@@ -297,5 +297,5 @@ if (type == LMD_TYPE_STRING) {
 ## Notes & Constraints
 - C++17 standard (use modern features: `std::optional`, structured bindings, etc.)
 - Grammar regeneration is automatic - don't manually edit `parser.c`
-- Log file location: `./log.txt` (configure levels in `log.conf`)
+- Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
 - **Token limit**: 1,000,000 tokens per session. So don't worry about running short of tokens.

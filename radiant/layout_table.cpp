@@ -5,6 +5,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include <vector>
+#include <string>
 
 /*
  * RADIANT TABLE LAYOUT ENGINE
@@ -343,6 +344,13 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             float child_css_height = get_explicit_css_height(lycon, block);
             float child_height = (child_css_height > 0) ? child_css_height : block->height;
             if (child_height > content_height) content_height = child_height;
+        }
+        else if (child->view_type == RDT_VIEW_TABLE) {
+            // Handle nested tables - use the table's computed height
+            ViewTable* nested_table = (ViewTable*)child;
+            float table_height = nested_table->height;
+            log_debug("measure_cell_content: nested table height=%.1f", table_height);
+            if (table_height > content_height) content_height = table_height;
         }
     }
 
@@ -880,6 +888,43 @@ static inline bool is_row_display(CssEnum display) {
     return display == CSS_VALUE_TABLE_ROW;
 }
 
+// Helper: Check if a display value is a table type
+static inline bool is_table_display(CssEnum display) {
+    return display == CSS_VALUE_TABLE || display == CSS_VALUE_INLINE_TABLE;
+}
+
+// Helper: Check if a display value is a column type
+static inline bool is_column_display(CssEnum display) {
+    return display == CSS_VALUE_TABLE_COLUMN || display == CSS_VALUE_TABLE_COLUMN_GROUP;
+}
+
+// Helper: Check if a display value is a caption type
+static inline bool is_caption_display(CssEnum display) {
+    return display == CSS_VALUE_TABLE_CAPTION;
+}
+
+// Helper: Check if a child is a "proper table child" per CSS 2.1 Section 17.2.1
+// A proper table child is: table-row-group, table-header-group, table-footer-group,
+// table-row, table-column-group, table-column, or table-caption
+static inline bool is_proper_table_child(CssEnum display) {
+    return is_row_group_display(display) ||
+           is_row_display(display) ||
+           is_column_display(display) ||
+           is_caption_display(display);
+}
+
+// Helper: Check if a child is a "proper row group child" per CSS 2.1
+// A proper row group child is: table-row
+static inline bool is_proper_row_group_child(CssEnum display) {
+    return is_row_display(display);
+}
+
+// Helper: Check if a child is a "proper row child" per CSS 2.1
+// A proper row child is: table-cell
+static inline bool is_proper_row_child(CssEnum display) {
+    return is_cell_display(display);
+}
+
 // =============================================================================
 // ANONYMOUS TABLE ELEMENT CREATION (CSS 2.1 Section 17.2.1)
 // =============================================================================
@@ -1059,18 +1104,90 @@ static void reparent_node(DomNode* node, DomElement* new_parent) {
 }
 
 /**
- * Generate anonymous table boxes for CSS 2.1 compliance.
+ * Insert a node before another node in the DOM tree.
+ * The reference node must already be a child of the parent.
+ */
+static void insert_node_before(DomElement* parent, DomNode* new_node, DomNode* ref_node) {
+    if (!parent || !new_node) return;
+
+    if (!ref_node) {
+        // Append at end
+        new_node->parent = parent;
+        new_node->next_sibling = nullptr;
+        new_node->prev_sibling = parent->last_child;
+        if (parent->last_child) {
+            parent->last_child->next_sibling = new_node;
+        } else {
+            parent->first_child = new_node;
+        }
+        parent->last_child = new_node;
+        return;
+    }
+
+    new_node->parent = parent;
+    new_node->next_sibling = ref_node;
+    new_node->prev_sibling = ref_node->prev_sibling;
+
+    if (ref_node->prev_sibling) {
+        ref_node->prev_sibling->next_sibling = new_node;
+    } else {
+        parent->first_child = new_node;
+    }
+    ref_node->prev_sibling = new_node;
+}
+
+/**
+ * Collect consecutive runs of children that need to be wrapped together.
+ * Returns the first child after the run ends (or nullptr if at end).
+ */
+static DomNode* collect_consecutive_run(DomNode* start, DomElement* parent,
+                                        bool (*should_include)(DomNode*, uintptr_t),
+                                        std::vector<DomNode*>& run) {
+    run.clear();
+    DomNode* child = start;
+
+    while (child) {
+        if (!child->is_element()) {
+            // Text nodes are included if adjacent to other included elements
+            if (!run.empty()) {
+                run.push_back(child);
+            }
+            child = child->next_sibling;
+            continue;
+        }
+
+        uintptr_t tag = child->tag();
+        if (should_include(child, tag)) {
+            run.push_back(child);
+            child = child->next_sibling;
+        } else {
+            break;
+        }
+    }
+
+    // Trim trailing non-element nodes
+    while (!run.empty() && !run.back()->is_element()) {
+        run.pop_back();
+    }
+
+    return child;
+}
+
+/**
+ * CSS 2.1 Section 17.2.1: Generate anonymous table boxes.
  *
- * CSS 2.1 Section 17.2.1 requires anonymous boxes when:
- * 1. table-cell is direct child of table (need anonymous tbody + tr)
- * 2. table-row is direct child of table (need anonymous tbody)
- * 3. table-cell is direct child of table-row-group (need anonymous tr)
+ * This implements the full CSS 2.1 anonymous table box generation algorithm:
  *
- * This function analyzes the table structure and inserts anonymous elements
- * where needed, BEFORE layout begins.
+ * 1. If a child of a table-row is not a table-cell, wrap it in anonymous table-cell
+ * 2. If a child of a table-row-group is not a table-row, wrap consecutive cells in anonymous table-row
+ * 3. If a child of a table/inline-table is not a proper table child (row-group, row, column, caption),
+ *    wrap it appropriately:
+ *    - Consecutive table-cells get wrapped in anonymous table-row, then in anonymous table-row-group
+ *    - Consecutive table-rows get wrapped in anonymous table-row-group
+ *    - Non-table content (like text/inline) gets wrapped in cell -> row -> row-group
  *
- * @param lycon Layout context
- * @param table The table element to process
+ * Note: This modifies the DOM tree by inserting anonymous wrapper elements.
+ * Anonymous elements are created with proper CSS 2.1 style inheritance.
  */
 static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* table) {
     if (!lycon || !table) return;
@@ -1078,96 +1195,185 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
     Pool* pool = lycon->doc->view_tree->pool;
     if (!pool) return;
 
-    log_debug("[ANON-TABLE] Analyzing table structure for anonymous box generation");
+    log_debug("[ANON-TABLE] === Starting CSS 2.1 anonymous box generation ===");
 
-    // Analyze direct children to determine what anonymous boxes are needed
-    bool has_row_group = false;
-    bool has_direct_row = false;
-    bool has_direct_cell = false;
-    DomNode* first_direct_row = nullptr;
-    DomNode* first_direct_cell = nullptr;
+    // ========================================================================
+    // PHASE 1: Process children of table/inline-table
+    // CSS 2.1 Rule: Children that are not proper table children need wrapping
+    // ========================================================================
 
+    // First pass: identify what needs to be wrapped and collect runs of consecutive elements
+    std::vector<DomNode*> children_to_process;
     for (DomNode* child = table->first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
+        children_to_process.push_back(child);
+    }
+
+    // Track runs of consecutive cells that need wrapping
+    std::vector<DomNode*> current_cell_run;
+    std::vector<DomNode*> current_row_run;
+    DomNode* insertion_point = nullptr;  // Where to insert wrapped elements
+
+    for (size_t i = 0; i < children_to_process.size(); ) {
+        DomNode* child = children_to_process[i];
+
+        // Skip non-element nodes in this pass (they'll be handled when adjacent to cells)
+        if (!child->is_element()) {
+            i++;
+            continue;
+        }
 
         DisplayValue display = resolve_display_value(child);
         uintptr_t tag = child->tag();
 
-        if (is_row_group_display(display.inner) ||
-            tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT) {
-            has_row_group = true;
+        // Check if this is a proper table child
+        bool is_row_group = is_row_group_display(display.inner) ||
+                           tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT;
+        bool is_row = is_row_display(display.inner) || tag == HTM_TAG_TR;
+        bool is_cell = is_cell_display(display.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+        bool is_column = is_column_display(display.inner) ||
+                        tag == HTM_TAG_COL || tag == HTM_TAG_COLGROUP;
+        bool is_caption = is_caption_display(display.inner) || tag == HTM_TAG_CAPTION;
+
+        if (is_row_group || is_column || is_caption) {
+            // Proper table child - flush any accumulated runs first
+            if (!current_cell_run.empty()) {
+                log_debug("[ANON-TABLE] Flushing cell run of %zu cells before row group",
+                         current_cell_run.size());
+
+                // Create anonymous tbody + tr for consecutive cells
+                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
+                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+                DomElement* anon_tr = create_anonymous_table_element(lycon, anon_tbody,
+                    CSS_VALUE_TABLE_ROW, "::anon-tr");
+                append_child_to_element(anon_tbody, anon_tr);
+
+                // Move cells to anonymous tr
+                for (DomNode* cell_node : current_cell_run) {
+                    reparent_node(cell_node, anon_tr);
+                }
+
+                // Insert at the position of the first cell
+                insert_node_before(table, (DomNode*)anon_tbody, child);
+                current_cell_run.clear();
+            }
+
+            if (!current_row_run.empty()) {
+                log_debug("[ANON-TABLE] Flushing row run of %zu rows before row group",
+                         current_row_run.size());
+
+                // Create anonymous tbody for consecutive rows
+                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
+                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+
+                // Move rows to anonymous tbody
+                for (DomNode* row_node : current_row_run) {
+                    reparent_node(row_node, anon_tbody);
+                }
+
+                // Insert at the position of the first row
+                insert_node_before(table, (DomNode*)anon_tbody, child);
+                current_row_run.clear();
+            }
+
+            i++;
+            continue;
         }
-        else if (is_row_display(display.inner) || tag == HTM_TAG_TR) {
-            has_direct_row = true;
-            if (!first_direct_row) first_direct_row = child;
+
+        if (is_row) {
+            // Row as direct child of table - accumulate for wrapping in tbody
+            if (!current_cell_run.empty()) {
+                // Flush cells first - they get their own tbody+tr
+                log_debug("[ANON-TABLE] Flushing cell run of %zu cells before row",
+                         current_cell_run.size());
+
+                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
+                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+                DomElement* anon_tr = create_anonymous_table_element(lycon, anon_tbody,
+                    CSS_VALUE_TABLE_ROW, "::anon-tr");
+                append_child_to_element(anon_tbody, anon_tr);
+
+                for (DomNode* cell_node : current_cell_run) {
+                    reparent_node(cell_node, anon_tr);
+                }
+
+                insert_node_before(table, (DomNode*)anon_tbody, child);
+                current_cell_run.clear();
+            }
+
+            current_row_run.push_back(child);
+            i++;
+            continue;
         }
-        else if (is_cell_display(display.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH) {
-            has_direct_cell = true;
-            if (!first_direct_cell) first_direct_cell = child;
+
+        if (is_cell) {
+            // Cell as direct child of table - accumulate for wrapping in tbody+tr
+            if (!current_row_run.empty()) {
+                // Flush rows first
+                log_debug("[ANON-TABLE] Flushing row run of %zu rows before cell",
+                         current_row_run.size());
+
+                DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
+                    CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+
+                for (DomNode* row_node : current_row_run) {
+                    reparent_node(row_node, anon_tbody);
+                }
+
+                insert_node_before(table, (DomNode*)anon_tbody, child);
+                current_row_run.clear();
+            }
+
+            current_cell_run.push_back(child);
+            i++;
+            continue;
         }
+
+        // Non-table content (text, inline elements, etc.) - wrap in cell
+        // CSS 2.1: "Any other child of a table element is treated as if it were
+        // wrapped in an anonymous table-cell box"
+        log_debug("[ANON-TABLE] Non-table content needs cell wrapping: tag=%s",
+                 child->node_name() ? child->node_name() : "unknown");
+
+        // For simplicity, treat non-table content as a cell that will be wrapped later
+        current_cell_run.push_back(child);
+        i++;
     }
 
-    // Case 1: Direct cells in table - need anonymous tbody AND anonymous tr
-    if (has_direct_cell && !has_direct_row) {
-        log_debug("[ANON-TABLE] Case 1: Direct cells need anonymous tbody + tr");
+    // Flush any remaining runs
+    if (!current_cell_run.empty()) {
+        log_debug("[ANON-TABLE] Flushing final cell run of %zu cells", current_cell_run.size());
 
-        // Create anonymous tbody
         DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
             CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-        if (!anon_tbody) return;
-
-        // Create anonymous tr inside tbody
         DomElement* anon_tr = create_anonymous_table_element(lycon, anon_tbody,
             CSS_VALUE_TABLE_ROW, "::anon-tr");
-        if (!anon_tr) return;
-
         append_child_to_element(anon_tbody, anon_tr);
 
-        // Move all direct cells into the anonymous tr
-        DomNode* child = table->first_child;
-        while (child) {
-            DomNode* next = child->next_sibling;
-            if (child->is_element()) {
-                DisplayValue display = resolve_display_value(child);
-                uintptr_t tag = child->tag();
-                if (is_cell_display(display.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH) {
-                    reparent_node(child, anon_tr);
-                }
-            }
-            child = next;
+        for (DomNode* cell_node : current_cell_run) {
+            reparent_node(cell_node, anon_tr);
         }
 
-        // Insert anonymous tbody at the appropriate position
         append_child_to_element(table, anon_tbody);
     }
-    // Case 2: Direct rows in table (no row groups) - need anonymous tbody
-    else if (has_direct_row && !has_row_group) {
-        log_debug("[ANON-TABLE] Case 2: Direct rows need anonymous tbody");
 
-        // Create anonymous tbody
+    if (!current_row_run.empty()) {
+        log_debug("[ANON-TABLE] Flushing final row run of %zu rows", current_row_run.size());
+
         DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
             CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
-        if (!anon_tbody) return;
 
-        // Move all direct rows into the anonymous tbody
-        DomNode* child = table->first_child;
-        while (child) {
-            DomNode* next = child->next_sibling;
-            if (child->is_element()) {
-                DisplayValue display = resolve_display_value(child);
-                uintptr_t tag = child->tag();
-                if (is_row_display(display.inner) || tag == HTM_TAG_TR) {
-                    reparent_node(child, anon_tbody);
-                }
-            }
-            child = next;
+        for (DomNode* row_node : current_row_run) {
+            reparent_node(row_node, anon_tbody);
         }
 
-        // Insert anonymous tbody
         append_child_to_element(table, anon_tbody);
     }
 
-    // Case 3: Check each row group for direct cells (need anonymous tr)
+    // ========================================================================
+    // PHASE 2: Process children of row groups (thead, tbody, tfoot)
+    // CSS 2.1: If a child of a row-group is not a table-row, wrap cells in anonymous row
+    // ========================================================================
+
     for (DomNode* child = table->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
 
@@ -1175,51 +1381,186 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         DisplayValue display = resolve_display_value(child);
         uintptr_t tag = child->tag();
 
+        // Only process row groups
         if (!is_row_group_display(display.inner) &&
             tag != HTM_TAG_THEAD && tag != HTM_TAG_TBODY && tag != HTM_TAG_TFOOT) {
             continue;
         }
 
-        // Check for direct cells in this row group
-        bool group_has_direct_cell = false;
+        // Collect children that need wrapping
+        std::vector<DomNode*> group_children;
         for (DomNode* gchild = row_group->first_child; gchild; gchild = gchild->next_sibling) {
-            if (!gchild->is_element()) continue;
-            DisplayValue gdisp = resolve_display_value(gchild);
-            uintptr_t gtag = gchild->tag();
-            if (is_cell_display(gdisp.inner) || gtag == HTM_TAG_TD || gtag == HTM_TAG_TH) {
-                group_has_direct_cell = true;
-                break;
-            }
+            group_children.push_back(gchild);
         }
 
-        if (group_has_direct_cell) {
-            log_debug("[ANON-TABLE] Case 3: Row group has direct cells, need anonymous tr");
+        std::vector<DomNode*> cell_run;
+        DomNode* first_cell_position = nullptr;
 
-            // Create anonymous tr
-            DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
-                CSS_VALUE_TABLE_ROW, "::anon-tr");
-            if (!anon_tr) continue;
+        for (size_t j = 0; j < group_children.size(); j++) {
+            DomNode* gchild = group_children[j];
 
-            // Move all direct cells into the anonymous tr
-            DomNode* gchild = row_group->first_child;
-            while (gchild) {
-                DomNode* gnext = gchild->next_sibling;
-                if (gchild->is_element()) {
-                    DisplayValue gdisp = resolve_display_value(gchild);
-                    uintptr_t gtag = gchild->tag();
-                    if (is_cell_display(gdisp.inner) || gtag == HTM_TAG_TD || gtag == HTM_TAG_TH) {
-                        reparent_node(gchild, anon_tr);
-                    }
+            if (!gchild->is_element()) {
+                // Include text nodes in current run if we have cells
+                if (!cell_run.empty()) {
+                    cell_run.push_back(gchild);
                 }
-                gchild = gnext;
+                continue;
             }
 
-            // Insert anonymous tr
+            DisplayValue gdisp = resolve_display_value(gchild);
+            uintptr_t gtag = gchild->tag();
+
+            bool is_row = is_row_display(gdisp.inner) || gtag == HTM_TAG_TR;
+            bool is_cell = is_cell_display(gdisp.inner) || gtag == HTM_TAG_TD || gtag == HTM_TAG_TH;
+
+            if (is_row) {
+                // Flush any accumulated cells before this row
+                if (!cell_run.empty()) {
+                    log_debug("[ANON-TABLE] Wrapping %zu cells in row group in anonymous row",
+                             cell_run.size());
+
+                    DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
+                        CSS_VALUE_TABLE_ROW, "::anon-tr");
+
+                    for (DomNode* cell_node : cell_run) {
+                        reparent_node(cell_node, anon_tr);
+                    }
+
+                    insert_node_before(row_group, (DomNode*)anon_tr, gchild);
+                    cell_run.clear();
+                    first_cell_position = nullptr;
+                }
+                continue;
+            }
+
+            if (is_cell) {
+                if (cell_run.empty()) {
+                    first_cell_position = gchild;
+                }
+                cell_run.push_back(gchild);
+                continue;
+            }
+
+            // Non-row, non-cell content - treat as content to wrap in cell then row
+            if (cell_run.empty()) {
+                first_cell_position = gchild;
+            }
+            cell_run.push_back(gchild);
+        }
+
+        // Flush remaining cells
+        if (!cell_run.empty()) {
+            log_debug("[ANON-TABLE] Wrapping final %zu cells in row group in anonymous row",
+                     cell_run.size());
+
+            DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
+                CSS_VALUE_TABLE_ROW, "::anon-tr");
+
+            for (DomNode* cell_node : cell_run) {
+                reparent_node(cell_node, anon_tr);
+            }
+
             append_child_to_element(row_group, anon_tr);
         }
     }
 
-    log_debug("[ANON-TABLE] Anonymous box generation complete");
+    // ========================================================================
+    // PHASE 3: Process children of rows
+    // CSS 2.1: If a child of a table-row is not a table-cell, wrap it in anonymous cell
+    // ========================================================================
+
+    // Process rows in all row groups
+    for (DomNode* group_node = table->first_child; group_node; group_node = group_node->next_sibling) {
+        if (!group_node->is_element()) continue;
+
+        DomElement* row_group = group_node->as_element();
+        DisplayValue group_display = resolve_display_value(group_node);
+        uintptr_t group_tag = group_node->tag();
+
+        // Only process row groups
+        if (!is_row_group_display(group_display.inner) &&
+            group_tag != HTM_TAG_THEAD && group_tag != HTM_TAG_TBODY && group_tag != HTM_TAG_TFOOT) {
+            continue;
+        }
+
+        // Process rows in this group
+        for (DomNode* row_node = row_group->first_child; row_node; row_node = row_node->next_sibling) {
+            if (!row_node->is_element()) continue;
+
+            DomElement* row = row_node->as_element();
+            DisplayValue row_display = resolve_display_value(row_node);
+            uintptr_t row_tag = row_node->tag();
+
+            // Only process rows
+            if (!is_row_display(row_display.inner) && row_tag != HTM_TAG_TR) {
+                continue;
+            }
+
+            // Collect non-cell children that need wrapping
+            std::vector<DomNode*> row_children;
+            for (DomNode* rchild = row->first_child; rchild; rchild = rchild->next_sibling) {
+                row_children.push_back(rchild);
+            }
+
+            std::vector<DomNode*> non_cell_run;
+
+            for (size_t k = 0; k < row_children.size(); k++) {
+                DomNode* rchild = row_children[k];
+
+                if (!rchild->is_element()) {
+                    // Include text nodes in current run
+                    if (!non_cell_run.empty()) {
+                        non_cell_run.push_back(rchild);
+                    }
+                    continue;
+                }
+
+                DisplayValue rdisp = resolve_display_value(rchild);
+                uintptr_t rtag = rchild->tag();
+
+                bool is_cell = is_cell_display(rdisp.inner) || rtag == HTM_TAG_TD || rtag == HTM_TAG_TH;
+
+                if (is_cell) {
+                    // Flush any accumulated non-cell content
+                    if (!non_cell_run.empty()) {
+                        log_debug("[ANON-TABLE] Wrapping %zu non-cell items in row in anonymous cell",
+                                 non_cell_run.size());
+
+                        DomElement* anon_td = create_anonymous_table_element(lycon, row,
+                            CSS_VALUE_TABLE_CELL, "::anon-td");
+
+                        for (DomNode* content_node : non_cell_run) {
+                            reparent_node(content_node, anon_td);
+                        }
+
+                        insert_node_before(row, (DomNode*)anon_td, rchild);
+                        non_cell_run.clear();
+                    }
+                    continue;
+                }
+
+                // Non-cell content in row
+                non_cell_run.push_back(rchild);
+            }
+
+            // Flush remaining non-cell content
+            if (!non_cell_run.empty()) {
+                log_debug("[ANON-TABLE] Wrapping final %zu non-cell items in row in anonymous cell",
+                         non_cell_run.size());
+
+                DomElement* anon_td = create_anonymous_table_element(lycon, row,
+                    CSS_VALUE_TABLE_CELL, "::anon-td");
+
+                for (DomNode* content_node : non_cell_run) {
+                    reparent_node(content_node, anon_td);
+                }
+
+                append_child_to_element(row, anon_td);
+            }
+        }
+    }
+
+    log_debug("[ANON-TABLE] === Anonymous box generation complete ===");
 }
 
 // Detect and set anonymous box flags for a table element
@@ -1787,11 +2128,85 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     lycon->font = saved_font;
 }
 
+// Forward declaration from layout_text.cpp
+extern CssEnum get_white_space_value(DomNode* node);
+
+// Helper: Check if whitespace should be collapsed for this element
+// CSS white-space: normal, nowrap -> collapse whitespace
+// CSS white-space: pre, pre-wrap, pre-line, break-spaces -> preserve whitespace
+// Checks the cell's own white-space property first, then falls back to inherited value
+static bool should_collapse_whitespace(ViewTableCell* cell) {
+    if (!cell) return true; // Default to collapse
+
+    // First check the cell's own resolved white-space property
+    DomElement* elem = cell->as_element();
+    if (elem && elem->blk && elem->blk->white_space != 0) {
+        CssEnum ws = elem->blk->white_space;
+        // Check for preserve-whitespace values
+        if (ws == CSS_VALUE_PRE ||
+            ws == CSS_VALUE_PRE_WRAP ||
+            ws == CSS_VALUE_PRE_LINE ||
+            ws == CSS_VALUE_BREAK_SPACES) {
+            return false;
+        }
+        // Explicit normal/nowrap means collapse
+        if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP) {
+            return true;
+        }
+    }
+
+    // Fall back to get_white_space_value which walks up from parent
+    // We pass the cell itself - get_white_space_value starts from node->parent
+    CssEnum ws_value = get_white_space_value((DomNode*)cell);
+
+    // These values preserve whitespace (don't collapse)
+    if (ws_value == CSS_VALUE_PRE ||
+        ws_value == CSS_VALUE_PRE_WRAP ||
+        ws_value == CSS_VALUE_PRE_LINE ||
+        ws_value == CSS_VALUE_BREAK_SPACES) {
+        return false;
+    }
+
+    return true; // Default: collapse whitespace (normal, nowrap)
+}
+
+// Helper: Normalize whitespace according to CSS white-space: normal rules
+// Collapses consecutive whitespace to single space, trims leading/trailing whitespace
+static std::string normalize_whitespace(const char* text, size_t length) {
+    if (!text || length == 0) return "";
+
+    std::string result;
+    result.reserve(length);
+
+    bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
+    for (size_t i = 0; i < length; i++) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+            if (!in_whitespace) {
+                result += ' ';  // Collapse to single space
+                in_whitespace = true;
+            }
+            // Otherwise, skip consecutive whitespace
+        } else {
+            result += (char)ch;
+            in_whitespace = false;
+        }
+    }
+
+    // Trim trailing whitespace (last char if it's a space from collapse)
+    if (!result.empty() && result.back() == ' ') {
+        result.pop_back();
+    }
+
+    return result;
+}
+
 // Measure cell's intrinsic content width (Preferred Content Width - PCW)
 // This performs accurate measurement using font metrics for CSS 2.1 compliance
 // REFACTORED: Now uses unified intrinsic_sizing.hpp for text measurement
 static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cell) {
     if (!cell || !cell->is_element()) return 20.0f; // CSS minimum usable width
+
 
     DomElement* cell_elem = cell->as_element();
     if (!cell_elem->first_child) return 20.0f; // Empty cell minimum
@@ -1827,6 +2242,9 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
 
     float max_width = 0.0f;
 
+    // Check if we should collapse whitespace based on CSS white-space property
+    bool collapse_ws = should_collapse_whitespace(cell);
+
     // Measure each child's natural width
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
@@ -1834,11 +2252,24 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
             const unsigned char* text = child->text_data();
             if (text && *text) {
                 size_t text_len = strlen((const char*)text);
-                log_debug("PCW measuring text: '%s' (len=%zu)", text, text_len);
+
+                const char* measure_text = (const char*)text;
+                size_t measure_len = text_len;
+                std::string normalized;
+
+                if (collapse_ws) {
+                    // Normalize whitespace according to CSS white-space: normal rules
+                    // This collapses consecutive whitespace and trims leading/trailing
+                    normalized = normalize_whitespace((const char*)text, text_len);
+                    log_debug("PCW measuring text: '%s' -> normalized: '%s'", text, normalized.c_str());
+                    if (normalized.empty()) continue; // Skip whitespace-only text nodes
+                    measure_text = normalized.c_str();
+                    measure_len = normalized.length();
+                }
 
                 // Use unified intrinsic sizing API
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, (const char*)text, text_len);
+                    lycon, measure_text, measure_len);
 
                 float text_width = (float)widths.max_content;  // PCW uses max-content
                 log_debug("PCW text measured width: %.2f (unified API)", text_width);
@@ -1935,6 +2366,9 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
     // For minimum width, we want the width of the longest word
     float min_width = 0.0f;
 
+    // Check if we should collapse whitespace based on CSS white-space property
+    bool collapse_ws = should_collapse_whitespace(cell);
+
     // Measure each child's minimum width
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
@@ -1943,9 +2377,21 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
             if (text && *text) {
                 size_t text_len = strlen((const char*)text);
 
+                const char* measure_text = (const char*)text;
+                size_t measure_len = text_len;
+                std::string normalized;
+
+                if (collapse_ws) {
+                    // Normalize whitespace according to CSS white-space: normal rules
+                    normalized = normalize_whitespace((const char*)text, text_len);
+                    if (normalized.empty()) continue; // Skip whitespace-only text nodes
+                    measure_text = normalized.c_str();
+                    measure_len = normalized.length();
+                }
+
                 // Use unified intrinsic sizing API - min_content gives longest word
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, (const char*)text, text_len);
+                    lycon, measure_text, measure_len);
 
                 float longest_word = (float)widths.min_content;
                 if (longest_word > min_width) min_width = longest_word;
@@ -2116,7 +2562,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Check if table has explicit width (for percentage cell width calculation)
     int explicit_table_width = 0;
     int table_content_width = 0; // Width available for cells
-    if (table->node_type == DOM_NODE_ELEMENT) {
+
+    // First check resolved style (from HTML width attribute or CSS)
+    // The given_width is already resolved to absolute pixels during style resolution
+    if (table->blk && table->blk->given_width > 0) {
+        explicit_table_width = (int)table->blk->given_width;
+        log_debug("Table width from resolved style (HTML attr or CSS): %dpx (percent=%s)",
+                explicit_table_width,
+                !isnan(table->blk->given_width_percent) ? "yes" : "no");
+    }
+
+    // If no resolved width, check CSS specified_style directly
+    if (explicit_table_width == 0 && table->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = table->as_element();
         if (dom_elem->specified_style) {
             CssDeclaration* width_decl = style_tree_get_declaration(
@@ -2132,7 +2589,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
                     if (container_width > 0) {
                         explicit_table_width = (int)(container_width * percentage / 100.0);
-                        log_debug("Table percentage width: %.1f%% of %dpx = %dpx",
+                        log_debug("Table CSS percentage width: %.1f%% of %dpx = %dpx",
                                 percentage, container_width, explicit_table_width);
                     }
                 }
@@ -2140,37 +2597,37 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                     float resolved_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
                     explicit_table_width = (int)resolved_width;
-                    log_debug("Table explicit width: %dpx", explicit_table_width);
-                }
-
-                // Calculate content width if we have an explicit width
-                if (explicit_table_width > 0) {
-                    table_content_width = explicit_table_width;
-
-                    // In border-collapse mode, the table border is shared with cell borders
-                    // so we don't subtract it from content width. In separate mode, subtract it.
-                    if (!table->tb->border_collapse) {
-                        // Subtract table border only in separate mode
-                        if (table->bound && table->bound->border) {
-                            table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
-                        }
-                    }
-
-                    // Subtract table padding
-                    if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
-                        table_content_width -= table->bound->padding.left + table->bound->padding.right;
-                    }
-
-                    // Subtract border-spacing (only in separate mode)
-                    if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
-                        table_content_width -= (columns + 1) * table->tb->border_spacing_h;
-                    }
-
-                    log_debug("Table content width for cells: %dpx (border_collapse=%d)",
-                             table_content_width, table->tb->border_collapse);
+                    log_debug("Table CSS explicit width: %dpx", explicit_table_width);
                 }
             }
         }
+    }
+
+    // Calculate content width if we have an explicit width
+    if (explicit_table_width > 0) {
+        table_content_width = explicit_table_width;
+
+        // In border-collapse mode, the table border is shared with cell borders
+        // so we don't subtract it from content width. In separate mode, subtract it.
+        if (!table->tb->border_collapse) {
+            // Subtract table border only in separate mode
+            if (table->bound && table->bound->border) {
+                table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+            }
+        }
+
+        // Subtract table padding
+        if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
+            table_content_width -= table->bound->padding.left + table->bound->padding.right;
+        }
+
+        // Subtract border-spacing (only in separate mode)
+        if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
+            table_content_width -= (columns + 1) * table->tb->border_spacing_h;
+        }
+
+        log_debug("Table content width for cells: %dpx (border_collapse=%d)",
+                 table_content_width, table->tb->border_collapse);
     }
 
     // Step 2: Enhanced column width calculation with colspan/rowspan support

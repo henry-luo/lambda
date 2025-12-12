@@ -284,23 +284,85 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // list item: display list-item handled elsewhere
         break;
     // ========== Table elements ==========
-    case HTM_TAG_TABLE:
+    case HTM_TAG_TABLE: {
         // HTML UA default: border-spacing: 2px (CSS spec default is 0, but HTML tables use 2px)
         // This is applied at the TableProp level in layout_table.cpp, not here in block props
-        // We just need to ensure the view is created properly
+
+        // Handle HTML width attribute (e.g., width="85%" or width="600")
+        const char* width_attr = elmt->get_attribute("width");
+        if (width_attr) {
+            size_t value_len = strlen(width_attr);
+            if (value_len > 0) {
+                // Check if it's a percentage value (ends with %)
+                if (width_attr[value_len - 1] == '%') {
+                    // Parse percentage value
+                    StrView width_view = strview_init(width_attr, value_len - 1);
+                    float percent = strview_to_int(&width_view);
+                    if (percent > 0 && percent <= 100) {
+                        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                        block->blk->given_width_percent = percent;
+                        // Calculate resolved width from container
+                        float container_width = lycon->block.content_width > 0
+                            ? lycon->block.content_width
+                            : (lycon->line.right - lycon->line.left);
+                        if (container_width > 0) {
+                            lycon->block.given_width = container_width * percent / 100.0f;
+                            block->blk->given_width = lycon->block.given_width;
+                            log_debug("[HTML] TABLE width attribute: %.0f%% -> %.1fpx", percent, lycon->block.given_width);
+                        }
+                    }
+                } else {
+                    // Parse pixel value
+                    StrView width_view = strview_init(width_attr, value_len);
+                    float width = strview_to_int(&width_view);
+                    if (width > 0) {
+                        lycon->block.given_width = width * lycon->ui_context->pixel_ratio;
+                        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                        block->blk->given_width = lycon->block.given_width;
+                        log_debug("[HTML] TABLE width attribute: %.0fpx", width);
+                    }
+                }
+            }
+        }
         break;
-    case HTM_TAG_TH:
+    }
+    case HTM_TAG_TH: {
         // font-weight: bold;  text-align: center;  vertical-align: middle;
         log_debug("apply default TH styles");
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_weight = CSS_VALUE_BOLD;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = CSS_VALUE_CENTER;
+        block->blk->text_align = CSS_VALUE_CENTER;  // TH defaults to center
         if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+
+        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
+        const char* align_attr = elmt->get_attribute("align");
+        if (align_attr) {
+            if (strcasecmp(align_attr, "left") == 0) {
+                block->blk->text_align = CSS_VALUE_LEFT;
+            } else if (strcasecmp(align_attr, "right") == 0) {
+                block->blk->text_align = CSS_VALUE_RIGHT;
+            } else if (strcasecmp(align_attr, "center") == 0) {
+                block->blk->text_align = CSS_VALUE_CENTER;
+            }
+        }
+        // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
+        const char* valign_attr = elmt->get_attribute("valign");
+        if (valign_attr) {
+            if (strcasecmp(valign_attr, "top") == 0) {
+                block->in_line->vertical_align = CSS_VALUE_TOP;
+            } else if (strcasecmp(valign_attr, "middle") == 0) {
+                block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+            } else if (strcasecmp(valign_attr, "bottom") == 0) {
+                block->in_line->vertical_align = CSS_VALUE_BOTTOM;
+            }
+        }
         break;
-    case HTM_TAG_TD:
+    }
+    case HTM_TAG_TD: {
         // table data: default padding 1px (browsers vary), vertical-align: middle;
+        // TD defaults to text-align: start (left in LTR) - does not inherit from outside table
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->padding.top = block->bound->padding.right =
             block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
@@ -308,7 +370,35 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
         if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+
+        // Set default text-align to left (start) - table cells don't inherit text-align from outside
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->text_align = CSS_VALUE_LEFT;  // Default for TD
+
+        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
+        const char* align_attr = elmt->get_attribute("align");
+        if (align_attr) {
+            if (strcasecmp(align_attr, "left") == 0) {
+                block->blk->text_align = CSS_VALUE_LEFT;
+            } else if (strcasecmp(align_attr, "right") == 0) {
+                block->blk->text_align = CSS_VALUE_RIGHT;
+            } else if (strcasecmp(align_attr, "center") == 0) {
+                block->blk->text_align = CSS_VALUE_CENTER;
+            }
+        }
+        // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
+        const char* valign_attr = elmt->get_attribute("valign");
+        if (valign_attr) {
+            if (strcasecmp(valign_attr, "top") == 0) {
+                block->in_line->vertical_align = CSS_VALUE_TOP;
+            } else if (strcasecmp(valign_attr, "middle") == 0) {
+                block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+            } else if (strcasecmp(valign_attr, "bottom") == 0) {
+                block->in_line->vertical_align = CSS_VALUE_BOTTOM;
+            }
+        }
         break;
+    }
     case HTM_TAG_CAPTION:
         // table caption: text-align center
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
