@@ -167,6 +167,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_GRID_COLUMN_GAP, "grid-column-gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_GRID_ROW_GAP, "grid-row-gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
 
+    // Grid alignment properties
+    {CSS_PROPERTY_JUSTIFY_ITEMS, "justify-items", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "stretch", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_JUSTIFY_SELF, "justify-self", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+
     // Additional Grid Properties
     {CSS_PROPERTY_GRID_TEMPLATE, "grid-template", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_GRID_TEMPLATE_AREAS, "grid-template-areas", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
