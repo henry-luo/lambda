@@ -79,19 +79,38 @@ void TextHtmlWriter::openTag(const char* tag, const char* classes,
     }
     
     in_tag_ = true;  // Mark that we're inside a tag
+    tag_stack_.push_back(tag);  // Track open tag
 }
 
 void TextHtmlWriter::closeTag(const char* tag) {
-    if (!tag) return;
-    
     closeTagStart();  // Close tag start if needed
+    
+    // If tag is nullptr, close the most recent tag from stack
+    std::string tag_name;
+    if (tag == nullptr || tag[0] == '\0') {
+        if (!tag_stack_.empty()) {
+            tag_name = tag_stack_.back();
+            tag_stack_.pop_back();
+        } else {
+            return;  // No tags to close
+        }
+    } else {
+        tag_name = tag;
+        // Remove from stack if present
+        for (auto it = tag_stack_.rbegin(); it != tag_stack_.rend(); ++it) {
+            if (*it == tag_name) {
+                tag_stack_.erase((it + 1).base());
+                break;
+            }
+        }
+    }
     
     if (pretty_print_) {
         appendIndent();
     }
     
     strbuf_append_str(buf_, "</");
-    strbuf_append_str(buf_, tag);
+    strbuf_append_str(buf_, tag_name.c_str());
     strbuf_append_char(buf_, '>');
     
     if (pretty_print_) {

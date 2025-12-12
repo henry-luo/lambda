@@ -52,6 +52,7 @@ private:
     bool pretty_print_;
     Pool* pool_;
     bool in_tag_;  // Track if we're inside a tag (for attribute writing)
+    std::vector<std::string> tag_stack_;  // Track open tags for proper closing
     
 public:
     explicit TextHtmlWriter(Pool* pool, bool pretty_print = false);
