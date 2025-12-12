@@ -55,6 +55,11 @@ void HtmlGenerator::span(const char* attrs) {
     createWithChildren("span", attrs);
 }
 
+void HtmlGenerator::spanWithStyle(const char* style_value) {
+    // Create span with style attribute directly
+    writer_->openTag("span", nullptr, nullptr, style_value);
+}
+
 void HtmlGenerator::div(const char* attrs) {
     // html-generator.ls div method
     createWithChildren("div", attrs);
