@@ -250,6 +250,7 @@ void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
         prop->grid_area = nullptr;
         prop->justify_self = CSS_VALUE_AUTO;
         prop->align_self_grid = CSS_VALUE_AUTO;
+        prop->order = 0;  // Default order is 0
         prop->computed_grid_row_start = 0;
         prop->computed_grid_row_end = 0;
         prop->computed_grid_column_start = 0;
