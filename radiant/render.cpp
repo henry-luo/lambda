@@ -85,7 +85,7 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->rows);
     if (left >= right || top >= bottom) {
         log_debug("glyph clipped: x=%d, y=%d, bitmap=%dx%d, clip=[%.0f,%.0f,%.0f,%.0f]",
-            x, y, bitmap->width, bitmap->rows, 
+            x, y, bitmap->width, bitmap->rows,
             rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
         return; // glyph outside the surface
     }
