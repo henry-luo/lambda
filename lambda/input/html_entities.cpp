@@ -101,6 +101,11 @@ static const EntityEntry html_entity_table[] = {
     // Currency symbols
     {"euro", 0x20AC},
 
+    // Zero-width characters (commonly used for text formatting)
+    {"ZeroWidthSpace", 0x200B},  // U+200B ZERO WIDTH SPACE
+    {"zwj", 0x200D},             // U+200D ZERO WIDTH JOINER
+    {"zwnj", 0x200C},            // U+200C ZERO WIDTH NON-JOINER
+
     // Letter-like symbols
     {"weierp", 0x2118}, {"image", 0x2111}, {"real", 0x211C}, {"trade", 0x2122},
     {"alefsym", 0x2135},
