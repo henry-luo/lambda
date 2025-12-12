@@ -46,12 +46,36 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **CSS Engine**: `lambda/input/css/` - complete CSS parser, cascade resolver
 - **Radiant Engine**: `radiant/` - HTML/CSS/SVG layout and rendering with FreeType, GLFW, FontConfig
 
-### Radiant Subsystems
+### Radiant Layout Engine (`radiant/`)
 
-Radiant is the CSS layout and rendering engine integrated with Lambda for document presentation.
-- **Unified DOM and View Tree**: A unified DOM tree and view-tree, with `DomNode`, `DomText`, `DomElement` represents both DOM nodes and layout views
-- **Relative View Coordinates**: Each view has position (x, y) relative to immediate containing block
-- **Pixel Ratio Support**: CSS pixel values are converted to physical pixels during style resolution
+Radiant is the CSS layout and rendering engine for HTML/CSS document presentation.
+
+**Architecture:**
+- **Unified DOM/View Tree**: `DomNode` → `DomText`/`DomElement` serve as both DOM and layout views
+- **Relative Coordinates**: All positions relative to parent's border box
+- **Layout Context**: `LayoutContext` struct coordinates all layout state
+
+**Layout Sub-flows** (dispatched in `layout_block.cpp`):
+- **Block/Inline**: `layout_block_content()`, `layout_inline()` - standard CSS flow
+- **Flexbox**: `layout_flex_content()` in `layout_flex_multipass.cpp` - 9-phase algorithm
+- **Grid**: `layout_grid_content()` in `layout_grid_multipass.cpp` - track sizing + item placement
+- **Table**: `layout_table_content()` in `layout_table.cpp` - auto/fixed layout
+
+**Key Files:**
+| File | Purpose |
+|------|---------|
+| `view.hpp` | View hierarchy: `ViewBlock`, `ViewSpan`, property structs |
+| `layout.hpp` | Core structs: `LayoutContext`, `BlockContext`, `Linebox` |
+| `layout_block.cpp` | Block layout, mode dispatch |
+| `layout_inline.cpp` | Inline/text layout, line breaking |
+| `layout_flex.cpp` | Flexbox algorithm |
+| `layout_grid.cpp` | Grid track sizing |
+| `layout_table.cpp` | Table layout |
+| `resolve_css_style.cpp` | CSS cascade and property resolution |
+
+**Property Structures** (allocated via `alloc_*_prop()` from pool):
+- `BlockProp`, `BoundaryProp` (box model), `InlineProp`, `FontProp`
+- `FlexProp`/`FlexItemProp`, `GridProp`/`GridItemProp`, `TableProp`
 
 ## Lambda CLI Commands
 
@@ -77,18 +101,14 @@ Radiant is the CSS layout and rendering engine integrated with Lambda for docume
 
 ### Layout Analysis & Rendering
 ```bash
-./lambda.exe layout page.html                    # Analyze CSS layout, show view tree
+make layout suite=baseline                       # Run layout regression tests
+make layout test=file_name                       # Compare specific html file layout against browser
+./lambda.exe layout page.html                    # Runs CSS layout, and output view tree
 ./lambda.exe render page.html -o output.svg      # Render to SVG
 ./lambda.exe render page.html -o output.pdf      # Render to PDF
-./lambda.exe render page.html -o output.png      # Render to PNG
-./lambda.exe render page.html -o output.jpg      # Render to JPEG
-```
-
-### Document Viewer
-```bash
-./lambda.exe view                     # Open default (test/html/index.html)
-./lambda.exe view document.pdf        # Open PDF in interactive viewer
-./lambda.exe view page.html           # Open HTML in browser window
+./lambda.exe render page.html -o output.png      # Render to PNG/JPEG
+./lambda.exe view                                # Open default (test/html/index.html)
+./lambda.exe view page.html                      # Open HTML in browser window
 ```
 
 ## Build System & Development Workflow
@@ -96,14 +116,11 @@ Radiant is the CSS layout and rendering engine integrated with Lambda for docume
 ### Build Commands
 ```bash
 make build              # Incremental build (Premake5-based, fastest)
-make debug              # Debug build with AddressSanitizer
-make rebuild            # Force complete rebuild
 make clean-all          # Clean all build artifacts
 ```
 
 **Build architecture**:
 - JSON config (`build_lambda_config.json`) → Python generator (`utils/generate_premake.py`) → Premake5 Lua → Makefiles
-- Supports parallel compilation (auto-detects cores, max 8 jobs)
 - Auto-regenerates parser when `grammar.js` changes (dependency tracking via Make)
 
 ### Testing Strategy
@@ -111,7 +128,6 @@ make clean-all          # Clean all build artifacts
 make build-test         # Build all test executables
 make test               # Run ALL tests (baseline + extended)
 make test-baseline      # Core functionalities (must pass 100%)
-make test-extended      # HTTP/HTTPS, ongoing features
 ```
 
 **Running single test**: e.g. `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
@@ -141,9 +157,8 @@ make clean-grammar      # Remove generated files (parser.c, ts-enum.h)
 log_debug("Processing item: type=%d, value=%p", type_id, ptr);
 log_info("Loaded document: %zu bytes", size);
 log_error("Parse failed at line %d: %s", line, msg);
-
-// NEVER use printf/fprintf/std::cout for debugging
 ```
+NEVER use printf/fprintf/std::cout for debugging
 
 ### Code Style
 - **Comments**: Start inline comments in lowercase: `// process the next token`
@@ -164,7 +179,7 @@ Item map = mb.final();
 **Parsing input**:
 ```cpp
 Input* input = input_create(pool, arena);
-parse_json(input, json_string);  // Sets input->root
+parse_json(input, json_string);
 Item doc = input->root;
 ```
 
@@ -172,7 +187,7 @@ Item doc = input->root;
 ```cpp
 TypeId type = get_type_id(item);
 if (type == LMD_TYPE_STRING) {
-    String* str = (String*)item.pointer;  // unpack from tagged pointer
+    String* str = (String*)item.string_ptr;  // unpack from tagged pointer
     // Access string data...
 } else if (type == LMD_TYPE_MAP) {
     Map* map = item.map;
@@ -225,7 +240,6 @@ if (type == LMD_TYPE_STRING) {
 - `log.c/h` - Structured logging
 
 ### Testing (`test/`)
-
 - `test_run.sh` - Main test runner (parallel execution)
 - `test/*.exe` - GTest C++ unit tests (e.g., `test_lambda_gtest.exe`)
 - `test/*.cpp` - GTest unit tests
@@ -233,30 +247,11 @@ if (type == LMD_TYPE_STRING) {
 - `test/input/` - Test data files
 - `test/layout/` - CSS layout tests and browser references
 
-## Common Development Tasks
-
-### Adding a New Input Format
-1. Create parser in `lambda/input/input-{format}.cpp`
-2. Implement `parse_{format}(Input* input, const char* content)`
-3. Use `MarkBuilder` to construct Lambda data structures
-4. Register format in `input.cpp` dispatcher
-5. Add MIME type to `lib/mime-types.c`
-6. Add tests in `test/test_input_roundtrip_gtest.cpp`
-
-### Adding a New Built-in Function
-1. Define signature in `lambda/lambda.h` (for MIR) and `lambda/lambda-data.hpp` (for C++)
-2. Implement in `lambda/lambda-proc.cpp` or `lambda/lambda-eval.cpp`
-3. Register in function table (`lambda/runner.cpp`)
-4. Add tests in `test/test_lambda_proc_gtest.cpp`
-5. Document in `doc/Lambda_Reference.md`
-
-### Debugging a Crash
-1. Use `log_debug()` liberally to trace execution flow
-2. Check `./log.txt` for detailed execution trace
-3. Run with debugger: `lldb ./lambda.exe -- extra CLI arguments`
-
-### Investigating Memory Issues
-1. Run with AddressSanitizer: `make debug && ./lambda.exe script.ls`
+### External Libraries
+- **FreeType**: Font rasterization (Radiant engine)
+- **GLFW**: Window management (Radiant engine)
+- **ThorVG**: Vector graphics rendering (Radiant engine)
+- **GTest**: Unit testing framework (dev dependency)
 
 ## Platform-Specific Notes
 
@@ -277,22 +272,23 @@ if (type == LMD_TYPE_STRING) {
 
 ## Integration Points & External Dependencies
 
+### Adding a New Built-in Function
+1. Define signature in `lambda/lambda.h` (for MIR) and `lambda/lambda-data.hpp` (for C++)
+2. Implement in `lambda/lambda-proc.cpp` or `lambda/lambda-eval.cpp`
+3. Register in function table (`lambda/runner.cpp`)
+4. Add tests in `test/test_lambda_proc_gtest.cpp`
+5. Document in `doc/Lambda_Reference.md`
+
 ### MIR (JIT Compiler)
 - Location: `lambda/mir.c` (embedded in repo)
 - API: See `include/mir.h`
 - Lambda → MIR transpilation in `lambda/transpile-mir.cpp`
 - Functions exposed to JIT code via function table
 
-### Tree-sitter (Parser Generator)
-- Grammar: `lambda/tree-sitter-lambda/grammar.js`
-- Library: `lambda/tree-sitter/` (built from source or system package)
-- Integration: `lambda/parse.c` wraps Tree-sitter API
-
-### External Libraries
-- **FreeType**: Font rasterization (Radiant engine)
-- **GLFW**: Window management (Radiant engine)
-- **ThorVG**: Vector graphics rendering (Radiant engine)
-- **GTest**: Unit testing framework (dev dependency)
+### Debugging a Crash
+1. Use `log_debug()` liberally to trace execution flow
+2. Check `./log.txt` for detailed execution trace
+3. Run with debugger: `lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- extra CLI arguments`
 
 ## Notes & Constraints
 - C++17 standard (use modern features: `std::optional`, structured bindings, etc.)
