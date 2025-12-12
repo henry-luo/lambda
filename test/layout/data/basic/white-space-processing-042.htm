@@ -7,6 +7,11 @@
         <meta name="flags" content="ahem">
         <meta name="assert" content="Tabs (when rendered) render spaces at 8 character stops. That is, within a line, split the line into 8 character lengths. The tab would continue until the end of the next length. So if there are already 3 characters in a line, the tab would be rendered as 5 spaces.">
         <style type="text/css">
+        @font-face {
+            font-family: 'ahem';
+            src: url('../font/Ahem.ttf') format('truetype');
+        }
+
             div
             {
                 font: 16px/1em ahem;

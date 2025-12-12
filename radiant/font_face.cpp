@@ -7,6 +7,7 @@ extern "C" {
 #include "../lib/url.h"
 }
 #include <string.h>
+#include <strings.h>  // for strcasecmp
 #include <stdlib.h>
 
 // Text flow logging categories
@@ -160,6 +161,19 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 
     free(css_descs);
     clog_info(font_log, "Registered %d @font-face descriptors", count);
+}
+
+// Helper function to process all @font-face rules from a document's stylesheets
+void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc) return;
+    if (!doc->stylesheets || doc->stylesheet_count == 0) return;
+
+    char* base_path = url_to_local_path(doc->url);
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (doc->stylesheets[i]) {
+            process_font_face_rules_from_stylesheet(uicon, doc->stylesheets[i], base_path);
+        }
+    }
 }
 
 /* Original lexbor-dependent code - commented out:
@@ -374,7 +388,6 @@ bool resolve_font_path_from_descriptor(FontFaceDescriptor* descriptor, char** re
 FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                                    FontProp* style, bool* is_fallback) {
     if (!uicon || !family_name) { return NULL; }
-    clog_debug(font_log, "Loading font with descriptors: %s", family_name);
 
     // Search registered @font-face descriptors first
     if (uicon->font_faces && uicon->font_face_count > 0) {
@@ -385,8 +398,9 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
             FontFaceDescriptor* descriptor = uicon->font_faces[i];
             if (!descriptor || !descriptor->family_name) continue;
 
-            // Check if family name matches
-            if (strcmp(descriptor->family_name, family_name) == 0) {
+            // Check if family name matches (case-insensitive per CSS spec)
+            int cmp_result = strcasecmp(descriptor->family_name, family_name);
+            if (cmp_result == 0) {
                 // Calculate match score based on weight and style
                 float score = 0.5f; // Base score for family name match
 
@@ -411,7 +425,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
 
         // Load the best matching font
         if (best_match) {
-            clog_info(font_log, "Found @font-face match for: %s (score=%.2f, weight=%d, style=%d)",
+            log_info("Found @font-face match for: %s (score=%.2f, weight=%d, style=%d)",
                       family_name, best_score, best_match->font_weight, best_match->font_style);
 
             if (best_match->src_local_path) {
@@ -421,12 +435,14 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                     best_match->is_loaded = true;
 
                     if (is_fallback) *is_fallback = false;
-                    clog_info(font_log, "Successfully loaded @font-face: %s from %s",
+                    log_info("Successfully loaded @font-face: %s from %s",
                               family_name, best_match->src_local_path);
                     return face;
                 } else {
-                    clog_warn(font_log, "Failed to load @font-face file: %s", best_match->src_local_path);
+                    log_warn("Failed to load @font-face file: %s", best_match->src_local_path);
                 }
+            } else {
+                log_warn("No src_local_path for @font-face: %s", family_name);
             }
         }
     }

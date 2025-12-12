@@ -375,8 +375,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Arial, sans-serif; font-size: 16px; }\n    \n    /* Mimics typical header navigation pattern */\n    .header {\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      background: #333;\n      color: white;\n      padding: 15px 20px;\n    }\n    \n    .logo {\n      font-size: 20px;\n      font-weight: bold;\n    }\n    \n    .nav {\n      display: flex;\n      gap: 20px;\n    }\n    \n    .nav-item {\n      color: white;\n    }\n  ",
-                "length": 532,
+                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Arial, sans-serif; font-size: 16px; }\n\n    /* Mimics typical header navigation pattern */\n    .header {\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      background: #333;\n      color: white;\n      padding: 15px 20px;\n    }\n\n    .logo {\n      font-size: 20px;\n      font-weight: bold;\n    }\n\n    .nav {\n      display: flex;\n      gap: 20px;\n    }\n\n    .nav-item {\n      color: white;\n    }\n  ",
+                "length": 516,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],

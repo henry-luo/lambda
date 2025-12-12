@@ -375,8 +375,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Arial, sans-serif; font-size: 16px; padding: 20px; }\n    \n    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }\n    \n    .row {\n      background: #f0f0f0;\n      padding: 10px;\n      margin-bottom: 10px;\n    }\n    \n    .icon {\n      display: inline-block;\n      background: #e3f2fd;\n      padding: 5px 10px;\n      margin-right: 10px;\n    }\n  ",
-                "length": 434,
+                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Arial, sans-serif; font-size: 16px; padding: 20px; }\n\n    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }\n\n    .row {\n      background: #f0f0f0;\n      padding: 10px;\n      margin-bottom: 10px;\n    }\n\n    .icon {\n      display: inline-block;\n      background: #e3f2fd;\n      padding: 5px 10px;\n      margin-right: 10px;\n    }\n  ",
+                "length": 422,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],

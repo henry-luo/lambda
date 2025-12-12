@@ -1191,15 +1191,7 @@ int cmd_layout(int argc, char** argv) {
 
     // Process @font-face rules from stored stylesheets
     // This must happen after UiContext is initialized but before layout
-    if (doc->stylesheets && doc->stylesheet_count > 0) {
-        log_debug("[Layout] Processing @font-face rules from %d stylesheets...", doc->stylesheet_count);
-        char* base_path = url_to_local_path(doc->url);
-        for (int i = 0; i < doc->stylesheet_count; i++) {
-            if (doc->stylesheets[i]) {
-                process_font_face_rules_from_stylesheet(&ui_context, doc->stylesheets[i], base_path);
-            }
-        }
-    }
+    process_document_font_faces(&ui_context, doc);
 
     // Perform layout computation
     log_debug("[Layout] About to call layout_html_doc...");

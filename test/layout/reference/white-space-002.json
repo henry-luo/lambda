@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font: 1em ahem;\n                line-height: 1em;\n            }\n            #test\n            {\n                white-space: pre;\n            }\n            #reference\n            {\n                height: 1em;\n                width: 7em;\n            }\n            #div1, #div3\n            {\n                background: black;\n            }\n            #div1, #div2, #div3\n            {\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n            #div2\n            {\n                height: 1em;\n                width: 3em;\n            }\n        ",
-                "length": 654,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            div\n            {\n                font: 1em ahem;\n                line-height: 1em;\n            }\n            #test\n            {\n                white-space: pre;\n            }\n            #reference\n            {\n                height: 1em;\n                width: 7em;\n            }\n            #div1, #div3\n            {\n                background: black;\n            }\n            #div1, #div2, #div3\n            {\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n            #div2\n            {\n                height: 1em;\n                width: 3em;\n            }\n        ",
+                "length": 780,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -881,7 +881,7 @@
               "contentWidth": 1184,
               "contentHeight": 16,
               "scrollWidth": 1184,
-              "scrollHeight": 17
+              "scrollHeight": 16
             },
             "computed": {
               "display": "block",
@@ -936,11 +936,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 49,
-                      "width": 58.22,
-                      "height": 18,
-                      "right": 66.22,
-                      "bottom": 67,
+                      "y": 50,
+                      "width": 112,
+                      "height": 16,
+                      "right": 120,
+                      "bottom": 66,
                       "text": "XX   XX",
                       "startIndex": 0,
                       "endIndex": 7

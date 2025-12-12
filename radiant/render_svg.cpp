@@ -1,6 +1,10 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "font_face.h"
+extern "C" {
+#include "../lib/url.h"
+}
 #include "../lib/strbuf.h"
 #include <stdio.h>
 #include <string.h>
@@ -447,6 +451,9 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     }
 
     ui_context.document = doc;
+
+    // Process @font-face rules before layout
+    process_document_font_faces(&ui_context, doc);
 
     // Layout the document
     log_debug("Performing layout...");

@@ -524,12 +524,7 @@ struct ViewElement : DomElement {
     }
 };
 
-typedef struct ViewSpan : ViewElement {
-    // FontProp* font;  // font style
-    // BoundaryProp* bound;  // block boundary properties
-    // InlineProp* in_line;  // inline specific style properties
-    // FlexFlowProp* fi;  // flex related properties
-} ViewSpan;
+typedef ViewElement ViewSpan;
 
 typedef struct {
     float v_scroll_position, h_scroll_position;

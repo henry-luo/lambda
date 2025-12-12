@@ -529,8 +529,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   pre { white-space: pre; font: 1em/1 Ahem; background: green; color: lime; }\n  ",
-                "length": 176,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   pre { white-space: pre; font: 1em/1 Ahem; background: green; color: lime; }\n  ",
+                "length": 302,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -724,11 +724,11 @@
             "layout": {
               "x": 8,
               "y": 26,
-              "width": 154,
+              "width": 342,
               "height": 150,
-              "contentWidth": 154,
+              "contentWidth": 342,
               "contentHeight": 150,
-              "scrollWidth": 154,
+              "scrollWidth": 342,
               "scrollHeight": 150
             },
             "computed": {
@@ -784,11 +784,11 @@
                 "layout": {
                   "x": 10,
                   "y": 28,
-                  "width": 150,
+                  "width": 338,
                   "height": 146,
-                  "contentWidth": 150,
+                  "contentWidth": 338,
                   "contentHeight": 146,
-                  "scrollWidth": 150,
+                  "scrollWidth": 338,
                   "scrollHeight": 146
                 },
                 "computed": {
@@ -844,11 +844,11 @@
                     "layout": {
                       "x": 10,
                       "y": 28,
-                      "width": 150,
+                      "width": 338,
                       "height": 146,
-                      "contentWidth": 150,
+                      "contentWidth": 338,
                       "contentHeight": 146,
-                      "scrollWidth": 150,
+                      "scrollWidth": 338,
                       "scrollHeight": 146
                     },
                     "computed": {
@@ -904,11 +904,11 @@
                         "layout": {
                           "x": 10,
                           "y": 28,
-                          "width": 150,
+                          "width": 338,
                           "height": 146,
-                          "contentWidth": 150,
+                          "contentWidth": 338,
                           "contentHeight": 146,
-                          "scrollWidth": 150,
+                          "scrollWidth": 338,
                           "scrollHeight": 146
                         },
                         "computed": {
@@ -964,12 +964,12 @@
                             "layout": {
                               "x": 11,
                               "y": 45,
-                              "width": 148,
+                              "width": 336,
                               "height": 112,
-                              "contentWidth": 148,
+                              "contentWidth": 336,
                               "contentHeight": 112,
-                              "scrollWidth": 148,
-                              "scrollHeight": 113
+                              "scrollWidth": 336,
+                              "scrollHeight": 112
                             },
                             "computed": {
                               "display": "block",
@@ -1024,11 +1024,11 @@
                                   "rects": [
                                     {
                                       "x": 11,
-                                      "y": 44,
-                                      "width": 84,
-                                      "height": 18,
-                                      "right": 95,
-                                      "bottom": 62,
+                                      "y": 45,
+                                      "width": 336,
+                                      "height": 16,
+                                      "right": 347,
+                                      "bottom": 61,
                                       "text": "                     \n",
                                       "startIndex": 0,
                                       "endIndex": 22
@@ -1051,12 +1051,12 @@
                                 "layout": {
                                   "rects": [
                                     {
-                                      "x": 95,
-                                      "y": 44,
+                                      "x": 347,
+                                      "y": 45,
                                       "width": 0,
-                                      "height": 18,
-                                      "right": 95,
-                                      "bottom": 62,
+                                      "height": 16,
+                                      "right": 347,
+                                      "bottom": 61,
                                       "text": " xxxx xxxx xxxx xxxx \n",
                                       "startIndex": 0,
                                       "endIndex": 22
@@ -1080,11 +1080,11 @@
                                   "rects": [
                                     {
                                       "x": 11,
-                                      "y": 60,
-                                      "width": 148,
-                                      "height": 18,
-                                      "right": 159,
-                                      "bottom": 78,
+                                      "y": 61,
+                                      "width": 336,
+                                      "height": 16,
+                                      "right": 347,
+                                      "bottom": 77,
                                       "text": " x  x x  x x    x    \n",
                                       "startIndex": 0,
                                       "endIndex": 22
@@ -1107,12 +1107,12 @@
                                 "layout": {
                                   "rects": [
                                     {
-                                      "x": 159,
-                                      "y": 60,
+                                      "x": 347,
+                                      "y": 61,
                                       "width": 0,
-                                      "height": 18,
-                                      "right": 159,
-                                      "bottom": 78,
+                                      "height": 16,
+                                      "right": 347,
+                                      "bottom": 77,
                                       "text": " xxxx xxxx xxxx xxxx\n",
                                       "startIndex": 0,
                                       "endIndex": 21
@@ -1136,11 +1136,11 @@
                                   "rects": [
                                     {
                                       "x": 11,
-                                      "y": 76,
-                                      "width": 108,
-                                      "height": 18,
-                                      "right": 119,
-                                      "bottom": 94,
+                                      "y": 77,
+                                      "width": 336,
+                                      "height": 16,
+                                      "right": 347,
+                                      "bottom": 93,
                                       "text": " x    x  x    x    x \n",
                                       "startIndex": 0,
                                       "endIndex": 22
@@ -1163,12 +1163,12 @@
                                 "layout": {
                                   "rects": [
                                     {
-                                      "x": 119,
-                                      "y": 76,
+                                      "x": 347,
+                                      "y": 77,
                                       "width": 0,
-                                      "height": 18,
-                                      "right": 119,
-                                      "bottom": 94,
+                                      "height": 16,
+                                      "right": 347,
+                                      "bottom": 93,
                                       "text": " x    x  x xxxx xxxx \n",
                                       "startIndex": 0,
                                       "endIndex": 22
@@ -1192,11 +1192,11 @@
                                   "rects": [
                                     {
                                       "x": 11,
-                                      "y": 92,
-                                      "width": 144,
-                                      "height": 18,
-                                      "right": 155,
-                                      "bottom": 110,
+                                      "y": 93,
+                                      "width": 320,
+                                      "height": 16,
+                                      "right": 331,
+                                      "bottom": 109,
                                       "text": "                     ",
                                       "startIndex": 0,
                                       "endIndex": 21
