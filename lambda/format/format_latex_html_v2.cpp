@@ -1017,7 +1017,7 @@ void LatexProcessor::processNode(Item node) {
     }
     
     if (type == LMD_TYPE_SYMBOL) {
-        // Symbol (spacing, paragraph break, etc.)
+        // Symbol (spacing, paragraph break, special characters, etc.)
         String* str = reader.asSymbol();
         if (str) {
             const char* sym_name = str->chars;
@@ -1025,6 +1025,10 @@ void LatexProcessor::processNode(Item node) {
             if (strcmp(sym_name, "parbreak") == 0) {
                 gen_->p();
                 gen_->closeElement();
+            } else if (strlen(sym_name) == 1) {
+                // Single-character symbols are escaped special characters
+                // Output them as literal text
+                processText(sym_name);
             } else {
                 // Skip other symbols (like 'uri', 'path', etc. - they are markers, not content)
                 log_debug("processNode: skipping symbol '%s'", sym_name);
@@ -1086,6 +1090,23 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Check if single-character command that's a literal escape sequence
+    // Diacritic commands (', `, ^, ~, ", =, ., etc.) are NOT escape sequences
+    // Escape sequences are: %, &, $, #, _, {, }, \, @, /, -, etc.
+    if (strlen(cmd_name) == 1) {
+        char c = cmd_name[0];
+        // Diacritics that should be processed as commands
+        if (c == '\'' || c == '`' || c == '^' || c == '~' || c == '"' || 
+            c == '=' || c == '.' || c == 'u' || c == 'v' || c == 'H' ||
+            c == 't' || c == 'c' || c == 'd' || c == 'b' || c == 'r' || c == 'k') {
+            // Fall through to command processing
+        } else {
+            // Literal escaped character - output as text
+            processText(cmd_name);
+            return;
+        }
+    }
+    
     // Look up command in table
     auto it = command_table_.find(cmd_name);
     if (it != command_table_.end()) {
