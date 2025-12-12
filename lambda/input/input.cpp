@@ -585,7 +585,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         else if (strcmp(effective_type, "html") == 0) {
             parse_html_impl(input, source);
         }
-        else if (strcmp(effective_type, "latex") == 0) {
+        else if (strcmp(effective_type, "latex") == 0 || strcmp(effective_type, "latex-ts") == 0) {
             // Tree-sitter LaTeX parser (default)
             parse_latex_ts(input, source);
         }
