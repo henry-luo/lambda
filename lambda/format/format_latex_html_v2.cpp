@@ -2377,8 +2377,9 @@ void LatexProcessor::processNode(Item node) {
             const char* sym_name = str->chars;
             
             if (strcmp(sym_name, "parbreak") == 0) {
-                gen_->p();
-                gen_->closeElement();
+                // Paragraph break: close current paragraph and prepare for next
+                closeParagraphIfOpen();
+                // Don't open new paragraph yet - ensureParagraph() will handle it when next content arrives
             } else if (strlen(sym_name) == 1) {
                 // Single-character symbols are escaped special characters
                 // Output them as literal text
