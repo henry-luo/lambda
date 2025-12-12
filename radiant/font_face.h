@@ -145,6 +145,7 @@ void parse_font_face_rule(struct LayoutContext* lycon, void* rule);
 FontFaceDescriptor* create_font_face_descriptor(struct LayoutContext* lycon);
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
 void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet, const char* base_path);
+void process_document_font_faces(UiContext* uicon, struct DomDocument* doc);
 
 // Font loading with @font-face support (local fonts only)
 FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
