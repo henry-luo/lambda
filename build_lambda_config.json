@@ -2056,6 +2056,19 @@
                         ],
                         "binary": "test_latex_html_v2_graphics_color.exe",
                         "icon": "🎨"
+                    },
+                    {
+                        "source": "test/test_latex_html_v2_macros.cpp",
+                        "name": "LaTeX HTML V2 Macros Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_html_v2_macros.exe",
+                        "icon": "🔧"
                     }
                 ],
                 "type": "input",
