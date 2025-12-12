@@ -22,13 +22,28 @@ class LatexProcessor;
 // Command processor function type
 typedef void (*CommandFunc)(LatexProcessor* proc, Item elem);
 
+// Forward declarations for helper functions
+static Element* cloneElement(Element* src, Input* input, Pool* pool);
+static std::vector<Item> substituteParamsInString(const char* text, size_t len,
+                                                   const std::vector<Element*>& args,
+                                                   Pool* pool);
+static void substituteParamsRecursive(Element* elem, const std::vector<Element*>& args, Pool* pool);
+
 // =============================================================================
 // LatexProcessor - Processes LaTeX Element tree and generates HTML
 // =============================================================================
 
 class LatexProcessor {
 public:
-    LatexProcessor(HtmlGenerator* gen, Pool* pool) : gen_(gen), pool_(pool) {}
+    // Macro definition structure (defined here so it can be used in public methods)
+    struct MacroDefinition {
+        std::string name;
+        int num_params;
+        Element* definition;
+    };
+    
+public:
+    LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) : gen_(gen), pool_(pool), input_(input) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -48,12 +63,25 @@ public:
     // Get pool
     Pool* pool() { return pool_; }
     
+    // Get input
+    Input* input() { return input_; }
+    
+    // Macro system functions (public so command handlers can access)
+    void registerMacro(const std::string& name, int num_params, Element* definition);
+    bool isMacro(const std::string& name);
+    MacroDefinition* getMacro(const std::string& name);
+    Element* expandMacro(const std::string& name, const std::vector<Element*>& args);
+    
 private:
     HtmlGenerator* gen_;
     Pool* pool_;
+    Input* input_;
     
     // Command dispatch table (will be populated)
     std::map<std::string, CommandFunc> command_table_;
+    
+    // Macro storage
+    std::map<std::string, MacroDefinition> macro_table_;
     
     // Process specific command
     void processCommand(const char* cmd_name, Item elem);
@@ -61,6 +89,239 @@ private:
     // Initialize command table
     void initCommandTable();
 };
+
+// =============================================================================
+// Macro System - Member Function Implementations
+// =============================================================================
+
+void LatexProcessor::registerMacro(const std::string& name, int num_params, Element* definition) {
+    fprintf(stderr, "registerMacro: name='%s', num_params=%d, definition=%p\n", name.c_str(), num_params, (void*)definition);
+    MacroDefinition macro;
+    macro.name = name;
+    macro.num_params = num_params;
+    macro.definition = definition;
+    macro_table_[name] = macro;
+}
+
+bool LatexProcessor::isMacro(const std::string& name) {
+    return macro_table_.find(name) != macro_table_.end();
+}
+
+LatexProcessor::MacroDefinition* LatexProcessor::getMacro(const std::string& name) {
+    auto it = macro_table_.find(name);
+    if (it != macro_table_.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<Element*>& args) {
+    MacroDefinition* macro = getMacro(name);
+    if (!macro || !macro->definition) {
+        fprintf(stderr, "expandMacro: macro '%s' not found or no definition\n", name.c_str());
+        return nullptr;
+    }
+    
+    fprintf(stderr, "expandMacro: '%s' with %zu args, num_params=%d\n", name.c_str(), args.size(), macro->num_params);
+    
+    // Clone the definition using MarkBuilder to preserve TypeElmt metadata
+    Element* expanded = cloneElement(macro->definition, input_, pool_);
+    
+    fprintf(stderr, "expandMacro: cloned definition, expanded=%p\n", (void*)expanded);
+    
+    // Substitute parameters with actual arguments if needed
+    if (expanded && args.size() > 0 && macro->num_params > 0) {
+        fprintf(stderr, "expandMacro: calling substituteParamsRecursive\n");
+        substituteParamsRecursive(expanded, args, pool_);
+        fprintf(stderr, "expandMacro: substitution done\n");
+    }
+    
+    return expanded;
+}
+
+// =============================================================================
+// Macro System - Helper Functions
+// =============================================================================
+
+// Clone an Element tree (deep copy for macro expansion)
+// Uses MarkBuilder to properly reconstruct Elements with TypeElmt metadata
+static Element* cloneElement(Element* src, Input* input, Pool* pool) {
+    fprintf(stderr, "cloneElement: START, src=%p\n", (void*)src);
+    if (!src) return nullptr;
+    
+    Item src_item;
+    src_item.element = src;
+    ElementReader reader(src_item);
+    const char* tag = reader.tagName();
+    fprintf(stderr, "cloneElement: tag='%s'\n", tag ? tag : "NULL");
+    if (!tag) {
+        fprintf(stderr, "cloneElement: source element has no tag name\n");
+        return nullptr;
+    }
+    
+    // Create builder using input's arena
+    MarkBuilder builder(input);
+    auto elem_builder = builder.element(tag);
+    
+    // Clone all child items
+    for (int64_t i = 0; i < reader.childCount(); i++) {
+        ItemReader child_reader = reader.childAt(i);
+        Item child = child_reader.item();
+        TypeId type = get_type_id(child);
+        
+        if (type == LMD_TYPE_ELEMENT) {
+            // Recursively clone child elements
+            Element* child_clone = cloneElement(child.element, input, pool);
+            if (child_clone) {
+                Item child_item;
+                child_item.element = child_clone;
+                elem_builder.child(child_item);
+            }
+        } else if (type == LMD_TYPE_STRING) {
+            // Copy string
+            String* str = (String*)child.string_ptr;
+            String* str_copy = builder.createString(str->chars, str->len);
+            Item str_item;
+            str_item.string_ptr = (uint64_t)str_copy;
+            str_item._8_s = LMD_TYPE_STRING;
+            elem_builder.child(str_item);
+        } else {
+            // Copy other types as-is (symbols, numbers, etc.)
+            elem_builder.child(child);
+        }
+    }
+    
+    Item clone_item = elem_builder.final();
+    
+    // Debug: verify the cloned element has a proper tag
+    if (clone_item.element) {
+        ElementReader verify_reader(clone_item);
+        const char* verify_tag = verify_reader.tagName();
+        fprintf(stderr, "cloneElement: cloned element tag='%s' (original='%s')\n", 
+                verify_tag ? verify_tag : "NULL", tag);
+    }
+    
+    return clone_item.element;
+}
+
+// Substitute #1, #2, etc. in a string with actual argument values
+static std::vector<Item> substituteParamsInString(const char* text, size_t len,
+                                                   const std::vector<Element*>& args,
+                                                   Pool* pool) {
+    std::vector<Item> result;
+    size_t i = 0;
+    size_t segment_start = 0;
+    
+    fprintf(stderr, "substituteParamsInString: text='%.*s', %zu args\n", (int)len, text, args.size());
+    
+    while (i < len) {
+        if (text[i] == '#' && i + 1 < len && text[i + 1] >= '1' && text[i + 1] <= '9') {
+            // Found parameter reference
+            int param_num = text[i + 1] - '0';
+            fprintf(stderr, "  Found param #%d at position %zu\n", param_num, i);
+            
+            // Add text segment before the parameter
+            if (i > segment_start) {
+                size_t seg_len = i - segment_start;
+                String* seg_str = (String*)pool_calloc(pool, sizeof(String) + seg_len + 1);
+                seg_str->len = seg_len;
+                memcpy(seg_str->chars, text + segment_start, seg_len);
+                seg_str->chars[seg_len] = '\0';
+                
+                Item str_item;
+                str_item.string_ptr = (uint64_t)seg_str;
+                str_item._8_s = LMD_TYPE_STRING;
+                result.push_back(str_item);
+            }
+            
+            // Add the argument element (if it exists)
+            if (param_num > 0 && param_num <= (int)args.size() && args[param_num - 1]) {
+                Item arg_item;
+                arg_item.item = (uint64_t)args[param_num - 1];
+                result.push_back(arg_item);
+            }
+            
+            i += 2;  // Skip #N
+            segment_start = i;
+        } else {
+            i++;
+        }
+    }
+    
+    // Add remaining text
+    if (segment_start < len) {
+        size_t seg_len = len - segment_start;
+        String* seg_str = (String*)pool_calloc(pool, sizeof(String) + seg_len + 1);
+        seg_str->len = seg_len;
+        memcpy(seg_str->chars, text + segment_start, seg_len);
+        seg_str->chars[seg_len] = '\0';
+        
+        Item str_item;
+        str_item.string_ptr = (uint64_t)seg_str;
+        str_item._8_s = LMD_TYPE_STRING;
+        result.push_back(str_item);
+    }
+    
+    return result;
+}
+
+// Recursively substitute parameters in an Element tree
+static void substituteParamsRecursive(Element* elem, const std::vector<Element*>& args, Pool* pool) {
+    if (!elem) return;
+    
+    List* elem_list = (List*)elem;
+    if (!elem_list->items) return;
+    
+    fprintf(stderr, "substituteParamsRecursive: processing %lld items with %zu args\n", elem_list->length, args.size());
+    
+    std::vector<Item> new_items;
+    
+    for (int64_t i = 0; i < elem_list->length; i++) {
+        Item item = elem_list->items[i];
+        TypeId type = get_type_id(item);
+        
+        fprintf(stderr, "  Item %lld: type=%d\n", i, type);
+        
+        if (type == LMD_TYPE_STRING) {
+            String* str = (String*)item.string_ptr;
+            fprintf(stderr, "  String item: '%.*s'\n", (int)str->len, str->chars);
+            
+            // Check if string contains parameter references
+            bool has_param = false;
+            for (size_t j = 0; j < str->len; j++) {
+                if (str->chars[j] == '#' && j + 1 < str->len &&
+                    str->chars[j + 1] >= '1' && str->chars[j + 1] <= '9') {
+                    has_param = true;
+                    break;
+                }
+            }
+            
+            if (has_param) {
+                // Substitute parameters in this string
+                std::vector<Item> substituted = substituteParamsInString(str->chars, str->len, args, pool);
+                new_items.insert(new_items.end(), substituted.begin(), substituted.end());
+            } else {
+                new_items.push_back(item);
+            }
+        } else if (type == LMD_TYPE_ELEMENT) {
+            // Recursively process child elements
+            substituteParamsRecursive(item.element, args, pool);
+            new_items.push_back(item);
+        } else {
+            new_items.push_back(item);
+        }
+    }
+    
+    // Replace element's items with substituted version
+    if (new_items.size() != (size_t)elem_list->length) {
+        elem_list->items = (Item*)pool_calloc(pool, sizeof(Item) * new_items.size());
+        elem_list->length = new_items.size();
+        elem_list->capacity = new_items.size();
+        for (size_t i = 0; i < new_items.size(); i++) {
+            elem_list->items[i] = new_items[i];
+        }
+    }
+}
 
 // =============================================================================
 // Command Implementations
@@ -164,6 +425,372 @@ static void cmd_underline(LatexProcessor* proc, Item elem) {
     gen->span("class=\"underline\"");
     proc->processChildren(elem);
     gen->closeElement();
+}
+
+// Macro definition commands
+
+static void cmd_newcommand(LatexProcessor* proc, Item elem) {
+    // \newcommand{\name}[num]{definition}
+    // Defines a new macro (error if already exists)
+    fprintf(stderr, "cmd_newcommand: called!\n");
+    ElementReader reader(elem);
+    
+    // DEBUG: Check textContent of entire element
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    reader.textContent(sb);
+    String* all_text = stringbuf_to_string(sb);
+    fprintf(stderr, "  new_command_definition textContent: '%s'\n", all_text->chars);
+    
+    fprintf(stderr, "  Total children: %zu\n", reader.childCount());
+    
+    std::string macro_name;
+    int num_params = 0;
+    Element* definition = nullptr;
+    
+    // Parse arguments: first is command name, second (optional) is num params, third is definition
+    auto iter = reader.children();
+    ItemReader child;
+    int arg_index = 0;
+    
+    while (iter.next(&child)) {
+        TypeId child_type = child.getType();
+        fprintf(stderr, "  Child (type=%d): ", child_type);
+        
+        if (child.isString()) {
+            String* str = child.asString();
+            fprintf(stderr, "STRING='%s'\n", str->chars);
+            // If we find a string starting with \, that might be the command name
+            if (macro_name.empty() && str->chars[0] == '\\') {
+                macro_name = str->chars;
+            }
+        } else if (child.isSymbol()) {
+            String* sym = child.asSymbol();
+            fprintf(stderr, "SYMBOL='%s'\n", sym->chars);
+            // Check if this symbol is the command name (not a marker)
+            if (macro_name.empty() && sym->chars[0] == '\\') {
+                macro_name = sym->chars;
+            }
+        } else if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            fprintf(stderr, "ELEMENT tag='%s'\n", tag);
+            
+            // Check for brack_group FIRST before other processing
+            if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "brack_group_argc") == 0) {
+                // [num] parameter count - use allText() to recursively extract all text
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.allText(sb);
+                String* num_str = stringbuf_to_string(sb);
+                fprintf(stderr, "    Found brack_group_argc: allText='%s'\n", num_str->chars);
+                
+                // Parse the number (might have whitespace)
+                num_params = atoi(num_str->chars);
+                fprintf(stderr, "    Set num_params=%d\n", num_params);
+                continue;  // Don't process as regular arg
+            }
+            
+            // If element tag starts with \, it might be the command itself
+            if (macro_name.empty() && tag[0] == '\\' && strcmp(tag, "\\newcommand") != 0) {
+                macro_name = tag;
+            }
+            
+            // Special case: check if this is the \newcommand token itself
+            if (strcmp(tag, "\\newcommand") == 0) {
+                fprintf(stderr, "    Checking \\newcommand token structure\n");
+                // Check its raw items
+                Element* token_elem = const_cast<Element*>(child_elem.element());
+                List* token_list = (List*)token_elem;
+                fprintf(stderr, "    \\newcommand has %lld items\n", token_list->length);
+                
+                for (int64_t k = 0; k < token_list->length; k++) {
+                    Item token_item = token_list->items[k];
+                    TypeId token_type = get_type_id(token_item);
+                    fprintf(stderr, "      Token item %lld: type=%d ", k, token_type);
+                    
+                    if (token_type == LMD_TYPE_STRING) {
+                        String* str = (String*)token_item.string_ptr;
+                        fprintf(stderr, "string='%s'\n", str->chars);
+                        if (macro_name.empty() && str->chars[0] == '\\') {
+                            macro_name = str->chars;
+                        }
+                    } else if (token_type == LMD_TYPE_SYMBOL) {
+                        String* sym = (String*)token_item.string_ptr;
+                        fprintf(stderr, "symbol='%s'\n", sym->chars);
+                        if (macro_name.empty() && sym->chars[0] == '\\') {
+                            macro_name = sym->chars;
+                        }
+                    } else if (token_type == LMD_TYPE_ELEMENT) {
+                        Item elem_item;
+                        elem_item.item = (uint64_t)token_item.element;
+                        ElementReader elem_reader(elem_item);
+                        fprintf(stderr, "element='%s'\n", elem_reader.tagName());
+                        if (macro_name.empty() && elem_reader.tagName()[0] == '\\') {
+                            macro_name = elem_reader.tagName();
+                        }
+                    } else {
+                        fprintf(stderr, "\n");
+                    }
+                }
+            }
+            
+            if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
+                fprintf(stderr, "    Processing curly_group at arg_index=%d\n", arg_index);
+                if (arg_index == 0) {
+                    // First arg: command name (like {\greet})
+                    // The command is stored as a symbol (if no children) or element (if has children)
+                    Element* curly_elem = const_cast<Element*>(child_elem.element());
+                    List* curly_list = (List*)curly_elem;
+                    
+                    // Extract command name from curly_group_command_name
+                    // After fix: command_name tokens are now strings (e.g., "greet"), not symbols
+                    for (int64_t j = 0; j < curly_list->length; j++) {
+                        Item item = curly_list->items[j];
+                        TypeId item_type = get_type_id(item);
+                        
+                        if (item_type == LMD_TYPE_STRING) {
+                            String* str = (String*)item.string_ptr;
+                            if (str->len > 0 && macro_name.empty()) {
+                                macro_name = str->chars;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Remove leading backslash if present
+                    if (!macro_name.empty() && macro_name[0] == '\\') {
+                        macro_name = macro_name.substr(1);
+                    }
+                    fprintf(stderr, "    Final macro_name='%s'\n", macro_name.c_str());
+                } else if (arg_index == 1) {
+                    // Could be [num] or {definition}
+                    // Check if it looks like a number
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* content_str = stringbuf_to_string(sb);
+                    std::string content = content_str->chars;
+                    
+                    if (!content.empty() && content[0] >= '0' && content[0] <= '9') {
+                        num_params = atoi(content.c_str());
+                    } else {
+                        // It's the definition
+                        definition = const_cast<Element*>(child_elem.element());
+                    }
+                } else if (arg_index == 2) {
+                    // Third arg: definitely the definition
+                    definition = const_cast<Element*>(child_elem.element());
+                }
+                arg_index++;
+            }
+        }
+    }
+    
+    fprintf(stderr, "cmd_newcommand: macro_name='%s', num_params=%d, definition=%p\n", macro_name.c_str(), num_params, (void*)definition);
+    
+    if (!macro_name.empty() && definition) {
+        // Check if macro already exists
+        if (proc->isMacro(macro_name)) {
+            log_error("Macro \\%s already defined (use \\renewcommand to redefine)", macro_name.c_str());
+        } else {
+            proc->registerMacro(macro_name, num_params, definition);
+        }
+    } else {
+        fprintf(stderr, "cmd_newcommand: FAILED - macro_name empty or no definition\n");
+    }
+}
+
+static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
+    // \renewcommand{\name}[num]{definition}
+    // Redefines an existing macro (warning if doesn't exist)
+    ElementReader reader(elem);
+    
+    std::string macro_name;
+    int num_params = 0;
+    Element* definition = nullptr;
+    
+    // Same parsing as newcommand
+    auto iter = reader.children();
+    ItemReader child;
+    int arg_index = 0;
+    
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
+                if (arg_index == 0) {
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* name_str = stringbuf_to_string(sb);
+                    macro_name = name_str->chars;
+                    if (!macro_name.empty() && macro_name[0] == '\\') {
+                        macro_name = macro_name.substr(1);
+                    }
+                } else if (arg_index == 1) {
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* content_str = stringbuf_to_string(sb);
+                    std::string content = content_str->chars;
+                    
+                    if (!content.empty() && content[0] >= '0' && content[0] <= '9') {
+                        num_params = atoi(content.c_str());
+                    } else {
+                        definition = const_cast<Element*>(child_elem.element());
+                    }
+                } else if (arg_index == 2) {
+                    definition = const_cast<Element*>(child_elem.element());
+                }
+                arg_index++;
+            } else if (strcmp(tag, "brack_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* num_str = stringbuf_to_string(sb);
+                num_params = atoi(num_str->chars);
+            }
+        }
+    }
+    
+    if (!macro_name.empty() && definition) {
+        // Warn if doesn't exist but register anyway
+        if (!proc->isMacro(macro_name)) {
+            log_info("Macro \\%s not previously defined (\\renewcommand used anyway)", macro_name.c_str());
+        }
+        proc->registerMacro(macro_name, num_params, definition);
+    }
+}
+
+static void cmd_providecommand(LatexProcessor* proc, Item elem) {
+    // \providecommand{\name}[num]{definition}
+    // Defines a macro only if it doesn't already exist
+    ElementReader reader(elem);
+    
+    std::string macro_name;
+    int num_params = 0;
+    Element* definition = nullptr;
+    
+    // Same parsing as newcommand
+    auto iter = reader.children();
+    ItemReader child;
+    int arg_index = 0;
+    
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
+                if (arg_index == 0) {
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* name_str = stringbuf_to_string(sb);
+                    macro_name = name_str->chars;
+                    if (!macro_name.empty() && macro_name[0] == '\\') {
+                        macro_name = macro_name.substr(1);
+                    }
+                } else if (arg_index == 1) {
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* content_str = stringbuf_to_string(sb);
+                    std::string content = content_str->chars;
+                    
+                    if (!content.empty() && content[0] >= '0' && content[0] <= '9') {
+                        num_params = atoi(content.c_str());
+                    } else {
+                        definition = const_cast<Element*>(child_elem.element());
+                    }
+                } else if (arg_index == 2) {
+                    definition = const_cast<Element*>(child_elem.element());
+                }
+                arg_index++;
+            } else if (strcmp(tag, "brack_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* num_str = stringbuf_to_string(sb);
+                num_params = atoi(num_str->chars);
+            }
+        }
+    }
+    
+    if (!macro_name.empty() && definition) {
+        // Only register if doesn't exist
+        if (!proc->isMacro(macro_name)) {
+            proc->registerMacro(macro_name, num_params, definition);
+        }
+    }
+}
+
+static void cmd_def(LatexProcessor* proc, Item elem) {
+    // \def\name{definition} - TeX primitive macro definition
+    // Note: \def doesn't use the [n] syntax for parameters, but we'll support it for compatibility
+    ElementReader reader(elem);
+    
+    std::string macro_name;
+    Element* definition = nullptr;
+    
+    // Parse: first child is command name, second is definition
+    auto iter = reader.children();
+    ItemReader child;
+    int arg_index = 0;
+    
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0 ||
+                strcmp(tag, "generic_command") == 0) {
+                if (arg_index == 0) {
+                    // First: command name
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* name_str = stringbuf_to_string(sb);
+                    macro_name = name_str->chars;
+                    if (!macro_name.empty() && macro_name[0] == '\\') {
+                        macro_name = macro_name.substr(1);
+                    }
+                } else if (arg_index == 1) {
+                    // Second: definition
+                    definition = const_cast<Element*>(child_elem.element());
+                }
+                arg_index++;
+            }
+        }
+    }
+    
+    if (!macro_name.empty() && definition) {
+        // Count #1, #2, etc. in definition to determine num_params
+        int num_params = 0;
+        Pool* pool = proc->pool();
+        StringBuf* sb = stringbuf_new(pool);
+        Item def_item;
+        def_item.item = (uint64_t)definition;
+        ElementReader def_reader(def_item);
+        def_reader.textContent(sb);
+        String* def_text = stringbuf_to_string(sb);
+        
+        for (size_t i = 0; i < def_text->len; i++) {
+            if (def_text->chars[i] == '#' && i + 1 < def_text->len &&
+                def_text->chars[i + 1] >= '1' && def_text->chars[i + 1] <= '9') {
+                int param_num = def_text->chars[i + 1] - '0';
+                if (param_num > num_params) {
+                    num_params = param_num;
+                }
+            }
+        }
+        
+        proc->registerMacro(macro_name, num_params, definition);
+    }
 }
 
 // Font size commands
@@ -1489,6 +2116,12 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
 // =============================================================================
 
 void LatexProcessor::initCommandTable() {
+    // Macro definitions
+    command_table_["newcommand"] = cmd_newcommand;
+    command_table_["renewcommand"] = cmd_renewcommand;
+    command_table_["providecommand"] = cmd_providecommand;
+    command_table_["def"] = cmd_def;
+    
     // Text formatting
     command_table_["textbf"] = cmd_textbf;
     command_table_["textit"] = cmd_textit;
@@ -1701,6 +2334,24 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Handle macro definition elements specially (from Tree-sitter)
+    if (strcmp(cmd_name, "new_command_definition") == 0) {
+        cmd_newcommand(this, elem);
+        return;
+    }
+    if (strcmp(cmd_name, "renew_command_definition") == 0) {
+        cmd_renewcommand(this, elem);
+        return;
+    }
+    if (strcmp(cmd_name, "provide_command_definition") == 0) {
+        cmd_providecommand(this, elem);
+        return;
+    }
+    if (strcmp(cmd_name, "def_definition") == 0) {
+        cmd_def(this, elem);
+        return;
+    }
+    
     // Check if single-character command that's a literal escape sequence
     // Diacritic commands (', `, ^, ~, ", =, ., etc.) are NOT escape sequences
     // Escape sequences are: %, &, $, #, _, {, }, \, @, /, -, etc.
@@ -1715,6 +2366,47 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             // Literal escaped character - output as text
             processText(cmd_name);
             return;
+        }
+    }
+    
+    // Check if this is a user-defined macro
+    fprintf(stderr, "processCommand: checking if '%s' is a macro\n", cmd_name);
+    if (isMacro(cmd_name)) {
+        fprintf(stderr, "processCommand: '%s' IS a macro!\n", cmd_name);
+        MacroDefinition* macro = getMacro(cmd_name);
+        if (macro && macro->definition) {
+            // Extract arguments from the command element
+            std::vector<Element*> args;
+            ElementReader reader(elem);
+            auto iter = reader.children();
+            ItemReader child;
+            
+            while (iter.next(&child)) {
+                if (child.isElement()) {
+                    ElementReader child_elem(child.item());
+                    const char* tag = child_elem.tagName();
+                    
+                    // Collect curly_group arguments for the macro
+                    if (strcmp(tag, "curly_group") == 0) {
+                        args.push_back(const_cast<Element*>(child_elem.element()));
+                        if ((int)args.size() >= macro->num_params) {
+                            break;  // Got all arguments
+                        }
+                    }
+                }
+            }
+            
+            // Expand the macro with arguments
+            Element* expanded = expandMacro(cmd_name, args);
+            if (expanded) {
+                log_debug("Macro %s expanded with %zu args", cmd_name, args.size());
+                // Process the expanded content  
+                // The expanded element IS the replacement content, so process it directly
+                Item expanded_item;
+                expanded_item.item = (uint64_t)expanded;
+                processNode(expanded_item);  // Process the expanded macro content itself
+                return;
+            }
         }
     }
     
@@ -1759,7 +2451,7 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     HtmlGenerator gen(pool, writer);
     
     // Create processor
-    LatexProcessor proc(&gen, pool);
+    LatexProcessor proc(&gen, pool, input);
     
     // Process LaTeX tree
     proc.process(input->root);
