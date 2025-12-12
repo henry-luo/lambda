@@ -336,6 +336,10 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_ROW_GAP,
     CSS_PROPERTY_COLUMN_GAP,
 
+    // Grid/Flex alignment properties
+    CSS_PROPERTY_JUSTIFY_ITEMS,
+    CSS_PROPERTY_JUSTIFY_SELF,
+
     // Transform Properties
     CSS_PROPERTY_TRANSFORM,
     CSS_PROPERTY_TRANSFORM_ORIGIN,

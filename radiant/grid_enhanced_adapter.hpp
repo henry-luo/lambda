@@ -343,9 +343,25 @@ inline void place_items_with_occupancy(
         item_infos.push_back(extract_grid_item_info(items[i], i));
     }
 
-    // Create initial track counts from explicit grid
-    TrackCounts col_counts(0, static_cast<uint16_t>(grid_layout->explicit_column_count), 0);
-    TrackCounts row_counts(0, static_cast<uint16_t>(grid_layout->explicit_row_count), 0);
+    // Per CSS Grid spec: If there's no explicit grid-template-columns,
+    // the grid defaults to a single column. Items flow row-by-row.
+    // Similarly, if there's no explicit rows and flow is column-first,
+    // default to a single row.
+    uint16_t effective_col_count = static_cast<uint16_t>(grid_layout->explicit_column_count);
+    uint16_t effective_row_count = static_cast<uint16_t>(grid_layout->explicit_row_count);
+
+    // When auto-flow is row (default), we need at least 1 column
+    // When auto-flow is column, we need at least 1 row
+    if (auto_flow != CSS_VALUE_COLUMN && effective_col_count == 0) {
+        effective_col_count = 1;  // Default to single column for row-flow
+    }
+    if (auto_flow == CSS_VALUE_COLUMN && effective_row_count == 0) {
+        effective_row_count = 1;  // Default to single row for column-flow
+    }
+
+    // Create initial track counts from effective grid
+    TrackCounts col_counts(0, effective_col_count, 0);
+    TrackCounts row_counts(0, effective_row_count, 0);
 
     // Create occupancy matrix
     CellOccupancyMatrix matrix(col_counts, row_counts);
@@ -355,8 +371,8 @@ inline void place_items_with_occupancy(
         matrix,
         item_infos,
         flow,
-        static_cast<uint16_t>(grid_layout->explicit_row_count),
-        static_cast<uint16_t>(grid_layout->explicit_column_count)
+        effective_row_count,
+        effective_col_count
     );
 
     // Apply results back to ViewBlocks
