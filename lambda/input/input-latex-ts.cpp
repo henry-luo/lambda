@@ -67,6 +67,8 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"caption", NODE_CONTAINER},            // \caption command
     {"\\caption", NODE_CONTAINER},          // Command name with backslash
     {"curly_group_path", NODE_CONTAINER},   // Path argument group
+    {"color_reference", NODE_CONTAINER},    // \textcolor, \colorbox commands
+    {"color_definition", NODE_CONTAINER},   // \definecolor command
     
     // Leaf nodes (cannot have children in grammar)
     {"command_name", NODE_LEAF},
@@ -409,6 +411,58 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             
             if (strcmp(node_type, "generic_environment") == 0) {
                 return convert_environment(ctx, node, source);
+            }
+            
+            if (strcmp(node_type, "color_reference") == 0) {
+                // Special handling for color commands like \textcolor, \colorbox
+                // Structure: command, name OR (model, spec), optional text
+                MarkBuilder& builder = ctx.builder;
+                
+                // Extract command name
+                TSNode cmd_node = ts_node_child_by_field_name(node, "command", 7);
+                String* cmd_str = ts_node_is_null(cmd_node) ? nullptr : extract_text(ctx, cmd_node, source);
+                const char* cmd_name = cmd_str ? cmd_str->chars : "color_reference";
+                
+                // Skip backslash if present
+                if (cmd_name[0] == '\\') {
+                    cmd_name++;
+                }
+                
+                ElementBuilder elem_builder = builder.element(cmd_name);
+                
+                // Get color specification (either name or model+spec)
+                TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+                TSNode model_node = ts_node_child_by_field_name(node, "model", 5);
+                TSNode spec_node = ts_node_child_by_field_name(node, "spec", 4);
+                
+                if (!ts_node_is_null(name_node)) {
+                    // Named color: extract from curly_group_text
+                    Item name_item = convert_latex_node(ctx, name_node, source);
+                    if (name_item.item != ITEM_NULL) {
+                        elem_builder.child(name_item);
+                    }
+                } else if (!ts_node_is_null(model_node) && !ts_node_is_null(spec_node)) {
+                    // Color by model+spec
+                    Item model_item = convert_latex_node(ctx, model_node, source);
+                    Item spec_item = convert_latex_node(ctx, spec_node, source);
+                    if (model_item.item != ITEM_NULL) {
+                        elem_builder.child(model_item);
+                    }
+                    if (spec_item.item != ITEM_NULL) {
+                        elem_builder.child(spec_item);
+                    }
+                }
+                
+                // Get optional text content
+                TSNode text_node = ts_node_child_by_field_name(node, "text", 4);
+                if (!ts_node_is_null(text_node)) {
+                    Item text_item = convert_latex_node(ctx, text_node, source);
+                    if (text_item.item != ITEM_NULL) {
+                        elem_builder.child(text_item);
+                    }
+                }
+                
+                return elem_builder.final();
             }
             
             // TODO: Add more specific handlers

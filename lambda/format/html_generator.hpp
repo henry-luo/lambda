@@ -43,6 +43,9 @@ public:
     // Create span element
     void span(const char* attrs = nullptr);
     
+    // Create span element with style attribute
+    void spanWithStyle(const char* style_value);
+    
     // Create div element
     void div(const char* attrs = nullptr);
     
