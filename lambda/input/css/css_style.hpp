@@ -339,6 +339,8 @@ typedef enum CssPropertyId {
     // Grid/Flex alignment properties
     CSS_PROPERTY_JUSTIFY_ITEMS,
     CSS_PROPERTY_JUSTIFY_SELF,
+    CSS_PROPERTY_PLACE_ITEMS,
+    CSS_PROPERTY_PLACE_SELF,
 
     // Transform Properties
     CSS_PROPERTY_TRANSFORM,

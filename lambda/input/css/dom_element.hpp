@@ -136,6 +136,16 @@ struct DomElement : DomNode {
     FontProp* font;  // font style
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
+
+    // Item property type indicator (fi, gi, tb, td share union)
+    enum ItemPropType : uint8_t {
+        ITEM_PROP_NONE = 0,
+        ITEM_PROP_FLEX = 1,    // fi (FlexItemProp)
+        ITEM_PROP_GRID = 2,    // gi (GridItemProp)
+        ITEM_PROP_TABLE = 3,   // tb (TableProp)
+        ITEM_PROP_CELL = 4     // td (TableCellProp)
+    } item_prop_type = ITEM_PROP_NONE;
+
     union {
         FlexItemProp* fi;
         GridItemProp* gi;
@@ -160,7 +170,8 @@ struct DomElement : DomNode {
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
-        pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
+        pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
+        item_prop_type(ITEM_PROP_NONE), fi(nullptr) {}
 };
 
 // Pseudo-class state flags

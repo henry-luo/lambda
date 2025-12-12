@@ -6,6 +6,7 @@
  */
 
 #include "intrinsic_sizing.hpp"
+#include "layout_flex.hpp"  // For FlexDirection enum
 #include "../lib/log.h"
 #include <cmath>
 #include <cstring>
@@ -59,6 +60,17 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
     for (size_t i = 0; i < length; i++) {
         unsigned char ch = str[i];
+
+        // Check for zero-width space (U+200B) - UTF-8 encoding: 0xE2 0x80 0x8B
+        // This is a break opportunity with no width
+        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && str[i+2] == 0x8B) {
+            // Zero-width space is a break opportunity
+            longest_word = fmax(longest_word, current_word);
+            current_word = 0.0f;
+            prev_glyph = 0;
+            i += 2;  // Skip remaining bytes of zero-width space
+            continue;
+        }
 
         // Word boundary detection (whitespace breaks words)
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
@@ -217,7 +229,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int inline_min_sum = 0;  // Sum of min-content widths for inline children
     int inline_max_sum = 0;  // Sum of max-content widths for inline children
     bool has_inline_content = false;
-    
+
     // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
     bool is_flex_container = false;
     ViewBlock* view_block = (ViewBlock*)element;
@@ -236,7 +248,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (is_flex_container) {
                 continue;
             }
-            
+
             const char* text = (const char*)child->text_data();
             if (text) {
                 // Skip whitespace-only text nodes
@@ -247,11 +259,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         break;
                     }
                 }
-                
+
                 if (is_whitespace_only) {
                     continue;
                 }
-                
+
                 TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
                     lycon, text, strlen(text));
                 child_sizes.min_content = text_widths.min_content;
@@ -395,23 +407,80 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     if (!element) return 0;
 
     float height = 0;
-
-    // Sum heights of block-level children, or take max for inline
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        float child_height = calculate_max_content_height(lycon, child, width);
-        height += child_height;  // Simplified: assume all block-level
-    }
-
-    // Add padding
     ViewBlock* view = (ViewBlock*)element;
-    if (view->bound) {
-        if (view->bound->padding.top >= 0) height += view->bound->padding.top;
-        if (view->bound->padding.bottom >= 0) height += view->bound->padding.bottom;
 
-        if (view->bound->border) {
-            height += view->bound->border->width.top + view->bound->border->width.bottom;
+    // Check if this is a grid container with column flow
+    // In column flow, items are placed in columns (side-by-side), so height = max(child_heights)
+    bool is_grid_column_flow = false;
+    if (view->display.inner == CSS_VALUE_GRID) {
+        // Check if grid-auto-flow is column
+        if (view->embed && view->embed->grid) {
+            if (view->embed->grid->grid_auto_flow == CSS_VALUE_COLUMN) {
+                is_grid_column_flow = true;
+            }
         }
     }
+
+    // Also check for flex containers with row direction (items side-by-side)
+    bool is_flex_row = false;
+    if (view->display.inner == CSS_VALUE_FLEX) {
+        // Default flex direction is row
+        if (view->embed && view->embed->flex) {
+            if (view->embed->flex->direction == DIR_ROW ||
+                view->embed->flex->direction == DIR_ROW_REVERSE) {
+                is_flex_row = true;
+            }
+        } else {
+            // No explicit flex props - default is row
+            is_flex_row = true;
+        }
+    }
+
+    // Calculate children's heights
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        float child_height = calculate_max_content_height(lycon, child, width);
+
+        if (is_grid_column_flow || is_flex_row) {
+            // Items are laid out horizontally - take max height
+            height = fmax(height, child_height);
+        } else {
+            // Items are stacked vertically - sum heights
+            height += child_height;
+        }
+    }
+
+    // Add padding and border
+    float pad_top = 0, pad_bottom = 0;
+    float border_top = 0, border_bottom = 0;
+
+    if (view->bound) {
+        if (view->bound->padding.top >= 0) pad_top = view->bound->padding.top;
+        if (view->bound->padding.bottom >= 0) pad_bottom = view->bound->padding.bottom;
+        if (view->bound->border) {
+            border_top = view->bound->border->width.top;
+            border_bottom = view->bound->border->width.bottom;
+        }
+    } else if (element->specified_style) {
+        // Fallback: read padding from CSS styles if bound hasn't been allocated yet
+        CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
+        if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            // Single padding value (shorthand)
+            float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+            pad_top = pad_bottom = pad;
+        } else {
+            // Check individual padding properties
+            CssDeclaration* pt = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_TOP);
+            if (pt && pt->value && pt->value->type == CSS_VALUE_TYPE_LENGTH) {
+                pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, pt->value);
+            }
+            CssDeclaration* pb = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
+            if (pb && pb->value && pb->value->type == CSS_VALUE_TYPE_LENGTH) {
+                pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, pb->value);
+            }
+        }
+    }
+
+    height += pad_top + pad_bottom + border_top + border_bottom;
 
     return height;
 }
