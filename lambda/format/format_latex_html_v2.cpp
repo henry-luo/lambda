@@ -2753,28 +2753,50 @@ void LatexProcessor::initCommandTable() {
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
+    command_table_["\\TeX"] = cmd_TeX;
     command_table_["LaTeX"] = cmd_LaTeX;
+    command_table_["\\LaTeX"] = cmd_LaTeX;
     command_table_["today"] = cmd_today;
+    command_table_["\\today"] = cmd_today;
     command_table_["empty"] = cmd_empty;
+    command_table_["\\empty"] = cmd_empty;
     command_table_["makeatletter"] = cmd_makeatletter;
+    command_table_["\\makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;
+    command_table_["\\makeatother"] = cmd_makeatother;
     
     // Spacing commands
     command_table_["hspace"] = cmd_hspace;
+    command_table_["\\hspace"] = cmd_hspace;
     command_table_["vspace"] = cmd_vspace;
+    command_table_["\\vspace"] = cmd_vspace;
     command_table_["addvspace"] = cmd_addvspace;
+    command_table_["\\addvspace"] = cmd_addvspace;
     command_table_["smallbreak"] = cmd_smallbreak;
+    command_table_["\\smallbreak"] = cmd_smallbreak;
     command_table_["medbreak"] = cmd_medbreak;
+    command_table_["\\medbreak"] = cmd_medbreak;
     command_table_["bigbreak"] = cmd_bigbreak;
+    command_table_["\\bigbreak"] = cmd_bigbreak;
     command_table_["vfill"] = cmd_vfill;
+    command_table_["\\vfill"] = cmd_vfill;
     command_table_["hfill"] = cmd_hfill;
+    command_table_["\\hfill"] = cmd_hfill;
     command_table_["nolinebreak"] = cmd_nolinebreak;
+    command_table_["\\nolinebreak"] = cmd_nolinebreak;
     command_table_["nopagebreak"] = cmd_nopagebreak;
+    command_table_["\\nopagebreak"] = cmd_nopagebreak;
     command_table_["pagebreak"] = cmd_pagebreak;
+    command_table_["\\pagebreak"] = cmd_pagebreak;
     command_table_["clearpage"] = cmd_clearpage;
+    command_table_["\\clearpage"] = cmd_clearpage;
     command_table_["cleardoublepage"] = cmd_cleardoublepage;
+    command_table_["\\cleardoublepage"] = cmd_cleardoublepage;
     command_table_["enlargethispage"] = cmd_enlargethispage;
+    command_table_["\\enlargethispage"] = cmd_enlargethispage;
     command_table_["negthinspace"] = cmd_negthinspace;
+    command_table_["\\negthinspace"] = cmd_negthinspace;
+    command_table_["!"] = cmd_negthinspace;  // \! is an alias for \negthinspace
     
     // Box commands
     command_table_["mbox"] = cmd_mbox;
@@ -2798,10 +2820,15 @@ void LatexProcessor::initCommandTable() {
     
     // Document metadata
     command_table_["author"] = cmd_author;
+    command_table_["\\author"] = cmd_author;
     command_table_["title"] = cmd_title;
+    command_table_["\\title"] = cmd_title;
     command_table_["date"] = cmd_date;
+    command_table_["\\date"] = cmd_date;
     command_table_["thanks"] = cmd_thanks;
+    command_table_["\\thanks"] = cmd_thanks;
     command_table_["maketitle"] = cmd_maketitle;
+    command_table_["\\maketitle"] = cmd_maketitle;
     
     // Labels and references
     command_table_["label"] = cmd_label;
@@ -2978,6 +3005,24 @@ void LatexProcessor::processNode(Item node) {
                 // Paragraph break: close current paragraph and prepare for next
                 closeParagraphIfOpen();
                 // Don't open new paragraph yet - ensureParagraph() will handle it when next content arrives
+            } else if (strcmp(sym_name, "TeX") == 0) {
+                // TeX logo
+                ensureParagraph();
+                gen_->span("tex-logo");
+                gen_->text("T");
+                gen_->text("E");
+                gen_->text("X");
+                gen_->closeElement();
+            } else if (strcmp(sym_name, "LaTeX") == 0) {
+                // LaTeX logo
+                ensureParagraph();
+                gen_->span("latex-logo");
+                gen_->text("L");
+                gen_->text("A");
+                gen_->text("T");
+                gen_->text("E");
+                gen_->text("X");
+                gen_->closeElement();
             } else if (strlen(sym_name) == 1) {
                 // Single-character symbols are escaped special characters
                 // Output them as literal text
