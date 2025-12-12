@@ -43,7 +43,8 @@ public:
     };
     
 public:
-    LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) : gen_(gen), pool_(pool), input_(input) {}
+    LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
+        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -82,6 +83,14 @@ private:
     
     // Macro storage
     std::map<std::string, MacroDefinition> macro_table_;
+    
+    // Paragraph tracking for auto-wrapping text
+    bool in_paragraph_;
+    
+    // Helper methods for paragraph management
+    void ensureParagraph();
+    void closeParagraphIfOpen();
+    bool isBlockCommand(const char* cmd_name);
     
     // Process specific command
     void processCommand(const char* cmd_name, Item elem);
@@ -335,7 +344,7 @@ static void cmd_textbf(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     gen->currentFont().series = FontSeries::Bold;
-    gen->span("class=\"textbf\"");
+    gen->span("bf");  // Just the class name
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -2242,9 +2251,61 @@ void LatexProcessor::initCommandTable() {
     command_table_["\\bibitem"] = cmd_bibitem;
 }
 
+// =============================================================================
+// Paragraph Management
+// =============================================================================
+
+bool LatexProcessor::isBlockCommand(const char* cmd_name) {
+    // Block-level commands that should not be wrapped in paragraphs
+    return (strcmp(cmd_name, "chapter") == 0 ||
+            strcmp(cmd_name, "section") == 0 ||
+            strcmp(cmd_name, "subsection") == 0 ||
+            strcmp(cmd_name, "subsubsection") == 0 ||
+            strcmp(cmd_name, "paragraph") == 0 ||
+            strcmp(cmd_name, "subparagraph") == 0 ||
+            strcmp(cmd_name, "part") == 0 ||
+            strcmp(cmd_name, "itemize") == 0 ||
+            strcmp(cmd_name, "enumerate") == 0 ||
+            strcmp(cmd_name, "description") == 0 ||
+            strcmp(cmd_name, "quote") == 0 ||
+            strcmp(cmd_name, "quotation") == 0 ||
+            strcmp(cmd_name, "verse") == 0 ||
+            strcmp(cmd_name, "verbatim") == 0 ||
+            strcmp(cmd_name, "center") == 0 ||
+            strcmp(cmd_name, "flushleft") == 0 ||
+            strcmp(cmd_name, "flushright") == 0 ||
+            strcmp(cmd_name, "figure") == 0 ||
+            strcmp(cmd_name, "table") == 0 ||
+            strcmp(cmd_name, "tabular") == 0 ||
+            strcmp(cmd_name, "equation") == 0 ||
+            strcmp(cmd_name, "displaymath") == 0 ||
+            strcmp(cmd_name, "par") == 0 ||
+            strcmp(cmd_name, "newpage") == 0 ||
+            strcmp(cmd_name, "maketitle") == 0 ||
+            strcmp(cmd_name, "title") == 0 ||
+            strcmp(cmd_name, "author") == 0 ||
+            strcmp(cmd_name, "date") == 0);
+}
+
+void LatexProcessor::ensureParagraph() {
+    if (!in_paragraph_) {
+        gen_->p();
+        in_paragraph_ = true;
+    }
+}
+
+void LatexProcessor::closeParagraphIfOpen() {
+    if (in_paragraph_) {
+        gen_->closeElement();
+        in_paragraph_ = false;
+    }
+}
+
 void LatexProcessor::process(Item root) {
     initCommandTable();
+    in_paragraph_ = false;  // Reset paragraph state
     processNode(root);
+    closeParagraphIfOpen();  // Close any open paragraph at the end
 }
 
 void LatexProcessor::processNode(Item node) {
@@ -2330,6 +2391,20 @@ void LatexProcessor::processChildren(Item elem) {
 
 void LatexProcessor::processText(const char* text) {
     if (!text) return;
+    
+    // Skip pure whitespace
+    bool all_whitespace = true;
+    for (const char* p = text; *p; p++) {
+        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+            all_whitespace = false;
+            break;
+        }
+    }
+    
+    if (!all_whitespace) {
+        ensureParagraph();  // Auto-wrap text in <p> tags
+    }
+    
     gen_->text(text);
 }
 
@@ -2410,6 +2485,11 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         }
     }
     
+    // Close paragraph before block commands
+    if (isBlockCommand(cmd_name)) {
+        closeParagraphIfOpen();
+    }
+    
     // Look up command in table
     auto it = command_table_.find(cmd_name);
     if (it != command_table_.end()) {
@@ -2453,8 +2533,14 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     // Create processor
     LatexProcessor proc(&gen, pool, input);
     
+    // Start HTML document container (using "body" class for LaTeX.js compatibility)
+    writer->openTag("div", "body");
+    
     // Process LaTeX tree
     proc.process(input->root);
+    
+    // Close HTML document container
+    writer->closeTag("div");
     
     // Get result
     Item result = writer->getResult();
