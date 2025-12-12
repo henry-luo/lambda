@@ -1,0 +1,980 @@
+# LaTeX to HTML V2 - Design Document
+
+**Date**: December 12, 2025  
+**Status**: Production Ready (Phases 1-5 Complete)  
+**Objective**: Translate LaTeX.js formatting logic to C++ for Lambda runtime
+
+---
+
+## 1. Overview
+
+### Project Goal
+
+Port the [LaTeX.js](https://github.com/michael-brade/LaTeX.js) HTML formatter from JavaScript to C++ as `format_latex_html_v2()`, enabling Lambda to convert LaTeX documents to HTML with high fidelity.
+
+### Translation Approach
+
+**File-by-file, function-by-function translation** from LaTeX.js to C++ for:
+- Easy verification against original JavaScript code
+- Straightforward debugging (compare outputs at each stage)
+- Incremental feature implementation
+- Clear mapping between source and target
+
+### Architecture Stack
+
+```
+LaTeX Source (.tex)
+    ↓
+Tree-sitter Parser (grammar: lambda/tree-sitter-latex/grammar.js)
+    ↓
+Lambda Element Tree (Lambda data structures)
+    ↓
+V2 Formatter (format_latex_html_v2.cpp - C++ translation of LaTeX.js)
+    ↓
+HTML Output (string or Element tree)
+```
+
+---
+
+## 2. Parser Layer: Tree-sitter to Lambda
+
+### Tree-sitter Grammar
+
+**File**: `lambda/tree-sitter-latex/grammar.js`
+
+- Defines LaTeX syntax rules (commands, environments, groups, etc.)
+- Generates C parser: `lambda/tree-sitter-latex/src/parser.c`
+- Produces Concrete Syntax Tree (CST) with node types
+
+### Parser Integration
+
+**File**: `lambda/input/input-latex-ts.cpp`
+
+**Function**: `parse_latex_ts(Input* input, const char* source, size_t len)`
+
+**Process**:
+1. Tree-sitter parses LaTeX source → CST
+2. Lambda parser walks CST nodes
+3. Converts to Lambda Element tree using `MarkBuilder`
+
+**Key Conversion Rules**:
+
+| Tree-sitter Node | Lambda Representation | Example |
+|------------------|----------------------|---------|
+| `command` with children | `Element` | `\textbf{text}` → `<textbf>` element |
+| `command` without children | `Symbol` | `\newpage` → symbol "newpage" |
+| `text` | `String` | Plain text content |
+| `group` (`{...}`) | `Element` with tag "curly_group" | Argument grouping |
+| `environment` | `Element` with tag = env name | `\begin{itemize}` → `<itemize>` |
+
+**Terminal nodes** (no children) become **Symbols**:
+```cpp
+// Example: \textbf has children (the text argument)
+<textbf>  // Element with tag "textbf"
+    "Bold text"  // String child
+
+// Example: \newpage has no children
+Symbol("newpage")  // Just a symbol
+```
+
+**Special Cases**:
+- `command_name` tokens: Extract text as String (e.g., `\greet` → `"greet"`)
+- `color_reference`: Specialized handler for color commands
+- `graphics_include`: Structured option parsing for images
+
+### Viewing the Lambda Tree
+
+**Command**: 
+```bash
+./lambda.exe convert document.tex -f latex -t mark -o output.mark
+```
+
+This outputs the Lambda Element tree in Mark format, showing:
+- Element tags (e.g., `<textbf>`, `<itemize>`)
+- String content
+- Symbol nodes
+- Tree structure with indentation
+
+**Use Case**: Debug parser output before formatter processing
+
+---
+
+## 3. Formatter Layer: LaTeX.js Translation
+
+### Source Files Mapping
+
+| LaTeX.js File | Lambda V2 File | Status |
+|---------------|----------------|--------|
+| `latex.ltx.ls` | `format_latex_html_v2.cpp` | ✅ Phases 1-5 complete |
+| `html-generator.ls` | Existing `HtmlGenerator` class | ✅ Reused |
+| `generator.ls` | `LatexProcessor` class | ✅ Custom implementation |
+| `symbols.ls` | Inline in command handlers | ✅ Partial (diacritics, escapes) |
+| `documentclasses/*.ls` | ⏳ Future | Pending |
+| `css/*.css` | ⏳ Future | Pending |
+
+### Core Architecture
+
+**File**: `lambda/format/format_latex_html_v2.cpp`
+
+**Main Components**:
+
+```cpp
+// 1. Entry point (called by Lambda)
+Item format_latex_html_v2(Input* input, bool text_mode);
+
+// 2. Processor class (state management, command dispatch)
+class LatexProcessor {
+private:
+    HtmlGenerator* gen_;                           // HTML output
+    Pool* pool_;                                   // Memory management
+    Input* input_;                                 // Input context
+    std::map<std::string, CommandFunc> command_table_;  // Command registry
+    std::map<std::string, MacroDefinition> macro_table_; // User macros
+    
+public:
+    void process(Item root);                       // Main processing
+    void processNode(Item node);                   // Single node
+    void processChildren(Item elem);               // Recurse children
+    void processCommand(const char* cmd_name, Item elem);  // Command dispatch
+};
+
+// 3. Command handler function type
+typedef void (*CommandFunc)(LatexProcessor* proc, Item elem);
+
+// 4. Individual command handlers (translate from LaTeX.js)
+static void cmd_textbf(LatexProcessor* proc, Item elem);
+static void cmd_section(LatexProcessor* proc, Item elem);
+static void cmd_begin(LatexProcessor* proc, Item elem);
+// ... ~75+ command handlers
+```
+
+### Translation Pattern
+
+**LaTeX.js Function** (JavaScript):
+```javascript
+generator.macro('textbf', function(groupsAndItems) {
+    var text = this.create(groupsAndItems[0]);
+    return this.createHtml('span', { 'class': 'bf' }, text);
+});
+```
+
+**Lambda V2 Translation** (C++):
+```cpp
+static void cmd_textbf(LatexProcessor* proc, Item elem) {
+    HtmlGenerator* gen = proc->generator();
+    
+    // Open <span class="bf">
+    gen->span("class=\"bf\"");
+    
+    // Process children (the text inside \textbf{...})
+    proc->processChildren(elem);
+    
+    // Close </span>
+    gen->closeElement();
+}
+```
+
+**Key Translation Principles**:
+1. **One JS macro → One C++ handler function**
+2. **Preserve logic flow**: Open tag → Process content → Close tag
+3. **Use Lambda APIs**: `gen->span()`, `proc->processChildren()`, etc.
+4. **Memory safety**: Pool-based allocation, no manual malloc/free
+
+### Command Dispatch Pattern
+
+```cpp
+void LatexProcessor::initCommandTable() {
+    // Register all command handlers
+    command_table_["textbf"] = cmd_textbf;
+    command_table_["textit"] = cmd_textit;
+    command_table_["section"] = cmd_section;
+    // ... ~75+ commands
+}
+
+void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Look up handler
+    auto it = command_table_.find(cmd_name);
+    if (it != command_table_.end()) {
+        // Call handler function
+        it->second(this, elem);
+    } else {
+        // Unknown command - output as text
+        gen_->text("\\");
+        gen_->text(cmd_name);
+    }
+}
+```
+
+**Benefits**:
+- O(1) lookup via hash map
+- Easy to add new commands
+- Clear separation of concerns
+- Testable individual handlers
+
+---
+
+## 4. Debug & Test Strategy
+
+### 4.1 Parser Debugging
+
+**View Lambda Tree**:
+```bash
+# Convert LaTeX to Mark format (shows parsed tree)
+./lambda.exe convert test.tex -f latex -t mark -o test.mark
+
+# View the tree structure
+cat test.mark
+```
+
+**Expected Output**:
+```
+<document>
+    <textbf>
+        "Bold text"
+    <section>
+        "Introduction"
+```
+
+**Use Case**: Verify parser correctly converts Tree-sitter CST to Lambda Elements
+
+---
+
+## 3.1 Dual-Mode Output Architecture: HtmlWriter
+
+### Design Overview
+
+The V2 formatter supports **two output modes** via the `HtmlWriter` abstract interface:
+
+1. **Text Mode**: Generate HTML as a string (using `StringBuf`)
+2. **Node Mode**: Generate HTML as Lambda Element tree (using `MarkBuilder`)
+
+This dual-mode design enables:
+- **Text output** for direct file writing or display
+- **Node output** for further processing in Lambda pipelines
+- **Same formatter logic** for both modes (single code path)
+- **Testable** output in both forms
+
+### HtmlWriter Interface
+
+**File**: `lambda/format/html_writer.hpp` (used by HtmlGenerator)
+
+```cpp
+// Abstract base class for HTML output
+class HtmlWriter {
+public:
+    virtual ~HtmlWriter() {}
+    
+    // Core output methods
+    virtual void writeStartElement(const char* tag) = 0;
+    virtual void writeEndElement() = 0;
+    virtual void writeAttribute(const char* name, const char* value) = 0;
+    virtual void writeText(const char* text) = 0;
+    virtual void writeComment(const char* text) = 0;
+    
+    // Get final result
+    virtual Item getResult() = 0;
+};
+```
+
+### Text Mode: TextHtmlWriter
+
+**Implementation**: `lambda/format/html_writer.cpp`
+
+**Storage**: Uses `StringBuf* sb_` from `lib/strbuf.h`
+
+**Operation**:
+```cpp
+class TextHtmlWriter : public HtmlWriter {
+private:
+    StringBuf* sb_;      // Dynamic string buffer
+    Pool* pool_;         // Memory pool
+    bool pretty_print_;  // Formatting flag
+    int indent_level_;   // Current indentation
+    
+public:
+    void writeStartElement(const char* tag) override {
+        // Append "<tag>" to string buffer
+        if (pretty_print_) {
+            stringbuf_append_indent(sb_, indent_level_);
+        }
+        stringbuf_append_char(sb_, '<');
+        stringbuf_append_str(sb_, tag);
+        stringbuf_append_char(sb_, '>');
+        indent_level_++;
+    }
+    
+    void writeText(const char* text) override {
+        // Escape HTML entities and append
+        stringbuf_append_html_escaped(sb_, text);
+    }
+    
+    Item getResult() override {
+        // Convert StringBuf to Lambda String
+        String* result = stringbuf_to_string(sb_);
+        Item item;
+        item.string_ptr = (uint64_t)result;
+        item._8_s = LMD_TYPE_STRING;
+        return item;
+    }
+};
+```
+
+**Use Case**: Final HTML output for files, HTTP responses, display
+
+### Node Mode: NodeHtmlWriter
+
+**Implementation**: `lambda/format/html_writer.cpp`
+
+**Storage**: Uses `MarkBuilder` from `lambda/mark_builder.hpp`
+
+**Operation**:
+```cpp
+class NodeHtmlWriter : public HtmlWriter {
+private:
+    MarkBuilder builder_;           // Element tree builder
+    std::stack<ElementBuilder> stack_; // Track open elements
+    Input* input_;                  // Input context
+    
+public:
+    void writeStartElement(const char* tag) override {
+        // Create new Element with tag name
+        ElementBuilder elem = builder_.element(tag);
+        stack_.push(elem);
+    }
+    
+    void writeEndElement() override {
+        // Finalize current element
+        if (!stack_.empty()) {
+            ElementBuilder current = stack_.top();
+            stack_.pop();
+            
+            Item elem_item = current.final();
+            
+            if (!stack_.empty()) {
+                // Add to parent
+                stack_.top().child(elem_item);
+            } else {
+                // Root element
+                root_ = elem_item;
+            }
+        }
+    }
+    
+    void writeText(const char* text) override {
+        // Add String child to current element
+        if (!stack_.empty()) {
+            String* str = builder_.createString(text);
+            Item str_item;
+            str_item.string_ptr = (uint64_t)str;
+            str_item._8_s = LMD_TYPE_STRING;
+            stack_.top().child(str_item);
+        }
+    }
+    
+    Item getResult() override {
+        // Return root Element
+        return root_;
+    }
+};
+```
+
+**Use Case**: Pipeline processing, validation, further transformation
+
+### Mode Selection
+
+**Entry Point**: `format_latex_html_v2(Input* input, bool text_mode)`
+
+```cpp
+Item format_latex_html_v2(Input* input, bool text_mode) {
+    Pool* pool = input->pool;
+    
+    // Create appropriate writer based on mode
+    HtmlWriter* writer = nullptr;
+    if (text_mode) {
+        // Text mode - generate HTML string
+        writer = new TextHtmlWriter(pool, true);  // pretty print
+    } else {
+        // Node mode - generate Element tree
+        writer = new NodeHtmlWriter(input);
+    }
+    
+    // Create HTML generator (same logic for both modes)
+    HtmlGenerator gen(pool, writer);
+    
+    // Create processor and format
+    LatexProcessor proc(&gen, pool, input);
+    proc.process(input->root);
+    
+    // Get result (String or Element depending on mode)
+    Item result = writer->getResult();
+    
+    // Cleanup
+    delete writer;
+    
+    return result;
+}
+```
+
+### Benefits of Dual-Mode Design
+
+1. **Single Code Path**: Formatter logic identical for both modes
+   - No duplication of command handlers
+   - Same bugs/fixes apply to both modes
+   - Easier maintenance
+
+2. **Flexible Output**: Choose mode based on use case
+   - Text mode: Direct output, HTTP responses
+   - Node mode: Further processing, validation, transformation
+
+3. **Testable**: Can verify both representations
+   - Text mode: Compare HTML strings
+   - Node mode: Validate Element tree structure
+
+4. **Memory Efficient**: 
+   - Text mode: Single StringBuf growth, no intermediate nodes
+   - Node mode: Arena allocation, automatic cleanup
+
+5. **Type Safety**: Compiler enforces interface
+   - Can't call wrong methods
+   - Virtual dispatch handles mode switching
+
+### Example Usage
+
+**Text Mode**:
+```bash
+# Generate HTML string output
+./lambda.exe convert document.tex -f latex -t html -o output.html
+```
+
+**Node Mode** (in Lambda script):
+```lambda
+let html_tree = convert(latex_doc, "html", text_mode: false)
+validate(html_tree, html_schema)
+transform(html_tree, custom_rules)
+```
+
+**C API**:
+```cpp
+// Text mode
+Input* input = parse_latex("\\textbf{Hello}");
+Item html_string = format_latex_html_v2(input, true);
+printf("%s\n", html_string.string_ptr->chars);  // <span class="bf">Hello</span>
+
+// Node mode
+Item html_tree = format_latex_html_v2(input, false);
+Element* root = html_tree.element;
+// Process tree further...
+```
+
+---
+
+### 4.2 Formatter Debugging
+
+**Enable Debug Logging**:
+```cpp
+// In format_latex_html_v2.cpp
+fprintf(stderr, "Processing command: %s\n", cmd_name);
+fprintf(stderr, "Element has %lld children\n", reader.childCount());
+```
+
+**Debug Output to stderr**:
+- Parser creates which Element tags
+- Command handler execution flow
+- Child iteration and types
+- Parameter extraction
+
+**Test Single Command**:
+```cpp
+TEST_F(LatexHtmlV2Test, TextbfCommand) {
+    const char* latex = "\\textbf{Bold text}";
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    EXPECT_STREQ(html, "<p><span class=\"bf\">Bold text</span></p>");
+}
+```
+
+### 4.3 Test Suite Architecture
+
+**Baseline Tests** (must pass 100%):
+- **File**: `test/latex/test_latex_html_baseline.cpp`
+- **Fixtures**: `test/latex/fixtures/*.tex`
+- **Coverage**: Core features (text, lists, sections, math)
+- **Status**: 50+ tests passing
+
+**Extended Tests** (ongoing development):
+- **File**: `test/latex/test_latex_html_extended.cpp`
+- **Coverage**: Advanced features (tables, floats, macros, packages)
+- **Status**: Incremental progress
+
+**V2-Specific Tests**:
+- **Files**: `test/test_latex_html_v2_*.cpp`
+- **Coverage**: V2 formatter-specific functionality
+- **Categories**: Lists/Envs, Tables, Floats, Special Chars, Bibliography, Graphics/Color, Macros
+
+### 4.4 Fixture Test Format
+
+**File**: `test/latex/fixtures/text.tex`
+
+```
+** simple test
+.
+Hello world
+.
+<div class="body"><p>Hello world</p></div>
+.
+
+** bold and italic
+.
+\textbf{Bold} and \textit{italic}
+.
+<div class="body"><p><span class="bf">Bold</span> and <span class="it">italic</span></p></div>
+.
+```
+
+**Format**:
+- `** header` - Test name
+- `.` - Separator
+- LaTeX source
+- `.` - Separator  
+- Expected HTML output
+- `.` - End marker
+
+**Benefits**:
+- Easy to read and write
+- Self-documenting test cases
+- Shared with LaTeX.js (can compare outputs)
+
+### 4.5 Test Workflow
+
+**1. Run Baseline Tests** (must always pass):
+```bash
+./test/test_latex_html_baseline.exe
+# Expected: [  PASSED  ] 50+ tests
+```
+
+**2. Run Extended Tests** (track progress):
+```bash
+./test/test_latex_html_extended.exe
+# Shows: X passing, Y failing
+```
+
+**3. Run V2-Specific Tests**:
+```bash
+# Phase 1-2: Core features, tables, floats
+./test/test_latex_html_v2_lists_envs.exe
+./test/test_latex_html_v2_tables.exe
+./test/test_latex_html_v2_floats.exe
+
+# Phase 3: Special characters
+./test/test_latex_html_v2_special_chars.exe
+
+# Phase 4: Bibliography
+./test/test_latex_html_v2_bibliography.exe
+
+# Phase 5: Graphics and colors
+./test/test_latex_html_v2_graphics_color.exe
+
+# Phase 6: Macros (CURRENT)
+./test/test_latex_html_v2_macros.exe
+```
+
+**4. Debug Specific Test**:
+```bash
+# Run single test with GTest filter
+./test/test_latex_html_v2_macros.exe --gtest_filter="*NewCommandSimple*"
+
+# With debug output
+./test/test_latex_html_v2_macros.exe --gtest_filter="*NewCommandSimple*" 2>&1 | grep "DEBUG"
+```
+
+**5. Compare with LaTeX.js**:
+```bash
+# Generate HTML with Lambda
+./lambda.exe convert test.tex -f latex -t html -o lambda_output.html
+
+# Generate HTML with LaTeX.js
+latex.js test.tex > latexjs_output.html
+
+# Compare outputs
+diff lambda_output.html latexjs_output.html
+```
+
+---
+
+## 5. Implementation Status
+
+### ✅ Completed Phases (70/70 tests passing)
+
+**Phase 1: Core Features** (15/15 tests)
+- Text formatting: `\textbf`, `\textit`, `\texttt`, `\emph`, `\underline`
+- Font sizes: `\tiny`, `\small`, `\large`, `\Large`, `\huge`, etc.
+- Document structure: `\section`, `\subsection`, `\chapter`, `\part`
+- Lists: `itemize`, `enumerate`, `description` with nested support
+- Text environments: `quote`, `quotation`, `verse`, `center`, `flushleft`, `flushright`
+- Mathematics: Inline `$...$`, display `\[...\]`, `equation` environment
+- Cross-references: `\label`, `\ref`, `\pageref`
+- Hyperlinks: `\url`, `\href`
+- Line breaking: `\\`, `\newline`, `\newpage`
+- Footnotes: `\footnote`
+- Verbatim: `\verb`, `verbatim` environment
+
+**Phase 2: Tables & Floats** (25/25 tests)
+- Tables: `tabular` environment with `\hline`, `\multicolumn`
+- Floats: `figure` and `table` with `\caption`, `\centering`
+- Special characters: Escape sequences (`\%`, `\&`, `\$`, `\#`, `\_`, `\{`, `\}`)
+- Diacritics: `\'`, `` \` ``, `\^`, `\~`, `\"`
+
+**Phase 3: Bibliography** (13/13 tests)
+- Citations: `\cite`, `\cite[text]`, `\citeauthor`, `\citeyear`
+- Bibliography: `\bibliography`, `thebibliography` environment
+- Entries: `\bibitem`, `\bibitem[label]`
+- Styles: `\bibliographystyle`
+
+**Phase 4: Graphics & Color** (17/17 tests)
+- Colors: `\textcolor`, `\colorbox`, `\fcolorbox`, `\color`, `\definecolor`
+- Color models: named, RGB, HTML, grayscale
+- Graphics: `\includegraphics` with options (width, height, scale, angle)
+
+### 🚧 Current Phase 6: Macros (4/14 tests passing)
+
+**Macro System** (in progress):
+- ✅ `\newcommand`: Simple macros without parameters
+- ✅ `\def`: Basic definitions
+- ✅ `\renewcommand`: Macro redefinition detection
+- ✅ `\providecommand`: Conditional definition
+- 🔄 Parameter substitution: `#1`, `#2`, etc. (partially working)
+- 🔄 Optional arguments: `\newcommand{\cmd}[n][default]{def}`
+- ❌ Nested macros: Macros calling other macros
+- ❌ Recursive macros: Self-referential definitions
+
+**Current Issues**:
+- Element cloning: Proper deep copy with TypeElmt metadata ✅ FIXED
+- Parameter extraction: `brack_group_argc` → number parsing ✅ FIXED  
+- Parameter substitution: String replacement in macro body (IN PROGRESS)
+- Macro expansion: Recursive expansion and nesting
+
+**Next Steps**:
+1. Fix parameter substitution logic
+2. Implement nested macro expansion
+3. Add optional argument support
+4. Complete all 14 macro tests
+
+### ⏳ Future Phases
+
+**Phase 7 Candidates**:
+- Advanced Math: `align`, `gather`, `cases`, matrices, operators
+- Custom Environments: `\newenvironment`, `\renewenvironment`
+- Packages: `hyperref`, `geometry`, `fancyhdr`, `multicol`, `listings`
+- Document Classes: `article`, `book`, `report` CSS styles
+
+---
+
+## 6. Key Design Decisions
+
+### 6.1 Why Command Dispatch Pattern?
+
+**Advantages**:
+- **O(1) lookup**: Hash map for command resolution
+- **Modularity**: Each command is independent function
+- **Extensibility**: Easy to add new commands
+- **Testability**: Test individual handlers
+- **Maintainability**: Clear code organization
+
+**Alternative Rejected**:
+- Giant if-else chain: O(n) lookup, hard to maintain
+- Inheritance hierarchy: Over-engineered for this use case
+
+### 6.2 Why Reuse HtmlGenerator?
+
+**Advantages**:
+- **Proven code**: Already tested in old formatter
+- **No duplication**: Single HTML generation logic
+- **Consistent output**: Same HTML structure across formatters
+
+**Alternative Rejected**:
+- New HtmlWriter abstraction: Unnecessary complexity for current needs
+- Direct string building: Error-prone, no tag matching
+
+### 6.3 Why Pool-Based Memory?
+
+**Advantages**:
+- **Performance**: Fast allocation, no fragmentation
+- **Safety**: Automatic cleanup via pool_destroy()
+- **Lambda standard**: Consistent with rest of codebase
+
+**Alternative Rejected**:
+- Manual malloc/free: Leak-prone, error-prone
+- C++ smart pointers: Mixing paradigms, Lambda uses C-style pools
+
+### 6.4 Why File-by-File Translation?
+
+**Advantages**:
+- **Verification**: Easy to compare with LaTeX.js source
+- **Debugging**: Know which JS function maps to which C++ function
+- **Incremental**: Implement features one at a time
+- **Documentation**: Self-documenting through naming
+
+**Alternative Rejected**:
+- Complete rewrite: Risk of missing edge cases
+- Hybrid approach: Confusing, hard to verify
+
+---
+
+## 7. Development Workflow
+
+### 7.1 Adding a New LaTeX Command
+
+**Step 1: Find LaTeX.js implementation**
+```bash
+# Search in LaTeX.js repository
+grep -r "textbf" latex.js/src/
+```
+
+**Step 2: Create handler function**
+```cpp
+static void cmd_textbf(LatexProcessor* proc, Item elem) {
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"bf\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+```
+
+**Step 3: Register in command table**
+```cpp
+void LatexProcessor::initCommandTable() {
+    // ... existing commands
+    command_table_["textbf"] = cmd_textbf;
+}
+```
+
+**Step 4: Write test**
+```cpp
+TEST_F(LatexHtmlV2Test, TextbfCommand) {
+    const char* latex = "\\textbf{Bold}";
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    EXPECT_TRUE(strstr(html, "<span class=\"bf\">Bold</span>"));
+}
+```
+
+**Step 5: Run tests**
+```bash
+make build-test
+./test/test_latex_html_v2_lists_envs.exe
+```
+
+### 7.2 Debugging a Failing Test
+
+**Step 1: Identify the failure**
+```bash
+./test/test_latex_html_baseline.exe
+# Shows: [  FAILED  ] text_tex_5
+```
+
+**Step 2: View the fixture**
+```bash
+cat test/latex/fixtures/text.tex
+# Find test with ID 5
+```
+
+**Step 3: Run single test**
+```bash
+./test/test_latex_html_baseline.exe --gtest_filter="*text_tex_5"
+```
+
+**Step 4: Add debug output**
+```cpp
+fprintf(stderr, "DEBUG: Processing node type=%d\n", type);
+fprintf(stderr, "DEBUG: Command name='%s'\n", cmd_name);
+```
+
+**Step 5: View Lambda tree**
+```bash
+./lambda.exe convert fixture_input.tex -f latex -t mark -o debug.mark
+cat debug.mark
+```
+
+**Step 6: Fix and verify**
+```cpp
+// Make fix in format_latex_html_v2.cpp
+make build-test
+./test/test_latex_html_baseline.exe --gtest_filter="*text_tex_5"
+```
+
+### 7.3 Parser Issues
+
+**If parser produces wrong Element structure**:
+
+**Step 1: Check grammar**
+```bash
+# View grammar definition
+cat lambda/tree-sitter-latex/grammar.js
+```
+
+**Step 2: Add debug to parser**
+```cpp
+// In input-latex-ts.cpp
+fprintf(stderr, "Parser: node_type='%s', has_children=%d\n", 
+        node_type, has_children);
+```
+
+**Step 3: View Tree-sitter CST**
+```bash
+# Use tree-sitter CLI (if installed)
+tree-sitter parse test.tex
+```
+
+**Step 4: Fix parser conversion logic**
+```cpp
+// Modify convert_node() in input-latex-ts.cpp
+```
+
+**Step 5: Regenerate if needed**
+```bash
+make clean-grammar
+make generate-grammar
+make build
+```
+
+---
+
+## 8. Architecture Diagrams
+
+### Overall Data Flow
+
+```
+┌─────────────────┐
+│  LaTeX Source   │
+│   (.tex file)   │
+└────────┬────────┘
+         │
+         ↓
+┌─────────────────────────────┐
+│  Tree-sitter Parser         │
+│  (grammar.js → parser.c)    │
+│  Produces: Concrete Syntax  │
+│            Tree (CST)       │
+└────────┬────────────────────┘
+         │
+         ↓
+┌─────────────────────────────┐
+│  Lambda Parser              │
+│  (input-latex-ts.cpp)       │
+│  Converts: CST → Elements   │
+│  Uses: MarkBuilder          │
+└────────┬────────────────────┘
+         │
+         ↓
+┌─────────────────────────────┐
+│  Lambda Element Tree        │
+│  - Element nodes (commands) │
+│  - String nodes (text)      │
+│  - Symbol nodes (terminals) │
+└────────┬────────────────────┘
+         │
+         ↓
+┌─────────────────────────────┐
+│  V2 Formatter               │
+│  (format_latex_html_v2.cpp) │
+│  - LatexProcessor           │
+│  - Command dispatch         │
+│  - HtmlGenerator            │
+└────────┬────────────────────┘
+         │
+         ↓
+┌─────────────────┐
+│  HTML Output    │
+│  (string or     │
+│   Element tree) │
+└─────────────────┘
+```
+
+### Command Processing Flow
+
+```
+processNode(Item node)
+    │
+    ├─ Is String? → gen->text(string)
+    │
+    ├─ Is Symbol? → processCommand(symbol_name, node)
+    │
+    └─ Is Element?
+        │
+        ├─ Get tag name
+        │
+        └─ processCommand(tag_name, node)
+            │
+            ├─ Look up in command_table_
+            │
+            ├─ Found? → Call handler function
+            │   │
+            │   └─ Handler:
+            │       1. Open HTML tag
+            │       2. processChildren(node)
+            │       3. Close HTML tag
+            │
+            └─ Not found? → Output as text
+```
+
+### Memory Management
+
+```
+┌───────────────────────────────────┐
+│  Pool (from input->pool)          │
+│  - Fast allocation                │
+│  - No fragmentation               │
+│  - Automatic cleanup              │
+└────────┬──────────────────────────┘
+         │
+         ├─ HtmlGenerator
+         │  └─ StringBuf (for HTML string)
+         │
+         ├─ LatexProcessor
+         │  └─ Command handlers
+         │
+         └─ Temporary allocations
+            └─ pool_calloc(), arena_alloc()
+```
+
+---
+
+## 9. References
+
+### LaTeX.js Repository
+- **URL**: https://github.com/michael-brade/LaTeX.js
+- **Key Files**:
+  - `src/latex.ltx.ls` - Command macros (~1400 lines)
+  - `src/html-generator.ls` - HTML generation
+  - `src/generator.ls` - Base generator
+  - `src/symbols.ls` - Unicode mappings
+
+### Lambda Codebase
+- **Parser**: `lambda/input/input-latex-ts.cpp`
+- **Formatter**: `lambda/format/format_latex_html_v2.cpp`
+- **Grammar**: `lambda/tree-sitter-latex/grammar.js`
+- **Tests**: `test/test_latex_html_v2_*.cpp`
+- **Fixtures**: `test/latex/fixtures/*.tex`
+
+### Documentation
+- **Progress Report**: `vibe/Latex_to_Html_v2.md`
+- **This Document**: `vibe/Latex_to_Html_v2_Design.md`
+- **Copilot Instructions**: `.github/copilot-instructions.md`
+
+---
+
+## 10. Conclusion
+
+The LaTeX to HTML V2 implementation successfully translates LaTeX.js formatting logic to C++ through:
+
+1. **Tree-sitter Parser**: Robust LaTeX parsing with grammar-based approach
+2. **Lambda Element Tree**: Unified data representation for document processing
+3. **Command Dispatch**: Modular, extensible architecture for command handlers
+4. **File-by-File Translation**: Systematic porting with clear verification path
+5. **Comprehensive Testing**: Baseline + extended tests for quality assurance
+
+**Current Status**: 70/70 tests passing across Phases 1-5 (Core, Tables, Floats, Special Chars, Bibliography, Graphics/Color)
+
+**Next Goal**: Complete Phase 6 (Macro system) to enable user-defined commands
+
+**Long-term Vision**: Full LaTeX.js feature parity with ~200 commands, document classes, and package support
