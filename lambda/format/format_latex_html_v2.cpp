@@ -901,6 +901,223 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
 }
 
 // =============================================================================
+// Bibliography & Citation Commands
+// =============================================================================
+
+static void cmd_cite(LatexProcessor* proc, Item elem) {
+    // \cite[optional]{key} or \cite{key1,key2}
+    // Generate citation reference like [1] or [Smith20]
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    // Extract citation keys from curly_group
+    std::vector<std::string> keys;
+    std::string optional_text;
+    
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "bracket_group") == 0) {
+                // Optional text like "p. 42"
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* text = stringbuf_to_string(sb);
+                optional_text = text->chars;
+            } else if (strcmp(tag, "curly_group") == 0) {
+                // Extract keys (may be comma-separated)
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* keys_str = stringbuf_to_string(sb);
+                
+                // Split by comma
+                const char* str = keys_str->chars;
+                std::string current_key;
+                for (size_t i = 0; i <= strlen(str); i++) {
+                    if (str[i] == ',' || str[i] == '\0') {
+                        if (!current_key.empty()) {
+                            // Trim whitespace
+                            size_t start = current_key.find_first_not_of(" \t\n");
+                            size_t end = current_key.find_last_not_of(" \t\n");
+                            if (start != std::string::npos) {
+                                keys.push_back(current_key.substr(start, end - start + 1));
+                            }
+                            current_key.clear();
+                        }
+                    } else {
+                        current_key += str[i];
+                    }
+                }
+            }
+        }
+    }
+    
+    // Generate citation
+    gen->span("class=\"cite\"");
+    gen->text("[");
+    
+    for (size_t i = 0; i < keys.size(); i++) {
+        if (i > 0) gen->text(",");
+        // For now, just output the key - in full implementation would look up number
+        gen->text(keys[i].c_str());
+    }
+    
+    if (!optional_text.empty()) {
+        gen->text(", ");
+        gen->text(optional_text.c_str());
+    }
+    
+    gen->text("]");
+    gen->closeElement();  // close span
+}
+
+static void cmd_citeauthor(LatexProcessor* proc, Item elem) {
+    // \citeauthor{key} - output author name
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    // Extract key
+    std::string key;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* key_str = stringbuf_to_string(sb);
+                key = key_str->chars;
+                break;
+            }
+        }
+    }
+    
+    // For now, just output the key - in full implementation would look up author
+    gen->span("class=\"cite-author\"");
+    gen->text(key.c_str());
+    gen->closeElement();
+}
+
+static void cmd_citeyear(LatexProcessor* proc, Item elem) {
+    // \citeyear{key} - output year
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    // Extract key
+    std::string key;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* key_str = stringbuf_to_string(sb);
+                key = key_str->chars;
+                break;
+            }
+        }
+    }
+    
+    // For now, just output the key - in full implementation would extract year
+    gen->span("class=\"cite-year\"");
+    gen->text(key.c_str());
+    gen->closeElement();
+}
+
+static void cmd_bibliographystyle(LatexProcessor* proc, Item elem) {
+    // \bibliographystyle{style} - set citation style
+    // This is typically just metadata, doesn't produce output
+    // We could store the style in the processor for later use
+    // For now, just skip it
+}
+
+static void cmd_bibliography(LatexProcessor* proc, Item elem) {
+    // \bibliography{file} - include bibliography
+    // This would normally read a .bib file and generate the bibliography
+    // For now, just output a placeholder section
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->startSection("section", false, "References", "references");
+    
+    // Process children (if any - though \bibliography usually has no content)
+    proc->processChildren(elem);
+}
+
+static void cmd_bibitem(LatexProcessor* proc, Item elem) {
+    // \bibitem[label]{key} Entry text...
+    // Part of thebibliography environment
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    std::string label;
+    std::string key;
+    
+    // Extract optional label and key
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "bracket_group") == 0) {
+                // Optional custom label
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* label_str = stringbuf_to_string(sb);
+                label = label_str->chars;
+            } else if (strcmp(tag, "curly_group") == 0) {
+                // Citation key
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* key_str = stringbuf_to_string(sb);
+                key = key_str->chars;
+            }
+        }
+    }
+    
+    // Start bibliography item
+    gen->div("class=\"bibitem\"");
+    
+    // Output label/number
+    gen->span("class=\"bibitem-label\"");
+    if (!label.empty()) {
+        gen->text("[");
+        gen->text(label.c_str());
+        gen->text("]");
+    } else {
+        // Use key as fallback
+        gen->text("[");
+        gen->text(key.c_str());
+        gen->text("]");
+    }
+    gen->closeElement();  // close span
+    
+    gen->text(" ");
+    
+    // The entry text will follow as siblings
+    proc->processChildren(elem);
+    
+    gen->closeElement();  // close div
+}
+
+// =============================================================================
 // LatexProcessor Implementation
 // =============================================================================
 
@@ -996,6 +1213,20 @@ void LatexProcessor::initCommandTable() {
     command_table_["graphics_include"] = cmd_includegraphics;
     command_table_["includegraphics"] = cmd_includegraphics;
     command_table_["\\includegraphics"] = cmd_includegraphics;
+    
+    // Bibliography & Citations
+    command_table_["cite"] = cmd_cite;
+    command_table_["\\cite"] = cmd_cite;
+    command_table_["citeauthor"] = cmd_citeauthor;
+    command_table_["\\citeauthor"] = cmd_citeauthor;
+    command_table_["citeyear"] = cmd_citeyear;
+    command_table_["\\citeyear"] = cmd_citeyear;
+    command_table_["bibliographystyle"] = cmd_bibliographystyle;
+    command_table_["\\bibliographystyle"] = cmd_bibliographystyle;
+    command_table_["bibliography"] = cmd_bibliography;
+    command_table_["\\bibliography"] = cmd_bibliography;
+    command_table_["bibitem"] = cmd_bibitem;
+    command_table_["\\bibitem"] = cmd_bibitem;
 }
 
 void LatexProcessor::process(Item root) {
