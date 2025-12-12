@@ -1980,6 +1980,28 @@
                         "icon": "📄"
                     },
                     {
+                        "source": "test/latex/test_latex_html_v2_baseline.cpp",
+                        "name": "LaTeX to HTML V2 Baseline Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_latex_html_v2_baseline.exe",
+                        "additional_sources": [
+                            "test/latex/fixture_loader.cpp",
+                            "test/latex/html_comparison.cpp"
+                        ],
+                        "includes": [
+                            "test/latex"
+                        ],
+                        "special_flags": "-std=c++17 -I/opt/homebrew/include",
+                        "icon": "✨"
+                    },
+                    {
                         "source": "test/test_latex_html_v2_lists_envs.cpp",
                         "name": "LaTeX-to-HTML V2: Lists & Environments Tests",
                         "dependencies": [
