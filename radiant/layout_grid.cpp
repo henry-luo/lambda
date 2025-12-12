@@ -349,22 +349,15 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         if (!is_absolute && !is_hidden) {
             grid_layout->grid_items[count] = child;
 
-            // Initialize grid item properties with defaults if not set
+            // Initialize grid item placement properties with defaults if not set
+            // Note: Only initialize placement-related properties (row/column),
+            // NOT alignment properties (justify_self/align_self_grid) which may be set via CSS
             bool has_explicit_placement = child->gi && (
                 child->gi->grid_row_start != 0 || child->gi->grid_row_end != 0 ||
                 child->gi->grid_column_start != 0 || child->gi->grid_column_end != 0);
-            if (!has_explicit_placement) {
-                // Item has default/uninitialized grid properties - set proper defaults
-                // Note: gi is allocated elsewhere, here we just mark as auto-placed
-                if (child->gi) {
-                    child->gi->grid_row_start = 0;    // auto
-                    child->gi->grid_row_end = 0;      // auto
-                    child->gi->grid_column_start = 0; // auto
-                    child->gi->grid_column_end = 0;   // auto
-                    child->gi->justify_self = CSS_VALUE_AUTO;
-                    child->gi->align_self_grid = CSS_VALUE_AUTO;
-                    child->gi->is_grid_auto_placed = true;
-                }
+            if (!has_explicit_placement && child->gi) {
+                // Mark as auto-placed but preserve any CSS-set alignment properties
+                child->gi->is_grid_auto_placed = true;
             }
 
             count++;
@@ -373,6 +366,29 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     }
 
     grid_layout->item_count = count;
+
+    // Sort items by CSS order property (stable sort - preserve DOM order for equal orders)
+    // CSS Grid spec: items are placed in order-modified document order
+    if (count > 1) {
+        // Simple insertion sort (stable, good for small arrays)
+        for (int i = 1; i < count; i++) {
+            ViewBlock* key = grid_layout->grid_items[i];
+            int key_order = key->gi ? key->gi->order : 0;
+            int j = i - 1;
+            while (j >= 0) {
+                int j_order = grid_layout->grid_items[j]->gi ?
+                             grid_layout->grid_items[j]->gi->order : 0;
+                if (j_order > key_order) {
+                    grid_layout->grid_items[j + 1] = grid_layout->grid_items[j];
+                    j--;
+                } else {
+                    break;
+                }
+            }
+            grid_layout->grid_items[j + 1] = key;
+        }
+    }
+
     *items = grid_layout->grid_items;
     return count;
 }

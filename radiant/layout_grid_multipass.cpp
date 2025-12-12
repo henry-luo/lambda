@@ -170,6 +170,11 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
 
     DomElement* elem = child->as_element();
 
+    // Resolve and store display value for this element
+    // This is crucial for detecting nested grid/flex containers
+    elem->display = resolve_display_value((void*)child);
+    log_debug("Grid item display: outer=%d, inner=%d", elem->display.outer, elem->display.inner);
+
     // Set up the view type based on display
     // Grid items are blockified - treat as block
     elem->view_type = RDT_VIEW_BLOCK;
@@ -191,6 +196,7 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
         Pool* pool = lycon->doc->view_tree->pool;
         elem->gi = (GridItemProp*)pool_calloc(pool, sizeof(GridItemProp));
         if (elem->gi) {
+            elem->item_prop_type = DomElement::ITEM_PROP_GRID;
             // Initialize with auto placement defaults
             elem->gi->is_grid_auto_placed = true;
             elem->gi->justify_self = CSS_VALUE_AUTO;
@@ -328,25 +334,10 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     if (*min_height <= 0) *min_height = 1;
     if (*max_height <= 0) *max_height = 1;
 
-    // Add padding and border to the measurements (grid items use border-box sizing)
-    if (item->bound) {
-        int padding_h = (int)(item->bound->padding.left + item->bound->padding.right);
-        int padding_v = (int)(item->bound->padding.top + item->bound->padding.bottom);
-        log_debug("Adding padding to measurements: h=%d, v=%d", padding_h, padding_v);
-        *min_width += padding_h;
-        *max_width += padding_h;
-        *min_height += padding_v;
-        *max_height += padding_v;
-
-        if (item->bound->border) {
-            int border_h = (int)(item->bound->border->width.left + item->bound->border->width.right);
-            int border_v = (int)(item->bound->border->width.top + item->bound->border->width.bottom);
-            *min_width += border_h;
-            *max_width += border_h;
-            *min_height += border_v;
-            *max_height += border_v;
-        }
-    }
+    // NOTE: Padding and border are already included by:
+    // - calculate_max_content_width: via measure_element_intrinsic_widths (lines 304-318)
+    // - calculate_max_content_height: directly adds padding/border (lines 405-413)
+    // Do NOT add padding/border again here to avoid double-counting
 
     // Store in cache
     store_in_measurement_cache((DomNode*)item, *max_width, *max_height,
