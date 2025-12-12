@@ -474,6 +474,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     if (!text_start) return;  // null check for text data
     unsigned char* str = text_start;
 
+    // Clear any existing text rects from previous layout passes (e.g., table measurement)
+    // This prevents accumulation of duplicate rects when the same node is laid out multiple times
+    if (text_node->view_type == RDT_VIEW_TEXT) {
+        ViewText* existing_view = (ViewText*)text_node;
+        if (existing_view->rect) {
+            log_debug("clearing existing text rects for re-layout");
+            existing_view->rect = nullptr;  // pool memory will be reused
+        }
+    }
+
     // Get white-space property from the text node's ancestor chain
     // This properly handles inline elements like <span style="white-space: pre">
     CssEnum white_space = get_white_space_value(text_node);  // todo: white-space should be put in BlockContext
