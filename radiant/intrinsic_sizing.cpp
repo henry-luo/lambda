@@ -218,7 +218,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int inline_min_sum = 0;  // Sum of min-content widths for inline children
     int inline_max_sum = 0;  // Sum of max-content widths for inline children
     bool has_inline_content = false;
-    
+
     // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
     bool is_flex_container = false;
     ViewBlock* view_block = (ViewBlock*)element;
@@ -237,7 +237,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (is_flex_container) {
                 continue;
             }
-            
+
             const char* text = (const char*)child->text_data();
             if (text) {
                 // Skip whitespace-only text nodes
@@ -248,11 +248,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         break;
                     }
                 }
-                
+
                 if (is_whitespace_only) {
                     continue;
                 }
-                
+
                 TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
                     lycon, text, strlen(text));
                 child_sizes.min_content = text_widths.min_content;
@@ -428,7 +428,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // Calculate children's heights
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         float child_height = calculate_max_content_height(lycon, child, width);
-        
+
         if (is_grid_column_flow || is_flex_row) {
             // Items are laid out horizontally - take max height
             height = fmax(height, child_height);
@@ -441,7 +441,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // Add padding and border
     float pad_top = 0, pad_bottom = 0;
     float border_top = 0, border_bottom = 0;
-    
+
     if (view->bound) {
         if (view->bound->padding.top >= 0) pad_top = view->bound->padding.top;
         if (view->bound->padding.bottom >= 0) pad_bottom = view->bound->padding.bottom;
@@ -468,7 +468,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
     }
-    
+
     height += pad_top + pad_bottom + border_top + border_bottom;
 
     return height;
