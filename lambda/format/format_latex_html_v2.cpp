@@ -44,7 +44,7 @@ public:
     
 public:
     LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
-        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false) {}
+        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -86,11 +86,13 @@ private:
     
     // Paragraph tracking for auto-wrapping text
     bool in_paragraph_;
+    int inline_depth_;  // Track nesting depth of inline elements
     
     // Helper methods for paragraph management
     void ensureParagraph();
     void closeParagraphIfOpen();
     bool isBlockCommand(const char* cmd_name);
+    bool isInlineCommand(const char* cmd_name);
     
     // Process specific command
     void processCommand(const char* cmd_name, Item elem);
@@ -356,7 +358,7 @@ static void cmd_textit(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     gen->currentFont().shape = FontShape::Italic;
-    gen->span("class=\"textit\"");
+    gen->span("it");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -373,7 +375,7 @@ static void cmd_emph(LatexProcessor* proc, Item elem) {
     } else {
         gen->currentFont().shape = FontShape::Italic;
     }
-    gen->span("class=\"emph\"");
+    gen->span("it");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -385,7 +387,7 @@ static void cmd_texttt(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     gen->currentFont().family = FontFamily::Typewriter;
-    gen->span("class=\"texttt\"");
+    gen->span("tt");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -397,7 +399,7 @@ static void cmd_textsf(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     gen->currentFont().family = FontFamily::SansSerif;
-    gen->span("class=\"textsf\"");
+    gen->span("textsf");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -409,7 +411,7 @@ static void cmd_textrm(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     gen->currentFont().family = FontFamily::Roman;
-    gen->span("class=\"textrm\"");
+    gen->span("textrm");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -421,7 +423,7 @@ static void cmd_textsc(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     gen->currentFont().shape = FontShape::SmallCaps;
-    gen->span("class=\"textsc\"");
+    gen->span("textsc");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -431,7 +433,16 @@ static void cmd_underline(LatexProcessor* proc, Item elem) {
     // \underline{text} - underlined text
     HtmlGenerator* gen = proc->generator();
     
-    gen->span("class=\"underline\"");
+    gen->span("underline");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_sout(LatexProcessor* proc, Item elem) {
+    // \sout{text} - strikethrough text
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->span("sout");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -808,7 +819,7 @@ static void cmd_tiny(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Tiny;
-    gen->span("class=\"tiny\"");
+    gen->span("tiny");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -818,7 +829,7 @@ static void cmd_scriptsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::ScriptSize;
-    gen->span("class=\"scriptsize\"");
+    gen->span("scriptsize");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -828,7 +839,7 @@ static void cmd_footnotesize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::FootnoteSize;
-    gen->span("class=\"footnotesize\"");
+    gen->span("footnotesize");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -838,7 +849,7 @@ static void cmd_small(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Small;
-    gen->span("class=\"small\"");
+    gen->span("small");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -848,7 +859,9 @@ static void cmd_normalsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::NormalSize;
+    gen->span("normalsize");
     proc->processChildren(elem);
+    gen->closeElement();
     gen->exitGroup();
 }
 
@@ -856,7 +869,7 @@ static void cmd_large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Large;
-    gen->span("class=\"large\"");
+    gen->span("large");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -866,7 +879,7 @@ static void cmd_Large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Large2;
-    gen->span("class=\"Large\"");
+    gen->span("Large");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -876,7 +889,7 @@ static void cmd_LARGE(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Large3;
-    gen->span("class=\"LARGE\"");
+    gen->span("LARGE");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -886,7 +899,7 @@ static void cmd_huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Huge;
-    gen->span("class=\"huge\"");
+    gen->span("huge");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -896,7 +909,7 @@ static void cmd_Huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Huge2;
-    gen->span("class=\"Huge\"");
+    gen->span("Huge");
     proc->processChildren(elem);
     gen->closeElement();
     gen->exitGroup();
@@ -1961,7 +1974,7 @@ static void cmd_cite(LatexProcessor* proc, Item elem) {
     }
     
     // Generate citation
-    gen->span("class=\"cite\"");
+    gen->span("cite");
     gen->text("[");
     
     for (size_t i = 0; i < keys.size(); i++) {
@@ -2005,7 +2018,7 @@ static void cmd_citeauthor(LatexProcessor* proc, Item elem) {
     }
     
     // For now, just output the key - in full implementation would look up author
-    gen->span("class=\"cite-author\"");
+    gen->span("cite-author");
     gen->text(key.c_str());
     gen->closeElement();
 }
@@ -2036,7 +2049,7 @@ static void cmd_citeyear(LatexProcessor* proc, Item elem) {
     }
     
     // For now, just output the key - in full implementation would extract year
-    gen->span("class=\"cite-year\"");
+    gen->span("cite-year");
     gen->text(key.c_str());
     gen->closeElement();
 }
@@ -2099,7 +2112,7 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
     gen->div("class=\"bibitem\"");
     
     // Output label/number
-    gen->span("class=\"bibitem-label\"");
+    gen->span("bibitem-label");
     if (!label.empty()) {
         gen->text("[");
         gen->text(label.c_str());
@@ -2140,6 +2153,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["textrm"] = cmd_textrm;
     command_table_["textsc"] = cmd_textsc;
     command_table_["underline"] = cmd_underline;
+    command_table_["sout"] = cmd_sout;
     
     // Font sizes
     command_table_["tiny"] = cmd_tiny;
@@ -2287,8 +2301,43 @@ bool LatexProcessor::isBlockCommand(const char* cmd_name) {
             strcmp(cmd_name, "date") == 0);
 }
 
+bool LatexProcessor::isInlineCommand(const char* cmd_name) {
+    // Inline formatting commands that should be wrapped in paragraphs
+    return (strcmp(cmd_name, "textbf") == 0 ||
+            strcmp(cmd_name, "textit") == 0 ||
+            strcmp(cmd_name, "emph") == 0 ||
+            strcmp(cmd_name, "texttt") == 0 ||
+            strcmp(cmd_name, "textsf") == 0 ||
+            strcmp(cmd_name, "textrm") == 0 ||
+            strcmp(cmd_name, "textsc") == 0 ||
+            strcmp(cmd_name, "underline") == 0 ||
+            strcmp(cmd_name, "sout") == 0 ||
+            strcmp(cmd_name, "textcolor") == 0 ||
+            strcmp(cmd_name, "colorbox") == 0 ||
+            strcmp(cmd_name, "fcolorbox") == 0 ||
+            strcmp(cmd_name, "tiny") == 0 ||
+            strcmp(cmd_name, "scriptsize") == 0 ||
+            strcmp(cmd_name, "footnotesize") == 0 ||
+            strcmp(cmd_name, "small") == 0 ||
+            strcmp(cmd_name, "normalsize") == 0 ||
+            strcmp(cmd_name, "large") == 0 ||
+            strcmp(cmd_name, "Large") == 0 ||
+            strcmp(cmd_name, "LARGE") == 0 ||
+            strcmp(cmd_name, "huge") == 0 ||
+            strcmp(cmd_name, "Huge") == 0 ||
+            strcmp(cmd_name, "cite") == 0 ||
+            strcmp(cmd_name, "citeauthor") == 0 ||
+            strcmp(cmd_name, "citeyear") == 0 ||
+            strcmp(cmd_name, "url") == 0 ||
+            strcmp(cmd_name, "href") == 0 ||
+            strcmp(cmd_name, "ref") == 0 ||
+            strcmp(cmd_name, "pageref") == 0 ||
+            strcmp(cmd_name, "footnote") == 0);
+}
+
 void LatexProcessor::ensureParagraph() {
-    if (!in_paragraph_) {
+    // Only open paragraph if we're not inside an inline element
+    if (!in_paragraph_ && inline_depth_ == 0) {
         gen_->p();
         in_paragraph_ = true;
     }
@@ -2485,9 +2534,15 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         }
     }
     
-    // Close paragraph before block commands
+    // Handle block vs inline commands differently
     if (isBlockCommand(cmd_name)) {
+        // Close paragraph before block commands
         closeParagraphIfOpen();
+    } else if (isInlineCommand(cmd_name)) {
+        // Ensure paragraph is open before inline commands
+        ensureParagraph();
+        // Track that we're entering an inline element
+        inline_depth_++;
     }
     
     // Look up command in table
@@ -2495,6 +2550,11 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     if (it != command_table_.end()) {
         // Call command handler
         it->second(this, elem);
+        
+        // Exit inline element tracking
+        if (isInlineCommand(cmd_name)) {
+            inline_depth_--;
+        }
         return;
     }
     
