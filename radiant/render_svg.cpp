@@ -83,11 +83,13 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     char color_str[32];
     svg_color_to_string(ctx->color, color_str);
 
-    float font_size = ctx->font.ft_face ? (ctx->font.ft_face->size->metrics.y_ppem / 64.0) : 16;
-    float baseline_y = y + (ctx->font.ft_face ? (ctx->font.ft_face->size->metrics.ascender / 64.0) : font_size * 0.8f);
+    // y_ppem is already in pixels (not 26.6 fixed point), so use directly
+    // ascender is in 26.6 format, so divide by 64 for pixels
+    float font_size = ctx->font.ft_face ? (float)ctx->font.ft_face->size->metrics.y_ppem : 16;
+    float baseline_y = y + (ctx->font.ft_face ? (ctx->font.ft_face->size->metrics.ascender / 64.0f) : font_size * 0.8f);
 
     strbuf_append_format(ctx->svg_content,
-        "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%d\" fill=\"%s\"",
+        "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" fill=\"%s\"",
         x, baseline_y,
         ctx->font.ft_face ? ctx->font.ft_face->family_name : "Arial",
         font_size,
