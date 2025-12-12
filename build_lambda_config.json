@@ -2030,6 +2030,32 @@
                         ],
                         "binary": "test_latex_html_v2_special_chars.exe",
                         "icon": "🔣"
+                    },
+                    {
+                        "source": "test/test_latex_html_v2_bibliography.cpp",
+                        "name": "LaTeX HTML V2 Bibliography Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_html_v2_bibliography.exe",
+                        "icon": "📚"
+                    },
+                    {
+                        "source": "test/test_latex_html_v2_graphics_color.cpp",
+                        "name": "LaTeX HTML V2 Graphics & Color Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_html_v2_graphics_color.exe",
+                        "icon": "🎨"
                     }
                 ],
                 "type": "input",
