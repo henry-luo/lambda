@@ -1700,8 +1700,8 @@ static void cmd_author(LatexProcessor* proc, Item elem) {
     // \author{name} - set document author
     HtmlGenerator* gen = proc->generator();
     // Store author for \maketitle
-    // For now, just output as metadata
-    gen->div("class=\"author\"");
+    // For now, just output inline with span - \maketitle will format properly later
+    gen->span("class=\"latex-author\"");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1709,9 +1709,9 @@ static void cmd_author(LatexProcessor* proc, Item elem) {
 static void cmd_title(LatexProcessor* proc, Item elem) {
     // \title{text} - set document title
     HtmlGenerator* gen = proc->generator();
-    // Store title for \maketitle
-    // For now, just output as metadata
-    gen->div("class=\"title\"");
+    // Store title for \maketitle  
+    // For now, just output inline with span - \maketitle will format properly later
+    gen->span("class=\"latex-title\"");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1720,8 +1720,8 @@ static void cmd_date(LatexProcessor* proc, Item elem) {
     // \date{text} - set document date
     HtmlGenerator* gen = proc->generator();
     // Store date for \maketitle
-    // For now, just output as metadata
-    gen->div("class=\"date\"");
+    // For now, just output inline with span - \maketitle will format properly later
+    gen->span("class=\"latex-date\"");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -2726,7 +2726,6 @@ void LatexProcessor::initCommandTable() {
     command_table_["description"] = cmd_description;
     command_table_["item"] = cmd_item;
     command_table_["enum_item"] = cmd_item;  // Tree-sitter node type for \item
-    command_table_["\\item"] = cmd_item;     // Command form with backslash
     
     // Basic environments
     command_table_["quote"] = cmd_quote;
@@ -2753,49 +2752,28 @@ void LatexProcessor::initCommandTable() {
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
-    command_table_["\\TeX"] = cmd_TeX;
     command_table_["LaTeX"] = cmd_LaTeX;
-    command_table_["\\LaTeX"] = cmd_LaTeX;
     command_table_["today"] = cmd_today;
-    command_table_["\\today"] = cmd_today;
     command_table_["empty"] = cmd_empty;
-    command_table_["\\empty"] = cmd_empty;
     command_table_["makeatletter"] = cmd_makeatletter;
-    command_table_["\\makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;
-    command_table_["\\makeatother"] = cmd_makeatother;
     
     // Spacing commands
     command_table_["hspace"] = cmd_hspace;
-    command_table_["\\hspace"] = cmd_hspace;
     command_table_["vspace"] = cmd_vspace;
-    command_table_["\\vspace"] = cmd_vspace;
     command_table_["addvspace"] = cmd_addvspace;
-    command_table_["\\addvspace"] = cmd_addvspace;
     command_table_["smallbreak"] = cmd_smallbreak;
-    command_table_["\\smallbreak"] = cmd_smallbreak;
     command_table_["medbreak"] = cmd_medbreak;
-    command_table_["\\medbreak"] = cmd_medbreak;
     command_table_["bigbreak"] = cmd_bigbreak;
-    command_table_["\\bigbreak"] = cmd_bigbreak;
     command_table_["vfill"] = cmd_vfill;
-    command_table_["\\vfill"] = cmd_vfill;
     command_table_["hfill"] = cmd_hfill;
-    command_table_["\\hfill"] = cmd_hfill;
     command_table_["nolinebreak"] = cmd_nolinebreak;
-    command_table_["\\nolinebreak"] = cmd_nolinebreak;
     command_table_["nopagebreak"] = cmd_nopagebreak;
-    command_table_["\\nopagebreak"] = cmd_nopagebreak;
     command_table_["pagebreak"] = cmd_pagebreak;
-    command_table_["\\pagebreak"] = cmd_pagebreak;
     command_table_["clearpage"] = cmd_clearpage;
-    command_table_["\\clearpage"] = cmd_clearpage;
     command_table_["cleardoublepage"] = cmd_cleardoublepage;
-    command_table_["\\cleardoublepage"] = cmd_cleardoublepage;
     command_table_["enlargethispage"] = cmd_enlargethispage;
-    command_table_["\\enlargethispage"] = cmd_enlargethispage;
     command_table_["negthinspace"] = cmd_negthinspace;
-    command_table_["\\negthinspace"] = cmd_negthinspace;
     command_table_["!"] = cmd_negthinspace;  // \! is an alias for \negthinspace
     
     // Box commands
@@ -2820,15 +2798,10 @@ void LatexProcessor::initCommandTable() {
     
     // Document metadata
     command_table_["author"] = cmd_author;
-    command_table_["\\author"] = cmd_author;
     command_table_["title"] = cmd_title;
-    command_table_["\\title"] = cmd_title;
     command_table_["date"] = cmd_date;
-    command_table_["\\date"] = cmd_date;
     command_table_["thanks"] = cmd_thanks;
-    command_table_["\\thanks"] = cmd_thanks;
     command_table_["maketitle"] = cmd_maketitle;
-    command_table_["\\maketitle"] = cmd_maketitle;
     
     // Labels and references
     command_table_["label"] = cmd_label;
@@ -2837,11 +2810,9 @@ void LatexProcessor::initCommandTable() {
     
     // Hyperlinks
     command_table_["url"] = cmd_url;
-    command_table_["\\url"] = cmd_url;  // Command form with backslash
     command_table_["hyperlink"] = cmd_href;  // Tree-sitter node type for \href
     command_table_["curly_group_uri"] = cmd_url;  // Tree-sitter uri group
     command_table_["href"] = cmd_href;
-    command_table_["\\href"] = cmd_href;  // Command form with backslash
     
     // Footnotes
     command_table_["footnote"] = cmd_footnote;
@@ -2849,7 +2820,6 @@ void LatexProcessor::initCommandTable() {
     // Tables
     command_table_["tabular"] = cmd_tabular;
     command_table_["hline"] = cmd_hline;
-    command_table_["\\hline"] = cmd_hline;
     command_table_["multicolumn"] = cmd_multicolumn;
     
     // Float environments
@@ -2860,34 +2830,22 @@ void LatexProcessor::initCommandTable() {
     // Graphics
     command_table_["graphics_include"] = cmd_includegraphics;
     command_table_["includegraphics"] = cmd_includegraphics;
-    command_table_["\\includegraphics"] = cmd_includegraphics;
     
     // Color commands
     command_table_["color_reference"] = cmd_color_reference;  // Tree-sitter node for \textcolor and \colorbox
     command_table_["textcolor"] = cmd_textcolor;
-    command_table_["\\textcolor"] = cmd_textcolor;
     command_table_["color"] = cmd_color;
-    command_table_["\\color"] = cmd_color;
     command_table_["colorbox"] = cmd_colorbox;
-    command_table_["\\colorbox"] = cmd_colorbox;
     command_table_["fcolorbox"] = cmd_fcolorbox;
-    command_table_["\\fcolorbox"] = cmd_fcolorbox;
     command_table_["definecolor"] = cmd_definecolor;
-    command_table_["\\definecolor"] = cmd_definecolor;
     
     // Bibliography & Citations
     command_table_["cite"] = cmd_cite;
-    command_table_["\\cite"] = cmd_cite;
     command_table_["citeauthor"] = cmd_citeauthor;
-    command_table_["\\citeauthor"] = cmd_citeauthor;
     command_table_["citeyear"] = cmd_citeyear;
-    command_table_["\\citeyear"] = cmd_citeyear;
     command_table_["bibliographystyle"] = cmd_bibliographystyle;
-    command_table_["\\bibliographystyle"] = cmd_bibliographystyle;
     command_table_["bibliography"] = cmd_bibliography;
-    command_table_["\\bibliography"] = cmd_bibliography;
     command_table_["bibitem"] = cmd_bibitem;
-    command_table_["\\bibitem"] = cmd_bibitem;
 }
 
 // =============================================================================
