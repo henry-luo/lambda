@@ -61,6 +61,17 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     for (size_t i = 0; i < length; i++) {
         unsigned char ch = str[i];
 
+        // Check for zero-width space (U+200B) - UTF-8 encoding: 0xE2 0x80 0x8B
+        // This is a break opportunity with no width
+        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && str[i+2] == 0x8B) {
+            // Zero-width space is a break opportunity
+            longest_word = fmax(longest_word, current_word);
+            current_word = 0.0f;
+            prev_glyph = 0;
+            i += 2;  // Skip remaining bytes of zero-width space
+            continue;
+        }
+
         // Word boundary detection (whitespace breaks words)
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
             longest_word = fmax(longest_word, current_word);

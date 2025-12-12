@@ -1071,6 +1071,21 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
                 track_size = parse_minmax_function(val);
             } else if (strcmp(func_name, "repeat") == 0) {
                 track_size = parse_repeat_function(val);
+            } else if (strcmp(func_name, "fit-content") == 0) {
+                // fit-content(<length-percentage>)
+                track_size = create_grid_track_size(GRID_TRACK_SIZE_FIT_CONTENT, 0);
+                if (track_size && val->data.function->arg_count > 0) {
+                    CssValue* arg = val->data.function->args[0];
+                    if (arg->type == CSS_VALUE_TYPE_LENGTH) {
+                        track_size->fit_content_limit = (int)arg->data.length.value;
+                        track_size->is_percentage = false;
+                        log_debug("[CSS]   parsed fit-content(%dpx)", track_size->fit_content_limit);
+                    } else if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        track_size->fit_content_limit = (int)arg->data.percentage.value;
+                        track_size->is_percentage = true;
+                        log_debug("[CSS]   parsed fit-content(%d%%)", track_size->fit_content_limit);
+                    }
+                }
             }
         }
     }
@@ -3942,6 +3957,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 parse_grid_track_list(value, &grid->grid_template_rows);
                 log_debug("[CSS] grid-template-rows: %d tracks parsed",
                           grid->grid_template_rows ? grid->grid_template_rows->track_count : 0);
+            }
+            // Handle single length/percentage value (e.g., 40px)
+            else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                log_debug("[CSS] grid-template-rows: handling single LENGTH/PERCENTAGE value");
+                GridTrackSize* ts = parse_css_value_to_track_size(value);
+                if (ts) {
+                    if (!grid->grid_template_rows) {
+                        grid->grid_template_rows = create_grid_track_list(1);
+                    } else {
+                        grid->grid_template_rows->track_count = 0;
+                    }
+                    grid->grid_template_rows->tracks[0] = ts;
+                    grid->grid_template_rows->track_count = 1;
+                    log_debug("[CSS] grid-template-rows: parsed single track -> %d tracks",
+                              grid->grid_template_rows->track_count);
+                }
             }
             // Handle single function value (e.g., repeat(...))
             else if (value->type == CSS_VALUE_TYPE_FUNCTION) {

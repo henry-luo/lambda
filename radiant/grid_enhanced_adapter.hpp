@@ -114,7 +114,11 @@ inline MaxTrackSizingFunction convert_to_max_sizing(GridTrackSize* old_size) {
             return MaxTrackSizingFunction::Fr(static_cast<float>(old_size->value));
 
         case GRID_TRACK_SIZE_FIT_CONTENT:
-            return MaxTrackSizingFunction::FitContentPx(static_cast<float>(old_size->fit_content_limit));
+            if (old_size->is_percentage) {
+                return MaxTrackSizingFunction::FitContentPercent(static_cast<float>(old_size->fit_content_limit));
+            } else {
+                return MaxTrackSizingFunction::FitContentPx(static_cast<float>(old_size->fit_content_limit));
+            }
 
         case GRID_TRACK_SIZE_MINMAX:
             // Recurse on max_size
