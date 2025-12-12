@@ -16,6 +16,17 @@
 #include "../../mark_builder.hpp" // For MarkBuilder
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 
+// Timing accumulators for cascade profiling
+static thread_local int64_t g_apply_decl_count = 0;
+
+void reset_dom_element_timing() {
+    g_apply_decl_count = 0;
+}
+
+void log_dom_element_timing() {
+    log_info("[TIMING] cascade detail: decl_count: %lld", g_apply_decl_count);
+}
+
 // Forward declaration
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* document, DomElement* parent);
 DomElement* build_dom_tree_from_element_with_input(Element* elem, DomDocument* document, DomElement* parent);
@@ -658,34 +669,18 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
         return false;
     }
 
+    g_apply_decl_count++;
+
     // Validate the property value before applying
     if (!css_property_validate_value(declaration->property_id, declaration->value)) {
-        log_debug("[APPLY_DECL] Invalid value for property %d on <%s>, skipping",
-                  declaration->property_id,
-                  element->tag_name ? element->tag_name : "null");
         return false;
     }
-
-    // DEBUG: Log which element is receiving the declaration
-    log_debug("[APPLY_DECL] Element <%s> receiving property %d (spec:%u, order:%d)",
-            element->tag_name ? element->tag_name : "null",
-            declaration->property_id,
-            css_specificity_to_value(declaration->specificity),
-            declaration->source_order);
 
     // Apply to specified style tree
     StyleNode* node = style_tree_apply_declaration(element->specified_style, declaration);
     if (!node) {
-        log_debug("[APPLY_DECL] FAILED to apply property %d to <%s>",
-                  declaration->property_id,
-                  element->tag_name ? element->tag_name : "null");
         return false;
     }
-
-    log_debug("[APPLY_DECL] Successfully applied property %d to <%s>, style tree now has %d nodes",
-              declaration->property_id,
-              element->tag_name ? element->tag_name : "null",
-              element->specified_style && element->specified_style->tree ? element->specified_style->tree->node_count : 0);
 
     // Increment style version to invalidate caches
     element->style_version++;

@@ -7,12 +7,57 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
+#include <chrono>
 
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
+
+using namespace std::chrono;
+
+// ============================================================================
+// Layout timing accumulators
+// ============================================================================
+double g_style_resolve_time = 0;
+double g_text_layout_time = 0;
+double g_block_layout_time = 0;
+double g_inline_layout_time = 0;
+double g_table_layout_time = 0;
+double g_flex_layout_time = 0;
+double g_grid_layout_time = 0;
+int64_t g_style_resolve_count = 0;
+int64_t g_style_resolve_full = 0;  // full resolutions (not cached)
+int64_t g_style_resolve_measure = 0;  // resolutions during measurement
+int64_t g_text_layout_count = 0;
+int64_t g_block_layout_count = 0;
+int64_t g_inline_layout_count = 0;
+
+void reset_layout_timing() {
+    g_style_resolve_time = 0;
+    g_text_layout_time = 0;
+    g_block_layout_time = 0;
+    g_inline_layout_time = 0;
+    g_table_layout_time = 0;
+    g_flex_layout_time = 0;
+    g_grid_layout_time = 0;
+    g_style_resolve_count = 0;
+    g_style_resolve_full = 0;
+    g_style_resolve_measure = 0;
+    g_text_layout_count = 0;
+    g_block_layout_count = 0;
+    g_inline_layout_count = 0;
+}
+
+void log_layout_timing_summary() {
+    log_info("[TIMING] layout breakdown: style_resolve=%.1fms (%lld calls, %lld full, %lld measure), text=%.1fms (%lld), block=%.1fms (%lld)",
+        g_style_resolve_time, g_style_resolve_count, g_style_resolve_full, g_style_resolve_measure,
+        g_text_layout_time, g_text_layout_count,
+        g_block_layout_time, g_block_layout_count);
+    log_info("[TIMING] layout breakdown: table=%.1fms, flex=%.1fms, grid=%.1fms",
+        g_table_layout_time, g_flex_layout_time, g_grid_layout_time);
+}
 
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
@@ -247,17 +292,33 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
 
 // DomNode style resolution function
 // Ensures styles are resolved only once per layout pass using styles_resolved flag
+// NOTE: Measurement mode (is_measuring=true) must NOT mark styles as resolved,
+// because percentage-based values need to be re-resolved against the actual
+// containing block dimensions during the real layout pass.
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
+    auto t_start = high_resolution_clock::now();
+
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
         if (dom_elem && dom_elem->specified_style) {
             // Check if styles already resolved in this layout pass
             // IMPORTANT: Skip this check during measurement mode (is_measuring=true)
             // because measurement passes should not permanently mark styles as resolved
+            // and percentage values may need different containing block dimensions
             if (dom_elem->styles_resolved && !lycon->is_measuring) {
                 log_debug("[CSS] Skipping style resolution for <%s> - already resolved",
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
-                return;
+                g_style_resolve_count++;
+                auto t_end = high_resolution_clock::now();
+                g_style_resolve_time += duration<double, std::milli>(t_end - t_start).count();
+                return;  // early return - reuse existing styles
+            }
+
+            // Track measurement vs full resolution
+            if (lycon->is_measuring) {
+                g_style_resolve_measure++;
+            } else {
+                g_style_resolve_full++;
             }
 
             // resolve element default styles
@@ -278,6 +339,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
         }
     }
+
+    auto t_end = high_resolution_clock::now();
+    g_style_resolve_time += duration<double, std::milli>(t_end - t_start).count();
+    g_style_resolve_count++;
 }
 
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline) {
@@ -538,6 +603,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 }
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
     log_debug("layout html root");
     log_debug("DEBUG: elmt=%p, type=%d", (void*)elmt, elmt ? (int)elmt->node_type : -1);
     //log_debug("DEBUG: About to call apply_header_style");
@@ -587,10 +655,16 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.float_right_edge = lycon->ui_context->window_width;
     log_debug("[BlockContext] Root BFC created (width=%.1f)", html->content_width);
 
+    auto t_init = high_resolution_clock::now();
+    log_info("[TIMING] layout: context init: %.1fms", duration<double, std::milli>(t_init - t_start).count());
+
     // resolve CSS style
     log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->node_name());
     dom_node_resolve_style(elmt, lycon);
     log_debug("DEBUG: After resolve style");
+
+    auto t_style = high_resolution_clock::now();
+    log_info("[TIMING] layout: root style resolve: %.1fms", duration<double, std::milli>(t_style - t_init).count());
 
     if (html->font) {
         setup_font(lycon->ui_context, &lycon->font, html->font);
@@ -629,6 +703,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         child = child->next_sibling;
     }
 
+    auto t_body_find = high_resolution_clock::now();
+    log_info("[TIMING] layout: body find: %.1fms", duration<double, std::milli>(t_body_find - t_style).count());
+
     if (body_node) {
         log_debug("Laying out body element: %p", (void*)body_node);
         layout_block(lycon, body_node,
@@ -637,7 +714,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         log_debug("No body element found in DOM tree");
     }
 
+    auto t_layout_block = high_resolution_clock::now();
+    log_info("[TIMING] layout: layout_block: %.1fms", duration<double, std::milli>(t_layout_block - t_body_find).count());
+
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
+
+    auto t_finalize = high_resolution_clock::now();
+    log_info("[TIMING] layout: finalize_block_flow: %.1fms", duration<double, std::milli>(t_finalize - t_layout_block).count());
 }
 
 int detect_html_version_lambda_css(DomDocument* doc) {
@@ -719,6 +802,12 @@ void layout_cleanup(LayoutContext* lycon) {
 }
 
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
+    // Reset layout timing accumulators
+    reset_layout_timing();
+
     LayoutContext lycon;
     if (!doc) return;
     log_debug("layout html doc - start");
@@ -736,6 +825,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_debug("calling layout_init...");
     layout_init(&lycon, doc, uicon);
     log_debug("layout_init complete");
+
+    auto t_init = high_resolution_clock::now();
 
     // Get root node based on document type
     DomNode* root_node = nullptr;
@@ -759,6 +850,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     log_debug("calling layout_html_root...");
     layout_html_root(&lycon, root_node);
+
+    auto t_layout = high_resolution_clock::now();
+    log_info("[TIMING] layout_html_root: %.1fms", duration<double, std::milli>(t_layout - t_init).count());
+
     log_debug("layout_html_root complete");
 
     log_debug("end layout");
@@ -778,5 +873,9 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         log_debug("Warning: No view tree generated");
     }
 
+    auto t_end = high_resolution_clock::now();
+    log_info("[TIMING] print_view_tree: %.1fms", duration<double, std::milli>(t_end - t_layout).count());
+    log_layout_timing_summary();
+    log_info("[TIMING] layout_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
     log_debug("layout_html_doc complete");
 }

@@ -9,6 +9,15 @@
 
 #include "../lib/log.h"
 #include "../lambda/input/css/selector_matcher.hpp"
+#include <chrono>
+using namespace std::chrono;
+
+// External timing accumulators from layout.cpp
+extern double g_table_layout_time;
+extern double g_flex_layout_time;
+extern double g_grid_layout_time;
+extern double g_block_layout_time;
+extern int64_t g_block_layout_count;
 
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 // void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);  // Removed: lexbor dependency
@@ -667,22 +676,28 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 }
             }
             else if (block->display.inner == CSS_VALUE_FLEX) {
+                auto t_flex_start = high_resolution_clock::now();
                 log_debug("Setting up flex container for %s", block->node_name());
                 layout_flex_content(lycon, block);
                 log_debug("Finished flex container layout for %s", block->node_name());
+                g_flex_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_flex_start).count();
                 return;
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
+                auto t_grid_start = high_resolution_clock::now();
                 log_debug("Setting up grid container for %s (multipass)", block->node_name());
                 // Use multipass grid layout (similar to flex layout pattern)
                 layout_grid_content(lycon, block);
                 log_debug("Finished grid container layout for %s", block->node_name());
+                g_grid_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_grid_start).count();
                 return;
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
+                auto t_table_start = high_resolution_clock::now();
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
                     block->display.outer, block->display.inner, block->node_name());
                 layout_table_content(lycon, block, block->display);
+                g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
                 return;
             }
             else {
@@ -1261,6 +1276,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 }
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
+    auto t_block_start = high_resolution_clock::now();
+
     log_enter();
     // display: CSS_VALUE_BLOCK, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_LIST_ITEM
     log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->node_name(), display.outer, display.inner);
@@ -1566,4 +1583,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
     log_leave();
+
+    auto t_block_end = high_resolution_clock::now();
+    g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
+    g_block_layout_count++;
 }
