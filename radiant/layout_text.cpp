@@ -41,38 +41,37 @@ static inline bool ws_wrap_lines(CssEnum ws) {
 }
 
 /**
+ * Check if a white-space value is concrete (not inherit/initial/unset/revert).
+ * These special values need to be resolved by walking up the parent chain.
+ */
+static inline bool is_concrete_white_space_value(CssEnum ws) {
+    return ws != CSS_VALUE_INHERIT &&
+           ws != CSS_VALUE_INITIAL &&
+           ws != CSS_VALUE_UNSET &&
+           ws != CSS_VALUE_REVERT;
+}
+
+/**
  * Get the white-space property value from the text node's ancestor chain.
  * Walks up from the text node to find the nearest element with a white_space value set.
  * This properly handles inline elements like <span style="white-space: pre">.
  *
  * white-space is an inherited property, so we check:
  * 1. The resolved blk->white_space (for block elements)
- * 2. The specified_style CSS tree (for all elements including inline)
+ * 2. Skip INHERIT/INITIAL/UNSET/REVERT and continue walking up
  */
-static CssEnum get_white_space_value(DomNode* node) {
+CssEnum get_white_space_value(DomNode* node) {
     // Walk up parent chain starting from the text node's parent
     DomNode* current = node ? node->parent : nullptr;
     while (current) {
-        if (current->is_element()) {
-            DomElement* elem = static_cast<DomElement*>(current);
-
-            // Check resolved BlockProp first (fastest path for blocks)
-            if (elem->blk && elem->blk->white_space != 0) {
-                return elem->blk->white_space;
-            }
-
-            // Check specified_style for inline elements (e.g., span with white-space: pre)
-            if (elem->specified_style && elem->specified_style->tree) {
-                AvlNode* ws_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_WHITE_SPACE);
-                if (ws_node) {
-                    StyleNode* style_node = (StyleNode*)ws_node->declaration;
-                    if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                        CssValue* val = style_node->winning_decl->value;
-                        if (val->type == CSS_VALUE_TYPE_KEYWORD && val->data.keyword != 0) {
-                            return val->data.keyword;
-                        }
-                    }
-                }
+        assert(current->is_element());
+        DomElement* elem = static_cast<DomElement*>(current);
+        // Check resolved BlockProp first (fastest path for blocks)
+        if (elem->blk && elem->blk->white_space != 0) {
+            CssEnum ws = elem->blk->white_space;
+            // Skip INHERIT/INITIAL/UNSET/REVERT - continue walking up
+            if (is_concrete_white_space_value(ws)) {
+                return ws;
             }
         }
         current = current->parent;
@@ -477,7 +476,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     // Get white-space property from the text node's ancestor chain
     // This properly handles inline elements like <span style="white-space: pre">
-    CssEnum white_space = get_white_space_value(text_node);
+    CssEnum white_space = get_white_space_value(text_node);  // todo: white-space should be put in BlockContext
     bool collapse_spaces = ws_collapse_spaces(white_space);
     bool collapse_newlines = ws_collapse_newlines(white_space);
     bool wrap_lines = ws_wrap_lines(white_space);
