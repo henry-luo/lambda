@@ -375,8 +375,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Arial, sans-serif; font-size: 14px; padding: 20px; }\n    \n    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }\n    \n    /* Test container height calculation with different align-items */\n    .flex-container {\n      display: flex;\n      background: #f0f0f0;\n      margin-bottom: 20px;\n      padding: 10px;\n    }\n    \n    .item-small { \n      background: #4a90d9; \n      color: white; \n      padding: 10px 20px;\n    }\n    \n    .item-tall { \n      background: #66bb6a; \n      color: white; \n      padding: 30px 20px;\n    }\n    \n    .align-stretch { align-items: stretch; }\n    .align-start { align-items: flex-start; }\n    .align-center { align-items: center; }\n    .align-end { align-items: flex-end; }\n  ",
-                "length": 797,
+                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Arial, sans-serif; font-size: 14px; padding: 20px; }\n\n    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }\n\n    /* Test container height calculation with different align-items */\n    .flex-container {\n      display: flex;\n      background: #f0f0f0;\n      margin-bottom: 20px;\n      padding: 10px;\n    }\n\n    .item-small {\n      background: #4a90d9;\n      color: white;\n      padding: 10px 20px;\n    }\n\n    .item-tall {\n      background: #66bb6a;\n      color: white;\n      padding: 30px 20px;\n    }\n\n    .align-stretch { align-items: stretch; }\n    .align-start { align-items: flex-start; }\n    .align-center { align-items: center; }\n    .align-end { align-items: flex-end; }\n  ",
+                "length": 771,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],

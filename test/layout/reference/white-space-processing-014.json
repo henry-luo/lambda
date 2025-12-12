@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font: 16px/1em ahem;\n                height: 1em;\n                margin-bottom: 3px;\n            }\n            #div1\n            {\n                background-color: blue;\n                width: 5em;\n            }\n            #div2\n            {\n                background-color: orange;\n                width: 4em;\n            }\n            span\n            {\n                background-color: black;\n                white-space: normal;\n            }\n        ",
-                "length": 508,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            div\n            {\n                font: 16px/1em ahem;\n                height: 1em;\n                margin-bottom: 3px;\n            }\n            #div1\n            {\n                background-color: blue;\n                width: 5em;\n            }\n            #div2\n            {\n                background-color: orange;\n                width: 4em;\n            }\n            span\n            {\n                background-color: black;\n                white-space: normal;\n            }\n        ",
+                "length": 634,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -865,7 +865,7 @@
               "contentWidth": 1184,
               "contentHeight": 16,
               "scrollWidth": 1184,
-              "scrollHeight": 17
+              "scrollHeight": 16
             },
             "computed": {
               "display": "block",
@@ -919,9 +919,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 68,
-                  "width": 50.22,
-                  "height": 18,
+                  "y": 69,
+                  "width": 80,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -980,11 +980,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 68,
-                          "width": 50.22,
-                          "height": 18,
-                          "right": 58.22,
-                          "bottom": 86,
+                          "y": 69,
+                          "width": 80,
+                          "height": 16,
+                          "right": 88,
+                          "bottom": 85,
                           "text": "XX\nXX",
                           "startIndex": 0,
                           "endIndex": 5

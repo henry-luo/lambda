@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font: 16px/1em ahem;\n            }\n            #table\n            {\n                display: table;\n            }\n            #row\n            {\n                display: table-row;\n            }\n            #cell\n            {\n                display: table-cell;\n                white-space: pre;\n            }\n            #div1, #div2\n            {\n                background: black;\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n            #div2\n            {\n                margin-left: 3em;\n            }\n        ",
-                "length": 631,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            div\n            {\n                font: 16px/1em ahem;\n            }\n            #table\n            {\n                display: table;\n            }\n            #row\n            {\n                display: table-row;\n            }\n            #cell\n            {\n                display: table-cell;\n                white-space: pre;\n            }\n            #div1, #div2\n            {\n                background: black;\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n            #div2\n            {\n                margin-left: 3em;\n            }\n        ",
+                "length": 757,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -876,12 +876,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 58.22,
+              "width": 112,
               "height": 16,
-              "contentWidth": 58,
+              "contentWidth": 112,
               "contentHeight": 16,
-              "scrollWidth": 58,
-              "scrollHeight": 17
+              "scrollWidth": 112,
+              "scrollHeight": 16
             },
             "computed": {
               "display": "table",
@@ -936,12 +936,12 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 58.22,
+                  "width": 112,
                   "height": 16,
-                  "contentWidth": 58,
+                  "contentWidth": 112,
                   "contentHeight": 16,
-                  "scrollWidth": 58,
-                  "scrollHeight": 17
+                  "scrollWidth": 112,
+                  "scrollHeight": 16
                 },
                 "computed": {
                   "display": "table-row",
@@ -996,12 +996,12 @@
                     "layout": {
                       "x": 8,
                       "y": 50,
-                      "width": 58.22,
+                      "width": 112,
                       "height": 16,
-                      "contentWidth": 58,
+                      "contentWidth": 112,
                       "contentHeight": 16,
-                      "scrollWidth": 58,
-                      "scrollHeight": 17
+                      "scrollWidth": 112,
+                      "scrollHeight": 16
                     },
                     "computed": {
                       "display": "table-cell",
@@ -1056,11 +1056,11 @@
                           "rects": [
                             {
                               "x": 8,
-                              "y": 49,
-                              "width": 58.22,
-                              "height": 18,
-                              "right": 66.22,
-                              "bottom": 67,
+                              "y": 50,
+                              "width": 112,
+                              "height": 16,
+                              "right": 120,
+                              "bottom": 66,
                               "text": "XX   XX",
                               "startIndex": 0,
                               "endIndex": 7

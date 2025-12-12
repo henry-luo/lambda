@@ -1,11 +1,81 @@
 #include "render.hpp"
 #include "render_img.hpp"
 #include "../lib/log.h"
+#include "../lib/avl_tree.h"
+#include "../lambda/input/css/css_style.hpp"
 #include <string.h>
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
 #define DEBUG_RENDER 0
+
+// ============================================================================
+// CSS white-space Property Helpers for Rendering
+// ============================================================================
+
+/**
+ * Check if a white-space value is a concrete value (not inherit/initial/unset).
+ * Concrete values: normal, nowrap, pre, pre-wrap, pre-line, break-spaces
+ */
+static inline bool is_concrete_white_space_value(CssEnum ws) {
+    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP ||
+           ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+           ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES;
+}
+
+/**
+ * Get the white-space property value from the text node's ancestor chain.
+ * Walks up from the text node to find the nearest element with a concrete white_space value.
+ * Skips inherit/initial/unset values and continues searching up the tree.
+ */
+static CssEnum get_white_space_value_for_render(DomNode* node) {
+    DomNode* current = node ? node->parent : nullptr;
+    while (current) {
+        if (current->is_element()) {
+            DomElement* elem = static_cast<DomElement*>(current);
+
+            // Check resolved BlockProp first (fastest path for blocks)
+            if (elem->blk && elem->blk->white_space != 0) {
+                CssEnum ws = elem->blk->white_space;
+                // Only return if it's a concrete value, not inherit/initial/unset
+                if (is_concrete_white_space_value(ws)) {
+                    return ws;
+                }
+                // If inherit/initial, continue walking up
+            }
+
+            // Check specified_style for inline elements (e.g., span with white-space: pre)
+            if (elem->specified_style && elem->specified_style->tree) {
+                AvlNode* ws_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_WHITE_SPACE);
+                if (ws_node) {
+                    StyleNode* style_node = (StyleNode*)ws_node->declaration;
+                    if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                        CssValue* val = style_node->winning_decl->value;
+                        if (val->type == CSS_VALUE_TYPE_KEYWORD && val->data.keyword != 0) {
+                            CssEnum ws = val->data.keyword;
+                            // Only return if it's a concrete value, not inherit/initial/unset
+                            if (is_concrete_white_space_value(ws)) {
+                                return ws;
+                            }
+                            // If inherit/initial, continue walking up
+                        }
+                    }
+                }
+            }
+        }
+        current = current->parent;
+    }
+    return CSS_VALUE_NORMAL;  // default
+}
+
+/**
+ * Check if whitespace should be preserved according to white-space property.
+ * Returns true for: pre, pre-wrap, break-spaces
+ * Returns false for: normal, nowrap, pre-line
+ */
+static inline bool ws_preserve_spaces(CssEnum ws) {
+    return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
+}
 
 // Forward declarations for functions from other modules
 int ui_context_init(UiContext* uicon, bool headless);
@@ -105,16 +175,37 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     }
     unsigned char* str = text_view->text_data();
     TextRect* text_rect = text_view->rect;
+
+    // Get the white-space property for this text node
+    CssEnum white_space = get_white_space_value_for_render(text_view);
+    bool preserve_spaces = ws_preserve_spaces(white_space);
+
+    // Check if parent inline element has a background color to render
+    DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
+    Color* bg_color = nullptr;
+    if (parent_elem && parent_elem->bound && parent_elem->bound->background &&
+        parent_elem->bound->background->color.a > 0) {
+        bg_color = &parent_elem->bound->background->color;
+    }
+
     while (text_rect) {
         float x = rdcon->block.x + text_rect->x, y = rdcon->block.y + text_rect->y;
+
+        // Render background for inline element if present
+        if (bg_color) {
+            Rect bg_rect = {x, y, text_rect->width, text_rect->height};
+            fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip);
+        }
+
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
-        log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)",
-            str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y);
+        log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d",
+            str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y,
+            white_space, preserve_spaces);
         bool has_space = false;  uint32_t codepoint;
         while (p < end) {
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
-                if (!has_space) {  // add whitespace
+                if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
                     // log_debug("draw_space: %c, x:%f, end:%f", *p, x, x + rdcon->font.space_width);
                     x += rdcon->font.style->space_width;
@@ -646,8 +737,8 @@ void render_children(RenderContext* rdcon, View* view) {
             else {
                 // Skip only absolute/fixed positioned elements - they are rendered separately
                 // Floats (which also have position struct) should be rendered in normal flow
-                if (block->position && 
-                    (block->position->position == CSS_VALUE_ABSOLUTE || 
+                if (block->position &&
+                    (block->position->position == CSS_VALUE_ABSOLUTE ||
                      block->position->position == CSS_VALUE_FIXED)) {
                     log_debug("absolute/fixed positioned block, skip in normal rendering");
                 } else {

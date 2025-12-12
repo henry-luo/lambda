@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font-family: ahem;\n                height: 1em;\n                margin-bottom: 3px;\n                width: 3em;\n            }\n            #div1\n            {\n                white-space: normal;\n            }\n            #div2\n            {\n                background-color: blue;\n            }\n        ",
-                "length": 350,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            div\n            {\n                font-family: ahem;\n                height: 1em;\n                margin-bottom: 3px;\n                width: 3em;\n            }\n            #div1\n            {\n                white-space: normal;\n            }\n            #div2\n            {\n                background-color: blue;\n            }\n        ",
+                "length": 476,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -804,7 +804,7 @@
               "contentWidth": 48,
               "contentHeight": 16,
               "scrollWidth": 48,
-              "scrollHeight": 18
+              "scrollHeight": 16
             },
             "computed": {
               "display": "block",
@@ -860,10 +860,10 @@
                     {
                       "x": 8,
                       "y": 50,
-                      "width": 23.11,
-                      "height": 18,
-                      "right": 31.11,
-                      "bottom": 68,
+                      "width": 32,
+                      "height": 16,
+                      "right": 40,
+                      "bottom": 66,
                       "text": "XX\t\n",
                       "startIndex": 0,
                       "endIndex": 4

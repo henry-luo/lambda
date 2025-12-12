@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font: 16px/1em ahem;\n            }\n            #div1\n            {\n                white-space: pre;\n            }\n            #div2, #div3\n            {\n                background: black;\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n            #div3\n            {\n                margin-left: 6em;\n            }\n        ",
-                "length": 434,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            div\n            {\n                font: 16px/1em ahem;\n            }\n            #div1\n            {\n                white-space: pre;\n            }\n            #div2, #div3\n            {\n                background: black;\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n            #div3\n            {\n                margin-left: 6em;\n            }\n        ",
+                "length": 560,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -864,7 +864,7 @@
                   "contentWidth": 1184,
                   "contentHeight": 16,
                   "scrollWidth": 1184,
-                  "scrollHeight": 17
+                  "scrollHeight": 16
                 },
                 "computed": {
                   "display": "block",
@@ -919,11 +919,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 49,
-                          "width": 23.11,
-                          "height": 18,
-                          "right": 31.11,
-                          "bottom": 67,
+                          "y": 50,
+                          "width": 32,
+                          "height": 16,
+                          "right": 40,
+                          "bottom": 66,
                           "text": "XX\tXX",
                           "startIndex": 0,
                           "endIndex": 5

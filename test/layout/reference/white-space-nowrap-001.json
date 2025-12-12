@@ -529,8 +529,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .top { font: 20px/1 Ahem; }\n   .outer { width: 10em; background: red; }\n   .inner { width: 7em; color: lime; background: green; white-space: nowrap; }\n  ",
-                "length": 251,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .top { font: 20px/1 Ahem; }\n   .outer { width: 10em; background: red; }\n   .inner { width: 7em; color: lime; background: green; white-space: nowrap; }\n  ",
+                "length": 377,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -577,7 +577,7 @@
           "contentWidth": 1184,
           "contentHeight": 88,
           "scrollWidth": 1184,
-          "scrollHeight": 89
+          "scrollHeight": 88
         },
         "computed": {
           "display": "block",
@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -821,7 +821,7 @@
               "contentWidth": 1184,
               "contentHeight": 20,
               "scrollWidth": 1184,
-              "scrollHeight": 21
+              "scrollHeight": 20
             },
             "computed": {
               "display": "block",
@@ -883,7 +883,7 @@
                   "contentWidth": 200,
                   "contentHeight": 20,
                   "scrollWidth": 200,
-                  "scrollHeight": 21
+                  "scrollHeight": 20
                 },
                 "computed": {
                   "display": "block",
@@ -944,8 +944,8 @@
                       "height": 20,
                       "contentWidth": 140,
                       "contentHeight": 20,
-                      "scrollWidth": 140,
-                      "scrollHeight": 21
+                      "scrollWidth": 200,
+                      "scrollHeight": 20
                     },
                     "computed": {
                       "display": "block",
@@ -1000,11 +1000,11 @@
                           "rects": [
                             {
                               "x": 8,
-                              "y": 74,
-                              "width": 95,
-                              "height": 23,
-                              "right": 103,
-                              "bottom": 97,
+                              "y": 76,
+                              "width": 200,
+                              "height": 20,
+                              "right": 208,
+                              "bottom": 96,
                               "text": "\n     xxx xxxxxx\n    ",
                               "startIndex": 0,
                               "endIndex": 21

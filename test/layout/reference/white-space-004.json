@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 102,
+      "height": 122,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font: 20px/1em ahem;\n                margin: 0;\n                padding: 0;\n            }\n            #test\n            {\n                white-space: pre-wrap;\n                width: 5em;\n            }\n            #reference\n            {\n                background: blue;\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n        ",
-                "length": 439,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            div\n            {\n                font: 20px/1em ahem;\n                margin: 0;\n                padding: 0;\n            }\n            #test\n            {\n                white-space: pre-wrap;\n                width: 5em;\n            }\n            #reference\n            {\n                background: blue;\n                display: inline-block;\n                height: 1em;\n                width: 2em;\n            }\n        ",
+                "length": 565,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 78,
+          "height": 98,
           "contentWidth": 1184,
-          "contentHeight": 78,
+          "contentHeight": 98,
           "scrollWidth": 1184,
-          "scrollHeight": 78
+          "scrollHeight": 98
         },
         "computed": {
           "display": "block",
@@ -877,11 +877,11 @@
               "x": 8,
               "y": 50,
               "width": 100,
-              "height": 20,
+              "height": 40,
               "contentWidth": 100,
-              "contentHeight": 20,
+              "contentHeight": 40,
               "scrollWidth": 100,
-              "scrollHeight": 21
+              "scrollHeight": 40
             },
             "computed": {
               "display": "block",
@@ -929,21 +929,49 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "XX  XX",
-                "length": 6,
+                "text": "XX  ",
+                "length": 4,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
-                      "y": 48,
-                      "width": 67.78,
-                      "height": 23,
-                      "right": 75.78,
-                      "bottom": 71,
-                      "text": "XX  XX",
+                      "y": 50,
+                      "width": 40,
+                      "height": 20,
+                      "right": 48,
+                      "bottom": 70,
+                      "text": "XX  ",
                       "startIndex": 0,
-                      "endIndex": 6
+                      "endIndex": 4
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "XX",
+                "length": 2,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 48,
+                      "y": 50,
+                      "width": 40,
+                      "height": 20,
+                      "right": 88,
+                      "bottom": 70,
+                      "text": "XX",
+                      "startIndex": 0,
+                      "endIndex": 2
                     }
                   ],
                   "hasLayout": true,
@@ -965,7 +993,7 @@
             "classes": [],
             "layout": {
               "x": 8,
-              "y": 70,
+              "y": 90,
               "width": 40,
               "height": 20,
               "contentWidth": 40,

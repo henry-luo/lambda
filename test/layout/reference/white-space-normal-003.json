@@ -529,8 +529,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n   /* setup */\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   * { white-space: normal; font: inherit; }\n   div { display: block; }\n   span { display: inline; }\n\n   /* test */\n   td { font: 20px/1 Ahem; color: maroon; background: red; padding: 0; }\n   span { color: green; background: lime; }\n  ",
-                "length": 345,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n   /* setup */\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   * { white-space: normal; font: inherit; }\n   div { display: block; }\n   span { display: inline; }\n\n   /* test */\n   td { font: 20px/1 Ahem; color: maroon; background: red; padding: 0; }\n   span { color: green; background: lime; }\n  ",
+                "length": 471,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -814,11 +814,11 @@
             "layout": {
               "x": 8,
               "y": 76,
-              "width": 234.53,
+              "width": 384,
               "height": 104,
-              "contentWidth": 235,
+              "contentWidth": 384,
               "contentHeight": 104,
-              "scrollWidth": 235,
+              "scrollWidth": 384,
               "scrollHeight": 104
             },
             "computed": {
@@ -874,12 +874,12 @@
                 "layout": {
                   "x": 10,
                   "y": 78,
-                  "width": 230.53,
+                  "width": 380,
                   "height": 100,
-                  "contentWidth": 231,
+                  "contentWidth": 380,
                   "contentHeight": 100,
-                  "scrollWidth": 231,
-                  "scrollHeight": 101
+                  "scrollWidth": 380,
+                  "scrollHeight": 100
                 },
                 "computed": {
                   "display": "table-row-group",
@@ -934,12 +934,12 @@
                     "layout": {
                       "x": 10,
                       "y": 78,
-                      "width": 230.53,
+                      "width": 380,
                       "height": 100,
-                      "contentWidth": 231,
+                      "contentWidth": 380,
                       "contentHeight": 100,
-                      "scrollWidth": 231,
-                      "scrollHeight": 101
+                      "scrollWidth": 380,
+                      "scrollHeight": 100
                     },
                     "computed": {
                       "display": "table-row",
@@ -994,12 +994,12 @@
                         "layout": {
                           "x": 10,
                           "y": 78,
-                          "width": 230.53,
+                          "width": 380,
                           "height": 100,
-                          "contentWidth": 231,
+                          "contentWidth": 380,
                           "contentHeight": 100,
-                          "scrollWidth": 231,
-                          "scrollHeight": 101
+                          "scrollWidth": 380,
+                          "scrollHeight": 100
                         },
                         "computed": {
                           "display": "table-cell",
@@ -1054,12 +1054,12 @@
                             "layout": {
                               "x": 10,
                               "y": 78,
-                              "width": 230.53,
+                              "width": 380,
                               "height": 20,
-                              "contentWidth": 231,
+                              "contentWidth": 380,
                               "contentHeight": 20,
-                              "scrollWidth": 231,
-                              "scrollHeight": 21
+                              "scrollWidth": 380,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "block",
@@ -1113,9 +1113,9 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 10,
-                                  "y": 76,
-                                  "width": 215,
-                                  "height": 23,
+                                  "y": 78,
+                                  "width": 380,
+                                  "height": 20,
                                   "contentWidth": 0,
                                   "contentHeight": 0,
                                   "scrollWidth": 0,
@@ -1174,11 +1174,11 @@
                                       "rects": [
                                         {
                                           "x": 10,
-                                          "y": 76,
-                                          "width": 215,
-                                          "height": 23,
-                                          "right": 225,
-                                          "bottom": 99,
+                                          "y": 78,
+                                          "width": 380,
+                                          "height": 20,
+                                          "right": 390,
+                                          "bottom": 98,
                                           "text": "XXXp pXXp pXXp pXXp",
                                           "startIndex": 0,
                                           "endIndex": 19
@@ -1206,12 +1206,12 @@
                             "layout": {
                               "x": 10,
                               "y": 98,
-                              "width": 230.53,
+                              "width": 380,
                               "height": 20,
-                              "contentWidth": 231,
+                              "contentWidth": 380,
                               "contentHeight": 20,
-                              "scrollWidth": 231,
-                              "scrollHeight": 21
+                              "scrollWidth": 380,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "block",
@@ -1265,9 +1265,9 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 10,
-                                  "y": 96,
-                                  "width": 166.09,
-                                  "height": 23,
+                                  "y": 98,
+                                  "width": 380,
+                                  "height": 20,
                                   "contentWidth": 0,
                                   "contentHeight": 0,
                                   "scrollWidth": 0,
@@ -1326,11 +1326,11 @@
                                       "rects": [
                                         {
                                           "x": 10,
-                                          "y": 96,
-                                          "width": 166.09,
-                                          "height": 23,
-                                          "right": 176.09,
-                                          "bottom": 119,
+                                          "y": 98,
+                                          "width": 380,
+                                          "height": 20,
+                                          "right": 390,
+                                          "bottom": 118,
                                           "text": " X ﻿ X X  X X  É X  É",
                                           "startIndex": 0,
                                           "endIndex": 21
@@ -1358,12 +1358,12 @@
                             "layout": {
                               "x": 10,
                               "y": 118,
-                              "width": 230.53,
+                              "width": 380,
                               "height": 20,
-                              "contentWidth": 231,
+                              "contentWidth": 380,
                               "contentHeight": 20,
-                              "scrollWidth": 231,
-                              "scrollHeight": 21
+                              "scrollWidth": 380,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "block",
@@ -1417,9 +1417,9 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 10,
-                                  "y": 116,
-                                  "width": 230.53,
-                                  "height": 23,
+                                  "y": 118,
+                                  "width": 380,
+                                  "height": 20,
                                   "contentWidth": 0,
                                   "contentHeight": 0,
                                   "scrollWidth": 0,
@@ -1478,11 +1478,11 @@
                                       "rects": [
                                         {
                                           "x": 10,
-                                          "y": 116,
-                                          "width": 230.53,
-                                          "height": 23,
-                                          "right": 240.53,
-                                          "bottom": 139,
+                                          "y": 118,
+                                          "width": 380,
+                                          "height": 20,
+                                          "right": 390,
+                                          "bottom": 138,
                                           "text": "  XXXÉ XXXX ÉXXp ÉXXp ",
                                           "startIndex": 0,
                                           "endIndex": 22
@@ -1510,12 +1510,12 @@
                             "layout": {
                               "x": 10,
                               "y": 138,
-                              "width": 230.53,
+                              "width": 380,
                               "height": 20,
-                              "contentWidth": 231,
+                              "contentWidth": 380,
                               "contentHeight": 20,
-                              "scrollWidth": 231,
-                              "scrollHeight": 21
+                              "scrollWidth": 380,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "block",
@@ -1569,9 +1569,9 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 10,
-                                  "y": 136,
-                                  "width": 152.22,
-                                  "height": 23,
+                                  "y": 138,
+                                  "width": 380,
+                                  "height": 20,
                                   "contentWidth": 0,
                                   "contentHeight": 0,
                                   "scrollWidth": 0,
@@ -1630,11 +1630,11 @@
                                       "rects": [
                                         {
                                           "x": 10,
-                                          "y": 136,
-                                          "width": 152.22,
-                                          "height": 23,
-                                          "right": 162.22,
-                                          "bottom": 159,
+                                          "y": 138,
+                                          "width": 380,
+                                          "height": 20,
+                                          "right": 390,
+                                          "bottom": 158,
                                           "text": "X﻿ ﻿ ﻿ ﻿ ﻿X ﻿ X p  X p  X ",
                                           "startIndex": 0,
                                           "endIndex": 26
@@ -1662,12 +1662,12 @@
                             "layout": {
                               "x": 10,
                               "y": 158,
-                              "width": 230.53,
+                              "width": 380,
                               "height": 20,
-                              "contentWidth": 231,
+                              "contentWidth": 380,
                               "contentHeight": 20,
-                              "scrollWidth": 231,
-                              "scrollHeight": 21
+                              "scrollWidth": 380,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "block",
@@ -1721,9 +1721,9 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 10,
-                                  "y": 156,
-                                  "width": 189.98,
-                                  "height": 23,
+                                  "y": 158,
+                                  "width": 380,
+                                  "height": 20,
                                   "contentWidth": 0,
                                   "contentHeight": 0,
                                   "scrollWidth": 0,
@@ -1782,11 +1782,11 @@
                                       "rects": [
                                         {
                                           "x": 10,
-                                          "y": 156,
-                                          "width": 189.98,
-                                          "height": 23,
-                                          "right": 199.98,
-                                          "bottom": 179,
+                                          "y": 158,
+                                          "width": 380,
+                                          "height": 20,
+                                          "right": 390,
+                                          "bottom": 178,
                                           "text": " X    X  X ÉXXÉ ÉXXÉ\n\n",
                                           "startIndex": 0,
                                           "endIndex": 22
