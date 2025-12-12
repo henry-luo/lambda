@@ -1,7 +1,41 @@
 #include "layout.hpp"
+#include <cstdlib>  // for strtol
 
 // Direct declaration of the actual C symbol (compiler will add underscore)
 extern "C" int strview_to_int(StrView* s);
+
+// Parse HTML color attribute (e.g., "#ff6600" or "ff6600" or named colors like "red")
+static Color parse_html_color(const char* color_str) {
+    Color result;
+    result.r = 0; result.g = 0; result.b = 0; result.a = 255;  // default black, opaque
+    if (!color_str || !*color_str) return result;
+
+    // Skip leading # if present
+    if (*color_str == '#') color_str++;
+
+    size_t len = strlen(color_str);
+    if (len == 6) {
+        // Parse #rrggbb format
+        char hex[3] = {0};
+        hex[0] = color_str[0]; hex[1] = color_str[1];
+        result.r = (uint8_t)strtol(hex, NULL, 16);
+        hex[0] = color_str[2]; hex[1] = color_str[3];
+        result.g = (uint8_t)strtol(hex, NULL, 16);
+        hex[0] = color_str[4]; hex[1] = color_str[5];
+        result.b = (uint8_t)strtol(hex, NULL, 16);
+    } else if (len == 3) {
+        // Parse #rgb shorthand (e.g., #f60 -> #ff6600)
+        char hex[3] = {0};
+        hex[0] = color_str[0]; hex[1] = color_str[0];
+        result.r = (uint8_t)strtol(hex, NULL, 16);
+        hex[0] = color_str[1]; hex[1] = color_str[1];
+        result.g = (uint8_t)strtol(hex, NULL, 16);
+        hex[0] = color_str[2]; hex[1] = color_str[2];
+        result.b = (uint8_t)strtol(hex, NULL, 16);
+    }
+    // TODO: add named color support (red, blue, green, etc.)
+    return result;
+}
 
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = (ViewSpan*)elmt;  ViewBlock* block = (ViewBlock*)elmt;
@@ -324,6 +358,27 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 }
             }
         }
+        // Handle HTML bgcolor attribute (e.g., bgcolor="#f6f6ef")
+        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
+        if (bgcolor_attr) {
+            Color bg_color = parse_html_color(bgcolor_attr);
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
+            block->bound->background->color = bg_color;
+            log_debug("[HTML] TABLE bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
+        }
+        break;
+    }
+    case HTM_TAG_TR: {
+        // Handle HTML bgcolor attribute for table rows
+        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
+        if (bgcolor_attr) {
+            Color bg_color = parse_html_color(bgcolor_attr);
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
+            block->bound->background->color = bg_color;
+            log_debug("[HTML] TR bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
+        }
         break;
     }
     case HTM_TAG_TH: {
@@ -357,6 +412,15 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             } else if (strcasecmp(valign_attr, "bottom") == 0) {
                 block->in_line->vertical_align = CSS_VALUE_BOTTOM;
             }
+        }
+        // Handle HTML bgcolor attribute for TH
+        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
+        if (bgcolor_attr) {
+            Color bg_color = parse_html_color(bgcolor_attr);
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
+            block->bound->background->color = bg_color;
+            log_debug("[HTML] TH bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
         break;
     }
@@ -396,6 +460,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             } else if (strcasecmp(valign_attr, "bottom") == 0) {
                 block->in_line->vertical_align = CSS_VALUE_BOTTOM;
             }
+        }
+        // Handle HTML bgcolor attribute for TD
+        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
+        if (bgcolor_attr) {
+            Color bg_color = parse_html_color(bgcolor_attr);
+            if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
+            block->bound->background->color = bg_color;
+            log_debug("[HTML] TD bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
         break;
     }
