@@ -60,6 +60,13 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"end", NODE_CONTAINER},
     {"comment_environment", NODE_CONTAINER},
     {"verbatim_environment", NODE_CONTAINER},
+    {"graphics_include", NODE_CONTAINER},   // \includegraphics command
+    {"\\includegraphics", NODE_CONTAINER},  // Command name with backslash
+    {"figure", NODE_CONTAINER},             // figure environment
+    {"table", NODE_CONTAINER},              // table float environment
+    {"caption", NODE_CONTAINER},            // \caption command
+    {"\\caption", NODE_CONTAINER},          // Command name with backslash
+    {"curly_group_path", NODE_CONTAINER},   // Path argument group
     
     // Leaf nodes (cannot have children in grammar)
     {"command_name", NODE_LEAF},
@@ -276,6 +283,11 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
             // For other operators, also return as text
             return {.item = s2it(op_text)};
         }
+    }
+    
+    // Path, label, uri: extract actual text content
+    if (strcmp(node_type, "path") == 0 || strcmp(node_type, "label") == 0 || strcmp(node_type, "uri") == 0) {
+        return {.item = s2it(extract_text(ctx, node, source))};
     }
     
     // Default: use node type as symbol name
