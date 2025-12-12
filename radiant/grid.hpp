@@ -177,6 +177,9 @@ void expand_flexible_tracks(GridContainerLayout* grid_layout, struct ViewBlock* 
 int calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_index, bool is_row, GridTrackSizeType size_type);
 void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int available_space);
 
+// Enhanced track sizing algorithm (uses Taffy-inspired implementation)
+void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);
+
 // Grid item positioning and alignment
 void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container);
 void align_grid_items(GridContainerLayout* grid_layout);
