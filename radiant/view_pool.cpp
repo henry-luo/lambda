@@ -211,6 +211,7 @@ void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
     if (!span->fi) {
         FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
         span->fi = prop;
+        span->item_prop_type = DomElement::ITEM_PROP_FLEX;
         prop->flex_grow = 0;  prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
         prop->align_self = CSS_VALUE_AUTO; // ALIGN_AUTO as per CSS spec
     }
@@ -240,6 +241,7 @@ void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
     if (!span->gi) {
         GridItemProp* prop = (GridItemProp*)alloc_prop(lycon, sizeof(GridItemProp));
         span->gi = prop;
+        span->item_prop_type = DomElement::ITEM_PROP_GRID;
         // Initialize with default values (auto placement)
         prop->grid_row_start = 0;  // 0 means auto
         prop->grid_row_end = 0;
