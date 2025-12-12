@@ -4356,6 +4356,32 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_JUSTIFY_ITEMS: {
+            log_debug("[CSS] Processing justify-items property");
+            if (!block) {
+                log_debug("[CSS] justify-items: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum align = value->data.keyword;
+                block->embed->grid->justify_items = align;
+                log_debug("[CSS] justify-items: %s", css_enum_info(align)->name);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_JUSTIFY_SELF: {
+            log_debug("[CSS] Processing justify-self property");
+            alloc_grid_item_prop(lycon, span);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum align = value->data.keyword;
+                span->gi->justify_self = align;
+                log_debug("[CSS] justify-self: %s", css_enum_info(align)->name);
+            }
+            break;
+        }
+
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
             alloc_flex_item_prop(lycon, span);
