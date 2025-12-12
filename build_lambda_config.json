@@ -2091,6 +2091,19 @@
                         ],
                         "binary": "test_latex_html_v2_macros.exe",
                         "icon": "🔧"
+                    },
+                    {
+                        "source": "test/test_latex_html_v2_new_commands.cpp",
+                        "name": "LaTeX HTML V2 New Commands Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_html_v2_new_commands.exe",
+                        "icon": "✨"
                     }
                 ],
                 "type": "input",
