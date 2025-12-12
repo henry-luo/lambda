@@ -159,7 +159,7 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     Rect r;
     if (!surface) return;
     if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
-    log_debug("fill rect: x:%d, y:%d, wd:%d, hg:%d, color:%x", rect->x, rect->y, rect->width, rect->height, color);
+    log_debug("fill rect: x:%.0f, y:%.0f, wd:%.0f, hg:%.0f, color:%x", rect->x, rect->y, rect->width, rect->height, color);
     int left = max(clip->left, rect->x), right = min(clip->right, rect->x + rect->width);
     int top = max(clip->top, rect->y), bottom = min(clip->bottom, rect->y + rect->height);
     if (left >= right || top >= bottom) return; // rect outside the surface
