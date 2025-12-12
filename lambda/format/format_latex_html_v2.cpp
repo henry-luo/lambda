@@ -481,6 +481,11 @@ static void cmd_displaymath(LatexProcessor* proc, Item elem) {
     gen->endDisplayMath();
 }
 
+static void cmd_math_environment(LatexProcessor* proc, Item elem) {
+    // Tree-sitter math_environment node for \[...\] display math
+    cmd_displaymath(proc, elem);
+}
+
 static void cmd_equation(LatexProcessor* proc, Item elem) {
     // \begin{equation} ... \end{equation}
     HtmlGenerator* gen = proc->generator();
@@ -570,17 +575,13 @@ static void cmd_pageref(LatexProcessor* proc, Item elem) {
 
 static void cmd_url(LatexProcessor* proc, Item elem) {
     // \url{http://...}
+    // Note: Tree-sitter doesn't extract URL text properly yet
+    // For now, just skip processing (URL text is lost in parse tree)
     HtmlGenerator* gen = proc->generator();
     
-    // Extract URL
-    ElementReader elem_reader(elem);
-    Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* url_str = stringbuf_to_string(sb);
-    
-    // Create hyperlink (URL as both href and text)
-    gen->hyperlink(url_str->chars, nullptr);
+    // TODO: Need to fix Tree-sitter LaTeX parser to capture URL text content
+    // For now, output a placeholder
+    gen->text("[URL]");
 }
 
 static void cmd_href(LatexProcessor* proc, Item elem) {
@@ -688,6 +689,7 @@ void LatexProcessor::initCommandTable() {
     // Math environments
     command_table_["math"] = cmd_math;
     command_table_["displaymath"] = cmd_displaymath;
+    command_table_["math_environment"] = cmd_math_environment;  // Tree-sitter node for \[...\]
     command_table_["equation"] = cmd_equation;
     command_table_["equation*"] = cmd_equation_star;
     
@@ -704,7 +706,11 @@ void LatexProcessor::initCommandTable() {
     
     // Hyperlinks
     command_table_["url"] = cmd_url;
+    command_table_["\\url"] = cmd_url;  // Command form with backslash
+    command_table_["hyperlink"] = cmd_url;  // Tree-sitter node type
+    command_table_["curly_group_uri"] = cmd_url;  // Tree-sitter uri group
     command_table_["href"] = cmd_href;
+    command_table_["\\href"] = cmd_href;  // Command form with backslash
     
     // Footnotes
     command_table_["footnote"] = cmd_footnote;
@@ -738,8 +744,19 @@ void LatexProcessor::processNode(Item node) {
                 gen_->p();
                 gen_->closeElement();
             } else {
-                // Other symbols - just output as text for now
-                gen_->text(sym_name);
+                // Skip other symbols (like 'uri', 'path', etc. - they are markers, not content)
+                log_debug("processNode: skipping symbol '%s'", sym_name);
+            }
+        }
+        return;
+    }
+    
+    if (type == LMD_TYPE_LIST) {
+        // Process list items (e.g., from math environments or flattened content)
+        List* list = node.list;
+        if (list && list->items) {
+            for (int64_t i = 0; i < list->length; i++) {
+                processNode(list->items[i]);
             }
         }
         return;
