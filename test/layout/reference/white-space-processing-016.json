@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            span\n            {\n                background-color: black;\n                font-family: ahem;\n                white-space: pre;\n            }\n        ",
-                "length": 164,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            span\n            {\n                background-color: black;\n                font-family: ahem;\n                white-space: pre;\n            }\n        ",
+                "length": 290,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -858,9 +858,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 50,
-                  "width": 23.11,
-                  "height": 36,
+                  "y": 51,
+                  "width": 32,
+                  "height": 34,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -919,11 +919,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 50,
-                          "width": 23.11,
-                          "height": 18,
-                          "right": 31.11,
-                          "bottom": 68,
+                          "y": 51,
+                          "width": 32,
+                          "height": 16,
+                          "right": 40,
+                          "bottom": 67,
                           "text": "XX\n",
                           "startIndex": 0,
                           "endIndex": 3
@@ -946,12 +946,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 31.11,
-                          "y": 50,
+                          "x": 40,
+                          "y": 51,
                           "width": 0,
-                          "height": 18,
-                          "right": 31.11,
-                          "bottom": 68,
+                          "height": 16,
+                          "right": 40,
+                          "bottom": 67,
                           "text": "XX",
                           "startIndex": 0,
                           "endIndex": 2

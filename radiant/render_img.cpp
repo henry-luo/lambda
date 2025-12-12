@@ -1,6 +1,10 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "font_face.h"
+extern "C" {
+#include "../lib/url.h"
+}
 #include <stdio.h>
 #include <string.h>
 #include <png.h>
@@ -176,6 +180,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     ui_context.document = doc;
 
+    // Process @font-face rules before layout
+    process_document_font_faces(&ui_context, doc);
+
     // Layout the document
     if (doc->root) {
         layout_html_doc(&ui_context, doc, false);
@@ -231,6 +238,9 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     }
 
     ui_context.document = doc;
+
+    // Process @font-face rules before layout
+    process_document_font_faces(&ui_context, doc);
 
     // Layout the document
     if (doc->root) {

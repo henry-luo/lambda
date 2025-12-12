@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font-family: ahem;\n                height: 1em;\n                margin-bottom: 3px;\n                width: 4em;\n            }\n            #div1\n            {\n                background: black;\n                white-space: nowrap;\n            }\n            #div2\n            {\n                background-color: blue;\n            }\n        ",
-                "length": 385,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            div\n            {\n                font-family: ahem;\n                height: 1em;\n                margin-bottom: 3px;\n                width: 4em;\n            }\n            #div1\n            {\n                background: black;\n                white-space: nowrap;\n            }\n            #div2\n            {\n                background-color: blue;\n            }\n        ",
+                "length": 511,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -804,7 +804,7 @@
               "contentWidth": 64,
               "contentHeight": 16,
               "scrollWidth": 64,
-              "scrollHeight": 18
+              "scrollHeight": 16
             },
             "computed": {
               "display": "block",
@@ -860,10 +860,10 @@
                     {
                       "x": 8,
                       "y": 50,
-                      "width": 38.67,
-                      "height": 18,
-                      "right": 46.67,
-                      "bottom": 68,
+                      "width": 64,
+                      "height": 16,
+                      "right": 72,
+                      "bottom": 66,
                       "text": "XX\nX",
                       "startIndex": 0,
                       "endIndex": 4

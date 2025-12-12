@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            span\n            {\n                background-color: red;\n                font-family: ahem;\n                white-space: normal;\n            }\n        ",
-                "length": 165,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            span\n            {\n                background-color: red;\n                font-family: ahem;\n                white-space: normal;\n            }\n        ",
+                "length": 291,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -858,9 +858,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 50,
-                  "width": 11.56,
-                  "height": 18,
+                  "y": 51,
+                  "width": 16,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -919,11 +919,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 50,
-                          "width": 11.56,
-                          "height": 18,
-                          "right": 19.56,
-                          "bottom": 68,
+                          "y": 51,
+                          "width": 16,
+                          "height": 16,
+                          "right": 24,
+                          "bottom": 67,
                           "text": "X ",
                           "startIndex": 0,
                           "endIndex": 2
