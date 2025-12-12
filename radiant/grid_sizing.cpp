@@ -151,6 +151,25 @@ void resolve_intrinsic_track_sizes(GridContainerLayout* grid_layout) {
                 track->growth_limit = track->base_size;
                 break;
 
+            case GRID_TRACK_SIZE_FIT_CONTENT: {
+                // fit-content(argument) = minmax(auto, max(min-content, min(argument, max-content)))
+                // Base size is min-content (auto minimum)
+                track->base_size = calculate_track_intrinsic_size(grid_layout, i, true, GRID_TRACK_SIZE_MIN_CONTENT);
+                // Growth limit is min(argument, max-content)
+                int max_content = calculate_track_intrinsic_size(grid_layout, i, true, GRID_TRACK_SIZE_MAX_CONTENT);
+                int fit_content_limit;
+                if (track->size->is_percentage && grid_layout->content_height > 0) {
+                    fit_content_limit = (grid_layout->content_height * track->size->fit_content_limit) / 100;
+                } else {
+                    fit_content_limit = track->size->fit_content_limit;
+                }
+                track->growth_limit = (max_content < fit_content_limit) ? max_content : fit_content_limit;
+                if (track->growth_limit < track->base_size) {
+                    track->growth_limit = track->base_size;
+                }
+                break;
+            }
+
             case GRID_TRACK_SIZE_FR:
                 track->base_size = 0;
                 track->growth_limit = INFINITY;
@@ -195,6 +214,29 @@ void resolve_intrinsic_track_sizes(GridContainerLayout* grid_layout) {
                 track->base_size = calculate_track_intrinsic_size(grid_layout, i, false, track->size->type);
                 track->growth_limit = track->base_size;
                 break;
+
+            case GRID_TRACK_SIZE_FIT_CONTENT: {
+                // fit-content(argument) = minmax(auto, max(min-content, min(argument, max-content)))
+                // Base size is min-content (auto minimum)
+                track->base_size = calculate_track_intrinsic_size(grid_layout, i, false, GRID_TRACK_SIZE_MIN_CONTENT);
+                // Growth limit is min(argument, max-content)
+                int max_content = calculate_track_intrinsic_size(grid_layout, i, false, GRID_TRACK_SIZE_MAX_CONTENT);
+                int fit_content_limit;
+                if (track->size->is_percentage && grid_layout->content_width > 0) {
+                    fit_content_limit = (grid_layout->content_width * track->size->fit_content_limit) / 100;
+                } else {
+                    fit_content_limit = track->size->fit_content_limit;
+                }
+                track->growth_limit = (max_content < fit_content_limit) ? max_content : fit_content_limit;
+                if (track->growth_limit < track->base_size) {
+                    track->growth_limit = track->base_size;
+                }
+                log_debug("fit-content column track %d: min_content=%d, max_content=%d, fit_content_limit=%d (content_width=%d, percent=%d, is_pct=%d), base=%d, growth=%d",
+                          i, track->base_size, max_content, fit_content_limit,
+                          grid_layout->content_width, track->size->fit_content_limit, track->size->is_percentage,
+                          track->base_size, (int)track->growth_limit);
+                break;
+            }
 
             case GRID_TRACK_SIZE_FR:
                 track->base_size = 0;
