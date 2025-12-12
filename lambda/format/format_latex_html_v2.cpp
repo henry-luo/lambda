@@ -16,6 +16,10 @@
 
 namespace lambda {
 
+// Maximum macro expansion depth to prevent infinite recursion
+// Real LaTeX documents rarely nest beyond 10 levels, but 100 allows complex templates
+const int MAX_MACRO_DEPTH = 100;
+
 // Forward declarations for command processors
 class LatexProcessor;
 
@@ -27,7 +31,7 @@ static Element* cloneElement(Element* src, Input* input, Pool* pool);
 static std::vector<Item> substituteParamsInString(const char* text, size_t len,
                                                    const std::vector<Element*>& args,
                                                    Pool* pool);
-static void substituteParamsRecursive(Element* elem, const std::vector<Element*>& args, Pool* pool);
+static void substituteParamsRecursive(Element* elem, const std::vector<Element*>& args, Pool* pool, int depth);
 
 // =============================================================================
 // LatexProcessor - Processes LaTeX Element tree and generates HTML
@@ -44,7 +48,7 @@ public:
     
 public:
     LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
-        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0) {}
+        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), recursion_depth_(0), depth_exceeded_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -91,6 +95,10 @@ private:
     bool in_paragraph_;
     int inline_depth_;  // Track nesting depth of inline elements
     
+    // Recursion depth tracking for macro expansion (prevent infinite loops)
+    int recursion_depth_;
+    bool depth_exceeded_;  // Flag to halt processing when depth limit is exceeded
+    
     // Helper methods for paragraph management
     void ensureParagraph();
     void closeParagraphIfOpen();
@@ -102,6 +110,23 @@ private:
     
     // Initialize command table
     void initCommandTable();
+    
+    // Recursion depth guard (RAII pattern)
+    class DepthGuard {
+    public:
+        DepthGuard(LatexProcessor* proc) : proc_(proc) {
+            proc_->recursion_depth_++;
+        }
+        ~DepthGuard() {
+            proc_->recursion_depth_--;
+        }
+        bool exceeded() const {
+            return proc_->recursion_depth_ > MAX_MACRO_DEPTH;
+        }
+    private:
+        LatexProcessor* proc_;
+    };
+    friend class DepthGuard;
 };
 
 // =============================================================================
@@ -109,7 +134,7 @@ private:
 // =============================================================================
 
 void LatexProcessor::registerMacro(const std::string& name, int num_params, Element* definition) {
-    fprintf(stderr, "registerMacro: name='%s', num_params=%d, definition=%p\n", name.c_str(), num_params, (void*)definition);
+    
     MacroDefinition macro;
     macro.name = name;
     macro.num_params = num_params;
@@ -130,55 +155,33 @@ LatexProcessor::MacroDefinition* LatexProcessor::getMacro(const std::string& nam
 }
 
 Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<Element*>& args) {
-    MacroDefinition* macro = getMacro(name);
-    if (!macro || !macro->definition) {
-        fprintf(stderr, "expandMacro: macro '%s' not found or no definition\n", name.c_str());
+    // Check if depth was already exceeded
+    if (depth_exceeded_) {
         return nullptr;
     }
     
-    fprintf(stderr, "expandMacro: '%s' with %zu args, num_params=%d\n", name.c_str(), args.size(), macro->num_params);
-    
-    // Debug: Show what's in the definition BEFORE cloning
-    ElementReader def_reader(macro->definition);
-    fprintf(stderr, "expandMacro: definition tag='%s', childCount=%lld\n", def_reader.tagName(), def_reader.childCount());
-    auto def_iter = def_reader.children();
-    ItemReader def_child;
-    int def_idx = 0;
-    while (def_iter.next(&def_child)) {
-        TypeId child_type = def_child.getType();
-        fprintf(stderr, "  def child[%d]: type=%d", def_idx, child_type);
-        if (def_child.isString()) {
-            fprintf(stderr, " STRING='%s'", def_child.cstring());
-        } else if (def_child.isSymbol()) {
-            fprintf(stderr, " SYMBOL='%s'", def_child.asSymbol()->chars);
-        } else if (def_child.isElement()) {
-            ElementReader child_elem = def_child.asElement();
-            fprintf(stderr, " ELEMENT tag='%s'", child_elem.tagName());
-        } else if (def_child.isList()) {
-            fprintf(stderr, " LIST");
-        }
-        fprintf(stderr, "\n");
-        def_idx++;
+    DepthGuard guard(this);
+    if (guard.exceeded()) {
+        log_error("Macro expansion depth exceeded maximum %d for macro '%s'", MAX_MACRO_DEPTH, name.c_str());
+        depth_exceeded_ = true;  // Set flag to halt all further processing
+        return nullptr;
     }
+    
+    MacroDefinition* macro = getMacro(name);
+    if (!macro || !macro->definition) {
+        log_debug("expandMacro: macro '%s' not found or no definition", name.c_str());
+        return nullptr;
+    }
+    
+    log_debug("expandMacro: '%s' with %zu args, num_params=%d, depth=%d", name.c_str(), args.size(), macro->num_params, recursion_depth_);
     
     // Clone the definition using MarkBuilder to preserve TypeElmt metadata
     Element* expanded = cloneElement(macro->definition, input_, pool_);
     
-    fprintf(stderr, "expandMacro: cloned definition, expanded=%p\n", (void*)expanded);
-    
     // Substitute parameters with actual arguments if needed
     if (expanded && args.size() > 0 && macro->num_params > 0) {
-        fprintf(stderr, "expandMacro: calling substituteParamsRecursive with %zu args\n", args.size());
-        for (size_t i = 0; i < args.size(); i++) {
-            ElementReader arg_reader(args[i]);
-            fprintf(stderr, "  arg[%zu]: tag='%s', childCount=%lld\n", i, arg_reader.tagName(), arg_reader.childCount());
-            StringBuf* sb = stringbuf_new(pool_);
-            arg_reader.textContent(sb);
-            String* content = stringbuf_to_string(sb);
-            fprintf(stderr, "  arg[%zu] textContent='%s'\n", i, content->chars);
-        }
-        substituteParamsRecursive(expanded, args, pool_);
-        fprintf(stderr, "expandMacro: substitution done\n");
+        log_debug("expandMacro: substituting parameters in macro '%s'", name.c_str());
+        substituteParamsRecursive(expanded, args, pool_, 0);
     }
     
     return expanded;
@@ -191,16 +194,14 @@ Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<
 // Clone an Element tree (deep copy for macro expansion)
 // Uses MarkBuilder to properly reconstruct Elements with TypeElmt metadata
 static Element* cloneElement(Element* src, Input* input, Pool* pool) {
-    fprintf(stderr, "cloneElement: START, src=%p\n", (void*)src);
     if (!src) return nullptr;
     
     Item src_item;
     src_item.element = src;
     ElementReader reader(src_item);
     const char* tag = reader.tagName();
-    fprintf(stderr, "cloneElement: tag='%s'\n", tag ? tag : "NULL");
     if (!tag) {
-        fprintf(stderr, "cloneElement: source element has no tag name\n");
+        log_error("cloneElement: source element has no tag name");
         return nullptr;
     }
     
@@ -237,15 +238,6 @@ static Element* cloneElement(Element* src, Input* input, Pool* pool) {
     }
     
     Item clone_item = elem_builder.final();
-    
-    // Debug: verify the cloned element has a proper tag
-    if (clone_item.element) {
-        ElementReader verify_reader(clone_item);
-        const char* verify_tag = verify_reader.tagName();
-        fprintf(stderr, "cloneElement: cloned element tag='%s' (original='%s')\n", 
-                verify_tag ? verify_tag : "NULL", tag);
-    }
-    
     return clone_item.element;
 }
 
@@ -257,13 +249,10 @@ static std::vector<Item> substituteParamsInString(const char* text, size_t len,
     size_t i = 0;
     size_t segment_start = 0;
     
-    fprintf(stderr, "substituteParamsInString: text='%.*s', %zu args\n", (int)len, text, args.size());
-    
     while (i < len) {
         if (text[i] == '#' && i + 1 < len && text[i + 1] >= '1' && text[i + 1] <= '9') {
             // Found parameter reference
             int param_num = text[i + 1] - '0';
-            fprintf(stderr, "  Found param #%d at position %zu\n", param_num, i);
             
             // Add text segment before the parameter
             if (i > segment_start) {
@@ -311,13 +300,17 @@ static std::vector<Item> substituteParamsInString(const char* text, size_t len,
 }
 
 // Recursively substitute parameters in an Element tree
-static void substituteParamsRecursive(Element* elem, const std::vector<Element*>& args, Pool* pool) {
+static void substituteParamsRecursive(Element* elem, const std::vector<Element*>& args, Pool* pool, int depth) {
+    // Check depth limit to prevent infinite recursion in substitution
+    if (depth > MAX_MACRO_DEPTH) {
+        log_error("Parameter substitution depth exceeded maximum %d", MAX_MACRO_DEPTH);
+        return;
+    }
+    
     if (!elem) return;
     
     List* elem_list = (List*)elem;
     if (!elem_list->items) return;
-    
-    fprintf(stderr, "substituteParamsRecursive: processing %lld items with %zu args\n", elem_list->length, args.size());
     
     std::vector<Item> new_items;
     
@@ -325,11 +318,8 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
         Item item = elem_list->items[i];
         TypeId type = get_type_id(item);
         
-        fprintf(stderr, "  Item %lld: type=%d\n", i, type);
-        
         if (type == LMD_TYPE_STRING) {
             String* str = (String*)item.string_ptr;
-            fprintf(stderr, "  String item: '%.*s'\n", (int)str->len, str->chars);
             
             // Check if string contains parameter references
             bool has_param = false;
@@ -351,22 +341,19 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
         } else if (type == LMD_TYPE_SYMBOL) {
             // Check if symbol is a parameter reference like "#1"
             String* sym = (String*)item.string_ptr;
-            fprintf(stderr, "  Symbol item: '%s'\n", sym->chars);
             
             if (sym->len >= 2 && sym->chars[0] == '#' && 
                 sym->chars[1] >= '1' && sym->chars[1] <= '9') {
                 // This is a parameter reference
                 int param_num = sym->chars[1] - '0';
-                fprintf(stderr, "  Found parameter symbol #%d\n", param_num);
                 
                 if (param_num > 0 && param_num <= (int)args.size() && args[param_num - 1]) {
                     // Substitute with the argument element
                     Item arg_item;
                     arg_item.item = (uint64_t)args[param_num - 1];
                     new_items.push_back(arg_item);
-                    fprintf(stderr, "  Substituted #%d with arg element\n", param_num);
                 } else {
-                    fprintf(stderr, "  WARNING: parameter #%d out of range (%zu args)\n", param_num, args.size());
+                    log_warn("Parameter #%d out of range (have %zu args)", param_num, args.size());
                     new_items.push_back(item);
                 }
             } else {
@@ -374,12 +361,11 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
             }
         } else if (type == LMD_TYPE_ELEMENT) {
             // Recursively process child elements
-            substituteParamsRecursive(item.element, args, pool);
+            substituteParamsRecursive(item.element, args, pool, depth + 1);
             new_items.push_back(item);
         } else if (type == LMD_TYPE_LIST) {
             // Recursively process list items
-            fprintf(stderr, "  List item\n");
-            substituteParamsRecursive((Element*)item.list, args, pool);
+            substituteParamsRecursive((Element*)item.list, args, pool, depth + 1);
             new_items.push_back(item);
         } else {
             new_items.push_back(item);
@@ -646,7 +632,7 @@ static void cmd_normalfont(LatexProcessor* proc, Item elem) {
 static void cmd_newcommand(LatexProcessor* proc, Item elem) {
     // \newcommand{\name}[num]{definition}
     // Defines a new macro (error if already exists)
-    fprintf(stderr, "cmd_newcommand: called!\n");
+    
     ElementReader reader(elem);
     
     // DEBUG: Check textContent of entire element
@@ -654,9 +640,9 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     reader.textContent(sb);
     String* all_text = stringbuf_to_string(sb);
-    fprintf(stderr, "  new_command_definition textContent: '%s'\n", all_text->chars);
     
-    fprintf(stderr, "  Total children: %zu\n", reader.childCount());
+    
+    
     
     std::string macro_name;
     int num_params = 0;
@@ -669,18 +655,18 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
     
     while (iter.next(&child)) {
         TypeId child_type = child.getType();
-        fprintf(stderr, "  Child (type=%d): ", child_type);
+        
         
         if (child.isString()) {
             String* str = child.asString();
-            fprintf(stderr, "STRING='%s'\n", str->chars);
+            
             // If we find a string starting with \, that might be the command name
             if (macro_name.empty() && str->chars[0] == '\\') {
                 macro_name = str->chars;
             }
         } else if (child.isSymbol()) {
             String* sym = child.asSymbol();
-            fprintf(stderr, "SYMBOL='%s'\n", sym->chars);
+            
             // Check if this symbol is the command name (not a marker)
             if (macro_name.empty() && sym->chars[0] == '\\') {
                 macro_name = sym->chars;
@@ -689,7 +675,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             
-            fprintf(stderr, "ELEMENT tag='%s'\n", tag);
+            
             
             // Check for brack_group FIRST before other processing
             if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "brack_group_argc") == 0) {
@@ -697,8 +683,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                 Element* brack_elem = const_cast<Element*>(child_elem.element());
                 List* brack_list = (List*)brack_elem;
                 
-                fprintf(stderr, "    Found brack_group_argc: examining %lld items, %lld attrs\n", 
-                        brack_list->length, child_elem.attrCount());
+                
                 
                 // Look through items to find the number
                 // The Tree-sitter grammar stores it as a symbol "argc" with value as attribute
@@ -707,20 +692,20 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                     Item item = brack_list->items[j];
                     TypeId item_type = get_type_id(item);
                     
-                    fprintf(stderr, "      Item %lld: type=%d ", j, item_type);
+                    
                     
                     if (item_type == LMD_TYPE_STRING) {
                         String* str = (String*)item.string_ptr;
-                        fprintf(stderr, "string='%s'\n", str->chars);
+                        
                         // Try to parse as number
                         if (str->len > 0 && str->chars[0] >= '0' && str->chars[0] <= '9') {
                             num_params = atoi(str->chars);
-                            fprintf(stderr, "      Extracted num_params=%d from string\n", num_params);
+                            
                             break;
                         }
                     } else if (item_type == LMD_TYPE_SYMBOL) {
                         String* sym = (String*)item.string_ptr;
-                        fprintf(stderr, "symbol='%s'\n", sym->chars);
+                        
                         // The symbol "argc" itself doesn't contain the value
                         // We need to look for numeric text in the bracket group
                     } else if (item_type == LMD_TYPE_ELEMENT) {
@@ -728,7 +713,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                         elem_item.item = (uint64_t)item.element;
                         ElementReader elem_reader(elem_item);
                         const char* elem_tag = elem_reader.tagName();
-                        fprintf(stderr, "element='%s'\n", elem_tag);
+                        
                         
                         // Check if this is an "argc" element - if so, extract its text content
                         if (strcmp(elem_tag, "argc") == 0) {
@@ -737,13 +722,13 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                             StringBuf* sb = stringbuf_new(pool);
                             elem_reader.textContent(sb);
                             String* argc_str = stringbuf_to_string(sb);
-                            fprintf(stderr, "      argc element textContent='%s'\n", argc_str->chars);
+                            
                             
                             // The argc element might have the number stored as text or in children
                             // Try parsing it
                             if (argc_str->len > 0) {
                                 num_params = atoi(argc_str->chars);
-                                fprintf(stderr, "      Extracted num_params=%d from argc element\n", num_params);
+                                
                             }
                             
                             // If still 0, the number might be stored in the element's attributes or elsewhere
@@ -751,16 +736,16 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                             if (num_params == 0) {
                                 Element* argc_elem = item.element;
                                 List* argc_list = (List*)argc_elem;
-                                fprintf(stderr, "      argc element has %lld items:\n", argc_list->length);
+                                
                                 for (int64_t k = 0; k < argc_list->length; k++) {
                                     Item argc_item = argc_list->items[k];
                                     TypeId argc_type = get_type_id(argc_item);
                                     if (argc_type == LMD_TYPE_STRING) {
                                         String* argc_str_inner = (String*)argc_item.string_ptr;
-                                        fprintf(stderr, "        Item %lld: string='%s'\n", k, argc_str_inner->chars);
+                                        
                                         if (argc_str_inner->len > 0 && argc_str_inner->chars[0] >= '0' && argc_str_inner->chars[0] <= '9') {
                                             num_params = atoi(argc_str_inner->chars);
-                                            fprintf(stderr, "        Extracted num_params=%d from argc element string\n", num_params);
+                                            
                                             break;
                                         }
                                     }
@@ -769,7 +754,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                             break;
                         }
                     } else {
-                        fprintf(stderr, "\n");
+                        
                     }
                 }
                 
@@ -778,10 +763,10 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                 // Default to 1 (most common case)
                 if (num_params == 0) {
                     num_params = 1;
-                    fprintf(stderr, "    WORKAROUND: brack_group_argc found but empty, defaulting to num_params=1\n");
+                    
                 }
                 
-                fprintf(stderr, "    Set num_params=%d\n", num_params);
+                
                 continue;  // Don't process as regular arg
             }
             
@@ -792,26 +777,26 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             
             // Special case: check if this is the \newcommand token itself
             if (strcmp(tag, "\\newcommand") == 0) {
-                fprintf(stderr, "    Checking \\newcommand token structure\n");
+                
                 // Check its raw items
                 Element* token_elem = const_cast<Element*>(child_elem.element());
                 List* token_list = (List*)token_elem;
-                fprintf(stderr, "    \\newcommand has %lld items\n", token_list->length);
+                
                 
                 for (int64_t k = 0; k < token_list->length; k++) {
                     Item token_item = token_list->items[k];
                     TypeId token_type = get_type_id(token_item);
-                    fprintf(stderr, "      Token item %lld: type=%d ", k, token_type);
+                    
                     
                     if (token_type == LMD_TYPE_STRING) {
                         String* str = (String*)token_item.string_ptr;
-                        fprintf(stderr, "string='%s'\n", str->chars);
+                        
                         if (macro_name.empty() && str->chars[0] == '\\') {
                             macro_name = str->chars;
                         }
                     } else if (token_type == LMD_TYPE_SYMBOL) {
                         String* sym = (String*)token_item.string_ptr;
-                        fprintf(stderr, "symbol='%s'\n", sym->chars);
+                        
                         if (macro_name.empty() && sym->chars[0] == '\\') {
                             macro_name = sym->chars;
                         }
@@ -819,12 +804,12 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                         Item elem_item;
                         elem_item.item = (uint64_t)token_item.element;
                         ElementReader elem_reader(elem_item);
-                        fprintf(stderr, "element='%s'\n", elem_reader.tagName());
+                        
                         if (macro_name.empty() && elem_reader.tagName()[0] == '\\') {
                             macro_name = elem_reader.tagName();
                         }
                     } else {
-                        fprintf(stderr, "\n");
+                        
                     }
                 }
             }
@@ -838,12 +823,12 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                 String* text_str = stringbuf_to_string(sb);
                 if (text_str->len > 0 && text_str->chars[0] >= '0' && text_str->chars[0] <= '9') {
                     num_params = atoi(text_str->chars);
-                    fprintf(stderr, "    Extracted num_params=%d from element '%s' textContent\n", num_params, tag);
+                    
                 }
             }
             
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
-                fprintf(stderr, "    Processing curly_group at arg_index=%d\n", arg_index);
+                
                 if (arg_index == 0) {
                     // First arg: command name (like {\greet})
                     // The command is stored as a symbol (if no children) or element (if has children)
@@ -869,7 +854,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                     if (!macro_name.empty() && macro_name[0] == '\\') {
                         macro_name = macro_name.substr(1);
                     }
-                    fprintf(stderr, "    Final macro_name='%s'\n", macro_name.c_str());
+                    
                 } else if (arg_index == 1) {
                     // Could be [num] or {definition}
                     // Check if it looks like a number
@@ -894,7 +879,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
         }
     }
     
-    fprintf(stderr, "cmd_newcommand: macro_name='%s', num_params=%d, definition=%p\n", macro_name.c_str(), num_params, (void*)definition);
+    
     
     if (!macro_name.empty() && definition) {
         // Check if macro already exists
@@ -904,7 +889,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             proc->registerMacro(macro_name, num_params, definition);
         }
     } else {
-        fprintf(stderr, "cmd_newcommand: FAILED - macro_name empty or no definition\n");
+        
     }
 }
 
@@ -3255,18 +3240,27 @@ void LatexProcessor::closeParagraphIfOpen() {
 void LatexProcessor::process(Item root) {
     initCommandTable();
     in_paragraph_ = false;  // Reset paragraph state
+    depth_exceeded_ = false;  // Reset depth error flag for this processing session
     processNode(root);
     closeParagraphIfOpen();  // Close any open paragraph at the end
 }
 
 void LatexProcessor::processNode(Item node) {
+    // Check if depth was already exceeded (early exit to stop cascading calls)
+    if (depth_exceeded_) {
+        return;
+    }
+    
+    DepthGuard guard(this);
+    if (guard.exceeded()) {
+        log_error("Processing depth exceeded maximum %d", MAX_MACRO_DEPTH);
+        gen_->text("[MAX DEPTH EXCEEDED]");
+        depth_exceeded_ = true;  // Set flag to halt all further processing
+        return;
+    }
+    
     ItemReader reader(node.to_const());
     TypeId type = reader.getType();
-    
-    if (type == LMD_TYPE_LIST) {
-        fprintf(stderr, "processNode: GOT LIST type!\n");
-        fflush(stderr);
-    }
     
     if (type == LMD_TYPE_STRING) {
         // Text content
@@ -3320,26 +3314,9 @@ void LatexProcessor::processNode(Item node) {
     if (type == LMD_TYPE_LIST) {
         // List (array of items) - process each item
         List* list = node.list;
-        fprintf(stderr, "LISTDEBUG: processing list with %lld items\n", list ? list->length : 0);
-        fflush(stderr);
         if (list && list->items) {
             for (int64_t i = 0; i < list->length; i++) {
-                Item item = list->items[i];
-                TypeId item_type = get_type_id(item);
-                fprintf(stderr, "LISTDEBUG:   item[%lld] type=%d", i, item_type);
-                if (item_type == LMD_TYPE_STRING) {
-                    String* str = (String*)item.string_ptr;
-                    fprintf(stderr, " STRING='%s'", str->chars);
-                } else if (item_type == LMD_TYPE_SYMBOL) {
-                    String* sym = (String*)item.string_ptr;
-                    fprintf(stderr, " SYMBOL='%s'", sym->chars);
-                } else if (item_type == LMD_TYPE_ELEMENT) {
-                    ElementReader elem_r(item.element);
-                    fprintf(stderr, " ELEMENT tag='%s'", elem_r.tagName());
-                }
-                fprintf(stderr, "\n");
-                fflush(stderr);
-                processNode(item);
+                processNode(list->items[i]);
             }
         }
         return;
@@ -3389,22 +3366,8 @@ void LatexProcessor::processChildren(Item elem) {
     // Iterate through children
     auto iter = elem_reader.children();
     ItemReader child;
-    int child_idx = 0;
     while (iter.next(&child)) {
-        TypeId child_type = child.getType();
-        fprintf(stderr, "CHILDEBUG[%d]: type=%d", child_idx, child_type);
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            fprintf(stderr, " ELEMENT tag='%s'", child_elem.tagName());
-        } else if (child.isList()) {
-            fprintf(stderr, " LIST");
-        } else if (child.isString()) {
-            fprintf(stderr, " STRING='%s'", child.cstring());
-        }
-        fprintf(stderr, "\n");
-        fflush(stderr);
         processNode(child.item());
-        child_idx++;
     }
 }
 
@@ -3499,9 +3462,6 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
-    fprintf(stderr, "===> processCommand: cmd_name='%s', isMacro=%d\n", cmd_name, isMacro(cmd_name));
-    fflush(stderr);
-    
     // Handle Tree-sitter special node types that should be silent
     if (strcmp(cmd_name, "class_include") == 0) {
         cmd_documentclass(this, elem);
@@ -3559,12 +3519,9 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     
     // Check if this is a user-defined macro
     if (isMacro(cmd_name)) {
-        fprintf(stderr, "MACRO INVOCATION: cmd_name='%s'\n", cmd_name);
-        fflush(stderr);
+        log_debug("Processing macro invocation: %s (depth=%d)", cmd_name, recursion_depth_);
         MacroDefinition* macro = getMacro(cmd_name);
         if (macro && macro->definition) {
-            fprintf(stderr, "MACRO FOUND: num_params=%d\n", macro->num_params);
-            fflush(stderr);
             // Extract arguments from the command element
             // For user-defined macros like \greet{Alice}, the {Alice} argument
             // is parsed as direct children of the 'greet' element, not as curly_group
@@ -3595,11 +3552,10 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             Element* expanded = expandMacro(cmd_name, args);
             if (expanded) {
                 log_debug("Macro %s expanded with %zu args", cmd_name, args.size());
-                // Process the expanded content  
-                // The expanded element IS the replacement content, so process it directly
+                // Process the expanded content
                 Item expanded_item;
                 expanded_item.item = (uint64_t)expanded;
-                processNode(expanded_item);  // Process the expanded macro content itself
+                processNode(expanded_item);
                 return;
             }
         }
