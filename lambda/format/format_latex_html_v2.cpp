@@ -271,43 +271,85 @@ static void cmd_Huge(LatexProcessor* proc, Item elem) {
 static void cmd_section(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
-    // Extract title from children - collect all text
     ElementReader elem_reader(elem);
     
-    // Use a StringBuf to collect text content
-    Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* title_str = stringbuf_to_string(sb);
-    std::string title = title_str->chars;
+    // Find the title argument (first curly_group child)
+    std::string title;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                // Extract title text from this group
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* title_str = stringbuf_to_string(sb);
+                title = title_str->chars;
+                break;
+            }
+        }
+    }
     
     gen->startSection("section", false, title, title);
+    
+    // Process remaining children (section content: label, text, refs, etc.)
+    proc->processChildren(elem);
 }
 
 static void cmd_subsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     ElementReader elem_reader(elem);
-    Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* title_str = stringbuf_to_string(sb);
-    std::string title = title_str->chars;
+    
+    // Find the title argument (first curly_group child)
+    std::string title;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* title_str = stringbuf_to_string(sb);
+                title = title_str->chars;
+                break;
+            }
+        }
+    }
     
     gen->startSection("subsection", false, title, title);
+    proc->processChildren(elem);
 }
 
 static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     ElementReader elem_reader(elem);
-    Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* title_str = stringbuf_to_string(sb);
-    std::string title = title_str->chars;
+    
+    // Find the title argument (first curly_group child)
+    std::string title;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* title_str = stringbuf_to_string(sb);
+                title = title_str->chars;
+                break;
+            }
+        }
+    }
     
     gen->startSection("subsubsection", false, title, title);
+    proc->processChildren(elem);
 }
 
 static void cmd_chapter(LatexProcessor* proc, Item elem) {
@@ -690,6 +732,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["math"] = cmd_math;
     command_table_["displaymath"] = cmd_displaymath;
     command_table_["math_environment"] = cmd_math_environment;  // Tree-sitter node for \[...\]
+    command_table_["displayed_equation"] = cmd_displaymath;  // Tree-sitter node for \[...\]
     command_table_["equation"] = cmd_equation;
     command_table_["equation*"] = cmd_equation_star;
     
@@ -707,7 +750,7 @@ void LatexProcessor::initCommandTable() {
     // Hyperlinks
     command_table_["url"] = cmd_url;
     command_table_["\\url"] = cmd_url;  // Command form with backslash
-    command_table_["hyperlink"] = cmd_url;  // Tree-sitter node type
+    command_table_["hyperlink"] = cmd_href;  // Tree-sitter node type for \href
     command_table_["curly_group_uri"] = cmd_url;  // Tree-sitter uri group
     command_table_["href"] = cmd_href;
     command_table_["\\href"] = cmd_href;  // Command form with backslash
