@@ -143,7 +143,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
                     grid_layout->align_content == CSS_VALUE_SPACE_EVENLY) {
                     current_y_f += align_spacing;
                 }
-                log_debug(" Added row gap: %.1f + spacing %.1f, new current_y: %.1f\n", 
+                log_debug(" Added row gap: %.1f + spacing %.1f, new current_y: %.1f\n",
                           grid_layout->row_gap, align_spacing, current_y_f);
             }
         }
@@ -167,7 +167,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
                     grid_layout->justify_content == CSS_VALUE_SPACE_EVENLY) {
                     current_x_f += justify_spacing;
                 }
-                log_debug(" Added column gap: %.1f + spacing %.1f, new current_x: %.1f\n", 
+                log_debug(" Added column gap: %.1f + spacing %.1f, new current_x: %.1f\n",
                           grid_layout->column_gap, justify_spacing, current_x_f);
             }
         }
