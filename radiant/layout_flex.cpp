@@ -2313,19 +2313,21 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             // For wrap-reverse, swap start and end alignments
             int effective_align = align_type;
             if (is_wrap_reverse) {
-                if (align_type == ALIGN_START) {
+                if (align_type == ALIGN_START || align_type == CSS_VALUE_START) {
                     effective_align = ALIGN_END;
-                } else if (align_type == ALIGN_END) {
+                } else if (align_type == ALIGN_END || align_type == CSS_VALUE_END) {
                     effective_align = ALIGN_START;
                 }
             }
 
-            // Regular alignment
+            // Regular alignment (handle both flex-specific and generic alignment keywords)
             switch (effective_align) {
                 case ALIGN_START:
+                case CSS_VALUE_START:  // Handle 'start' same as 'flex-start'
                     cross_pos = 0;
                     break;
                 case ALIGN_END:
+                case CSS_VALUE_END:  // Handle 'end' same as 'flex-end'
                     cross_pos = available_cross_size - item_cross_size;
                     break;
                 case ALIGN_CENTER:
@@ -2435,20 +2437,24 @@ void align_content(FlexContainerLayout* flex_layout) {
     // - ALIGN_STRETCH with no free space behaves like ALIGN_START (which becomes ALIGN_END for wrap-reverse)
     bool is_wrap_reverse = (flex_layout->wrap == WRAP_WRAP_REVERSE);
     if (is_wrap_reverse) {
-        if (effective_align == ALIGN_START || (effective_align == ALIGN_STRETCH && free_space <= 0)) {
+        if (effective_align == ALIGN_START || effective_align == CSS_VALUE_START ||
+            (effective_align == ALIGN_STRETCH && free_space <= 0)) {
             effective_align = ALIGN_END;
-        } else if (effective_align == ALIGN_END) {
+        } else if (effective_align == ALIGN_END || effective_align == CSS_VALUE_END) {
             effective_align = ALIGN_START;
         }
         // Note: space-* and stretch (with positive free_space) keep their behavior, just with reversed line order
     }
 
     // CRITICAL FIX: Use align_content value directly - it's now stored as Lexbor constant
+    // Handle both flex-specific (flex-start/flex-end) and generic (start/end) alignment values
     switch (effective_align) {
         case ALIGN_START:
+        case CSS_VALUE_START:  // Handle 'start' keyword same as 'flex-start'
             start_pos = 0;
             break;
         case ALIGN_END:
+        case CSS_VALUE_END:  // Handle 'end' keyword same as 'flex-end'
             start_pos = free_space;
             break;
         case ALIGN_CENTER:
