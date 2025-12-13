@@ -13,7 +13,7 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 | Suite | Tests | Passing | Rate |
 |-------|-------|---------|------|
 | **Baseline** | 1262 | 1262 | 100% ✅ |
-| **Flex** | 339 | 25 | 7.4% |
+| **Flex** | 339 | 27 | 8.0% |
 | **Grid** | 228 | 0 | 0% |
 
 ### Completed Tasks
@@ -32,10 +32,17 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
    - Fixed `given_height >= 0` checks to `> 0` (0 means auto, not explicit)
    - Fixed single-line detection: only `flex-wrap: nowrap` counts as single-line
    - Added CSS_VALUE_START/END handling for `start`/`end` keywords
-   - **Result**: 25 flex tests now passing (up from 0)
+6. ✅ **Phase 3 Fixes** - Flex constraint resolution algorithm:
+   - Implemented proper CSS Flexbox §9.7 constraint resolution
+   - Track min/max violations separately during flex distribution
+   - Freeze items based on total violation direction (not all constrained items)
+   - Allows remaining space to be redistributed correctly
+   - **Result**: 27 flex tests now passing (up from 25)
 
-### Phase 2 Passing Tests (25 tests)
-- `align_content_end` (new with CSS_VALUE_END fix)
+### Phase 2+3 Passing Tests (27 tests)
+- `align_content_end`
+- `align_content_end_wrapped_negative_space`
+- `align_content_end_wrapped_negative_space_gap`
 - `align_flex_start_with_shrinking_children`
 - `align_flex_start_with_shrinking_children_with_stretch`
 - `align_flex_start_with_stretching_children`
@@ -46,9 +53,11 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 - `bevy_issue_8017_reduced`
 - `border_flex_child`
 - `border_stretch_child`
+- `child_min_max_width_flexing`
 - `container_with_unsized_child`
 - `flex_basis_overrides_main_size`
 - `flex_direction_row`
+- `flex_grow_flex_basis_percent_min_max`
 - `flex_grow_less_than_factor_one`
 - `flex_grow_shrink_at_most`
 - `flex_row_relative_all_sides`
@@ -66,18 +75,12 @@ The flex tests require `test_base_style.css` which wasn't being loaded. With CSS
 - Tests are now properly evaluating flex layout behavior
 - Failures reveal real gaps in Radiant's flex implementation
 
-### Next Priority: Flex Grow/Shrink with Frozen Items
+### Next Priority: Content-Based Sizing and Aspect Ratio
 
-The flex-grow/shrink algorithm needs to handle "frozen" items properly:
-1. When an item violates min/max constraints, it becomes frozen
-2. Frozen items are excluded from subsequent flex calculations
-3. Remaining space is redistributed among unfrozen items
-4. Currently failing tests like `flex_grow_flex_basis_percent_min_max`
-
-Other remaining issues:
-- Content-based sizing for nested flex containers
-- Cross-axis sizing propagation
-- Multi-line wrap calculations
+Remaining major issues:
+1. **Nested flex containers** - child's size needs to be determined from content BEFORE parent centers it
+2. **Aspect ratio** - absolute positioned items with aspect-ratio not sizing correctly
+3. **Intrinsic sizing** - many tests fail due to incorrect intrinsic size calculation
 
 See Section 4 for implementation details.
 
