@@ -13,7 +13,7 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 | Suite | Tests | Passing | Rate |
 |-------|-------|---------|------|
 | **Baseline** | 1262 | 1262 | 100% ✅ |
-| **Flex** | 339 | 22 | 6.5% |
+| **Flex** | 339 | 25 | 7.4% |
 | **Grid** | 228 | 0 | 0% |
 
 ### Completed Tasks
@@ -27,13 +27,15 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
    - 101 flex-related tests → `test/layout/data/flex/`
    - 45 grid-related tests → `test/layout/data/grid/`
 4. ✅ **Baseline Protected** - 100% pass rate maintained
-5. ✅ **Phase 2 Fixes (Partial)** - Fixed critical bugs:
+5. ✅ **Phase 2 Fixes** - Fixed critical bugs:
    - Fixed `align-items` default from `ALIGN_START` to `ALIGN_STRETCH` (CSS spec)
    - Fixed `given_height >= 0` checks to `> 0` (0 means auto, not explicit)
    - Fixed single-line detection: only `flex-wrap: nowrap` counts as single-line
-   - **Result**: 22 flex tests now passing (up from 0)
+   - Added CSS_VALUE_START/END handling for `start`/`end` keywords
+   - **Result**: 25 flex tests now passing (up from 0)
 
-### Phase 2 Passing Tests (22 tests)
+### Phase 2 Passing Tests (25 tests)
+- `align_content_end` (new with CSS_VALUE_END fix)
 - `align_flex_start_with_shrinking_children`
 - `align_flex_start_with_shrinking_children_with_stretch`
 - `align_flex_start_with_stretching_children`
@@ -64,14 +66,20 @@ The flex tests require `test_base_style.css` which wasn't being loaded. With CSS
 - Tests are now properly evaluating flex layout behavior
 - Failures reveal real gaps in Radiant's flex implementation
 
-### Next Priority: Continue Phase 2 (Hypothetical Cross Size)
+### Next Priority: Flex Grow/Shrink with Frozen Items
 
-Remaining issues in the algorithm:
-1. Items with `auto` cross-size in column flex don't stretch properly
-2. Nested flex containers need better cross-size propagation
-3. Multi-line containers need proper line cross-size calculation
+The flex-grow/shrink algorithm needs to handle "frozen" items properly:
+1. When an item violates min/max constraints, it becomes frozen
+2. Frozen items are excluded from subsequent flex calculations
+3. Remaining space is redistributed among unfrozen items
+4. Currently failing tests like `flex_grow_flex_basis_percent_min_max`
 
-See Section 4.1 for implementation details.
+Other remaining issues:
+- Content-based sizing for nested flex containers
+- Cross-axis sizing propagation
+- Multi-line wrap calculations
+
+See Section 4 for implementation details.
 
 ---
 
