@@ -25,6 +25,7 @@ public:
     // Element creation
     virtual void openTag(const char* tag, const char* classes = nullptr, 
                          const char* id = nullptr, const char* style = nullptr) = 0;
+    virtual void openTagRaw(const char* tag, const char* raw_attrs) = 0;  // Raw attribute string
     virtual void closeTag(const char* tag) = 0;
     virtual void writeSelfClosingTag(const char* tag, const char* classes = nullptr, 
                                      const char* attrs = nullptr) = 0;
@@ -62,6 +63,7 @@ public:
     void writeRawHtml(const char* html) override;
     void openTag(const char* tag, const char* classes = nullptr, 
                 const char* id = nullptr, const char* style = nullptr) override;
+    void openTagRaw(const char* tag, const char* raw_attrs) override;
     void closeTag(const char* tag) override;
     void writeSelfClosingTag(const char* tag, const char* classes = nullptr,
                             const char* attrs = nullptr) override;
@@ -99,6 +101,7 @@ public:
     void writeRawHtml(const char* html) override;  // Parse HTML → Elements (not implemented yet)
     void openTag(const char* tag, const char* classes = nullptr,
                 const char* id = nullptr, const char* style = nullptr) override;
+    void openTagRaw(const char* tag, const char* raw_attrs) override;
     void closeTag(const char* tag) override;
     void writeSelfClosingTag(const char* tag, const char* classes = nullptr,
                             const char* attrs = nullptr) override;

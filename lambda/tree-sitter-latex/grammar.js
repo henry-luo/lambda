@@ -47,6 +47,7 @@ module.exports = grammar({
       $.curly_group,
       $.brack_group,
       $.line_comment,
+      $.control_symbol, // Escape sequences like \%, \& 
       $.space,
       $.text,
       $.paragraph_break,  // Blank lines are allowed in preamble
@@ -97,6 +98,7 @@ module.exports = grammar({
     _inline: $ => choice(
       $.text,
       $.space,
+      $.line_comment,   // Comments can appear inline
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
       $.command,
       $.curly_group,
@@ -104,6 +106,7 @@ module.exports = grammar({
       $.math,
       $.ligature,
       $.control_symbol,
+      $.placeholder,    // #1, #2, etc. in macro definitions
     ),
 
     // Text is everything that's not a special character
@@ -114,11 +117,17 @@ module.exports = grammar({
 
     line_comment: $ => /%[^\n]*/,
 
+    // Placeholder for macro arguments (#1, #2, ..., #9)
+    placeholder: $ => /#[1-9]/,
+
     // Ligatures (matches LaTeX.js: ligature)
     ligature: $ => choice('---', '--', '``', "''", '<<', '>>'),
 
     // Control symbols (matches LaTeX.js: ctrl_sym) 
-    control_symbol: $ => seq('\\', /[$%#&{}_\-,\/@]/),
+    // High precedence to match before line_comment sees the %
+    // Includes: escape chars ($%#&{}_-), spacing (\! \, \; \: \/ \@), 
+    // punctuation (\. \' \` \^ \" \~ \=), control space (\ ), and line break (\\)
+    control_symbol: $ => token(prec(2, seq('\\', /[$%#&{}_\-,\/@ !;:.'`^"~=\\]/))),
 
     // ========================================================================
     // Commands/Macros (matches LaTeX.js: macro, macro_args)
@@ -164,6 +173,7 @@ module.exports = grammar({
       $.math,
       $.ligature,
       $.control_symbol,
+      $.placeholder,  // #1, #2, etc. in macro definitions
       ',',   // Common in group content
       '=',   // For key=value
     ),

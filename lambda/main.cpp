@@ -1,6 +1,5 @@
 #include "input/input.hpp"
 #include "format/format.h"
-#include "format/format-latex-html.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
 #include <unistd.h>  // for getcwd
@@ -14,6 +13,11 @@
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
+
+// Forward declaration for LaTeX HTML v2 formatter
+namespace lambda {
+    Item format_latex_html_v2(Input* input, bool text_mode);
+}
 
 #ifdef _WIN32
 // Windows compatibility shim for __intrinsic_setjmpex
@@ -469,37 +473,15 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "xml") == 0) {
             formatted_output = format_xml(input->pool, input->root);
         } else if (strcmp(to_format, "html") == 0) {
-            // Check if input is LaTeX and route to LaTeX-HTML converter
+            // Check if input is LaTeX and route to LaTeX-HTML v2 converter
             if (is_latex_input) {
-                // Use LaTeX to HTML converter
-                printf("Using LaTeX to HTML converter\n");
-                StringBuf* html_buf = stringbuf_new(input->pool);
-                StringBuf* css_buf = stringbuf_new(input->pool);
-
-                if (html_buf && css_buf) {
-                    format_latex_to_html(html_buf, css_buf, input->root, input->pool);
-
-                    // Combine HTML and CSS into a complete HTML document
-                    StringBuf* combined_buf = stringbuf_new(input->pool);
-                    if (combined_buf) {
-                        stringbuf_append_str(combined_buf, "<!DOCTYPE html>\n<html>\n<head>\n<style>\n");
-                        String* css_result = stringbuf_to_string(css_buf);
-                        if (css_result && css_result->chars) {
-                            stringbuf_append_str(combined_buf, css_result->chars);
-                        }
-                        stringbuf_append_str(combined_buf, "\n</style>\n</head>\n<body>\n");
-                        String* html_result = stringbuf_to_string(html_buf);
-                        if (html_result && html_result->chars) {
-                            stringbuf_append_str(combined_buf, html_result->chars);
-                        }
-                        stringbuf_append_str(combined_buf, "\n</body>\n</html>");
-                        formatted_output = stringbuf_to_string(combined_buf);
-                        stringbuf_free(combined_buf);
-                    }
-                    stringbuf_free(html_buf);
-                    stringbuf_free(css_buf);
+                // Use LaTeX to HTML v2 converter (hybrid grammar support)
+                printf("Using LaTeX to HTML v2 converter\n");
+                Item result = lambda::format_latex_html_v2(input, true);  // text mode for HTML string output
+                if (result.item != 0 && get_type_id(result) == LMD_TYPE_STRING) {
+                    formatted_output = (String*)result.string_ptr;
                 } else {
-                    printf("Error: Failed to create string buffers for LaTeX conversion\n");
+                    printf("Error: LaTeX to HTML v2 conversion failed\n");
                 }
             } else {
                 // Use regular HTML formatter
