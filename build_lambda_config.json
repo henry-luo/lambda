@@ -1960,6 +1960,7 @@
                     {
                         "source": "test/latex/test_latex_html_v2_baseline.cpp",
                         "name": "LaTeX to HTML V2 Baseline Tests",
+                        "category": "extended",
                         "dependencies": [
                             "lambda-input-full"
                         ],
