@@ -4133,9 +4133,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 bool has_separator = false;
 
                 // First pass: check if there's a "/" separator
+                // Note: "/" may come as STRING or CUSTOM type depending on parser
                 for (size_t i = 0; i < count; i++) {
                     CssValue* v = values[i];
                     if (v->type == CSS_VALUE_TYPE_STRING && v->data.string && strcmp(v->data.string, "/") == 0) {
+                        has_separator = true;
+                        break;
+                    }
+                    if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
+                        strcmp(v->data.custom_property.name, "/") == 0) {
                         has_separator = true;
                         break;
                     }
@@ -4214,6 +4220,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             const char* name = v->data.custom_property.name;
                             if (name && strcmp(name, "span") == 0) {
                                 saw_span = true;
+                            } else if (name && strcmp(name, "/") == 0) {
+                                // "/" separator may come as CUSTOM type
+                                value_idx = 1;
+                                saw_span = false;
                             }
                         } else if (v->type == CSS_VALUE_TYPE_STRING) {
                             if (v->data.string && strcmp(v->data.string, "/") == 0) {
@@ -4248,9 +4258,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 bool has_separator = false;
 
                 // First pass: check if there's a "/" separator
+                // Note: "/" may come as STRING or CUSTOM type depending on parser
                 for (size_t i = 0; i < count; i++) {
                     CssValue* v = values[i];
                     if (v->type == CSS_VALUE_TYPE_STRING && v->data.string && strcmp(v->data.string, "/") == 0) {
+                        has_separator = true;
+                        break;
+                    }
+                    if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
+                        strcmp(v->data.custom_property.name, "/") == 0) {
                         has_separator = true;
                         break;
                     }
@@ -4328,6 +4344,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             const char* name = v->data.custom_property.name;
                             if (name && strcmp(name, "span") == 0) {
                                 saw_span = true;
+                            } else if (name && strcmp(name, "/") == 0) {
+                                // "/" separator may come as CUSTOM type
+                                value_idx = 1;
+                                saw_span = false;
                             }
                         } else if (v->type == CSS_VALUE_TYPE_STRING) {
                             if (v->data.string && strcmp(v->data.string, "/") == 0) {
