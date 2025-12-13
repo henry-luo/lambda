@@ -138,11 +138,12 @@ void HtmlGenerator::applyFontStyle(const FontContext& font) {
 
 std::string HtmlGenerator::getFontClass(const FontContext& font) const {
     // html-generator.ls getFontClass method
+    // Only output classes for non-default font properties
     std::stringstream ss;
     
-    // Build CSS class from font properties
+    // Build CSS class from font properties (only non-default values)
     switch (font.family) {
-        case FontFamily::Roman: ss << "rm "; break;
+        case FontFamily::Roman: break;  // Roman is default, don't output
         case FontFamily::SansSerif: ss << "sf "; break;
         case FontFamily::Typewriter: ss << "tt "; break;
     }

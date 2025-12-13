@@ -50,7 +50,9 @@ public:
     
 public:
     LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
-        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), recursion_depth_(0), depth_exceeded_(false) {}
+        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
+          strip_next_leading_space_(false), styled_span_depth_(0), 
+          recursion_depth_(0), depth_exceeded_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -76,6 +78,18 @@ public:
     // Get input
     Input* input() { return input_; }
     
+    // Font declaration tracking - call after a font declaration command
+    // to indicate that the next text should strip its leading space
+    void setStripNextLeadingSpace(bool strip) { strip_next_leading_space_ = strip; }
+    
+    // Styled span depth management - used to prevent double-wrapping in text-styling commands
+    void enterStyledSpan() { styled_span_depth_++; }
+    void exitStyledSpan() { if (styled_span_depth_ > 0) styled_span_depth_--; }
+    bool inStyledSpan() const { return styled_span_depth_ > 0; }
+    
+    // Paragraph management - public so command handlers can access
+    void endParagraph();  // Close current paragraph if open
+    
     // Macro system functions (public so command handlers can access)
     void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
     bool isMacro(const std::string& name);
@@ -96,6 +110,14 @@ private:
     // Paragraph tracking for auto-wrapping text
     bool in_paragraph_;
     int inline_depth_;  // Track nesting depth of inline elements
+    
+    // Font declaration tracking - when true, the next text should strip leading space
+    // This is set by font declaration commands like \bfseries, \em, etc.
+    bool strip_next_leading_space_;
+    
+    // Styled span depth - when > 0, we're inside a text-styling command like \textbf{}
+    // processText should not add font spans when inside a styled span
+    int styled_span_depth_;
     
     // Recursion depth tracking for macro expansion (prevent infinite loops)
     int recursion_depth_;
@@ -389,16 +411,20 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
 // =============================================================================
 
 // Text formatting commands
+// Note: These commands create spans directly and do NOT modify font state,
+// so processText won't double-wrap the content in another span.
+// Font state is only modified by declaration commands (\bfseries, \em, etc.)
 
 static void cmd_textbf(LatexProcessor* proc, Item elem) {
     // \textbf{text} - bold text
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
-    gen->currentFont().series = FontSeries::Bold;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("bf");  // Just the class name
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -407,10 +433,11 @@ static void cmd_textit(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
-    gen->currentFont().shape = FontShape::Italic;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("it");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -419,15 +446,19 @@ static void cmd_emph(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     // Toggle italic state
-    if (gen->currentFont().shape == FontShape::Italic) {
+    bool was_italic = (gen->currentFont().shape == FontShape::Italic);
+    if (was_italic) {
         gen->currentFont().shape = FontShape::Upright;
+        gen->span("up");  // Use "up" class for upright when inside italic
     } else {
         gen->currentFont().shape = FontShape::Italic;
+        gen->span("it");
     }
-    gen->span("it");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -436,10 +467,12 @@ static void cmd_texttt(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().family = FontFamily::Typewriter;
     gen->span("tt");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -448,10 +481,12 @@ static void cmd_textsf(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().family = FontFamily::SansSerif;
     gen->span("textsf");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -460,10 +495,12 @@ static void cmd_textrm(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().family = FontFamily::Roman;
     gen->span("textrm");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -472,10 +509,12 @@ static void cmd_textsc(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().shape = FontShape::SmallCaps;
     gen->span("textsc");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -483,18 +522,22 @@ static void cmd_underline(LatexProcessor* proc, Item elem) {
     // \underline{text} - underlined text
     HtmlGenerator* gen = proc->generator();
     
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("underline");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
 }
 
 static void cmd_sout(LatexProcessor* proc, Item elem) {
     // \sout{text} - strikethrough text
     HtmlGenerator* gen = proc->generator();
     
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("sout");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
 }
 
 // =============================================================================
@@ -506,10 +549,12 @@ static void cmd_textmd(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().series = FontSeries::Normal;
     gen->span("textmd");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -518,10 +563,12 @@ static void cmd_textup(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().shape = FontShape::Upright;
     gen->span("textup");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -530,10 +577,12 @@ static void cmd_textsl(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().shape = FontShape::Slanted;
     gen->span("textsl");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -542,6 +591,7 @@ static void cmd_textnormal(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     // Reset to defaults
     gen->currentFont().series = FontSeries::Normal;
     gen->currentFont().shape = FontShape::Upright;
@@ -550,17 +600,21 @@ static void cmd_textnormal(LatexProcessor* proc, Item elem) {
     gen->span("textnormal");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
 // =============================================================================
 // Font Declaration Commands (bfseries, mdseries, rmfamily, etc.)
+// These set font state and mark that the following text should strip leading space
+// (LaTeX commands consume their trailing space)
 // =============================================================================
 
 static void cmd_bfseries(LatexProcessor* proc, Item elem) {
     // \bfseries - switch to bold (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().series = FontSeries::Bold;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -568,6 +622,7 @@ static void cmd_mdseries(LatexProcessor* proc, Item elem) {
     // \mdseries - switch to medium weight (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().series = FontSeries::Normal;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -575,6 +630,7 @@ static void cmd_rmfamily(LatexProcessor* proc, Item elem) {
     // \rmfamily - switch to roman family (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().family = FontFamily::Roman;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -582,6 +638,7 @@ static void cmd_sffamily(LatexProcessor* proc, Item elem) {
     // \sffamily - switch to sans-serif family (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().family = FontFamily::SansSerif;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -589,6 +646,7 @@ static void cmd_ttfamily(LatexProcessor* proc, Item elem) {
     // \ttfamily - switch to typewriter family (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().family = FontFamily::Typewriter;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -596,6 +654,15 @@ static void cmd_itshape(LatexProcessor* proc, Item elem) {
     // \itshape - switch to italic shape (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().shape = FontShape::Italic;
+    proc->setStripNextLeadingSpace(true);
+    proc->processChildren(elem);
+}
+
+static void cmd_em(LatexProcessor* proc, Item elem) {
+    // \em - switch to italic shape (declaration, same as \itshape)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().shape = FontShape::Italic;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -603,6 +670,7 @@ static void cmd_slshape(LatexProcessor* proc, Item elem) {
     // \slshape - switch to slanted shape (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().shape = FontShape::Slanted;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -610,6 +678,7 @@ static void cmd_scshape(LatexProcessor* proc, Item elem) {
     // \scshape - switch to small caps shape (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().shape = FontShape::SmallCaps;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -617,6 +686,7 @@ static void cmd_upshape(LatexProcessor* proc, Item elem) {
     // \upshape - switch to upright shape (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().shape = FontShape::Upright;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -627,6 +697,7 @@ static void cmd_normalfont(LatexProcessor* proc, Item elem) {
     gen->currentFont().shape = FontShape::Upright;
     gen->currentFont().family = FontFamily::Roman;
     gen->currentFont().size = FontSize::NormalSize;
+    proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
 
@@ -1834,6 +1905,13 @@ static void cmd_linebreak(LatexProcessor* proc, Item elem) {
     // \linebreak
     HtmlGenerator* gen = proc->generator();
     gen->lineBreak(false);
+}
+
+static void cmd_par(LatexProcessor* proc, Item elem) {
+    // \par - end current paragraph and start a new one
+    // Simply close the paragraph if open - the next text will start a new one
+    proc->endParagraph();
+    (void)elem;  // unused
 }
 
 static void cmd_newpage(LatexProcessor* proc, Item elem) {
@@ -3429,6 +3507,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["sffamily"] = cmd_sffamily;
     command_table_["ttfamily"] = cmd_ttfamily;
     command_table_["itshape"] = cmd_itshape;
+    command_table_["em"] = cmd_em;  // \em is same as \itshape
     command_table_["slshape"] = cmd_slshape;
     command_table_["scshape"] = cmd_scshape;
     command_table_["upshape"] = cmd_upshape;
@@ -3482,6 +3561,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["newline"] = cmd_newline;
     command_table_["linebreak"] = cmd_linebreak;
     command_table_["newpage"] = cmd_newpage;
+    command_table_["par"] = cmd_par;
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
@@ -3688,6 +3768,10 @@ void LatexProcessor::closeParagraphIfOpen() {
         gen_->closeElement();
         in_paragraph_ = false;
     }
+}
+
+void LatexProcessor::endParagraph() {
+    closeParagraphIfOpen();
 }
 
 void LatexProcessor::process(Item root) {
@@ -3911,7 +3995,47 @@ void LatexProcessor::processText(const char* text) {
     }
     
     ensureParagraph();  // Auto-wrap text in <p> tags
-    gen_->text(normalized.c_str());
+    
+    // Check if we should strip leading space (set by font declaration commands)
+    // LaTeX commands consume their trailing space, so text after a declaration
+    // should have its leading space stripped
+    bool should_strip_leading = strip_next_leading_space_;
+    strip_next_leading_space_ = false;  // Reset flag after checking
+    
+    // Check if current font differs from default - if so, wrap text in a span
+    // BUT skip this if we're inside a styled span (like \textbf{}) to prevent double-wrapping
+    std::string font_class = gen_->getFontClass(gen_->currentFont());
+    if (!font_class.empty() && !inStyledSpan()) {
+        // When font styling is active
+        if (all_whitespace) {
+            // Skip pure whitespace when font styling is active
+            return;
+        }
+        
+        std::string content = normalized;
+        
+        // Strip leading whitespace only if flagged (after a font declaration command)
+        if (should_strip_leading) {
+            size_t start = 0;
+            while (start < content.length() && content[start] == ' ') {
+                start++;
+            }
+            if (start > 0) {
+                content = content.substr(start);
+            }
+        }
+        
+        // Wrap content in span with font class
+        if (!content.empty()) {
+            gen_->span(font_class.c_str());
+            gen_->text(content.c_str());
+            gen_->closeElement();
+        }
+    } else if (!all_whitespace || normalized.length() == 1) {
+        // Normal text or single space - output as-is
+        gen_->text(normalized.c_str());
+    }
+    // Skip pure whitespace (more than one space) - already handled above
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
