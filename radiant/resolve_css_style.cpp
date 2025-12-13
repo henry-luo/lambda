@@ -5121,16 +5121,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
                     }
                     span->bound->background->gradient_type = GRADIENT_LINEAR;
-                    
+
                     // Allocate LinearGradient
                     LinearGradient* lg = (LinearGradient*)alloc_prop(lycon, sizeof(LinearGradient));
                     span->bound->background->linear_gradient = lg;
-                    
+
                     // Parse arguments
                     CssFunction* func = value->data.function;
                     int arg_idx = 0;
                     float angle = 180.0f;  // default: to bottom
-                    
+
                     // Check if first arg is angle or direction
                     if (func->arg_count > 0 && func->args[0]) {
                         CssValue* first_arg = func->args[0];
@@ -5157,12 +5157,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
                     lg->angle = angle;
-                    
+
                     // Count color stops
                     int color_count = func->arg_count - arg_idx;
                     lg->stop_count = color_count > 0 ? color_count : 2;
                     lg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count);
-                    
+
                     // Parse color stops
                     int stop_idx = 0;
                     for (int i = arg_idx; i < func->arg_count && stop_idx < lg->stop_count; i++) {
@@ -5176,7 +5176,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
                     lg->stop_count = stop_idx;
-                    
+
                     // Auto-distribute positions if not specified
                     if (lg->stop_count > 0) {
                         for (int i = 0; i < lg->stop_count; i++) {
@@ -5185,7 +5185,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             }
                         }
                     }
-                    
+
                     log_debug("[Lambda CSS Shorthand] Parsed linear-gradient with %d stops, angle=%.1f",
                         lg->stop_count, lg->angle);
                     return;
