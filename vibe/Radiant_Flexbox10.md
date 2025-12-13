@@ -2,7 +2,76 @@
 
 ## Executive Summary
 
-Analysis of 298 flex layout tests reveals a 0% pass rate, with most failures showing correct child positioning but incorrect container/parent dimensions. Comparison with Taffy (a Rust flexbox implementation) identifies key algorithmic gaps in Radiant's flex layout engine.
+Analysis of flex layout tests reveals significant gaps in Radiant's flexbox implementation. Comparison with Taffy (a Rust flexbox implementation) identifies key algorithmic gaps. This document tracks progress on implementing fixes.
+
+---
+
+## 0. Progress Summary (Updated: Dec 13, 2025)
+
+### Current Test Status
+
+| Suite | Tests | Passing | Rate |
+|-------|-------|---------|------|
+| **Baseline** | 1262 | 1262 | 100% ✅ |
+| **Flex** | 339 | 22 | 6.5% |
+| **Grid** | 228 | 0 | 0% |
+
+### Completed Tasks
+
+1. ✅ **Analysis Document** - Created this comprehensive analysis
+2. ✅ **Test Infrastructure** - Added `test_base_style.css` from Taffy with:
+   - `div { display: flex }` - All divs become flex containers
+   - `body { margin: 0; padding: 0 }` - Remove default margins
+   - `body > * { position: absolute }` - Test isolation
+3. ✅ **Test Suite Reorganization** - Moved 146 failing tests:
+   - 101 flex-related tests → `test/layout/data/flex/`
+   - 45 grid-related tests → `test/layout/data/grid/`
+4. ✅ **Baseline Protected** - 100% pass rate maintained
+5. ✅ **Phase 2 Fixes (Partial)** - Fixed critical bugs:
+   - Fixed `align-items` default from `ALIGN_START` to `ALIGN_STRETCH` (CSS spec)
+   - Fixed `given_height >= 0` checks to `> 0` (0 means auto, not explicit)
+   - Fixed single-line detection: only `flex-wrap: nowrap` counts as single-line
+   - **Result**: 22 flex tests now passing (up from 0)
+
+### Phase 2 Passing Tests (22 tests)
+- `align_flex_start_with_shrinking_children`
+- `align_flex_start_with_shrinking_children_with_stretch`
+- `align_flex_start_with_stretching_children`
+- `align_items_center_with_min_height_percentage_with_align_content_flex_start`
+- `align_items_stretch`
+- `align_stretch_should_size_based_on_parent`
+- `aspect_ratio_flex_row_stretch_fill_height`
+- `bevy_issue_8017_reduced`
+- `border_flex_child`
+- `border_stretch_child`
+- `container_with_unsized_child`
+- `flex_basis_overrides_main_size`
+- `flex_direction_row`
+- `flex_grow_less_than_factor_one`
+- `flex_grow_shrink_at_most`
+- `flex_row_relative_all_sides`
+- `overflow_main_axis`
+- `overflow_scrollbars_take_up_space_both_axis`
+- `overflow_scrollbars_take_up_space_cross_axis`
+- `overflow_scrollbars_take_up_space_main_axis`
+- `padding_flex_child`
+- `percentage_sizes_should_not_prevent_flex_shrinking`
+
+### Key Findings
+
+The flex tests require `test_base_style.css` which wasn't being loaded. With CSS properly applied:
+- All `<div>` elements become flex containers
+- Tests are now properly evaluating flex layout behavior
+- Failures reveal real gaps in Radiant's flex implementation
+
+### Next Priority: Continue Phase 2 (Hypothetical Cross Size)
+
+Remaining issues in the algorithm:
+1. Items with `auto` cross-size in column flex don't stretch properly
+2. Nested flex containers need better cross-size propagation
+3. Multi-line containers need proper line cross-size calculation
+
+See Section 4.1 for implementation details.
 
 ---
 
@@ -11,9 +80,9 @@ Analysis of 298 flex layout tests reveals a 0% pass rate, with most failures sho
 ### 1.1 Test Results Overview
 
 ```
-Total Tests: 298
+Total Flex Tests: 339
 Successful: 0 (0%)
-Failed: 298 (100%)
+Failed: 339 (100%)
 ```
 
 ### 1.2 Common Failure Patterns
@@ -404,19 +473,21 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
 
 ## 5. Implementation Plan
 
-### Phase 1: Quick Wins (1-2 days)
-1. Fix explicit height check (remove flex-grow condition)
-2. Move container cross-size calculation after line cross-sizes
+### Phase 1: Quick Wins ✅ COMPLETED
+1. ✅ Fix explicit height check (remove flex-grow condition)
+2. ✅ Move container cross-size calculation after line cross-sizes
+3. ✅ Add `test_base_style.css` for proper test setup
+4. ✅ Reorganize test suites (baseline protected at 100%)
 
-**Expected Impact:** ~30% of tests may start passing
+**Actual Impact:** Infrastructure ready, baseline protected
 
-### Phase 2: Core Algorithm (3-5 days)
-1. Add `FlexItemProp` hypothetical size fields
-2. Implement `determine_hypothetical_cross_sizes()`
-3. Implement proper `determine_container_cross_size()`
-4. Update `calculate_line_cross_sizes()` to use hypothetical sizes
+### Phase 2: Core Algorithm 🔄 IN PROGRESS
+1. ⬜ Add `FlexItemProp` hypothetical size fields
+2. ⬜ Implement `determine_hypothetical_cross_sizes()`
+3. ⬜ Implement proper `determine_container_cross_size()`
+4. ⬜ Update `calculate_line_cross_sizes()` to use hypothetical sizes
 
-**Expected Impact:** ~60-70% of tests may start passing
+**Expected Impact:** ~60-70% of flex tests may start passing
 
 ### Phase 3: Edge Cases (2-3 days)
 1. Handle align-content: stretch properly
@@ -441,15 +512,16 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
 
 After each change, run:
 ```bash
-make layout suite=flex 2>&1 | grep -E "^(📊|✅|❌)" | head -50
+make layout suite=flex 2>&1 | grep -E "Category Summary|Successful|Failed"
+make layout suite=baseline 2>&1 | grep -E "Category Summary|Successful|Failed"
 ```
 
 ### 6.2 Key Test Cases to Track
 
 | Test | Tests | Expected After Phase |
 |------|-------|---------------------|
-| `flex_grow_child` | Container sizing | 1 |
-| `flex_direction_column_no_height` | Column auto-height | 1 |
+| `flex_grow_child` | Container sizing | 2 |
+| `flex_direction_column_no_height` | Column auto-height | 2 |
 | `align_content_center_*` | Align-content | 2 |
 | `intrinsic_sizing_*` | Content sizing | 2 |
 | `wrap_*` | Multi-line | 2 |
@@ -458,8 +530,35 @@ make layout suite=flex 2>&1 | grep -E "^(📊|✅|❌)" | head -50
 
 ---
 
-## 7. References
+## 7. Next Steps
+
+### Immediate Task: Implement Phase 2 Core Algorithm
+
+1. **Add hypothetical size fields to `FlexItemProp`** in `view.hpp`:
+   ```cpp
+   float hypothetical_cross_size;
+   float hypothetical_outer_cross_size;
+   ```
+
+2. **Implement `determine_hypothetical_cross_sizes()`** in `layout_flex.cpp`:
+   - After flexible lengths resolved
+   - Before line cross sizes calculated
+   - Measure each item's cross size
+
+3. **Fix container cross size determination**:
+   - Sum line cross sizes
+   - Apply padding/border
+   - Update container height/width
+
+4. **Test incrementally**:
+   - Run `make layout suite=flex` after each change
+   - Verify baseline still passes
+
+---
+
+## 8. References
 
 - [CSS Flexbox Level 1 Spec](https://www.w3.org/TR/css-flexbox-1/)
 - [Taffy Source Code](https://github.com/DioxusLabs/taffy/blob/main/src/compute/flexbox.rs)
 - [Radiant Layout Design Doc](../doc/Radiant_Layout_Design.md)
+
