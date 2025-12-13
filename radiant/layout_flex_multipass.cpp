@@ -226,22 +226,30 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                         }
                         
                         // Get margins
-                        float margin_left = 0, margin_top = 0;
+                        float margin_left = 0, margin_top = 0, margin_right = 0, margin_bottom = 0;
                         if (child_block->bound) {
                             margin_left = child_block->bound->margin.left;
                             margin_top = child_block->bound->margin.top;
+                            margin_right = child_block->bound->margin.right;
+                            margin_bottom = child_block->bound->margin.bottom;
                         }
                         
                         // Calculate main axis offset based on justify-content
                         if ((is_row && adjust_x) || (!is_row && adjust_y)) {
                             float main_offset = 0;
+                            // margin_start is the margin at the start of main axis
+                            // margin_end is the margin at the end of main axis
+                            float margin_start = is_row ? margin_left : margin_top;
+                            float margin_end = is_row ? margin_right : margin_bottom;
+                            
                             switch (justify_content) {
                                 case CSS_VALUE_CENTER:
                                     main_offset = (main_axis_size - item_main) / 2;
                                     break;
                                 case CSS_VALUE_FLEX_END:
                                 case CSS_VALUE_END:
-                                    main_offset = main_axis_size - item_main;
+                                    // Position at end minus item size minus end margin
+                                    main_offset = main_axis_size - item_main - margin_end;
                                     break;
                                 case CSS_VALUE_SPACE_BETWEEN:
                                 case CSS_VALUE_SPACE_AROUND:
@@ -249,14 +257,15 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                                 case CSS_VALUE_FLEX_START:
                                 case CSS_VALUE_START:
                                 default:
-                                    main_offset = 0;
+                                    // Position at start plus start margin
+                                    main_offset = margin_start;
                                     break;
                             }
                             
                             if (is_row) {
-                                child_block->x = content_offset_x + main_offset + margin_left;
+                                child_block->x = content_offset_x + main_offset;
                             } else {
-                                child_block->y = content_offset_y + main_offset + margin_top;
+                                child_block->y = content_offset_y + main_offset;
                             }
                         }
                         
@@ -285,26 +294,33 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                                 }
                             }
                             
+                            // margin_cross_start is the margin at the start of cross axis
+                            // margin_cross_end is the margin at the end of cross axis
+                            float margin_cross_start = is_row ? margin_top : margin_left;
+                            float margin_cross_end = is_row ? margin_bottom : margin_right;
+                            
                             switch (effective_align) {
                                 case CSS_VALUE_CENTER:
                                     cross_offset = (cross_axis_size - item_cross) / 2;
                                     break;
                                 case CSS_VALUE_FLEX_END:
                                 case CSS_VALUE_END:
-                                    cross_offset = cross_axis_size - item_cross;
+                                    // Position at end minus item size minus end margin
+                                    cross_offset = cross_axis_size - item_cross - margin_cross_end;
                                     break;
                                 case CSS_VALUE_FLEX_START:
                                 case CSS_VALUE_START:
                                 case CSS_VALUE_STRETCH:
                                 default:
-                                    cross_offset = 0;
+                                    // Position at start plus start margin
+                                    cross_offset = margin_cross_start;
                                     break;
                             }
                             
                             if (is_row) {
-                                child_block->y = content_offset_y + cross_offset + margin_top;
+                                child_block->y = content_offset_y + cross_offset;
                             } else {
-                                child_block->x = content_offset_x + cross_offset + margin_left;
+                                child_block->x = content_offset_x + cross_offset;
                             }
                         }
                         
