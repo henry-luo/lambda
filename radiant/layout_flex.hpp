@@ -58,6 +58,14 @@ void sort_flex_items_by_order(View** items, int count);
 int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_count);
 void calculate_line_cross_sizes(FlexContainerLayout* flex_layout);
 
+// Hypothetical cross size determination (CSS Flexbox spec §9.4)
+// Computes hypothetical cross sizes for all flex items before line cross-size calculation
+void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayout* flex_layout);
+
+// Container cross size determination (CSS Flexbox spec §9.4)
+// Computes the flex container's cross size from line cross sizes
+void determine_container_cross_size(FlexContainerLayout* flex_layout, ViewBlock* container);
+
 // Flexible length resolution
 void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout);
