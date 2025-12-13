@@ -3968,6 +3968,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                               grid->grid_template_columns->track_count);
                 }
             }
+            // Handle single length/percentage value (e.g., 100px)
+            else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                log_debug("[CSS] grid-template-columns: handling single LENGTH/PERCENTAGE value");
+                GridTrackSize* ts = parse_css_value_to_track_size(value);
+                if (ts) {
+                    if (!grid->grid_template_columns) {
+                        grid->grid_template_columns = create_grid_track_list(1);
+                    } else {
+                        grid->grid_template_columns->track_count = 0;
+                    }
+                    grid->grid_template_columns->tracks[0] = ts;
+                    grid->grid_template_columns->track_count = 1;
+                    log_debug("[CSS] grid-template-columns: parsed single track -> %d tracks",
+                              grid->grid_template_columns->track_count);
+                }
+            }
             break;
         }
 
