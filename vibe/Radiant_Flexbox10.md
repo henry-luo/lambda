@@ -6,14 +6,14 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 
 ---
 
-## 0. Progress Summary (Updated: Dec 13, 2025)
+## 0. Progress Summary (Updated: Dec 14, 2025)
 
 ### Current Test Status
 
 | Suite | Tests | Passing | Rate |
 |-------|-------|---------|------|
 | **Baseline** | 1262 | 1262 | 100% ✅ |
-| **Flex** | 339 | 27 | 8.0% |
+| **Flex** | 339 | 52 | 15.3% |
 | **Grid** | 228 | 0 | 0% |
 
 ### Completed Tasks
@@ -36,10 +36,17 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
    - Implemented proper CSS Flexbox §9.7 constraint resolution
    - Track min/max violations separately during flex distribution
    - Freeze items based on total violation direction (not all constrained items)
-   - Allows remaining space to be redistributed correctly
-   - **Result**: 27 flex tests now passing (up from 25)
+7. ✅ **Phase 4 Fixes** - Content-based sizing & alignment:
+   - Added CSS_VALUE_START/END handling for justify-content (writing-mode aware)
+   - Fixed column-reverse positioning with justify-content: start
+   - Added shrink-to-fit behavior for absolutely positioned flex containers
+   - Fixed row/column flex containers with auto width to shrink to content
+   - Fixed align-items calculation to use line cross size for wrapping containers
+   - Added recursive DOM height measurement for nested flex containers
+   - Respect min-width/max-width constraints in shrink-to-fit calculations
+   - **Result**: 52 flex tests now passing (up from 27, almost 2x improvement)
 
-### Phase 2+3 Passing Tests (27 tests)
+### Phase 2-4 Passing Tests (52 tests)
 - `align_content_end`
 - `align_content_end_wrapped_negative_space`
 - `align_content_end_wrapped_negative_space_gap`
