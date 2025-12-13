@@ -213,7 +213,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // - Absolutely positioned with both left and right, OR
         // - Block-level element in normal flow (inherits definite width from containing block)
         bool has_definite_width = has_explicit_width;
-        
+
         // Check if max-width is actually constraining the width
         // This means: container.width equals max-width AND there was more available space
         // For simplicity, we check if container.width == max-width (meaning it was clamped)
@@ -238,13 +238,13 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                           container_content_width, max_content_width);
             }
         }
-        
+
         // For absolutely positioned elements, also check left+right
         if (is_absolute && container->position) {
             has_definite_width = has_definite_width ||
                 (container->position->has_left && container->position->has_right);
         }
-        
+
         // Block-level elements in normal flow have definite width from containing block
         // Only inline-block/inline elements with auto width are shrink-to-fit (indefinite)
         // Absolute/fixed positioned elements with auto width are also shrink-to-fit (indefinite)
@@ -259,12 +259,12 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                           (float)content_width);
             }
         }
-        
+
         flex->main_axis_is_indefinite = !has_definite_width;
     } else {
         // Main axis is height for column flex
         bool has_definite_height = has_explicit_height;
-        
+
         // Check if max-height is actually constraining
         if (has_max_height && content_height > 0) {
             float max_height_value = container->blk->given_max_height;
@@ -281,7 +281,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                           (float)content_height, max_content_height);
             }
         }
-        
+
         // Absolutely positioned elements have definite height only if both top and bottom are specified
         if (is_absolute && container->position) {
             has_definite_height = has_definite_height ||

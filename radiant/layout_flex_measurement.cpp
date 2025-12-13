@@ -80,7 +80,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
                       elem->tag_name ? elem->tag_name : "(null)", elem->fi->intrinsic_height.max_content);
             return (float)elem->fi->intrinsic_height.max_content;
         }
-        
+
         // Also check specified_style for explicit height
         if (elem->specified_style) {
             CssDeclaration* height_decl = style_tree_get_declaration(
@@ -733,6 +733,86 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
     // Initialize to zero
     int min_width = 0, max_width = 0, min_height = 0, max_height = 0;
+
+    // Check if this is a replaced element (img, video) - needs special handling
+    LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
+    uintptr_t elmt_name = item->tag();
+    bool is_replaced = (elmt_name == HTM_TAG_IMG || elmt_name == HTM_TAG_VIDEO ||
+                        elmt_name == HTM_TAG_IFRAME || elmt_name == HTM_TAG_CANVAS);
+
+    if (is_replaced && lycon && elmt_name == HTM_TAG_IMG) {
+        // Load image to get intrinsic dimensions
+        log_debug("calculate_item_intrinsic_sizes: loading image for flex item %s", item->node_name());
+        const char* src_value = item->get_attribute("src");
+        if (src_value) {
+            if (!item->embed) {
+                item->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+            }
+            if (!item->embed->img) {
+                item->embed->img = load_image(lycon->ui_context, src_value);
+            }
+            if (item->embed->img) {
+                ImageSurface* img = item->embed->img;
+                float w = img->width * lycon->ui_context->pixel_ratio;
+                float h = img->height * lycon->ui_context->pixel_ratio;
+
+                // Check for explicit CSS dimensions
+                float explicit_width = (item->blk && item->blk->given_width > 0) ?
+                    item->blk->given_width : -1;
+                float explicit_height = (item->blk && item->blk->given_height > 0) ?
+                    item->blk->given_height : -1;
+
+                // Also check max-width as constraint
+                float max_width_constraint = (item->blk && item->blk->given_max_width > 0) ?
+                    item->blk->given_max_width : -1;
+
+                if (explicit_width > 0 && explicit_height > 0) {
+                    // Both dimensions specified
+                    min_width = max_width = (int)explicit_width;
+                    min_height = max_height = (int)explicit_height;
+                } else if (explicit_width > 0) {
+                    // Width specified, compute height from aspect ratio
+                    min_width = max_width = (int)explicit_width;
+                    min_height = max_height = (int)(explicit_width * h / w);
+                } else if (explicit_height > 0) {
+                    // Height specified, compute width from aspect ratio
+                    min_height = max_height = (int)explicit_height;
+                    min_width = max_width = (int)(explicit_height * w / h);
+                } else if (max_width_constraint > 0 && max_width_constraint < w) {
+                    // Max-width constrains the image
+                    min_width = max_width = (int)max_width_constraint;
+                    min_height = max_height = (int)(max_width_constraint * h / w);
+                } else {
+                    // Use intrinsic dimensions
+                    min_width = max_width = (int)w;
+                    min_height = max_height = (int)h;
+                }
+                log_debug("calculate_item_intrinsic_sizes: image intrinsic size=%dx%d (source=%dx%d)",
+                          min_width, min_height, (int)w, (int)h);
+            } else {
+                // Failed to load image - use placeholder size
+                log_debug("calculate_item_intrinsic_sizes: failed to load image %s", src_value);
+                min_width = max_width = 40;
+                min_height = max_height = 30;
+            }
+        } else {
+            // No src attribute - use placeholder
+            min_width = max_width = 40;
+            min_height = max_height = 30;
+        }
+
+        // Store computed intrinsic sizes
+        item->fi->intrinsic_width.min_content = min_width;
+        item->fi->intrinsic_width.max_content = max_width;
+        item->fi->has_intrinsic_width = true;
+
+        item->fi->intrinsic_height.min_content = min_height;
+        item->fi->intrinsic_height.max_content = max_height;
+        item->fi->has_intrinsic_height = true;
+
+        log_debug("calculate_item_intrinsic_sizes: image final intrinsic=%dx%d", max_width, max_height);
+        return;
+    }
 
     // Check if item has children to measure
     DomNode* child = item->first_child;

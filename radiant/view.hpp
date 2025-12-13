@@ -433,11 +433,35 @@ typedef struct {
     Corner radius;
 } BorderProp;
 
+// Gradient types for CSS background gradients
+typedef enum {
+    GRADIENT_NONE = 0,
+    GRADIENT_LINEAR,
+    GRADIENT_RADIAL,
+    GRADIENT_CONIC
+} GradientType;
+
+// Color stop for gradients
+typedef struct {
+    Color color;
+    float position;  // 0.0 to 1.0, or -1 for auto
+} GradientStop;
+
+// Linear gradient data
+typedef struct {
+    float angle;           // in degrees, 0 = to top, 90 = to right
+    GradientStop* stops;   // array of color stops
+    int stop_count;
+} LinearGradient;
+
 typedef struct {
     Color color; // background color
     char* image; // background image path
     char* repeat; // repeat behavior
     char* position; // positioning of background image
+    // Gradient support
+    GradientType gradient_type;
+    LinearGradient* linear_gradient;
 } BackgroundProp;
 
 typedef struct BoundaryProp {
