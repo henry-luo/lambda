@@ -1791,21 +1791,52 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
     int container_main_size = flex_layout->main_axis_size;
 
-    // Calculate initial main sizes based on flex-basis
-    // CRITICAL: Store initial flex basis for each item (needed for correct flex-shrink calculation)
+    // CRITICAL: Store original flex basis for each item (needed for correct flex-shrink calculation)
+    // Per CSS Flexbox spec §9.7, scaled shrink factor uses the original flex base size
     int* item_flex_basis = (int*)calloc(line->item_count, sizeof(int));
     if (!item_flex_basis) return;
 
-    int total_basis_size = 0;
-    int total_margin_size = 0;  // Track margins in main axis direction
+    // Track which items are frozen (have flex factor 0 or hit constraints during distribution)
+    bool* frozen = (bool*)calloc(line->item_count, sizeof(bool));
+    if (!frozen) {
+        free(item_flex_basis);
+        return;
+    }
+
+    int total_initial_size = 0;
+    int total_margin_size = 0;
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
+    // CSS Flexbox §9.7: Initialize items and freeze inflexible ones
+    // Inflexible items = those with flex factor 0 in the relevant direction
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = (ViewElement*)line->items[i]->as_element();
+        if (!item) continue;
+
+        // Store original flex-basis for scaled shrink calculation
         int basis = calculate_flex_basis(item, flex_layout);
-        item_flex_basis[i] = basis;  // Store for scaled shrink calculation
-        set_main_axis_size(item, basis, flex_layout);
-        total_basis_size += basis;
+        item_flex_basis[i] = basis;
+
+        // Calculate hypothetical main size (basis clamped by min/max constraints)
+        int hypothetical = calculate_hypothetical_main_size(item, flex_layout);
+
+        // Check if item is inflexible (has 0 flex factor in ALL directions)
+        bool is_inflexible = (!item->fi || 
+                              (item->fi->flex_grow == 0 && item->fi->flex_shrink == 0));
+
+        if (is_inflexible) {
+            // Inflexible items are frozen at their hypothetical main size
+            set_main_axis_size(item, hypothetical, flex_layout);
+            frozen[i] = true;
+            total_initial_size += hypothetical;
+            log_debug("ITERATIVE_FLEX - item %d: PRE-FROZEN (inflexible), size=%d", i, hypothetical);
+        } else {
+            // Flexible items start at their flex-basis (will be adjusted during distribution)
+            set_main_axis_size(item, basis, flex_layout);
+            total_initial_size += basis;
+            log_debug("ITERATIVE_FLEX - item %d: FLEXIBLE (grow=%.2f, shrink=%.2f), basis=%d",
+                      i, item->fi->flex_grow, item->fi->flex_shrink, basis);
+        }
 
         // Add margins in the main axis direction
         if (item->bound) {
@@ -1820,27 +1851,20 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     // Calculate gap space
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
 
-    // Calculate free space: container size minus item basis sizes minus margins minus gap space
-    // Per CSS Flexbox spec, margins are part of the item's outer size
-    int free_space = container_main_size - total_basis_size - total_margin_size - gap_space;
+    // Calculate initial free space
+    int free_space = container_main_size - total_initial_size - total_margin_size - gap_space;
     line->free_space = free_space;
 
-    log_debug("FLEX FREE_SPACE: container=%d, basis=%d, margins=%d, gaps=%d, free=%d",
-              container_main_size, total_basis_size, total_margin_size, gap_space, free_space);
+    log_debug("FLEX FREE_SPACE: container=%d, initial=%d, margins=%d, gaps=%d, free=%d",
+              container_main_size, total_initial_size, total_margin_size, gap_space, free_space);
 
-    log_info("ITERATIVE_FLEX START - container=%d, basis=%d, gap=%d, free_space=%d",
-              container_main_size, total_basis_size, gap_space, free_space);
+    log_info("ITERATIVE_FLEX START - container=%d, initial=%d, gap=%d, free_space=%d",
+              container_main_size, total_initial_size, gap_space, free_space);
 
     if (free_space == 0) {
         free(item_flex_basis);
+        free(frozen);
         return;  // No space to distribute
-    }
-
-    // Track which items are frozen (hit their constraints)
-    bool* frozen = (bool*)calloc(line->item_count, sizeof(bool));
-    if (!frozen) {
-        free(item_flex_basis);
-        return;
     }
 
     // ITERATIVE CONSTRAINT RESOLUTION ALGORITHM
@@ -1899,9 +1923,19 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             break;  // All items frozen or no flexible items
         }
 
-        // Distribute remaining free space to unfrozen items
-        bool any_frozen_this_iteration = false;
-        int total_distributed = 0;
+        // CSS Flexbox §9.7 Step 5: Calculate target sizes for unfrozen items
+        // Store target sizes and violation info for two-phase freezing
+        int* target_sizes = (int*)calloc(line->item_count, sizeof(int));
+        int* clamped_sizes = (int*)calloc(line->item_count, sizeof(int));
+        bool* has_min_violation = (bool*)calloc(line->item_count, sizeof(bool));
+        bool* has_max_violation = (bool*)calloc(line->item_count, sizeof(bool));
+        
+        if (!target_sizes || !clamped_sizes || !has_min_violation || !has_max_violation) {
+            free(target_sizes); free(clamped_sizes); free(has_min_violation); free(has_max_violation);
+            break;
+        }
+
+        int total_violation = 0;
 
         for (int i = 0; i < line->item_count; i++) {
             if (frozen[i]) continue;
@@ -1914,66 +1948,94 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
             if (is_growing && item->fi->flex_grow > 0) {
                 // FLEX-GROW: Distribute positive free space
-                // Per CSS Flexbox spec: when sum(flex_grow) < 1.0, only distribute
-                // sum * free_space instead of all free space
-                // The distribution ratio is still normalized by total_flex_factor
                 double effective_free_space = (total_flex_factor < 1.0)
-                    ? remaining_free_space * total_flex_factor  // Distribute only sum * free_space
-                    : remaining_free_space;                     // Distribute all if sum >= 1
-
-                // Always normalize the ratio by total_flex_factor
+                    ? remaining_free_space * total_flex_factor
+                    : remaining_free_space;
                 double grow_ratio = item->fi->flex_grow / total_flex_factor;
                 int grow_amount = (int)round(grow_ratio * effective_free_space);
                 target_size = current_size + grow_amount;
-                total_distributed += grow_amount;
 
-                log_debug("ITERATIVE_FLEX - item %d: total_flex=%.2f, effective_free=%.1f, grow_ratio=%.4f, grow_amount=%d, %d→%d",
-                          i, total_flex_factor, effective_free_space, grow_ratio, grow_amount, current_size, target_size);
+                log_debug("ITERATIVE_FLEX - item %d: grow_ratio=%.4f, grow_amount=%d, %d→%d",
+                          i, grow_ratio, grow_amount, current_size, target_size);
 
             } else if (is_shrinking && item->fi->flex_shrink > 0) {
                 // FLEX-SHRINK: Distribute negative space using scaled shrink factor
-                // Per CSS spec: scaled_flex_shrink_factor = flex_shrink × flex_base_size
-                // shrink_ratio = scaled_flex_shrink_factor / sum(all scaled factors)
                 int flex_basis = item_flex_basis[i];
                 double scaled_shrink = (double)flex_basis * item->fi->flex_shrink;
                 double shrink_ratio = scaled_shrink / total_scaled_shrink;
                 int shrink_amount = (int)round(shrink_ratio * (-remaining_free_space));
                 target_size = current_size - shrink_amount;
-                total_distributed -= shrink_amount;
 
-                log_debug("FLEX_SHRINK - item %d: flex_basis=%d, flex_shrink=%.2f, scaled=%.2f, ratio=%.4f, shrink=%d, %d→%d",
-                          i, flex_basis, item->fi->flex_shrink, scaled_shrink, shrink_ratio, shrink_amount, current_size, target_size);
+                log_debug("FLEX_SHRINK - item %d: shrink_ratio=%.4f, shrink=%d, %d→%d",
+                          i, shrink_ratio, shrink_amount, current_size, target_size);
             }
 
-            // Check constraints and freeze if violated (using consolidated function)
+            target_sizes[i] = target_size;
+
+            // Step 5c: Clamp and detect violations
             bool hit_min = false, hit_max = false;
-            int clamped_size = apply_flex_constraint(item, target_size, true, flex_layout, &hit_min, &hit_max);
-            bool hit_constraint = hit_min || hit_max;
+            int clamped = apply_flex_constraint(item, target_size, true, flex_layout, &hit_min, &hit_max);
+            clamped_sizes[i] = clamped;
 
-            if (hit_constraint) {
-                log_debug("ITERATIVE_FLEX - item %d: HIT %s CONSTRAINT %d (wanted %d)",
-                          i, hit_min ? "MIN" : "MAX", clamped_size, target_size);
+            // Track violation type and amount
+            int adjustment = clamped - target_size;
+            if (adjustment > 0) {
+                has_min_violation[i] = true;  // Made larger by min constraint
+                log_debug("ITERATIVE_FLEX - item %d: MIN violation, %d→%d (+%d)", i, target_size, clamped, adjustment);
+            } else if (adjustment < 0) {
+                has_max_violation[i] = true;  // Made smaller by max constraint
+                log_debug("ITERATIVE_FLEX - item %d: MAX violation, %d→%d (%d)", i, target_size, clamped, adjustment);
+            }
+            total_violation += adjustment;
+        }
+
+        // Step 6: Freeze over-flexed items based on total violation direction
+        // - Positive total: freeze items with min violations
+        // - Negative total: freeze items with max violations
+        // - Zero total: freeze all items (converged)
+        log_debug("ITERATIVE_FLEX - total_violation=%d", total_violation);
+
+        bool any_frozen_this_iteration = false;
+        for (int i = 0; i < line->item_count; i++) {
+            if (frozen[i]) continue;
+
+            ViewElement* item = (ViewElement*)line->items[i]->as_element();
+            if (!item) continue;
+
+            bool should_freeze = false;
+            if (total_violation == 0) {
+                should_freeze = true;  // Converged - freeze all
+            } else if (total_violation > 0 && has_min_violation[i]) {
+                should_freeze = true;  // Positive total - freeze min violations
+            } else if (total_violation < 0 && has_max_violation[i]) {
+                should_freeze = true;  // Negative total - freeze max violations
             }
 
-            set_main_axis_size(item, clamped_size, flex_layout);
+            // Apply the clamped size
+            set_main_axis_size(item, clamped_sizes[i], flex_layout);
 
-            if (hit_constraint) {
+            if (should_freeze) {
                 frozen[i] = true;
                 any_frozen_this_iteration = true;
-                log_debug("ITERATIVE_FLEX - item %d: FROZEN at size %d", i, clamped_size);
+                log_debug("ITERATIVE_FLEX - item %d: FROZEN at size %d", i, clamped_sizes[i]);
             }
 
             // Adjust cross axis size based on aspect ratio
-            if (item->fi->aspect_ratio > 0) {
+            if (item->fi && item->fi->aspect_ratio > 0) {
                 if (is_main_axis_horizontal(flex_layout)) {
-                    item->height = (int)(clamped_size / item->fi->aspect_ratio);
+                    item->height = (int)(clamped_sizes[i] / item->fi->aspect_ratio);
                 } else {
-                    item->width = (int)(clamped_size * item->fi->aspect_ratio);
+                    item->width = (int)(clamped_sizes[i] * item->fi->aspect_ratio);
                 }
             }
         }
 
-        // If no items were frozen this iteration, we're done
+        free(target_sizes);
+        free(clamped_sizes);
+        free(has_min_violation);
+        free(has_max_violation);
+
+        // If no items were frozen this iteration (total_violation was 0), we're done
         if (!any_frozen_this_iteration) {
             log_debug("ITERATIVE_FLEX - converged after %d iterations", iteration);
             break;
