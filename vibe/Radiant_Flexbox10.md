@@ -6,14 +6,14 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 
 ---
 
-## 0. Progress Summary (Updated: Dec 13, 2025)
+## 0. Progress Summary (Updated: Dec 14, 2025)
 
 ### Current Test Status
 
 | Suite | Tests | Passing | Rate |
 |-------|-------|---------|------|
-| **Baseline** | 1262 | 1262 | 100% ✅ |
-| **Flex** | 339 | 68 | 20.1% |
+| **Baseline** | 1330 | 1330 | 100% ✅ |
+| **Flex** | 271 | 5 (100%) / 125 (75%+) | 1.8% / 46% |
 | **Grid** | 228 | 0 | 0% |
 
 ### Completed Tasks
@@ -53,6 +53,13 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
    - Check `align-self` override on individual items
    - Account for margins correctly in static position calculation (start vs end margins)
    - **Result**: 68 flex tests passing (up from 52, +31% improvement)
+9. ✅ **Phase 6 Fixes** - Main axis definiteness detection:
+   - Fixed `main_axis_is_indefinite` for containers with `max-width` constraint
+   - When max-width is actively constraining (content_width == max_width), treat as definite
+   - Block-level flex containers in normal flow inherit definite width from containing block
+   - Only inline-block/inline and absolute elements with auto width are truly indefinite
+   - **Impact**: sample5.html hero section now has proper widths (was 0)
+   - **Result**: 125 flex tests at 75%+ match rate (up from 124)
 
 ### Phase 2-5 Passing Tests (68 tests)
 
@@ -594,4 +601,3 @@ make layout suite=baseline 2>&1 | grep -E "Category Summary|Successful|Failed"
 - [CSS Flexbox Level 1 Spec](https://www.w3.org/TR/css-flexbox-1/)
 - [Taffy Source Code](https://github.com/DioxusLabs/taffy/blob/main/src/compute/flexbox.rs)
 - [Radiant Layout Design Doc](../doc/Radiant_Layout_Design.md)
-
