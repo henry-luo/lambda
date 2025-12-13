@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Grid Responsive Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));\n            grid-template-rows: minmax(80px, auto) 1fr minmax(60px, auto);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .header { \n            background-color: #ffcccc; \n            grid-column: 1 / -1;\n        }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .footer { \n            background-color: #ffccff; \n            grid-column: 1 / -1;\n        }\n    \n\n\n    \n        Responsive Header\n        Auto 1\n        Auto 2\n        Auto 3\n        Responsive Footer\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_019_responsive\",\n        \"category\": \"advanced\",\n        \"features\": [\"auto-fit\", \"minmax\", \"responsive-design\", \"flexible-layout\"],\n        \"description\": \"Responsive grid layout that adapts to container size with flexible columns\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"advanced\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Grid Responsive Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));\n            grid-template-rows: minmax(80px, auto) 1fr minmax(60px, auto);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .header { \n            background-color: #ffcccc; \n            grid-column: 1 / -1;\n        }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .footer { \n            background-color: #ffccff; \n            grid-column: 1 / -1;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Grid Responsive Layout",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Grid Responsive Layout",
+                "length": 28,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));\n            grid-template-rows: minmax(80px, auto) 1fr minmax(60px, auto);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .header { \n            background-color: #ffcccc; \n            grid-column: 1 / -1;\n        }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .footer { \n            background-color: #ffccff; \n            grid-column: 1 / -1;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));\n            grid-template-rows: minmax(80px, auto) 1fr minmax(60px, auto);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .header { \n            background-color: #ffcccc; \n            grid-column: 1 / -1;\n        }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .footer { \n            background-color: #ffccff; \n            grid-column: 1 / -1;\n        }\n    ",
+                "length": 1083,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Responsive Header\n        Auto 1\n        Auto 2\n        Auto 3\n        Responsive Footer\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_019_responsive\",\n        \"category\": \"advanced\",\n        \"features\": [\"auto-fit\", \"minmax\", \"responsive-design\", \"flexible-layout\"],\n        \"description\": \"Responsive grid layout that adapts to container size with flexible columns\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"advanced\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Responsive Header\n        Auto 1\n        Auto 2\n        Auto 3\n        Responsive Footer",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 5,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.item.header:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -569,33 +668,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Responsive Header",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Responsive Header",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 138.52,
-                        "y": 22,
-                        "width": 122.97,
-                        "height": 16,
-                        "right": 261.48,
-                        "bottom": 38
-                      }
-                    ],
                     "length": 17,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 17
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 138.52,
+                          "y": 22,
+                          "width": 122.97,
+                          "height": 16,
+                          "right": 261.48,
+                          "bottom": 38,
+                          "text": "Responsive Header",
+                          "startIndex": 0,
+                          "endIndex": 17
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -653,33 +760,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Auto 1",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Auto 1",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 35,
-                        "y": 112,
-                        "width": 40.48,
-                        "height": 16,
-                        "right": 75.48,
-                        "bottom": 128
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 35,
+                          "y": 112,
+                          "width": 40.48,
+                          "height": 16,
+                          "right": 75.48,
+                          "bottom": 128,
+                          "text": "Auto 1",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -737,33 +852,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Auto 2",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Auto 2",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 131.5,
-                        "y": 112,
-                        "width": 40.48,
-                        "height": 16,
-                        "right": 171.98,
-                        "bottom": 128
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 131.5,
+                          "y": 112,
+                          "width": 40.48,
+                          "height": 16,
+                          "right": 171.98,
+                          "bottom": 128,
+                          "text": "Auto 2",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -821,33 +944,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Auto 3",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 7,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Auto 3",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 228,
-                        "y": 112,
-                        "width": 40.48,
-                        "height": 16,
-                        "right": 268.48,
-                        "bottom": 128
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 228,
+                          "y": 112,
+                          "width": 40.48,
+                          "height": 16,
+                          "right": 268.48,
+                          "bottom": 128,
+                          "text": "Auto 3",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item.footer:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -906,35 +1037,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Responsive Footer",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 9,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Responsive Footer",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 141.23,
-                        "y": 238,
-                        "width": 117.52,
-                        "height": 16,
-                        "right": 258.75,
-                        "bottom": 254
-                      }
-                    ],
                     "length": 17,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 17
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 141.23,
+                          "y": 238,
+                          "width": 117.52,
+                          "height": 16,
+                          "right": 258.75,
+                          "bottom": 254,
+                          "text": "Responsive Footer",
+                          "startIndex": 0,
+                          "endIndex": 17
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -990,12 +1129,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"grid_019_responsive\",\n        \"category\": \"advanced\",\n        \"features\": [\"auto-fit\", \"minmax\", \"responsive-design\", \"flexible-layout\"],\n        \"description\": \"Responsive grid layout that adapts to container size with flexible columns\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"advanced\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"grid_019_responsive\",\n        \"category\": \"advanced\",\n        \"features\": [\"auto-fit\", \"minmax\", \"responsive-design\", \"flexible-layout\"],\n        \"description\": \"Responsive grid layout that adapts to container size with flexible columns\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"advanced\"\n    }\n    ",
+                "length": 391,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

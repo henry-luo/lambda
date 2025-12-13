@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Grid Line Numbers\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(4, 1fr);\n            grid-template-rows: repeat(3, 1fr);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .item:nth-child(1) { \n            background-color: #ffcccc; \n            grid-column: 1 / 3;\n            grid-row: 1 / 2;\n        }\n        .item:nth-child(2) { \n            background-color: #ccffcc; \n            grid-column: 3 / 5;\n            grid-row: 1 / 3;\n        }\n        .item:nth-child(3) { \n            background-color: #ccccff; \n            grid-column: 1 / 2;\n            grid-row: 2 / 4;\n        }\n        .item:nth-child(4) { \n            background-color: #ffffcc; \n            grid-column: 2 / 4;\n            grid-row: 3 / 4;\n        }\n    \n\n\n    \n        1/3, 1/2\n        3/5, 1/3\n        1/2, 2/4\n        2/4, 3/4\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_008_line_numbers\",\n        \"category\": \"basic\",\n        \"features\": [\"grid-column\", \"grid-row\", \"line-numbers\", \"explicit-placement\"],\n        \"description\": \"Grid items positioned using explicit line numbers for precise placement\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#line-placement\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Grid Line Numbers\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(4, 1fr);\n            grid-template-rows: repeat(3, 1fr);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .item:nth-child(1) { \n            background-color: #ffcccc; \n            grid-column: 1 / 3;\n            grid-row: 1 / 2;\n        }\n        .item:nth-child(2) { \n            background-color: #ccffcc; \n            grid-column: 3 / 5;\n            grid-row: 1 / 3;\n        }\n        .item:nth-child(3) { \n            background-color: #ccccff; \n            grid-column: 1 / 2;\n            grid-row: 2 / 4;\n        }\n        .item:nth-child(4) { \n            background-color: #ffffcc; \n            grid-column: 2 / 4;\n            grid-row: 3 / 4;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Grid Line Numbers",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Grid Line Numbers",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(4, 1fr);\n            grid-template-rows: repeat(3, 1fr);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .item:nth-child(1) { \n            background-color: #ffcccc; \n            grid-column: 1 / 3;\n            grid-row: 1 / 2;\n        }\n        .item:nth-child(2) { \n            background-color: #ccffcc; \n            grid-column: 3 / 5;\n            grid-row: 1 / 3;\n        }\n        .item:nth-child(3) { \n            background-color: #ccccff; \n            grid-column: 1 / 2;\n            grid-row: 2 / 4;\n        }\n        .item:nth-child(4) { \n            background-color: #ffffcc; \n            grid-column: 2 / 4;\n            grid-row: 3 / 4;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(4, 1fr);\n            grid-template-rows: repeat(3, 1fr);\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .item:nth-child(1) { \n            background-color: #ffcccc; \n            grid-column: 1 / 3;\n            grid-row: 1 / 2;\n        }\n        .item:nth-child(2) { \n            background-color: #ccffcc; \n            grid-column: 3 / 5;\n            grid-row: 1 / 3;\n        }\n        .item:nth-child(3) { \n            background-color: #ccccff; \n            grid-column: 1 / 2;\n            grid-row: 2 / 4;\n        }\n        .item:nth-child(4) { \n            background-color: #ffffcc; \n            grid-column: 2 / 4;\n            grid-row: 3 / 4;\n        }\n    ",
+                "length": 1221,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "1/3, 1/2\n        3/5, 1/3\n        1/2, 2/4\n        2/4, 3/4\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_008_line_numbers\",\n        \"category\": \"basic\",\n        \"features\": [\"grid-column\", \"grid-row\", \"line-numbers\", \"explicit-placement\"],\n        \"description\": \"Grid items positioned using explicit line numbers for precise placement\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#line-placement\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "1/3, 1/2\n        3/5, 1/3\n        1/2, 2/4\n        2/4, 3/4",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 4,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +667,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "1/3, 1/2",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "1/3, 1/2",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 83.48,
-                        "y": 22,
-                        "width": 40.03,
-                        "height": 14,
-                        "right": 123.52,
-                        "bottom": 36
-                      }
-                    ],
                     "length": 8,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 8
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 83.48,
+                          "y": 22,
+                          "width": 40.03,
+                          "height": 14,
+                          "right": 123.52,
+                          "bottom": 36,
+                          "text": "1/3, 1/2",
+                          "startIndex": 0,
+                          "endIndex": 8
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,33 +759,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "3/5, 1/3",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "3/5, 1/3",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 276.48,
-                        "y": 22,
-                        "width": 40.03,
-                        "height": 14,
-                        "right": 316.52,
-                        "bottom": 36
-                      }
-                    ],
                     "length": 8,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 8
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 276.48,
+                          "y": 22,
+                          "width": 40.03,
+                          "height": 14,
+                          "right": 316.52,
+                          "bottom": 36,
+                          "text": "3/5, 1/3",
+                          "startIndex": 0,
+                          "endIndex": 8
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -736,33 +851,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "1/2, 2/4",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "1/2, 2/4",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 35.23,
-                        "y": 117.33,
-                        "width": 40.03,
-                        "height": 14,
-                        "right": 75.27,
-                        "bottom": 131.33
-                      }
-                    ],
                     "length": 8,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 8
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 35.23,
+                          "y": 117.33,
+                          "width": 40.03,
+                          "height": 14,
+                          "right": 75.27,
+                          "bottom": 131.33,
+                          "text": "1/2, 2/4",
+                          "startIndex": 0,
+                          "endIndex": 8
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -820,35 +943,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "2/4, 3/4",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 7,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "2/4, 3/4",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 179.98,
-                        "y": 212.66,
-                        "width": 40.03,
-                        "height": 14,
-                        "right": 220.02,
-                        "bottom": 226.66
-                      }
-                    ],
                     "length": 8,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 8
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 179.98,
+                          "y": 212.66,
+                          "width": 40.03,
+                          "height": 14,
+                          "right": 220.02,
+                          "bottom": 226.66,
+                          "text": "2/4, 3/4",
+                          "startIndex": 0,
+                          "endIndex": 8
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -904,12 +1035,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"grid_008_line_numbers\",\n        \"category\": \"basic\",\n        \"features\": [\"grid-column\", \"grid-row\", \"line-numbers\", \"explicit-placement\"],\n        \"description\": \"Grid items positioned using explicit line numbers for precise placement\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#line-placement\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"grid_008_line_numbers\",\n        \"category\": \"basic\",\n        \"features\": [\"grid-column\", \"grid-row\", \"line-numbers\", \"explicit-placement\"],\n        \"description\": \"Grid items positioned using explicit line numbers for precise placement\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#line-placement\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 393,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

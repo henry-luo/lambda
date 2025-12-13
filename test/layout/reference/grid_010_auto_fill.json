@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Grid Auto Fill\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));\n            grid-auto-rows: 80px;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }\n    \n\n\n    \n        Item 1\n        Item 2\n        Item 3\n        Item 4\n        Item 5\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_010_auto_fill\",\n        \"category\": \"basic\",\n        \"features\": [\"auto-fill\", \"minmax\", \"responsive-columns\"],\n        \"description\": \"Grid with auto-fill creating responsive columns based on available space\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Grid Auto Fill\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));\n            grid-auto-rows: 80px;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Grid Auto Fill",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Grid Auto Fill",
+                "length": 20,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));\n            grid-auto-rows: 80px;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));\n            grid-auto-rows: 80px;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }\n    ",
+                "length": 956,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Item 1\n        Item 2\n        Item 3\n        Item 4\n        Item 5\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_010_auto_fill\",\n        \"category\": \"basic\",\n        \"features\": [\"auto-fill\", \"minmax\", \"responsive-columns\"],\n        \"description\": \"Grid with auto-fill creating responsive columns based on available space\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Item 1\n        Item 2\n        Item 3\n        Item 4\n        Item 5",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 5,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +667,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Item 1",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Item 1",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 51.88,
-                        "y": 22,
-                        "width": 38.91,
-                        "height": 16,
-                        "right": 90.78,
-                        "bottom": 38
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 51.88,
+                          "y": 22,
+                          "width": 38.91,
+                          "height": 16,
+                          "right": 90.78,
+                          "bottom": 38,
+                          "text": "Item 1",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,33 +759,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Item 2",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Item 2",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 180.53,
-                        "y": 22,
-                        "width": 38.91,
-                        "height": 16,
-                        "right": 219.44,
-                        "bottom": 38
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 180.53,
+                          "y": 22,
+                          "width": 38.91,
+                          "height": 16,
+                          "right": 219.44,
+                          "bottom": 38,
+                          "text": "Item 2",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -736,33 +851,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Item 3",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Item 3",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 309.2,
-                        "y": 22,
-                        "width": 38.91,
-                        "height": 16,
-                        "right": 348.11,
-                        "bottom": 38
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 309.2,
+                          "y": 22,
+                          "width": 38.91,
+                          "height": 16,
+                          "right": 348.11,
+                          "bottom": 38,
+                          "text": "Item 3",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -820,33 +943,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Item 4",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 7,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Item 4",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 51.88,
-                        "y": 112,
-                        "width": 38.91,
-                        "height": 16,
-                        "right": 90.78,
-                        "bottom": 128
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 51.88,
+                          "y": 112,
+                          "width": 38.91,
+                          "height": 16,
+                          "right": 90.78,
+                          "bottom": 128,
+                          "text": "Item 4",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -904,35 +1035,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Item 5",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 9,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Item 5",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 180.53,
-                        "y": 112,
-                        "width": 38.91,
-                        "height": 16,
-                        "right": 219.44,
-                        "bottom": 128
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 180.53,
+                          "y": 112,
+                          "width": 38.91,
+                          "height": 16,
+                          "right": 219.44,
+                          "bottom": 128,
+                          "text": "Item 5",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -988,12 +1127,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"grid_010_auto_fill\",\n        \"category\": \"basic\",\n        \"features\": [\"auto-fill\", \"minmax\", \"responsive-columns\"],\n        \"description\": \"Grid with auto-fill creating responsive columns based on available space\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"grid_010_auto_fill\",\n        \"category\": \"basic\",\n        \"features\": [\"auto-fill\", \"minmax\", \"responsive-columns\"],\n        \"description\": \"Grid with auto-fill creating responsive columns based on available space\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#repeat-notation\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 372,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }
