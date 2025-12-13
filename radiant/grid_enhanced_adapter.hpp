@@ -258,7 +258,8 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index) {
     int col_end = gi->grid_column_end;
     int col_span = get_span_value(col_start, col_end);
 
-    if (col_start > 0) {
+    if (col_start != 0) {
+        // Definite start position (positive or negative line number)
         info.column = GridPlacement::FromStartSpan(static_cast<int16_t>(col_start),
                                                     static_cast<uint16_t>(col_span));
     } else if (col_end < 0) {
@@ -273,7 +274,8 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index) {
     int row_end = gi->grid_row_end;
     int row_span = get_span_value(row_start, row_end);
 
-    if (row_start > 0) {
+    if (row_start != 0) {
+        // Definite start position (positive or negative line number)
         info.row = GridPlacement::FromStartSpan(static_cast<int16_t>(row_start),
                                                  static_cast<uint16_t>(row_span));
     } else if (row_end < 0) {
@@ -288,17 +290,26 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index) {
 
 /**
  * Apply placement result back to ViewBlock's GridItemProp
+ *
+ * @param item The ViewBlock to update
+ * @param info The placement result
+ * @param neg_col_offset Negative implicit column offset (to shift OriginZero to final coords)
+ * @param neg_row_offset Negative implicit row offset
  */
-inline void apply_placement_to_item(ViewBlock* item, const GridItemInfo& info) {
+inline void apply_placement_to_item(ViewBlock* item, const GridItemInfo& info,
+                                    int neg_col_offset = 0, int neg_row_offset = 0) {
     if (!item || !item->gi) return;
 
     GridItemProp* gi = item->gi;
 
-    // Get resolved positions from the LineSpan (OriginZeroLine has .value member)
-    int col_start = info.resolved_column.start.value + 1;  // Convert to 1-based
-    int col_end = info.resolved_column.end.value + 1;
-    int row_start = info.resolved_row.start.value + 1;
-    int row_end = info.resolved_row.end.value + 1;
+    // Convert from OriginZero coordinates to 1-based final grid coordinates
+    // OriginZero(0) = first line of explicit grid
+    // With N negative implicit tracks, the explicit grid starts at final line (N+1)
+    // So: final_line = origin_zero_value + neg_implicit + 1
+    int col_start = info.resolved_column.start.value + neg_col_offset + 1;
+    int col_end = info.resolved_column.end.value + neg_col_offset + 1;
+    int row_start = info.resolved_row.start.value + neg_row_offset + 1;
+    int row_end = info.resolved_row.end.value + neg_row_offset + 1;
 
     gi->computed_grid_column_start = col_start;
     gi->computed_grid_column_end = col_end;
@@ -388,14 +399,16 @@ inline void place_items_with_occupancy(
         effective_col_count
     );
 
-    // Apply results back to ViewBlocks
-    for (size_t i = 0; i < item_infos.size(); i++) {
-        apply_placement_to_item(items[i], item_infos[i]);
-    }
-
-    // Update grid layout with final track counts from matrix
+    // Get final track counts from matrix (includes negative implicit tracks)
     TrackCounts final_col_counts = matrix.track_counts(AbsoluteAxis::Horizontal);
     TrackCounts final_row_counts = matrix.track_counts(AbsoluteAxis::Vertical);
+
+    // Apply results back to ViewBlocks with offset for negative implicit tracks
+    int neg_col_offset = final_col_counts.negative_implicit;
+    int neg_row_offset = final_row_counts.negative_implicit;
+    for (size_t i = 0; i < item_infos.size(); i++) {
+        apply_placement_to_item(items[i], item_infos[i], neg_col_offset, neg_row_offset);
+    }
 
     int total_columns = final_col_counts.negative_implicit +
                         final_col_counts.explicit_count +
@@ -408,6 +421,10 @@ inline void place_items_with_occupancy(
     grid_layout->implicit_row_count = total_rows - grid_layout->explicit_row_count;
     grid_layout->computed_column_count = total_columns;
     grid_layout->computed_row_count = total_rows;
+
+    // Store negative implicit counts for track sizing
+    grid_layout->negative_implicit_row_count = final_row_counts.negative_implicit;
+    grid_layout->negative_implicit_column_count = final_col_counts.negative_implicit;
 }
 
 // ============================================================================
