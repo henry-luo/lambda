@@ -518,6 +518,12 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
 
     log_debug(" auto_place_grid_item called for item %p\n", item);
 
+    // Check if item has explicit column or row positioning
+    bool has_explicit_column = (item->gi->computed_grid_column_start > 0);
+    bool has_explicit_row = (item->gi->computed_grid_row_start > 0);
+
+    log_debug(" Explicit positioning: column=%d, row=%d\n", has_explicit_column, has_explicit_row);
+
     // Use grid_layout to track current auto-placement cursor
     // Note: These are initialized to 1 in init_grid_container_layout
 
@@ -528,9 +534,16 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
     // Check if computed_grid_column_end has a span value (negative)
     if (item->gi->computed_grid_column_end < 0) {
         col_span = -item->gi->computed_grid_column_end;
+    } else if (has_explicit_column) {
+        // Calculate span from explicit start/end
+        col_span = item->gi->computed_grid_column_end - item->gi->computed_grid_column_start;
     }
+
     if (item->gi->computed_grid_row_end < 0) {
         row_span = -item->gi->computed_grid_row_end;
+    } else if (has_explicit_row) {
+        // Calculate span from explicit start/end
+        row_span = item->gi->computed_grid_row_end - item->gi->computed_grid_row_start;
     }
 
     log_debug(" Item span: %d cols x %d rows\n", col_span, row_span);
@@ -553,6 +566,37 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
     log_debug(" Grid dimensions for auto-placement: %dx%d (cols x rows)\n", max_columns, max_rows);
     log_debug(" Current cursor: row=%d, col=%d\n", grid_layout->auto_row_cursor, grid_layout->auto_col_cursor);
 
+    // Handle explicit column with auto row (e.g., "grid-column: 1 / span 2")
+    if (has_explicit_column && !has_explicit_row) {
+        log_debug(" Semi-explicit: column %d-%d explicit, finding row\n",
+                  item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
+        // Column is already set, just find first available row
+        item->gi->computed_grid_row_start = grid_layout->auto_row_cursor;
+        item->gi->computed_grid_row_end = grid_layout->auto_row_cursor + row_span;
+        // Advance row cursor
+        grid_layout->auto_row_cursor += row_span;
+        log_debug(" Placed at row %d-%d\n", item->gi->computed_grid_row_start, item->gi->computed_grid_row_end);
+        return;
+    }
+
+    // Handle explicit row with auto column (e.g., "grid-row: 2 / span 3")
+    if (has_explicit_row && !has_explicit_column) {
+        log_debug(" Semi-explicit: row %d-%d explicit, finding column\n",
+                  item->gi->computed_grid_row_start, item->gi->computed_grid_row_end);
+        // Row is already set, just find first available column
+        item->gi->computed_grid_column_start = grid_layout->auto_col_cursor;
+        item->gi->computed_grid_column_end = grid_layout->auto_col_cursor + col_span;
+        // Advance column cursor
+        grid_layout->auto_col_cursor += col_span;
+        if (grid_layout->auto_col_cursor > max_columns) {
+            grid_layout->auto_col_cursor = 1;
+            grid_layout->auto_row_cursor++;
+        }
+        log_debug(" Placed at column %d-%d\n", item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
+        return;
+    }
+
+    // Fully automatic placement (no explicit row or column)
     if (grid_layout->grid_auto_flow == CSS_VALUE_ROW) {
         // Place items row by row (default behavior)
         // Find a position where the item fits with its span
