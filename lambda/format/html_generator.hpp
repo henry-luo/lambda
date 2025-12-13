@@ -52,6 +52,9 @@ public:
     // Create div element
     void div(const char* attrs = nullptr);
     
+    // Create div element with style only
+    void divWithStyle(const char* style_value);
+    
     // Create div element with class and style
     void divWithClassAndStyle(const char* css_class, const char* style_value);
     
