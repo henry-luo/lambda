@@ -73,6 +73,10 @@
           "named": true
         },
         {
+          "type": "placeholder",
+          "named": true
+        },
+        {
           "type": "space",
           "named": true
         },
@@ -118,11 +122,6 @@
     }
   },
   {
-    "type": "control_symbol",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "curly_group",
     "named": true,
     "fields": {},
@@ -152,6 +151,10 @@
         },
         {
           "type": "math",
+          "named": true
+        },
+        {
+          "type": "placeholder",
           "named": true
         },
         {
@@ -403,7 +406,15 @@
           "named": true
         },
         {
+          "type": "line_comment",
+          "named": true
+        },
+        {
           "type": "math",
+          "named": true
+        },
+        {
+          "type": "placeholder",
           "named": true
         },
         {
@@ -490,6 +501,10 @@
         },
         {
           "type": "command",
+          "named": true
+        },
+        {
+          "type": "control_symbol",
           "named": true
         },
         {
@@ -594,10 +609,6 @@
     "named": false
   },
   {
-    "type": "\\",
-    "named": false
-  },
-  {
     "type": "\\(",
     "named": false
   },
@@ -642,6 +653,10 @@
     "named": true
   },
   {
+    "type": "control_symbol",
+    "named": true
+  },
+  {
     "type": "line_comment",
     "named": true
   },
@@ -651,6 +666,10 @@
   },
   {
     "type": "paragraph_break",
+    "named": true
+  },
+  {
+    "type": "placeholder",
     "named": true
   },
   {
