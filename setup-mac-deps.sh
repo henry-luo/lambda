@@ -1102,7 +1102,6 @@ HOMEBREW_DEPS=(
     "utf8proc"   # For Unicode processing - referenced in build config
     "coreutils"  # For timeout command needed by test suite
     "mbedtls"    # For SSL/TLS support - replaced OpenSSL with mbedTLS
-    "libharu"    # For PDF generation - referenced in build config
 )
 
 # Note: libcurl will be rebuilt with mbedTLS support (see build_curl_with_http2_for_mac)
