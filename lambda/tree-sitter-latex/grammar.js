@@ -41,12 +41,18 @@ module.exports = grammar({
   name: 'latex',
   extras: $ => [$.line_comment],  // whitespace is now significant!
   
+  // PHASE 8: Add inline rules to reduce parser states
+  // Inline rules are substituted directly into usage sites, eliminating intermediate states
+  // Note: Be careful - inlining complex rules can cause conflicts
+  inline: $ => [
+    $._section_part,
+    $._glob_pattern_fragment,
+    $._math_delimiter_part,
+  ],
+  
   conflicts: $ => [
     // Allow paragraph_break to interrupt text
     [$._text_content, $.text],
-    // Allow counter_value to appear in counter rules
-    [$._command, $.counter_definition],
-    [$._command, $.counter_addition],
   ],
   
   externals: $ => [
@@ -55,13 +61,9 @@ module.exports = grammar({
     $._trivia_raw_env_verbatim,
     $._trivia_raw_env_listing,
     $._trivia_raw_env_minted,
-    $._trivia_raw_env_asy,
-    $._trivia_raw_env_asydef,
-    $._trivia_raw_env_pycode,
-    $._trivia_raw_env_luacode,
-    $._trivia_raw_env_luacode_star,
-    $._trivia_raw_env_sagesilent,
-    $._trivia_raw_env_sageblock,
+    $._trivia_raw_env_asy,      // Used for asy, asydef
+    $._trivia_raw_env_pycode,   // Used for pycode, luacode, luacode*
+    $._trivia_raw_env_sagesilent,  // Used for sagesilent, sageblock
   ],
   word: $ => $.command_name,
   rules: {
@@ -108,12 +110,9 @@ module.exports = grammar({
         $.verbatim_environment,
         $.listing_environment,
         $.minted_environment,
-        $.asy_environment,
-        $.asydef_environment,
-        $.pycode_environment,
-        $.luacode_environment,
-        $.sagesilent_environment,
-        $.sageblock_environment,
+        $.asy_environment,     // Unified: handles asy, asydef
+        $.code_environment,    // Unified: handles pycode, luacode, luacode*
+        $.sage_environment,    // Unified: handles sagesilent, sageblock
         $.generic_environment,
         $.math_environment,
         $._text_content,
@@ -134,194 +133,137 @@ module.exports = grammar({
       ),
 
     //--- Sections
+    // PHASE 9: Flattened section structure
+    // Instead of enforcing part → chapter → section hierarchy at parse time,
+    // we use a flat structure. The hierarchy is built in AST builder.
+    // This dramatically reduces parser states.
 
     _section: $ =>
-      prec.right(
-        choice(
-          repeat1($.part),
-          repeat1($.chapter),
-          repeat1($.section),
-          repeat1($.subsection),
-          repeat1($.subsubsection),
-        ),
-      ),
+      prec.right(repeat1($._any_section)),
+
+    _any_section: $ => choice(
+      $.part,
+      $.chapter,
+      $.section,
+      $.subsection,
+      $.subsubsection,
+    ),
 
     _paragraph: $ =>
-      prec.right(
-        choice(
-          repeat1($.paragraph),
-          repeat1($.subparagraph),
-          repeat1($.enum_item),
-        ),
-      ),
+      prec.right(repeat1($._any_paragraph)),
+
+    _any_paragraph: $ => choice(
+      $.paragraph,
+      $.subparagraph,
+      $.enum_item,
+    ),
 
     _section_part: $ =>
       seq(field('toc', optional($.brack_group)), field('text', $.curly_group)),
 
+    // OPTIMIZED: Using regex for part commands
     _part_declaration: $ =>
       prec.right(
         seq(
           field(
             'command',
-            choice('\\part', '\\part*', '\\addpart', '\\addpart*'),
+            token(prec(1, /\\(part|part\*|addpart|addpart\*)/)),
           ),
           optional($._section_part),
         ),
       ),
 
+    // PHASE 9: Simplified part - flat structure, no nested hierarchy
     part: $ =>
-      prec.right(
-        -1,
-        seq(
-          $._part_declaration,
-          repeat($._flat_content),
-          optional(prec.right(-1, $._paragraph)),
-          optional(
-            prec.right(
-              choice(
-                repeat1($.chapter),
-                repeat1($.section),
-                repeat1($.subsection),
-                repeat1($.subsubsection),
-              ),
-            ),
-          ),
-        ),
-      ),
+      prec.right(-1, seq($._part_declaration, repeat($._flat_content))),
 
+    // OPTIMIZED: Using regex for chapter commands
     _chapter_declaration: $ =>
       prec.right(
         seq(
           field(
             'command',
-            choice('\\chapter', '\\chapter*', '\\addchap', '\\addchap*'),
+            token(prec(1, /\\(chapter|chapter\*|addchap|addchap\*)/)),
           ),
           optional($._section_part),
         ),
       ),
 
+    // PHASE 9: Simplified chapter - flat structure
     chapter: $ =>
-      prec.right(
-        -1,
-        seq(
-          $._chapter_declaration,
-          repeat($._flat_content),
-          optional(prec.right(-1, $._paragraph)),
-          optional(
-            prec.right(
-              choice(
-                repeat1($.section),
-                repeat1($.subsection),
-                repeat1($.subsubsection),
-              ),
-            ),
-          ),
-        ),
-      ),
+      prec.right(-1, seq($._chapter_declaration, repeat($._flat_content))),
 
+    // OPTIMIZED: Using regex for section commands
     _section_declaration: $ =>
       prec.right(
         seq(
           field(
             'command',
-            choice('\\section', '\\section*', '\\addsec', '\\addsec*'),
+            token(prec(1, /\\(section|section\*|addsec|addsec\*)/)),
           ),
           optional($._section_part),
         ),
       ),
 
+    // PHASE 9: Simplified section - flat structure
     section: $ =>
-      prec.right(
-        -1,
-        seq(
-          $._section_declaration,
-          repeat($._flat_content),
-          optional(prec.right(-1, $._paragraph)),
-          optional(
-            prec.right(choice(repeat1($.subsection), repeat1($.subsubsection))),
-          ),
-        ),
-      ),
+      prec.right(-1, seq($._section_declaration, repeat($._flat_content))),
 
+    // OPTIMIZED: Using regex for subsection commands
     _subsection_declaration: $ =>
       prec.right(
         seq(
-          field('command', choice('\\subsection', '\\subsection*')),
+          field('command', token(prec(1, /\\subsection\*?/))),
           optional($._section_part),
         ),
       ),
 
+    // PHASE 9: Simplified subsection - flat structure
     subsection: $ =>
-      prec.right(
-        -1,
-        seq(
-          $._subsection_declaration,
-          repeat($._flat_content),
-          optional(prec.right(-1, $._paragraph)),
-          optional(prec.right(repeat1($.subsubsection))),
-        ),
-      ),
+      prec.right(-1, seq($._subsection_declaration, repeat($._flat_content))),
 
+    // OPTIMIZED: Using regex for subsubsection commands
     _subsubsection_declaration: $ =>
       prec.right(
         seq(
-          field('command', choice('\\subsubsection', '\\subsubsection*')),
+          field('command', token(prec(1, /\\subsubsection\*?/))),
           optional($._section_part),
         ),
       ),
 
+    // PHASE 9: Simplified subsubsection - flat structure
     subsubsection: $ =>
-      prec.right(
-        -1,
-        seq(
-          $._subsubsection_declaration,
-          repeat($._flat_content),
-          optional(prec.right(-1, $._paragraph)),
-        ),
-      ),
+      prec.right(-1, seq($._subsubsection_declaration, repeat($._flat_content))),
 
+    // OPTIMIZED: Using regex for paragraph/subparagraph/item commands
     _paragraph_declaration: $ =>
       prec.right(
         seq(
-          field('command', choice('\\paragraph', '\\paragraph*')),
+          field('command', token(prec(1, /\\paragraph\*?/))),
           optional($._section_part),
         ),
       ),
 
+    // PHASE 9: Simplified paragraph
     paragraph: $ =>
-      prec.right(
-        -1,
-        seq(
-          $._paragraph_declaration,
-          repeat($._flat_content),
-          optional(
-            prec.right(choice(repeat1($.subparagraph), repeat1($.enum_item))),
-          ),
-        ),
-      ),
+      prec.right(-1, seq($._paragraph_declaration, repeat($._flat_content))),
 
     _subparagraph_declaration: $ =>
       prec.right(
         seq(
-          field('command', choice('\\subparagraph', '\\subparagraph*')),
+          field('command', token(prec(1, /\\subparagraph\*?/))),
           optional($._section_part),
         ),
       ),
 
+    // PHASE 9: Simplified subparagraph
     subparagraph: $ =>
-      prec.right(
-        -1,
-        seq(
-          $._subparagraph_declaration,
-          repeat($._flat_content),
-          optional(prec.right(choice(repeat1($.enum_item)))),
-        ),
-      ),
+      prec.right(-1, seq($._subparagraph_declaration, repeat($._flat_content))),
 
     _enum_itemdeclaration: $ =>
       prec.right(
         seq(
-          field('command', choice('\\item', '\\item*')),
+          field('command', token(prec(1, /\\item\*?/))),
           field('label', optional($.brack_group_text)),
         ),
       ),
@@ -443,7 +385,8 @@ module.exports = grammar({
         /[^\"\[\]:;\|\{\}<>]+/,
       ),
 
-    operator: $ => choice('+', '-', '*', '/', '<', '>', '!', '|', ':', "'"),
+    // OPTIMIZED: Regex pattern for operators
+    operator: $ => /[+\-*\/<>!|:']/,
 
     letter: $ => /[^\\%\{\}\$\#_\^]/,
 
@@ -494,21 +437,24 @@ module.exports = grammar({
         seq(
           field(
             'left_command',
-            choice('\\left', '\\bigl', '\\Bigl', '\\biggl', '\\Biggl'),
+            // OPTIMIZED: Using regex for left delimiter commands
+            token(prec(1, /\\(left|bigl|Bigl|biggl|Biggl)/)),
           ),
           field('left_delimiter', $._math_delimiter_part),
           repeat($._root_content),
           field(
             'right_command',
-            choice('\\right', '\\bigr', '\\Bigr', '\\biggr', '\\Biggr'),
+            // OPTIMIZED: Using regex for right delimiter commands
+            token(prec(1, /\\(right|bigr|Bigr|biggr|Biggr)/)),
           ),
           field('right_delimiter', $._math_delimiter_part),
         ),
       ),
 
+    // OPTIMIZED: Using regex for text mode commands
     text_mode: $ =>
       seq(
-        field('command', choice('\\text', '\\intertext', '\\shortintertext')),
+        field('command', token(prec(1, /\\(text|intertext|shortintertext)/))),
         field('content', $.curly_group),
       ),
 
@@ -573,143 +519,68 @@ module.exports = grammar({
         ),
     }),
 
+    // SIMPLIFIED: Unified asy environment (handles asy and asydef)
     ...specialEnvironment({
       rule: 'asy_environment',
-      name: 'asy',
+      name: /(asy|asydef)/,
       content: $ => field('code', alias($._trivia_raw_env_asy, $.source_code)),
       options: undefined,
     }),
 
+    // SIMPLIFIED: Unified code environment (handles pycode, luacode, luacode*)
+    // All use the same scanner - just skip content until \end{...}
     ...specialEnvironment({
-      rule: 'asydef_environment',
-      name: 'asydef',
-      content: $ =>
-        field('code', alias($._trivia_raw_env_asydef, $.source_code)),
-      options: undefined,
-    }),
-
-    ...specialEnvironment({
-      rule: 'pycode_environment',
-      name: 'pycode',
+      rule: 'code_environment',
+      name: /(pycode|luacode\*?)/,
       content: $ =>
         field('code', alias($._trivia_raw_env_pycode, $.source_code)),
       options: undefined,
     }),
 
-    luacode_environment: $ =>
-      choice($._luacode_environment, $._luacode_environment_star),
-
+    // SIMPLIFIED: Unified sage environment (handles sagesilent and sageblock)
     ...specialEnvironment({
-      rule: '_luacode_environment',
-      name: 'luacode',
-      content: $ =>
-        field('code', alias($._trivia_raw_env_luacode, $.source_code)),
-      options: undefined,
-    }),
-
-    ...specialEnvironment({
-      rule: '_luacode_environment_star',
-      name: 'luacode*',
-      content: $ =>
-        field('code', alias($._trivia_raw_env_luacode_star, $.source_code)),
-      options: undefined,
-    }),
-
-    ...specialEnvironment({
-      rule: 'sagesilent_environment',
-      name: 'sagesilent',
+      rule: 'sage_environment',
+      name: /(sagesilent|sageblock)/,
       content: $ =>
         field('code', alias($._trivia_raw_env_sagesilent, $.source_code)),
       options: undefined,
     }),
 
-    ...specialEnvironment({
-      rule: 'sageblock_environment',
-      name: 'sageblock',
-      content: $ =>
-        field('code', alias($._trivia_raw_env_sageblock, $.source_code)),
-      options: undefined,
-    }),
-
+    // OPTIMIZED: Using regex for math environment names (27 variants → 1 pattern)
     ...specialEnvironment({
       rule: 'math_environment',
-      name: choice(
-        'math',
-        'displaymath',
-        'displaymath*',
-        'equation',
-        'equation*',
-        'multline',
-        'multline*',
-        'eqnarray',
-        'eqnarray*',
-        'align',
-        'align*',
-        'aligned',
-        'aligned*',
-        'array',
-        'array*',
-        'split',
-        'split*',
-        'alignat',
-        'alignat*',
-        'alignedat',
-        'alignedat*',
-        'gather',
-        'gather*',
-        'gathered',
-        'gathered*',
-        'flalign',
-        'flalign*',
-      ),
+      name: /(math|displaymath|displaymath\*|equation|equation\*|multline|multline\*|eqnarray|eqnarray\*|align|align\*|aligned|aligned\*|array|array\*|split|split\*|alignat|alignat\*|alignedat|alignedat\*|gather|gather\*|gathered|gathered\*|flalign|flalign\*)/,
       content: $ => repeat($._flat_content),
       options: undefined,
     }),
 
     //--- Command
 
+    // PHASE 6 OPTIMIZATION: Aggressive consolidation for parser size
     _command: $ =>
       choice(
-        $.title_declaration,
-        $.author_declaration,
-        $.package_include,
-        $.class_include,
-        $.latex_include,
-        $.biblatex_include,
-        $.bibstyle_include,
-        $.bibtex_include,
-        $.graphics_include,
-        $.svg_include,
-        $.inkscape_include,
-        $.verbatim_include,
-        $.import_include,
-        $.caption,
+        // Metadata commands - consolidated (title + author + caption → 1)
+        $.metadata_command,
+        // Include commands - consolidated (9 → 2 rules)
+        $.single_path_include,
+        $.double_path_include,
         $.citation,
-        $.counter_declaration,
-        $.counter_within_declaration,
-        $.counter_without_declaration,
-        $.counter_value,
-        $.counter_definition,
-        $.counter_addition,
-        $.counter_increment,
-        $.counter_typesetting,
-        $.label_definition,
-        $.label_reference,
-        $.label_reference_range,
-        $.label_number,
+        // Counter commands - consolidated into single rule
+        $.counter_command,
+        // Label commands - consolidated into single rule
+        $.label_command,
+        // Definition commands
         $.new_command_definition,
         $.old_command_definition,
         $.let_command_definition,
         $.paired_delimiter_definition,
         $.environment_definition,
-        $.glossary_entry_definition,
-        $.glossary_entry_reference,
-        $.acronym_definition,
-        $.acronym_reference,
+        // Glossary & acronym - consolidated (4 → 2 rules)
+        $.glossary_command,
+        $.acronym_command,
         $.theorem_definition,
-        $.color_definition,
-        $.color_set_definition,
-        $.color_reference,
+        // Color commands - consolidated (3 → 1)
+        $.color_command,
         $.tikz_library_import,
         $.hyperlink,
         $.changes_replaced,
@@ -718,8 +589,7 @@ module.exports = grammar({
         $.escape_sequence,
         $.diacritic_command,
         $.linebreak_command,
-        $.spacing_command,
-        $.symbol_command,
+        $.simple_command,      // Consolidated: spacing + symbol commands
         $.verb_command,
         $.generic_command,
       ),
@@ -744,23 +614,22 @@ module.exports = grammar({
     command_name: $ => /\\([^\r\n]|[@a-zA-Z]+\*?)?/,
 
     // Control symbols (escape characters) - Priority 1
+    // OPTIMIZED: Using regex for escape sequences (12 variants → 1 pattern)
     escape_sequence: $ =>
       seq(
         '\\',
-        choice('$', '%', '#', '&', '{', '}', '_', '\\', ',', '@', '/', '-'),
+        /[\$%#&{}_\\,@\/\-]/,
       ),
 
     // Diacritic commands - Priority 1
+    // OPTIMIZED: Using regex for accent marks (15 variants → 1 pattern)
     diacritic_command: $ =>
       prec.right(
         seq(
           '\\',
           field(
             'accent',
-            choice(
-              "'", '`', '^', '"', '~', '=', '.', 'u', 'v', 'H', 'c', 'd', 'b',
-              'r', 'k', 't',
-            ),
+            /['`\^"~=.uvHcdbrkt]/
           ),
           field(
             'base',
@@ -783,351 +652,72 @@ module.exports = grammar({
         ),
       ),
 
-    // Spacing commands - Priority 1
-    spacing_command: $ =>
+    // PHASE 7: Consolidated simple commands (spacing + symbol → 1)
+    // Spacing commands + Symbol commands (no arguments)
+    simple_command: $ =>
       field(
         'command',
-        choice(
-          '\\quad',
-          '\\qquad',
-          '\\enspace',
-          '\\enskip',
-          '\\,',
-          '\\!',
-          '\\;',
-          '\\:',
-          '\\thinspace',
-          '\\negthinspace',
-          '\\space',
-          '\\medspace',
-          '\\thickspace',
-          '\\negmedspace',
-          '\\negthickspace',
-        ),
+        token(prec(1, /\\(quad|qquad|enspace|enskip|,|!|;|:|thinspace|negthinspace|space|medspace|thickspace|negmedspace|negthickspace|ss|SS|o|O|ae|AE|oe|OE|aa|AA|l|L|i|j|dh|DH|th|TH|dag|ddag|S|P|copyright|pounds|textbackslash|LaTeX|TeX|LaTeXe|textquoteleft|textquoteright|textquotedblleft|textquotedblright|textendash|textemdash|textellipsis|dots|ldots|textbullet|textperiodcentered|textasteriskcentered|textcent|textsterling|textyen|texteuro|textdollar|textexclamdown|textquestiondown|textsection|textparagraph|textdegree|textregistered|texttrademark)/))
       ),
 
-    // Symbol commands (no arguments) - Priority 1
-    symbol_command: $ =>
-      field(
-        'command',
-        choice(
-          // Special characters
-          '\\ss',
-          '\\SS',
-          '\\o',
-          '\\O',
-          '\\ae',
-          '\\AE',
-          '\\oe',
-          '\\OE',
-          '\\aa',
-          '\\AA',
-          '\\l',
-          '\\L',
-          '\\i',
-          '\\j',
-          '\\dh',
-          '\\DH',
-          '\\th',
-          '\\TH',
-          // Symbols
-          '\\dag',
-          '\\ddag',
-          '\\S',
-          '\\P',
-          '\\copyright',
-          '\\pounds',
-          '\\textbackslash',
-          // TeX/LaTeX logos
-          '\\LaTeX',
-          '\\TeX',
-          '\\LaTeXe',
-          // Quotes and dashes
-          '\\textquoteleft',
-          '\\textquoteright',
-          '\\textquotedblleft',
-          '\\textquotedblright',
-          '\\textendash',
-          '\\textemdash',
-          '\\textellipsis',
-          '\\dots',
-          '\\ldots',
-          // Math/logic
-          '\\textbullet',
-          '\\textperiodcentered',
-          '\\textasteriskcentered',
-          // Currency
-          '\\textcent',
-          '\\textsterling',
-          '\\textyen',
-          '\\texteuro',
-          '\\textdollar',
-          // Other
-          '\\textexclamdown',
-          '\\textquestiondown',
-          '\\textsection',
-          '\\textparagraph',
-          '\\textdegree',
-          '\\textregistered',
-          '\\texttrademark',
-        ),
-      ),
-
-    // Verb command (special parsing) - Priority 1
+    // OPTIMIZED: Verb command with regex
     verb_command: $ =>
       seq(
-        field('command', choice('\\verb', '\\verb*')),
+        field('command', token(prec(1, /\\verb\*?/))),
         field('delimiter', /[^\s\w]/), // any non-alphanumeric
         field('content', /[^\r\n]+/), // content until delimiter
         // Note: delimiter matching is tricky in tree-sitter
         // May need external scanner for full correctness
       ),
 
-    counter_declaration: $ =>
+    // PHASE 6: Consolidated counter command (6 rules → 1)
+    // All counter commands: newcounter, counterwithin, counterwithout, value, setcounter, addtocounter, stepcounter, refstepcounter, arabic, alph, Alph, roman, Roman, fnsymbol
+    counter_command: $ =>
       prec.right(
         seq(
-          field('command', '\\newcounter'),
-          field('counter', $.curly_group_word),
-          optional(field('supercounter', $.brack_group_word))
+          field('command', token(prec(1, /\\(newcounter|counter(within|without)\*?|value|setcounter|addtocounter|stepcounter|refstepcounter|arabic|alph|Alph|roman|Roman|fnsymbol)/))),
+          field('arg1', $.curly_group_text),
+          optional(field('arg2', choice($.curly_group_text, $.brack_group_text))),
         )
       ),
 
-    counter_within_declaration: $ =>
+    // PHASE 7: Consolidated metadata commands (title + author + caption → 1)
+    metadata_command: $ =>
       seq(
-        field('command', choice('\\counterwithin', '\\counterwithin*')),
-        field('counter', $.curly_group_word),
-        field('supercounter', $.curly_group_word),
-      ),
-
-    counter_without_declaration: $ =>
-      seq(
-        field('command', choice('\\counterwithout', '\\counterwithout*')),
-        field('counter', $.curly_group_word),
-        field('supercounter', $.curly_group_word),
-      ),
-
-    counter_value: $ =>
-      seq(
-        field('command', '\\value'),
-        field('counter', $.curly_group_word)
-      ),
-
-    counter_definition: $ =>
-      seq(
-        field('command', '\\setcounter'),
-        field('counter', $.curly_group_word),
-        // We can have a value or a call to \value{x} inside curly braces:
-        field('value', choice(
-          $.curly_group_value,
-          seq('{', field('value', $.counter_value), '}')
-        )),
-      ),
-
-    counter_addition: $ =>
-      seq(
-        field('command', '\\addtocounter'),
-        field('counter', $.curly_group_word),
-        // Same as $.counter_definition['value']:
-        field('value', choice(
-          $.curly_group_value,
-          seq('{', field('value', $.counter_value), '}')
-        )),
-      ),
-
-    counter_increment: $ =>
-      seq(
-        field('command', choice('\\stepcounter', '\\refstepcounter')),
-        field('counter', $.curly_group_word),
-      ),
-
-    // NOTE: It is not the rule of the grammar tree to check if the counter
-    //       is in [0,9] for \fnsymbol: it's up to the LSP (or the user) :)
-    counter_typesetting: $ =>
-      seq(
-        field('command', choice(
-          '\\arabic',
-          '\\alph',
-          '\\Alph',
-          '\\roman',
-          '\\Roman',
-          '\\fnsymbol'
-        )),
-        field('counter', $.curly_group_word),
-      ),
-
-    title_declaration: $ =>
-      seq(
-        field('command', '\\title'),
+        field('command', token(prec(1, /\\(title|author|caption|thanks|date|abstract)/))),
         field('options', optional($.brack_group)),
-        field('text', $.curly_group),
+        field('content', $.curly_group),
       ),
 
-    author_declaration: $ =>
-      seq(
-        field('command', '\\author'),
-        field('options', optional($.brack_group)),
-        field('authors', $.curly_group_author_list),
-      ),
-
-    package_include: $ =>
-      seq(
-        field('command', choice('\\usepackage', '\\RequirePackage')),
-        field('options', optional($.brack_group_key_value)),
-        field('paths', $.curly_group_path_list),
-      ),
-
-    class_include: $ =>
-      seq(
-        field('command', '\\documentclass'),
-        field('options', optional($.brack_group_key_value)),
-        field('path', $.curly_group_path),
-      ),
-
-    latex_include: $ =>
+    // PHASE 6: Consolidated include commands (9 rules → 2)
+    // single_path_include: All commands that take optional options + single path
+    single_path_include: $ =>
       seq(
         field(
           'command',
-          choice('\\include', '\\subfileinclude', '\\input', '\\subfile'),
+          token(prec(1, /\\(documentclass|include|subfileinclude|input|subfile|includegraphics|includesvg|includeinkscape|verbatiminput|VerbatimInput|bibliographystyle|usepackage|RequirePackage|bibliography|addbibresource)/)),
         ),
-        field('path', $.curly_group_path),
-      ),
-
-    biblatex_include: $ =>
-      seq(
-        '\\addbibresource',
         field('options', optional($.brack_group_key_value)),
-        field('glob', $.curly_group_glob_pattern),
+        field('path', $.curly_group_path_list),
       ),
 
-    bibstyle_include: $ =>
-      seq(
-        field('command', '\\bibliographystyle'),
-        field('path', $.curly_group_path),
-      ),
-
-    bibtex_include: $ =>
-      seq(
-        field('command', '\\bibliography'),
-        field('paths', $.curly_group_path_list),
-      ),
-
-    graphics_include: $ =>
-      seq(
-        field('command', '\\includegraphics'),
-        field('options', optional($.brack_group_key_value)),
-        field('path', $.curly_group_path),
-      ),
-
-    svg_include: $ =>
-      seq(
-        field('command', '\\includesvg'),
-        field('options', optional($.brack_group_key_value)),
-        field('path', $.curly_group_path),
-      ),
-
-    inkscape_include: $ =>
-      seq(
-        field('command', '\\includeinkscape'),
-        field('options', optional($.brack_group_key_value)),
-        field('path', $.curly_group_path),
-      ),
-
-    verbatim_include: $ =>
-      seq(
-        field('command', choice('\\verbatiminput', '\\VerbatimInput')),
-        field('path', $.curly_group_path),
-      ),
-
-    import_include: $ =>
+    // double_path_include: Commands that take two paths (directory + file)
+    double_path_include: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\import',
-            '\\subimport',
-            '\\inputfrom',
-            '\\subimportfrom',
-            '\\includefrom',
-            '\\subincludefrom',
-          ),
+          token(prec(1, /\\(import|subimport|inputfrom|subimportfrom|includefrom|subincludefrom)/))
         ),
         field('directory', $.curly_group_path),
         field('file', $.curly_group_path),
       ),
 
-    caption: $ =>
-      seq(
-        field('command', '\\caption'),
-        field('short', optional($.brack_group)),
-        field('long', $.curly_group),
-      ),
-
+    // OPTIMIZED: Using regex instead of 60-item choice() to reduce parser size
     citation: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\cite',
-            '\\cite*',
-            '\\Cite',
-            '\\nocite',
-            '\\citet',
-            '\\citep',
-            '\\citet*',
-            '\\citep*',
-            '\\citeA',
-            '\\citeR',
-            '\\citeS',
-            '\\citeyearR',
-            '\\citeauthor',
-            '\\citeauthor*',
-            '\\Citeauthor',
-            '\\Citeauthor*',
-            '\\citetitle',
-            '\\citetitle*',
-            '\\citeyear',
-            '\\citeyear*',
-            '\\citedate',
-            '\\citedate*',
-            '\\citeurl',
-            '\\fullcite',
-            '\\citeyearpar',
-            '\\citealt',
-            '\\citealp',
-            '\\citetext',
-            '\\parencite',
-            '\\parencite*',
-            '\\Parencite',
-            '\\footcite',
-            '\\footfullcite',
-            '\\footcitetext',
-            '\\textcite',
-            '\\Textcite',
-            '\\smartcite',
-            '\\Smartcite',
-            '\\supercite',
-            '\\autocite',
-            '\\Autocite',
-            '\\autocite*',
-            '\\Autocite*',
-            '\\volcite',
-            '\\Volcite',
-            '\\pvolcite',
-            '\\Pvolcite',
-            '\\fvolcite',
-            '\\ftvolcite',
-            '\\svolcite',
-            '\\Svolcite',
-            '\\tvolcite',
-            '\\Tvolcite',
-            '\\avolcite',
-            '\\Avolcite',
-            '\\notecite',
-            '\\Notecite',
-            '\\pnotecite',
-            '\\Pnotecite',
-            '\\fnotecite',
-          ),
+          token(prec(1, /\\(cite|cite\*|Cite|nocite|citet|citep|citet\*|citep\*|citeA|citeR|citeS|citeyearR|citeauthor|citeauthor\*|Citeauthor|Citeauthor\*|citetitle|citetitle\*|citeyear|citeyear\*|citedate|citedate\*|citeurl|fullcite|citeyearpar|citealt|citealp|citetext|parencite|parencite\*|Parencite|footcite|footfullcite|footcitetext|textcite|Textcite|smartcite|Smartcite|supercite|autocite|Autocite|autocite\*|Autocite\*|volcite|Volcite|pvolcite|Pvolcite|fvolcite|ftvolcite|svolcite|Svolcite|tvolcite|Tvolcite|avolcite|Avolcite|notecite|Notecite|pnotecite|Pnotecite|fnotecite)/))
         ),
         optional(
           seq(
@@ -1138,88 +728,26 @@ module.exports = grammar({
         field('keys', $.curly_group_text_list),
       ),
 
-    label_definition: $ =>
-      seq(field('command', '\\label'), field('name', $.curly_group_label)),
-
-    label_reference: $ =>
-      seq(
-        field(
-          'command',
-          choice(
-            '\\ref',
-            '\\eqref',
-            '\\vref',
-            '\\Vref',
-            '\\autoref',
-            '\\autoref*',
-            '\\pageref',
-            '\\pageref*',
-            '\\autopageref',
-            '\\autopageref*',
-            '\\cref',
-            '\\cref*',
-            '\\Cref',
-            '\\Cref*',
-            '\\cpageref',
-            '\\Cpageref',
-            '\\namecref',
-            '\\nameCref',
-            '\\lcnamecref',
-            '\\namecrefs',
-            '\\nameCrefs',
-            '\\lcnamecrefs',
-            '\\labelcref',
-            '\\labelcref*',
-            '\\labelcpageref',
-            '\\labelcpageref*',
-          ),
-        ),
-        field('names', $.curly_group_label_list),
-      ),
-
-    label_reference_range: $ =>
-      seq(
-        field(
-          'command',
-          choice(
-            '\\crefrange',
-            '\\crefrange*',
-            '\\Crefrange',
-            '\\Crefrange*',
-            '\\cpagerefrange',
-            '\\Cpagerefrange',
-          ),
-        ),
-        field('from', $.curly_group_label),
-        field('to', $.curly_group_label),
-      ),
-
-    label_number: $ =>
-      seq(
-        field('command', '\\newlabel'),
-        field('name', $.curly_group_label),
-        field('number', $.curly_group),
+    // PHASE 6: Consolidated label command (4 rules → 1)
+    // All label commands: label, ref, eqref, vref, Vref, autoref, pageref, cref, Cref, etc., crefrange, Crefrange, newlabel
+    label_command: $ =>
+      prec.right(
+        seq(
+          field('command', token(prec(1, /\\(label|newlabel|ref|eqref|vref|Vref|autoref\*?|pageref\*?|autopageref\*?|cref\*?|Cref\*?|cpageref|Cpageref|namecref|nameCref|lcnamecref|namecrefs|nameCrefs|lcnamecrefs|labelcref\*?|labelcpageref\*?|crefrange\*?|Crefrange\*?|cpagerefrange|Cpagerefrange)/))),
+          field('name', $.curly_group_label_list),
+          optional(field('arg2', $.curly_group)),
+        )
       ),
 
     new_command_definition: $ =>
       choice($._new_command_definition, $._newer_command_definition, $._new_command_copy),
 
+    // OPTIMIZED: Regex for command definition commands
     _new_command_definition: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\newcommand',
-            '\\newcommand*',
-            '\\renewcommand',
-            '\\renewcommand*',
-            '\\providecommand',
-            '\\providecommand*',
-            '\\DeclareRobustCommand',
-            '\\DeclareRobustCommand*',
-            '\\DeclareMathOperator',
-            '\\DeclareMathOperator*',
-          ),
+          token(prec(1, /\\(newcommand|newcommand\*|renewcommand|renewcommand\*|providecommand|providecommand\*|DeclareRobustCommand|DeclareRobustCommand\*|DeclareMathOperator|DeclareMathOperator\*)/))
         ),
         field('declaration', choice($.curly_group_command_name, $.command_name)),
         optional(
@@ -1231,60 +759,52 @@ module.exports = grammar({
         field('implementation', $.curly_group),
       ),
 
+    // OPTIMIZED: Regex for newer command definition commands
     _newer_command_definition: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\NewDocumentCommand',
-            '\\RenewDocumentCommand',
-            '\\ProvideDocumentCommand',
-            '\\DeclareDocumentCommand',
-            '\\NewExpandableDocumentCommand',
-            '\\RenewExpandableDocumentCommand',
-            '\\ProvideExpandableDocumentCommand',
-            '\\DeclareExpandableDocumentCommand',
-          ),
+          token(prec(1, /\\(NewDocumentCommand|RenewDocumentCommand|ProvideDocumentCommand|DeclareDocumentCommand|NewExpandableDocumentCommand|RenewExpandableDocumentCommand|ProvideExpandableDocumentCommand|DeclareExpandableDocumentCommand)/))
         ),
         field('declaration', choice($.curly_group_command_name, $.command_name)),
         field('spec', $.curly_group_spec),
         field('implementation', $.curly_group),
       ),
 
+    // OPTIMIZED: _new_command_copy with regex
     _new_command_copy: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\NewCommandCopy',
-            '\\RenewCommandCopy',
-            '\\DeclareCommandCopy',
-          ),
+          token(prec(1, /\\(NewCommandCopy|RenewCommandCopy|DeclareCommandCopy)/)),
         ),
         field('declaration', choice($.curly_group_command_name, $.command_name)),
         field('implementation', $.curly_group_command_name),
       ),
 
+    // OPTIMIZED: Regex for old-style command definitions
     old_command_definition: $ =>
       seq(
-        field('command', choice('\\def', '\\gdef', '\\edef', '\\xdef')),
+        field('command', token(prec(1, /\\(def|gdef|edef|xdef)/))),
         field('declaration', $.command_name)
       ),
 
+    // OPTIMIZED: let_command_definition with regex
     let_command_definition: $ =>
       seq(
-        field('command', choice('\\let', '\\glet')),
+        field('command', token(prec(1, /\\(let|glet)/))),
         field('declaration', $.command_name),
         optional('='),
         field('implementation', $.command_name),
       ),
 
+    // OPTIMIZED: paired_delimiter_definition with regex
     paired_delimiter_definition: $ =>
       prec.right(
         seq(
           field(
             'command',
-            choice('\\DeclarePairedDelimiter', '\\DeclarePairedDelimiterX'),
+            token(prec(1, /\\(DeclarePairedDelimiter|DeclarePairedDelimiterX)/)),
           ),
           field('declaration', $.curly_group_command_name),
           field('argc', optional($.brack_group_argc)),
@@ -1297,14 +817,12 @@ module.exports = grammar({
     environment_definition: $ =>
       choice($._environment_definition, $._newer_environment_definition, $._new_environment_copy),
 
+    // OPTIMIZED: _environment_definition with regex
     _environment_definition: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\newenvironment',
-            '\\renewenvironment',
-          ),
+          token(prec(1, /\\(newenvironment|renewenvironment)/)),
         ),
         field('name', $.curly_group_text),
         field('argc', optional($.brack_group_argc)),
@@ -1312,16 +830,12 @@ module.exports = grammar({
         field('end', $.curly_group_impl),
       ),
 
+    // OPTIMIZED: _newer_environment_definition with regex
     _newer_environment_definition: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\NewDocumentEnvironment',
-            '\\RenewDocumentEnvironment',
-            '\\ProvideDocumentEnvironment',
-            '\\DeclareDocumentEnvironment',
-          ),
+          token(prec(1, /\\(NewDocumentEnvironment|RenewDocumentEnvironment|ProvideDocumentEnvironment|DeclareDocumentEnvironment)/)),
         ),
         field('name', $.curly_group_text),
         field('spec', $.curly_group_spec),
@@ -1329,158 +843,54 @@ module.exports = grammar({
         field('end', $.curly_group_impl),
       ),
 
+    // OPTIMIZED: _new_environment_copy with regex
     _new_environment_copy: $ =>
       seq(
         field(
           'command',
-          choice(
-            '\\NewEnvironmentCopy',
-            '\\RenewEnvironmentCopy',
-            '\\DeclareEnvironmentCopy',
-          ),
+          token(prec(1, /\\(NewEnvironmentCopy|RenewEnvironmentCopy|DeclareEnvironmentCopy)/)),
         ),
         field('name', $.curly_group_text),
         field('name', $.curly_group_text),
       ),
 
-    glossary_entry_definition: $ =>
-      seq(
-        field('command', '\\newglossaryentry'),
-        field('name', $.curly_group_text),
-        field('options', $.curly_group_key_value),
-      ),
-
-    glossary_entry_reference: $ =>
-      seq(
-        field(
-          'command',
-          choice(
-            '\\gls',
-            '\\Gls',
-            '\\GLS',
-            '\\glspl',
-            '\\Glspl',
-            '\\GLSpl',
-            '\\glsdisp',
-            '\\glslink',
-            '\\glstext',
-            '\\Glstext',
-            '\\GLStext',
-            '\\glsfirst',
-            '\\Glsfirst',
-            '\\GLSfirst',
-            '\\glsplural',
-            '\\Glsplural',
-            '\\GLSplural',
-            '\\glsfirstplural',
-            '\\Glsfirstplural',
-            '\\GLSfirstplural',
-            '\\glsname',
-            '\\Glsname',
-            '\\GLSname',
-            '\\glssymbol',
-            '\\Glssymbol',
-            '\\glsdesc',
-            '\\Glsdesc',
-            '\\GLSdesc',
-            '\\glsuseri',
-            '\\Glsuseri',
-            '\\GLSuseri',
-            '\\glsuserii',
-            '\\Glsuserii',
-            '\\GLSuserii',
-            '\\glsuseriii',
-            '\\Glsuseriii',
-            '\\GLSuseriii',
-            '\\glsuseriv',
-            '\\Glsuseriv',
-            '\\GLSuseriv',
-            '\\glsuserv',
-            '\\Glsuserv',
-            '\\GLSuserv',
-            '\\glsuservi',
-            '\\Glsuservi',
-            '\\GLSuservi',
+    // PHASE 6: Consolidated glossary commands (2 → 1)
+    // Combines glossary_entry_definition and glossary_entry_reference
+    glossary_command: $ =>
+      prec.right(
+        seq(
+          field(
+            'command',
+            token(prec(1, /\\(newglossaryentry|gls|Gls|GLS|glspl|Glspl|GLSpl|glsdisp|glslink|glstext|Glstext|GLStext|glsfirst|Glsfirst|GLSfirst|glsplural|Glsplural|GLSplural|glsfirstplural|Glsfirstplural|GLSfirstplural|glsname|Glsname|GLSname|glssymbol|Glssymbol|glsdesc|Glsdesc|GLSdesc|glsuseri|Glsuseri|GLSuseri|glsuserii|Glsuserii|GLSuserii|glsuseriii|Glsuseriii|GLSuseriii|glsuseriv|Glsuseriv|GLSuseriv|glsuserv|Glsuserv|GLSuserv|glsuservi|Glsuservi|GLSuservi)/))
           ),
-        ),
-        field('options', optional($.brack_group_key_value)),
-        field('name', $.curly_group_text),
+          field('options', optional($.brack_group_key_value)),
+          field('name', $.curly_group_text),
+          optional(field('extra', $.curly_group_key_value)),
+        )
       ),
 
-    acronym_definition: $ =>
-      seq(
-        field('command', '\\newacronym'),
-        field('options', optional($.brack_group_key_value)),
-        field('name', $.curly_group_text),
-        field('short', $.curly_group),
-        field('long', $.curly_group),
-      ),
-
-    acronym_reference: $ =>
-      seq(
-        field(
-          'command',
-          choice(
-            '\\acrshort',
-            '\\Acrshort',
-            '\\ACRshort',
-            '\\acrshortpl',
-            '\\Acrshortpl',
-            '\\ACRshortpl',
-            '\\acrlong',
-            '\\Acrlong',
-            '\\ACRlong',
-            '\\acrlongpl',
-            '\\Acrlongpl',
-            '\\ACRlongpl',
-            '\\acrfull',
-            '\\Acrfull',
-            '\\ACRfull',
-            '\\acrfullpl',
-            '\\Acrfullpl',
-            '\\ACRfullpl',
-            '\\acs',
-            '\\Acs',
-            '\\acsp',
-            '\\Acsp',
-            '\\acl',
-            '\\Acl',
-            '\\aclp',
-            '\\Aclp',
-            '\\acf',
-            '\\Acf',
-            '\\acfp',
-            '\\Acfp',
-            '\\ac',
-            '\\Ac',
-            '\\acp',
-            '\\glsentrylong',
-            '\\Glsentrylong',
-            '\\glsentrylongpl',
-            '\\Glsentrylongpl',
-            '\\glsentryshort',
-            '\\Glsentryshort',
-            '\\glsentryshortpl',
-            '\\Glsentryshortpl',
-            '\\glsentryfullpl',
-            '\\Glsentryfullpl',
+    // PHASE 6: Consolidated acronym commands (2 → 1)
+    // Combines acronym_definition and acronym_reference
+    acronym_command: $ =>
+      prec.right(
+        seq(
+          field(
+            'command',
+            token(prec(1, /\\(newacronym|acrshort|Acrshort|ACRshort|acrshortpl|Acrshortpl|ACRshortpl|acrlong|Acrlong|ACRlong|acrlongpl|Acrlongpl|ACRlongpl|acrfull|Acrfull|ACRfull|acrfullpl|Acrfullpl|ACRfullpl|acs|Acs|acsp|Acsp|acl|Acl|aclp|Aclp|acf|Acf|acfp|Acfp|ac|Ac|acp|glsentrylong|Glsentrylong|glsentrylongpl|Glsentrylongpl|glsentryshort|Glsentryshort|glsentryshortpl|Glsentryshortpl|glsentryfullpl|Glsentryfullpl)/))
           ),
-        ),
-        field('options', optional($.brack_group_key_value)),
-        field('name', $.curly_group_text),
+          field('options', optional($.brack_group_key_value)),
+          field('name', $.curly_group_text),
+          repeat(field('extra', $.curly_group)),
+        )
       ),
 
+    // OPTIMIZED: theorem_definition with regex
     theorem_definition: $ =>
       prec.right(
         seq(
           field(
             'command',
-            choice(
-              '\\newtheorem',
-              '\\newtheorem*',
-              '\\declaretheorem',
-              '\\declaretheorem*',
-            ),
+            token(prec(1, /\\(newtheorem\*?|declaretheorem\*?)/)),
           ),
           optional(field('options', $.brack_group_key_value)),
           field('name', $.curly_group_text_list),
@@ -1499,53 +909,32 @@ module.exports = grammar({
         ),
       ),
 
-    color_definition: $ =>
-      seq(
-        field('command', '\\definecolor'),
-        optional($.brack_group_text),
-        field('name', $.curly_group_text),
-        field('model', $.curly_group_text),
-        field('spec', $.curly_group),
-      ),
-
-    color_set_definition: $ =>
-      seq(
-        field('command', '\\definecolorset'),
-        field('ty', optional($.brack_group_text)),
-        field('model', $.curly_group_text_list),
-        field('head', $.curly_group),
-        field('tail', $.curly_group),
-        field('spec', $.curly_group),
-      ),
-
-    color_reference: $ =>
+    // PHASE 6: Consolidated color commands (3 → 1)
+    color_command: $ =>
       prec.right(
         seq(
           field(
             'command',
-            choice('\\color', '\\pagecolor', '\\textcolor', '\\mathcolor', '\\colorbox'),
+            token(prec(1, /\\(definecolor|definecolorset|color|pagecolor|textcolor|mathcolor|colorbox)/)),
           ),
-          choice(
-            field('name', $.curly_group_text),
-            seq(
-              field('model', $.brack_group_text),
-              field('spec', $.curly_group),
-            ),
-          ),
-          optional(field('text', $.curly_group)),
-        ),
+          field('arg1', optional($.brack_group_text)),
+          field('arg2', $.curly_group_text),
+          repeat(field('extra', $.curly_group)),
+        )
       ),
 
+    // OPTIMIZED: Using regex for tikz library import
     tikz_library_import: $ =>
       seq(
-        field('command', choice('\\usepgflibrary', '\\usetikzlibrary')),
+        field('command', token(prec(1, /\\(usepgflibrary|usetikzlibrary)/))),
         field('paths', $.curly_group_path_list),
       ),
 
+    // OPTIMIZED: Using regex for hyperlink commands
     hyperlink: $ =>
       prec.right(
         seq(
-          field('command', choice('\\url', '\\href')),
+          field('command', token(prec(1, /\\(url|href)/))),
           field('uri', $.curly_group_uri),
           field('label', optional($.curly_group)),
         ),
