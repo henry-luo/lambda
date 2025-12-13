@@ -60,7 +60,10 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"end", NODE_CONTAINER},
     {"comment_environment", NODE_CONTAINER},
     {"verbatim_environment", NODE_CONTAINER},
-    {"graphics_include", NODE_CONTAINER},   // \includegraphics command
+    // PHASE 5: Consolidated include commands
+    {"single_path_include", NODE_CONTAINER},   // documentclass, includegraphics, include, input, etc.
+    {"double_path_include", NODE_CONTAINER},   // import, subimport, etc.
+    {"graphics_include", NODE_CONTAINER},   // Legacy: \includegraphics command
     {"\\includegraphics", NODE_CONTAINER},  // Command name with backslash
     {"figure", NODE_CONTAINER},             // figure environment
     {"table", NODE_CONTAINER},              // table float environment
@@ -69,6 +72,9 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"curly_group_path", NODE_CONTAINER},   // Path argument group
     {"color_reference", NODE_CONTAINER},    // \textcolor, \colorbox commands
     {"color_definition", NODE_CONTAINER},   // \definecolor command
+    // PHASE 5: Consolidated counter and label commands
+    {"counter_command", NODE_CONTAINER},    // All counter commands
+    {"label_command", NODE_CONTAINER},      // All label commands
     
     // Leaf nodes (cannot have children in grammar)
     {"command_name", NODE_LEAF},
