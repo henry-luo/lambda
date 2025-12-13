@@ -23,10 +23,8 @@ String* format_css(Pool* pool, Item root_item);
 String* format_jsx(Pool* pool, Item root_item);
 String* format_mdx(Pool* pool, Item root_item);
 String* format_latex(Pool* pool, Item root_item);
-String* format_latex_html(Pool* pool, Item root_item);
-String* format_latex_html_with_css(Pool* pool, Item root_item, StringBuf* css_output);
 
-// New LaTeX to HTML formatter (v2)
+// LaTeX to HTML formatter (v2)
 Item format_latex_html_v2(struct Input* input, bool text_mode);
 
 void format_rst(StringBuf* sb, Item root_item);
