@@ -28,9 +28,10 @@ void HtmlGenerator::create(const char* tag, const char* attrs) {
     writer_->closeTag(tag);
 }
 
-void HtmlGenerator::createWithChildren(const char* tag, const char* attrs) {
+void HtmlGenerator::createWithChildren(const char* tag, const char* classes) {
     // html-generator.ls create method - element with children
-    writer_->openTagRaw(tag, attrs);
+    // Note: attrs is treated as a class name, not raw attributes
+    writer_->openTag(tag, classes);
 }
 
 void HtmlGenerator::closeElement() {
@@ -60,9 +61,19 @@ void HtmlGenerator::spanWithStyle(const char* style_value) {
     writer_->openTag("span", nullptr, nullptr, style_value);
 }
 
+void HtmlGenerator::spanWithClassAndStyle(const char* css_class, const char* style_value) {
+    // Create span with both class and style attributes
+    writer_->openTag("span", css_class, nullptr, style_value);
+}
+
 void HtmlGenerator::div(const char* attrs) {
     // html-generator.ls div method
     createWithChildren("div", attrs);
+}
+
+void HtmlGenerator::divWithClassAndStyle(const char* css_class, const char* style_value) {
+    // Create div with both class and style attributes
+    writer_->openTag("div", css_class, nullptr, style_value);
 }
 
 void HtmlGenerator::p(const char* attrs) {
@@ -81,11 +92,7 @@ void HtmlGenerator::text(const char* content) {
 
 void HtmlGenerator::textWithClass(const char* content, const char* css_class) {
     // Create a span with the given class and text content
-    std::stringstream ss;
-    ss << "class=\"" << css_class << "\"";
-    std::string attrs = ss.str();
-    
-    writer_->openTag("span", attrs.c_str());
+    writer_->openTag("span", css_class);
     writer_->writeText(content);
     writer_->closeTag("span");
 }
@@ -283,7 +290,7 @@ void HtmlGenerator::startItemize() {
     LatexGenerator::startList();  // Update list depth counter
     pushListState("itemize");
     
-    writer_->openTag("ul", "class=\"itemize\"");
+    writer_->openTag("ul", "itemize");
 }
 
 void HtmlGenerator::endItemize() {
@@ -300,7 +307,7 @@ void HtmlGenerator::startEnumerate() {
     LatexGenerator::startList();
     pushListState("enumerate");
     
-    writer_->openTag("ol", "class=\"enumerate\"");
+    writer_->openTag("ol", "enumerate");
 }
 
 void HtmlGenerator::endEnumerate() {
@@ -317,7 +324,7 @@ void HtmlGenerator::startDescription() {
     LatexGenerator::startList();
     pushListState("description");
     
-    writer_->openTag("dl", "class=\"description\"");
+    writer_->openTag("dl", "description");
 }
 
 void HtmlGenerator::endDescription() {
@@ -400,7 +407,7 @@ std::string HtmlGenerator::getEnumerateLabel(int depth) const {
 // =============================================================================
 
 void HtmlGenerator::startQuote() {
-    writer_->openTag("blockquote", "class=\"quote\"");
+    writer_->openTag("blockquote", "quote");
 }
 
 void HtmlGenerator::endQuote() {
@@ -408,7 +415,7 @@ void HtmlGenerator::endQuote() {
 }
 
 void HtmlGenerator::startQuotation() {
-    writer_->openTag("blockquote", "class=\"quotation\"");
+    writer_->openTag("blockquote", "quotation");
 }
 
 void HtmlGenerator::endQuotation() {
@@ -416,7 +423,7 @@ void HtmlGenerator::endQuotation() {
 }
 
 void HtmlGenerator::startVerse() {
-    writer_->openTag("div", "class=\"verse\"");
+    writer_->openTag("div", "verse");
 }
 
 void HtmlGenerator::endVerse() {
@@ -424,7 +431,7 @@ void HtmlGenerator::endVerse() {
 }
 
 void HtmlGenerator::startCenter() {
-    writer_->openTag("div", "class=\"center\"");
+    writer_->openTag("div", "center");
     setAlignment("center");
 }
 
@@ -433,7 +440,7 @@ void HtmlGenerator::endCenter() {
 }
 
 void HtmlGenerator::startFlushLeft() {
-    writer_->openTag("div", "class=\"flushleft\"");
+    writer_->openTag("div", "flushleft");
     setAlignment("left");
 }
 
@@ -442,7 +449,7 @@ void HtmlGenerator::endFlushLeft() {
 }
 
 void HtmlGenerator::startFlushRight() {
-    writer_->openTag("div", "class=\"flushright\"");
+    writer_->openTag("div", "flushright");
     setAlignment("right");
 }
 
@@ -452,7 +459,7 @@ void HtmlGenerator::endFlushRight() {
 
 void HtmlGenerator::startVerbatim() {
     verbatim_mode_ = true;
-    writer_->openTag("pre", "class=\"verbatim\"");
+    writer_->openTag("pre", "verbatim");
 }
 
 void HtmlGenerator::endVerbatim() {
@@ -473,7 +480,7 @@ void HtmlGenerator::verbatimText(const char* text) {
 
 void HtmlGenerator::startTable(const char* position) {
     pushFloatState("table", position);
-    writer_->openTag("div", "class=\"table-float\"");
+    writer_->openTag("div", "table-float");
 }
 
 void HtmlGenerator::endTable() {
@@ -486,7 +493,7 @@ void HtmlGenerator::startTabular(const char* column_spec) {
     std::vector<std::string> cols = parseColumnSpec(column_spec);
     pushTableState(cols);
     
-    writer_->openTag("table", "class=\"tabular\"");
+    writer_->openTag("table", "tabular");
 }
 
 void HtmlGenerator::endTabular() {
@@ -560,7 +567,7 @@ void HtmlGenerator::hline() {
 
 void HtmlGenerator::startFigure(const char* position) {
     pushFloatState("figure", position);
-    writer_->openTag("div", "class=\"figure-float\"");
+    writer_->openTag("div", "figure-float");
 }
 
 void HtmlGenerator::endFigure() {
@@ -584,7 +591,7 @@ void HtmlGenerator::startCaption() {
         stepCounter("table");
     }
     
-    writer_->openTag("div", "class=\"caption\"");
+    writer_->openTag("div", "caption");
     
     // Write caption label
     std::string label;
@@ -607,7 +614,7 @@ void HtmlGenerator::endCaption() {
 }
 
 void HtmlGenerator::includegraphics(const char* filename, const char* options) {
-    // Create img element
+    // Create img element with raw attributes
     std::stringstream attrs;
     attrs << "src=\"" << filename << "\"";
     
@@ -615,7 +622,7 @@ void HtmlGenerator::includegraphics(const char* filename, const char* options) {
         attrs << " " << options;
     }
     
-    writer_->openTag("img", attrs.str().c_str());
+    writer_->openTagRaw("img", attrs.str().c_str());
     writer_->closeTag("img");
 }
 
@@ -625,7 +632,7 @@ void HtmlGenerator::includegraphics(const char* filename, const char* options) {
 
 void HtmlGenerator::startInlineMath() {
     math_mode_ = true;
-    writer_->openTag("span", "class=\"math inline\"");
+    writer_->openTag("span", "math inline");
 }
 
 void HtmlGenerator::endInlineMath() {
@@ -635,7 +642,7 @@ void HtmlGenerator::endInlineMath() {
 
 void HtmlGenerator::startDisplayMath() {
     math_mode_ = true;
-    writer_->openTag("div", "class=\"math display\"");
+    writer_->openTag("div", "math display");
 }
 
 void HtmlGenerator::endDisplayMath() {
@@ -748,7 +755,7 @@ void HtmlGenerator::space(const char* type) {
 
 void HtmlGenerator::lineBreak(bool newpage) {
     if (newpage) {
-        writer_->openTag("div", "class=\"page-break\"");
+        writer_->openTag("div", "page-break");
         writer_->closeTag("div");
     } else {
         // <br> is a self-closing tag
