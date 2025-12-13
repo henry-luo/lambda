@@ -39,6 +39,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "control_symbol"
+        },
+        {
+          "type": "SYMBOL",
           "name": "space"
         },
         {
@@ -183,6 +187,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "line_comment"
+        },
+        {
+          "type": "SYMBOL",
           "name": "environment"
         },
         {
@@ -208,6 +216,10 @@
         {
           "type": "SYMBOL",
           "name": "control_symbol"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "placeholder"
         }
       ]
     },
@@ -222,6 +234,10 @@
     "line_comment": {
       "type": "PATTERN",
       "value": "%[^\\n]*"
+    },
+    "placeholder": {
+      "type": "PATTERN",
+      "value": "#[1-9]"
     },
     "ligature": {
       "type": "CHOICE",
@@ -253,17 +269,24 @@
       ]
     },
     "control_symbol": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "\\"
-        },
-        {
-          "type": "PATTERN",
-          "value": "[$%#&{}_\\-,\\/@]"
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 2,
+        "content": {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "\\"
+            },
+            {
+              "type": "PATTERN",
+              "value": "[$%#&{}_\\-,\\/@ !;:.'`^\"~=\\\\]"
+            }
+          ]
         }
-      ]
+      }
     },
     "command": {
       "type": "PREC_RIGHT",
@@ -388,6 +411,10 @@
         {
           "type": "SYMBOL",
           "name": "control_symbol"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "placeholder"
         },
         {
           "type": "STRING",
