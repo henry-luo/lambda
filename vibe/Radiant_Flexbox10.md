@@ -6,14 +6,14 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 
 ---
 
-## 0. Progress Summary (Updated: Dec 14, 2025)
+## 0. Progress Summary (Updated: Dec 13, 2025)
 
 ### Current Test Status
 
 | Suite | Tests | Passing | Rate |
 |-------|-------|---------|------|
 | **Baseline** | 1262 | 1262 | 100% ✅ |
-| **Flex** | 339 | 52 | 15.3% |
+| **Flex** | 339 | 68 | 20.1% |
 | **Grid** | 228 | 0 | 0% |
 
 ### Completed Tasks
@@ -44,36 +44,50 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
    - Fixed align-items calculation to use line cross size for wrapping containers
    - Added recursive DOM height measurement for nested flex containers
    - Respect min-width/max-width constraints in shrink-to-fit calculations
-   - **Result**: 52 flex tests now passing (up from 27, almost 2x improvement)
+   - **Result**: 52 flex tests passing (up from 27, almost 2x improvement)
+8. ✅ **Phase 5 Fixes** - Absolute child positioning in flex containers:
+   - Re-resolve percentage width/height for absolute children against flex container (not viewport)
+   - Apply `justify-content` and `align-items` to static position per CSS Flexbox spec §4.1
+   - Handle each axis independently (left/right vs top/bottom can be set separately)
+   - Support `flex-wrap: wrap-reverse` cross-axis flipping
+   - Check `align-self` override on individual items
+   - Account for margins correctly in static position calculation (start vs end margins)
+   - **Result**: 68 flex tests passing (up from 52, +31% improvement)
 
-### Phase 2-4 Passing Tests (52 tests)
-- `align_content_end`
-- `align_content_end_wrapped_negative_space`
-- `align_content_end_wrapped_negative_space_gap`
-- `align_flex_start_with_shrinking_children`
-- `align_flex_start_with_shrinking_children_with_stretch`
-- `align_flex_start_with_stretching_children`
+### Phase 2-5 Passing Tests (68 tests)
+
+**Alignment & Stretch:**
+- `align_content_end`, `align_content_end_wrapped_negative_space`, `align_content_end_wrapped_negative_space_gap`
+- `align_flex_start_with_shrinking_children`, `align_flex_start_with_shrinking_children_with_stretch`, `align_flex_start_with_stretching_children`
 - `align_items_center_with_min_height_percentage_with_align_content_flex_start`
-- `align_items_stretch`
-- `align_stretch_should_size_based_on_parent`
+- `align_items_stretch`, `align_stretch_should_size_based_on_parent`
+
+**Flex Sizing:**
 - `aspect_ratio_flex_row_stretch_fill_height`
 - `bevy_issue_8017_reduced`
-- `border_flex_child`
-- `border_stretch_child`
+- `border_flex_child`, `border_stretch_child`
 - `child_min_max_width_flexing`
 - `container_with_unsized_child`
 - `flex_basis_overrides_main_size`
 - `flex_direction_row`
-- `flex_grow_flex_basis_percent_min_max`
-- `flex_grow_less_than_factor_one`
-- `flex_grow_shrink_at_most`
+- `flex_grow_flex_basis_percent_min_max`, `flex_grow_less_than_factor_one`, `flex_grow_shrink_at_most`
 - `flex_row_relative_all_sides`
-- `overflow_main_axis`
-- `overflow_scrollbars_take_up_space_both_axis`
-- `overflow_scrollbars_take_up_space_cross_axis`
-- `overflow_scrollbars_take_up_space_main_axis`
+- `overflow_main_axis`, `overflow_scrollbars_take_up_space_*`
 - `padding_flex_child`
 - `percentage_sizes_should_not_prevent_flex_shrinking`
+
+**Absolute Positioning in Flex (Phase 5 - NEW):**
+- `absolute_child_with_cross_margin`, `absolute_child_with_main_margin`
+- `absolute_layout_align_items_and_justify_content_center`
+- `absolute_layout_align_items_and_justify_content_center_and_*_position` (top, bottom, left, right)
+- `absolute_layout_align_items_and_justify_content_flex_end`
+- `absolute_layout_in_wrap_reverse_row_container`
+- `absolute_layout_in_wrap_reverse_row_container_flex_end`
+- `absolute_layout_in_wrap_reverse_column_container`
+- `absolute_layout_in_wrap_reverse_column_container_flex_end`
+- `absolute_margin_bottom_left`
+- `justify_content_column_start_reverse`
+- `wrap_child`, `wrap_grandchild`
 
 ### Key Findings
 
@@ -82,12 +96,13 @@ The flex tests require `test_base_style.css` which wasn't being loaded. With CSS
 - Tests are now properly evaluating flex layout behavior
 - Failures reveal real gaps in Radiant's flex implementation
 
-### Next Priority: Content-Based Sizing and Aspect Ratio
+### Next Priority: Aspect Ratio and Inset Sizing
 
-Remaining major issues:
-1. **Nested flex containers** - child's size needs to be determined from content BEFORE parent centers it
-2. **Aspect ratio** - absolute positioned items with aspect-ratio not sizing correctly
-3. **Intrinsic sizing** - many tests fail due to incorrect intrinsic size calculation
+Remaining major issues (many tests at 75% pass rate):
+1. **Aspect ratio** - absolute positioned items with `aspect-ratio` not sizing correctly (~15 tests)
+2. **Inset sizing** - when both `top` and `bottom` (or `left` and `right`) are specified, height/width should be calculated from containing block (~5 tests)
+3. **Gap calculations** - percentage gaps and gap interactions with margins
+4. **Intrinsic sizing** - many tests fail due to incorrect intrinsic size calculation
 
 See Section 4 for implementation details.
 
