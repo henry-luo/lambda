@@ -375,8 +375,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Helvetica, Arial, sans-serif; }\n    \n    .container { margin-bottom: 20px; }\n    .label { font-size: 12px; color: #666; margin-bottom: 5px; }\n    \n    /* Different font sizes with default line-height */\n    .fs12 { font-size: 12px; background: #e3f2fd; }\n    .fs14 { font-size: 14px; background: #f3e5f5; }\n    .fs16 { font-size: 16px; background: #e8f5e9; }\n    .fs18 { font-size: 18px; background: #fff3e0; }\n    .fs24 { font-size: 24px; background: #fce4ec; }\n    .fs32 { font-size: 32px; background: #e0f7fa; }\n  ",
-                "length": 599,
+                "text": "\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: Helvetica, Arial, sans-serif; }\n\n    .container { margin-bottom: 20px; }\n    .label { font-size: 12px; color: #666; margin-bottom: 5px; }\n\n    /* Different font sizes with default line-height */\n    .fs12 { font-size: 12px; background: #e3f2fd; }\n    .fs14 { font-size: 14px; background: #f3e5f5; }\n    .fs16 { font-size: 16px; background: #e8f5e9; }\n    .fs18 { font-size: 18px; background: #fff3e0; }\n    .fs24 { font-size: 24px; background: #fce4ec; }\n    .fs32 { font-size: 32px; background: #e0f7fa; }\n  ",
+                "length": 591,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
