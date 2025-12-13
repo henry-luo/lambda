@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Grid Column Flow\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(3, 1fr);\n            grid-template-rows: repeat(4, 60px);\n            grid-auto-flow: column;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }\n        .item:nth-child(6) { background-color: #ccffff; }\n        .item:nth-child(7) { background-color: #ffeedd; }\n        .item:nth-child(8) { background-color: #ddffee; }\n    \n\n\n    \n        1\n        2\n        3\n        4\n        5\n        6\n        7\n        8\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_016_column_flow\",\n        \"category\": \"intermediate\",\n        \"features\": [\"grid-auto-flow\", \"column\", \"vertical-flow\"],\n        \"description\": \"Grid items flow in columns instead of rows using grid-auto-flow: column\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Grid Column Flow\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(3, 1fr);\n            grid-template-rows: repeat(4, 60px);\n            grid-auto-flow: column;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }\n        .item:nth-child(6) { background-color: #ccffff; }\n        .item:nth-child(7) { background-color: #ffeedd; }\n        .item:nth-child(8) { background-color: #ddffee; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Grid Column Flow",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Grid Column Flow",
+                "length": 22,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(3, 1fr);\n            grid-template-rows: repeat(4, 60px);\n            grid-auto-flow: column;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }\n        .item:nth-child(6) { background-color: #ccffff; }\n        .item:nth-child(7) { background-color: #ffeedd; }\n        .item:nth-child(8) { background-color: #ddffee; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: repeat(3, 1fr);\n            grid-template-rows: repeat(4, 60px);\n            grid-auto-flow: column;\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 14px;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n        .item:nth-child(4) { background-color: #ffffcc; }\n        .item:nth-child(5) { background-color: #ffccff; }\n        .item:nth-child(6) { background-color: #ccffff; }\n        .item:nth-child(7) { background-color: #ffeedd; }\n        .item:nth-child(8) { background-color: #ddffee; }\n    ",
+                "length": 1158,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "1\n        2\n        3\n        4\n        5\n        6\n        7\n        8\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_016_column_flow\",\n        \"category\": \"intermediate\",\n        \"features\": [\"grid-auto-flow\", \"column\", \"vertical-flow\"],\n        \"description\": \"Grid items flow in columns instead of rows using grid-auto-flow: column\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "1\n        2\n        3\n        4\n        5\n        6\n        7\n        8",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 8,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +667,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "1",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "1",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 67.42,
-                        "y": 22,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 75.22,
-                        "bottom": 38
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 67.42,
+                          "y": 22,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 75.22,
+                          "bottom": 38,
+                          "text": "1",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,33 +759,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "2",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "2",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 67.42,
-                        "y": 92,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 75.22,
-                        "bottom": 108
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 67.42,
+                          "y": 92,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 75.22,
+                          "bottom": 108,
+                          "text": "2",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -736,33 +851,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "3",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "3",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 67.42,
-                        "y": 162,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 75.22,
-                        "bottom": 178
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 67.42,
+                          "y": 162,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 75.22,
+                          "bottom": 178,
+                          "text": "3",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -820,33 +943,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "4",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 7,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "4",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 67.42,
-                        "y": 232,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 75.22,
-                        "bottom": 248
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 67.42,
+                          "y": 232,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 75.22,
+                          "bottom": 248,
+                          "text": "4",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -904,33 +1035,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "5",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 9,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "5",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 196.09,
-                        "y": 22,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 203.89,
-                        "bottom": 38
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 196.09,
+                          "y": 22,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 203.89,
+                          "bottom": 38,
+                          "text": "5",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(6)",
                 "tag": "div",
                 "id": null,
@@ -988,33 +1127,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "6",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 11,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "6",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 196.09,
-                        "y": 92,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 203.89,
-                        "bottom": 108
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 196.09,
+                          "y": 92,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 203.89,
+                          "bottom": 108,
+                          "text": "6",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(7)",
                 "tag": "div",
                 "id": null,
@@ -1072,33 +1219,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "7",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 13,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "7",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 196.09,
-                        "y": 162,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 203.89,
-                        "bottom": 178
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 196.09,
+                          "y": 162,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 203.89,
+                          "bottom": 178,
+                          "text": "7",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(8)",
                 "tag": "div",
                 "id": null,
@@ -1156,35 +1311,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "8",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 15,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "8",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 196.09,
-                        "y": 232,
-                        "width": 7.8,
-                        "height": 16,
-                        "right": 203.89,
-                        "bottom": 248
-                      }
-                    ],
                     "length": 1,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 1
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 196.09,
+                          "y": 232,
+                          "width": 7.8,
+                          "height": 16,
+                          "right": 203.89,
+                          "bottom": 248,
+                          "text": "8",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1240,12 +1403,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"grid_016_column_flow\",\n        \"category\": \"intermediate\",\n        \"features\": [\"grid-auto-flow\", \"column\", \"vertical-flow\"],\n        \"description\": \"Grid items flow in columns instead of rows using grid-auto-flow: column\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"grid_016_column_flow\",\n        \"category\": \"intermediate\",\n        \"features\": [\"grid-auto-flow\", \"column\", \"vertical-flow\"],\n        \"description\": \"Grid items flow in columns instead of rows using grid-auto-flow: column\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 388,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

@@ -158,6 +158,45 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("init_flex_container: main_axis_size=%.1f, cross_axis_size=%.1f (content: %dx%d)",
               flex->main_axis_size, flex->cross_axis_size, content_width, content_height);
 
+    // Detect indefinite main axis size (CSS Flexbox spec §9.2)
+    // A flex container has indefinite main size when:
+    // 1. No explicit CSS width/height in the main axis direction
+    // 2. Absolutely/fixed positioned without both left+right (for width) or top+bottom (for height)
+    //
+    // When main axis is indefinite, flex-grow should NOT distribute additional space
+    // because the container should shrink-to-fit its content.
+    flex->main_axis_is_indefinite = false;
+
+    bool is_absolute = container->position &&
+        (container->position->position == CSS_VALUE_ABSOLUTE || container->position->position == CSS_VALUE_FIXED);
+
+    if (is_horizontal) {
+        // Main axis is width for row flex
+        bool has_definite_width = has_explicit_width;
+        // Absolutely positioned elements have definite width only if both left and right are specified
+        if (is_absolute && container->position) {
+            has_definite_width = has_explicit_width ||
+                (container->position->has_left && container->position->has_right);
+        }
+        flex->main_axis_is_indefinite = !has_definite_width;
+    } else {
+        // Main axis is height for column flex
+        bool has_definite_height = has_explicit_height;
+        // Absolutely positioned elements have definite height only if both top and bottom are specified
+        if (is_absolute && container->position) {
+            has_definite_height = has_explicit_height ||
+                (container->position->has_top && container->position->has_bottom);
+        }
+        flex->main_axis_is_indefinite = !has_definite_height;
+    }
+
+    log_debug("init_flex_container: main_axis_is_indefinite=%s (is_absolute=%s, is_horizontal=%s, has_width=%s, has_height=%s)",
+              flex->main_axis_is_indefinite ? "true" : "false",
+              is_absolute ? "true" : "false",
+              is_horizontal ? "true" : "false",
+              has_explicit_width ? "true" : "false",
+              has_explicit_height ? "true" : "false");
+
     // Initialize dynamic arrays
     flex->allocated_items = 8;
     flex->flex_items = (View**)calloc(flex->allocated_items, sizeof(View*));
@@ -424,6 +463,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         log_info("Phase 4: Completed line %d", i);
     }
     log_info("Phase 4: All flex lengths resolved");
+
+    // Phase 4.5: Determine hypothetical cross sizes for each item
+    // CSS Flexbox §9.4: After main sizes are resolved, determine cross sizes
+    log_debug("Phase 4.5: About to determine hypothetical cross sizes");
+    determine_hypothetical_cross_sizes(lycon, flex_layout);
+    log_debug("Phase 4.5: Completed determining hypothetical cross sizes");
 
     // REMOVED: Don't override content dimensions after flex calculations
     // The flex algorithm should work with the proper content dimensions
@@ -1809,11 +1854,14 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         log_debug("ITERATIVE_FLEX - iteration %d, remaining_free_space=%d", iteration, remaining_free_space);
 
         // Re-evaluate whether we're growing or shrinking based on CURRENT remaining_free_space
-        bool is_growing = (remaining_free_space > 0 && line->total_flex_grow > 0);
+        // CRITICAL: When main axis is indefinite (shrink-to-fit), NEVER grow items
+        // per CSS Flexbox spec §9.2 - items keep their basis sizes, container shrinks to fit
+        bool is_growing = (remaining_free_space > 0 && line->total_flex_grow > 0 && !flex_layout->main_axis_is_indefinite);
         bool is_shrinking = (remaining_free_space < 0 && line->total_flex_shrink > 0);
 
         if (!is_growing && !is_shrinking) {
-            log_debug("ITERATIVE_FLEX - no flex distribution needed (free_space=%d)", remaining_free_space);
+            log_debug("ITERATIVE_FLEX - no flex distribution needed (free_space=%d, indefinite=%s)",
+                      remaining_free_space, flex_layout->main_axis_is_indefinite ? "true" : "false");
             break;
         }
 
@@ -2805,6 +2853,7 @@ static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layou
 }
 
 // Calculate cross sizes for all flex lines
+// Updated to use hypothetical cross sizes from Phase 4.5
 void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
     if (!flex_layout || flex_layout->line_count == 0) return;
 
@@ -2813,9 +2862,9 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
 
     for (int i = 0; i < flex_layout->line_count; i++) {
         FlexLineInfo* line = &flex_layout->lines[i];
-        int max_cross_size = 0;
+        float max_cross_size = 0;
 
-        // Find the maximum cross size among items in this line
+        // Find the maximum hypothetical outer cross size among items in this line
         for (int j = 0; j < line->item_count; j++) {
             ViewElement* item = (ViewElement*)line->items[j]->as_element();
             if (!item) continue;
@@ -2830,7 +2879,7 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
                 !has_definite &&
                 will_stretch) {
                 // Even for stretch items, consider their minimum size
-                int min_cross_size = 0;
+                float min_cross_size = 0;
                 if (item->fi) {
                     if (is_main_axis_horizontal(flex_layout)) {
                         min_cross_size = item->fi->resolved_min_height;
@@ -2839,7 +2888,7 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
                     }
                 }
                 if (min_cross_size > 0) {
-                    log_debug("STRETCH_ITEM_MIN: line %d item %d - using min-cross-size: %d",
+                    log_debug("STRETCH_ITEM_MIN: line %d item %d - using min-cross-size: %.1f",
                               i, j, min_cross_size);
                     if (min_cross_size > max_cross_size) {
                         max_cross_size = min_cross_size;
@@ -2851,13 +2900,226 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
                 continue;
             }
 
-            int item_cross_size = get_cross_axis_size(item, flex_layout);
+            // Use hypothetical outer cross size if available (computed in Phase 4.5)
+            // Otherwise fall back to get_cross_axis_size
+            float item_cross_size = 0;
+            if (item->fi && item->fi->hypothetical_outer_cross_size > 0) {
+                item_cross_size = item->fi->hypothetical_outer_cross_size;
+                log_debug("LINE_CROSS: item[%d][%d] using hypothetical_outer_cross=%.1f",
+                          i, j, item_cross_size);
+            } else {
+                item_cross_size = get_cross_axis_size(item, flex_layout);
+                log_debug("LINE_CROSS: item[%d][%d] using fallback cross=%.1f", i, j, item_cross_size);
+            }
+
             if (item_cross_size > max_cross_size) {
                 max_cross_size = item_cross_size;
             }
         }
 
-        line->cross_size = max_cross_size;
-        log_debug("LINE_CROSS_SIZE: line %d = %d", i, max_cross_size);
+        line->cross_size = (int)max_cross_size;
+        log_debug("LINE_CROSS_SIZE: line %d = %d", i, (int)max_cross_size);
+    }
+}
+
+// ============================================================================
+// CSS Flexbox §9.4: Determine hypothetical cross size of each item
+// ============================================================================
+// Per the spec: "Determine the hypothetical cross size of each item by performing
+// layout with the used main size and the available space, treating auto as fit-content."
+void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayout* flex_layout) {
+    if (!flex_layout || flex_layout->line_count == 0) return;
+
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+    log_debug("HYPOTHETICAL_CROSS: Starting determination, is_horizontal=%d", is_horizontal);
+
+    for (int i = 0; i < flex_layout->line_count; i++) {
+        FlexLineInfo* line = &flex_layout->lines[i];
+
+        for (int j = 0; j < line->item_count; j++) {
+            ViewElement* item = (ViewElement*)line->items[j]->as_element();
+            if (!item || !item->fi) continue;
+
+            float hypothetical_cross = 0;
+            float min_cross = 0;
+            float max_cross = INFINITY;
+
+            // get the constraints for the cross axis
+            if (is_horizontal) {
+                // cross-axis is height
+                min_cross = item->fi->resolved_min_height;
+                max_cross = (item->fi->resolved_max_height > 0) ?
+                            item->fi->resolved_max_height : INFINITY;
+
+                // check for explicit cross-axis size (CSS height)
+                if (item->blk && item->blk->given_height > 0) {
+                    hypothetical_cross = item->blk->given_height;
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit height=%.1f",
+                              i, j, hypothetical_cross);
+                } else {
+                    // use measured/content height
+                    hypothetical_cross = item->height > 0 ? item->height : item->content_height;
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using content height=%.1f",
+                              i, j, hypothetical_cross);
+                }
+            } else {
+                // cross-axis is width
+                min_cross = item->fi->resolved_min_width;
+                max_cross = (item->fi->resolved_max_width > 0) ?
+                            item->fi->resolved_max_width : INFINITY;
+
+                // check for explicit cross-axis size (CSS width)
+                if (item->blk && item->blk->given_width > 0) {
+                    hypothetical_cross = item->blk->given_width;
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit width=%.1f",
+                              i, j, hypothetical_cross);
+                } else {
+                    // use measured/content width
+                    hypothetical_cross = item->width > 0 ? item->width : item->content_width;
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using content width=%.1f",
+                              i, j, hypothetical_cross);
+                }
+            }
+
+            // clamp to min/max constraints
+            if (hypothetical_cross < min_cross) {
+                hypothetical_cross = min_cross;
+            }
+            if (hypothetical_cross > max_cross) {
+                hypothetical_cross = max_cross;
+            }
+
+            // store the hypothetical cross size
+            item->fi->hypothetical_cross_size = hypothetical_cross;
+
+            // compute the outer hypothetical cross size (add margins)
+            float margin_sum = 0;
+            if (item->bound) {
+                if (is_horizontal) {
+                    margin_sum = item->bound->margin.top + item->bound->margin.bottom;
+                } else {
+                    margin_sum = item->bound->margin.left + item->bound->margin.right;
+                }
+            }
+            item->fi->hypothetical_outer_cross_size = hypothetical_cross + margin_sum;
+
+            log_debug("HYPOTHETICAL_CROSS: item[%d][%d] final=%.1f, outer=%.1f (margins=%.1f)",
+                      i, j, hypothetical_cross, item->fi->hypothetical_outer_cross_size, margin_sum);
+        }
+    }
+}
+
+// ============================================================================
+// CSS Flexbox §9.4: Determine container cross size from line cross sizes
+// ============================================================================
+// Per the spec: If the flex container has a definite cross size, use that.
+// Otherwise, use the sum of the flex lines' cross sizes plus gaps and padding/border.
+void determine_container_cross_size(FlexContainerLayout* flex_layout, ViewBlock* container) {
+    if (!flex_layout || !container) return;
+
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+    log_debug("CONTAINER_CROSS: Determining cross size, is_horizontal=%d", is_horizontal);
+
+    // check if container has definite cross size
+    bool has_definite_cross = false;
+    float definite_cross = 0;
+
+    if (is_horizontal) {
+        // cross-axis is height
+        if (container->blk && container->blk->given_height > 0) {
+            has_definite_cross = true;
+            definite_cross = container->blk->given_height;
+            log_debug("CONTAINER_CROSS: Container has definite height=%.1f", definite_cross);
+        }
+    } else {
+        // cross-axis is width
+        if (container->blk && container->blk->given_width > 0) {
+            has_definite_cross = true;
+            definite_cross = container->blk->given_width;
+            log_debug("CONTAINER_CROSS: Container has definite width=%.1f", definite_cross);
+        }
+    }
+
+    // Also check if this container is a flex item whose cross-size was set by parent flex
+    // In that case, we should NOT override it
+    if (!has_definite_cross && container->fi) {
+        // If the container is a flex item and already has a cross-size set,
+        // check if it came from parent flex sizing (not auto)
+        float current_cross = is_horizontal ? container->height : container->width;
+        if (current_cross > 0) {
+            // The container already has a cross size - likely set by parent flex
+            // Don't override it
+            has_definite_cross = true;
+            definite_cross = current_cross;
+            log_debug("CONTAINER_CROSS: Container is flex item with cross size from parent=%.1f",
+                      definite_cross);
+        }
+    }
+
+    if (has_definite_cross) {
+        // use the definite size
+        flex_layout->cross_axis_size = definite_cross;
+        if (is_horizontal) {
+            container->height = definite_cross;
+        } else {
+            container->width = definite_cross;
+        }
+        log_debug("CONTAINER_CROSS: Using definite cross size=%.1f", definite_cross);
+        return;
+    }
+
+    // sum the cross sizes of all lines
+    float total_cross = 0;
+    for (int i = 0; i < flex_layout->line_count; i++) {
+        total_cross += flex_layout->lines[i].cross_size;
+    }
+
+    // add gaps between lines
+    if (flex_layout->line_count > 1) {
+        // row-gap for wrapping row flex (vertical gaps between lines)
+        // column-gap for wrapping column flex (horizontal gaps between lines)
+        float gap = is_horizontal ? flex_layout->row_gap : flex_layout->column_gap;
+        total_cross += gap * (flex_layout->line_count - 1);
+    }
+
+    // add padding to total cross
+    if (container->bound) {
+        if (is_horizontal) {
+            total_cross += container->bound->padding.top + container->bound->padding.bottom;
+        } else {
+            total_cross += container->bound->padding.left + container->bound->padding.right;
+        }
+    }
+
+    // apply min/max constraints
+    if (container->blk) {
+        float min_cross = is_horizontal ?
+            container->blk->given_min_height : container->blk->given_min_width;
+        float max_cross = is_horizontal ?
+            container->blk->given_max_height : container->blk->given_max_width;
+
+        if (min_cross > 0 && total_cross < min_cross) {
+            total_cross = min_cross;
+            log_debug("CONTAINER_CROSS: Applied min constraint, now=%.1f", total_cross);
+        }
+        if (max_cross > 0 && total_cross > max_cross) {
+            total_cross = max_cross;
+            log_debug("CONTAINER_CROSS: Applied max constraint, now=%.1f", total_cross);
+        }
+    }
+
+    // Only update if we computed a non-zero total
+    if (total_cross > 0) {
+        flex_layout->cross_axis_size = total_cross;
+        if (is_horizontal) {
+            container->height = total_cross;
+        } else {
+            container->width = total_cross;
+        }
+        log_debug("CONTAINER_CROSS: Final cross_axis_size=%.1f (lines=%d)",
+                  total_cross, flex_layout->line_count);
+    } else {
+        log_debug("CONTAINER_CROSS: No cross size computed, keeping existing=%.1f",
+                  flex_layout->cross_axis_size);
     }
 }
