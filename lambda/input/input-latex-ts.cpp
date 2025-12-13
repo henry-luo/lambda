@@ -30,74 +30,70 @@ enum NodeCategory {
     NODE_TEXT         // Text content -> String
 };
 
-// Grammar analysis: which node types can have children?
+// Hybrid grammar (50 rules) node classification
+// Matches LaTeX.js structure: generic commands, section hierarchy, environment types
 static const std::unordered_map<std::string, NodeCategory> node_classification = {
-    // Container nodes (can have children in grammar)
+    // Document structure
     {"source_file", NODE_CONTAINER},
-    {"generic_command", NODE_CONTAINER},
-    {"generic_environment", NODE_CONTAINER},
-    {"curly_group", NODE_CONTAINER},
-    {"curly_group_text", NODE_CONTAINER},
-    {"brack_group", NODE_CONTAINER},
-    {"brack_group_text", NODE_CONTAINER},
-    {"math_environment", NODE_CONTAINER},
-    {"section", NODE_CONTAINER},
-    {"subsection", NODE_CONTAINER},
-    {"subsubsection", NODE_CONTAINER},
-    {"chapter", NODE_CONTAINER},
-    {"part", NODE_CONTAINER},
-    {"paragraph", NODE_CONTAINER},
-    {"subparagraph", NODE_CONTAINER},
-    {"itemize", NODE_CONTAINER},
-    {"enumerate", NODE_CONTAINER},
-    {"description", NODE_CONTAINER},
-    {"text", NODE_TEXT},  // Text content - return as string, not element
-    {"enum_item", NODE_CONTAINER},
-    {"diacritic_command", NODE_CONTAINER},  // Can have optional base
-    {"linebreak_command", NODE_CONTAINER},  // Can have optional spacing
-    {"verb_command", NODE_CONTAINER},       // Has content field
-    {"begin", NODE_CONTAINER},
-    {"end", NODE_CONTAINER},
-    {"comment_environment", NODE_CONTAINER},
-    {"verbatim_environment", NODE_CONTAINER},
-    // PHASE 5: Consolidated include commands
-    {"single_path_include", NODE_CONTAINER},   // documentclass, includegraphics, include, input, etc.
-    {"double_path_include", NODE_CONTAINER},   // import, subimport, etc.
-    {"graphics_include", NODE_CONTAINER},   // Legacy: \includegraphics command
-    {"\\includegraphics", NODE_CONTAINER},  // Command name with backslash
-    {"figure", NODE_CONTAINER},             // figure environment
-    {"table", NODE_CONTAINER},              // table float environment
-    {"caption", NODE_CONTAINER},            // \caption command
-    {"\\caption", NODE_CONTAINER},          // Command name with backslash
-    {"curly_group_path", NODE_CONTAINER},   // Path argument group
-    {"color_reference", NODE_CONTAINER},    // \textcolor, \colorbox commands
-    {"color_definition", NODE_CONTAINER},   // \definecolor command
-    // PHASE 5: Consolidated counter and label commands
-    {"counter_command", NODE_CONTAINER},    // All counter commands
-    {"label_command", NODE_CONTAINER},      // All label commands
+    {"preamble", NODE_CONTAINER},
+    {"document", NODE_CONTAINER},
+    {"begin_document", NODE_LEAF},
+    {"end_document", NODE_LEAF},
     
-    // Leaf nodes (cannot have children in grammar)
+    // Block-level content
+    {"paragraph", NODE_CONTAINER},
+    {"paragraph_break", NODE_LEAF},
+    {"section", NODE_CONTAINER},
+    {"section_command", NODE_LEAF},
+    
+    // Commands (generic pattern)
+    {"command", NODE_CONTAINER},
     {"command_name", NODE_LEAF},
-    {"escape_sequence", NODE_LEAF},
-    {"spacing_command", NODE_LEAF},
-    {"symbol_command", NODE_LEAF},
+    {"star", NODE_LEAF},
+    
+    // Groups
+    {"curly_group", NODE_CONTAINER},
+    {"brack_group", NODE_CONTAINER},
+    
+    // Math
+    {"math", NODE_CONTAINER},
+    {"inline_math", NODE_CONTAINER},
+    {"display_math", NODE_CONTAINER},
+    {"math_text", NODE_TEXT},
+    {"subscript", NODE_CONTAINER},
+    {"superscript", NODE_CONTAINER},
+    
+    // Environments
+    {"environment", NODE_CONTAINER},
+    {"generic_environment", NODE_CONTAINER},
+    {"verbatim_environment", NODE_CONTAINER},
+    {"comment_environment", NODE_CONTAINER},
+    {"math_environment", NODE_CONTAINER},
+    {"begin_env", NODE_CONTAINER},
+    {"end_env", NODE_CONTAINER},
+    {"env_name", NODE_LEAF},
+    {"verbatim", NODE_TEXT},
+    
+    // Text content
+    {"text", NODE_TEXT},
+    {"space", NODE_LEAF},
     {"line_comment", NODE_LEAF},
-    {"paragraph_break", NODE_LEAF},  // Blank line - creates paragraph boundary
-    {"space", NODE_LEAF},             // Whitespace - collapses to single space
-    {"operator", NODE_LEAF},
-    {"delimiter", NODE_LEAF},
-    {"value_literal", NODE_LEAF},
-    {"label", NODE_LEAF},
-    {"path", NODE_LEAF},
-    {"uri", NODE_LEAF},
-    {"{", NODE_LEAF},                 // Brace delimiters - skip these
+    {"ligature", NODE_LEAF},
+    {"control_symbol", NODE_CONTAINER},
+    
+    // Special tokens
+    {"nbsp", NODE_LEAF},
+    {"alignment_tab", NODE_LEAF},
+    
+    // Punctuation (skip these)
+    {"{", NODE_LEAF},
     {"}", NODE_LEAF},
     {"[", NODE_LEAF},
     {"]", NODE_LEAF},
+    {"$", NODE_LEAF},
     
-    // Text nodes (raw text content)
-    {"word", NODE_TEXT},
-    {"comment", NODE_TEXT},
+    // Error recovery
+    {"ERROR", NODE_TEXT},
 };
 
 static NodeCategory classify_node_type(const char* node_type) {
@@ -334,62 +330,11 @@ static Item convert_text_node(InputContext& ctx, TSNode node, const char* source
         return {.item = s2it(extract_text(ctx, node, source))};
     }
     
-    // For "text" nodes, process children (words, spaces, commands, etc.)
-    if (strcmp(node_type, "text") == 0) {
-        uint32_t child_count = ts_node_child_count(node);
-        if (child_count == 0) {
-            return {.item = ITEM_NULL};
-        }
-        
-        // If single child, unwrap it
-        if (child_count == 1) {
-            return convert_latex_node(ctx, ts_node_child(node, 0), source);
-        }
-        
-        // Multiple children - need to handle mixed content (strings, commands, symbols)
-        // Strategy: Try to concatenate consecutive strings, but preserve non-string items
-        MarkBuilder& builder = ctx.builder;
-        std::vector<Item> items;
-        StrBuf* sb = strbuf_new();  // Buffer for concatenating strings
-        
-        auto flush_string_buffer = [&]() {
-            if (sb->length > 0) {
-                items.push_back({.item = s2it(builder.createString(sb->str, sb->length))});
-                strbuf_reset(sb);
-            }
-        };
-        
-        for (uint32_t i = 0; i < child_count; i++) {
-            TSNode child = ts_node_child(node, i);
-            Item child_item = convert_latex_node(ctx, child, source);
-            
-            if (child_item.item != ITEM_NULL) {
-                TypeId type = get_type_id(child_item);
-                if (type == LMD_TYPE_STRING) {
-                    // Append to string buffer
-                    String* str = (String*)(child_item.item & ~7ULL);
-                    strbuf_append_str_n(sb, str->chars, str->len);
-                } else {
-                    // Non-string item (command, symbol, element) - flush buffer and add item
-                    flush_string_buffer();
-                    items.push_back(child_item);
-                }
-            }
-        }
-        flush_string_buffer();  // Flush any remaining string
-        strbuf_free(sb);
-        
-        // If we have a single item, unwrap it
-        if (items.size() == 1) {
-            return items[0];
-        }
-        
-        // Multiple items - return as list
-        ListBuilder lb = builder.list();
-        for (const Item& item : items) {
-            lb.push(item);
-        }
-        return lb.final();
+    // For "text" and "math_text" nodes in hybrid grammar - they are terminal nodes (no children)
+    // Just extract the raw text directly
+    if (strcmp(node_type, "text") == 0 || strcmp(node_type, "math_text") == 0 ||
+        strcmp(node_type, "verbatim") == 0) {
+        return {.item = s2it(extract_text(ctx, node, source))};
     }
     
     // Default: extract as string
@@ -438,60 +383,70 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 return convert_command(ctx, node, source);
             }
             
+            // NEW: command type in hybrid grammar
+            if (strcmp(node_type, "command") == 0) {
+                return convert_command(ctx, node, source);
+            }
+            
             if (strcmp(node_type, "generic_environment") == 0) {
                 return convert_environment(ctx, node, source);
             }
             
-            if (strcmp(node_type, "color_reference") == 0) {
-                // Special handling for color commands like \textcolor, \colorbox
-                // Structure: command, name OR (model, spec), optional text
+            // NEW: section handling in hybrid grammar
+            // section has: command field (section_command), toc field (optional brack_group), title field (curly_group)
+            if (strcmp(node_type, "section") == 0) {
                 MarkBuilder& builder = ctx.builder;
                 
-                // Extract command name
+                // Extract section command to determine level
                 TSNode cmd_node = ts_node_child_by_field_name(node, "command", 7);
                 String* cmd_str = ts_node_is_null(cmd_node) ? nullptr : extract_text(ctx, cmd_node, source);
-                const char* cmd_name = cmd_str ? cmd_str->chars : "color_reference";
+                const char* section_type = cmd_str ? cmd_str->chars : "section";
                 
                 // Skip backslash if present
-                if (cmd_name[0] == '\\') {
-                    cmd_name++;
+                if (section_type[0] == '\\') {
+                    section_type++;
                 }
                 
-                ElementBuilder elem_builder = builder.element(cmd_name);
+                ElementBuilder section_builder = builder.element(section_type);
                 
-                // Get color specification (either name or model+spec)
-                TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
-                TSNode model_node = ts_node_child_by_field_name(node, "model", 5);
-                TSNode spec_node = ts_node_child_by_field_name(node, "spec", 4);
-                
-                if (!ts_node_is_null(name_node)) {
-                    // Named color: extract from curly_group_text
-                    Item name_item = convert_latex_node(ctx, name_node, source);
-                    if (name_item.item != ITEM_NULL) {
-                        elem_builder.child(name_item);
-                    }
-                } else if (!ts_node_is_null(model_node) && !ts_node_is_null(spec_node)) {
-                    // Color by model+spec
-                    Item model_item = convert_latex_node(ctx, model_node, source);
-                    Item spec_item = convert_latex_node(ctx, spec_node, source);
-                    if (model_item.item != ITEM_NULL) {
-                        elem_builder.child(model_item);
-                    }
-                    if (spec_item.item != ITEM_NULL) {
-                        elem_builder.child(spec_item);
+                // Extract title
+                TSNode title_node = ts_node_child_by_field_name(node, "title", 5);
+                if (!ts_node_is_null(title_node)) {
+                    Item title_item = convert_latex_node(ctx, title_node, source);
+                    if (title_item.item != ITEM_NULL) {
+                        section_builder.attr("title", title_item);
                     }
                 }
                 
-                // Get optional text content
-                TSNode text_node = ts_node_child_by_field_name(node, "text", 4);
-                if (!ts_node_is_null(text_node)) {
-                    Item text_item = convert_latex_node(ctx, text_node, source);
-                    if (text_item.item != ITEM_NULL) {
-                        elem_builder.child(text_item);
+                // Extract optional TOC title  
+                TSNode toc_node = ts_node_child_by_field_name(node, "toc", 3);
+                if (!ts_node_is_null(toc_node)) {
+                    Item toc_item = convert_latex_node(ctx, toc_node, source);
+                    if (toc_item.item != ITEM_NULL) {
+                        section_builder.attr("toc", toc_item);
                     }
                 }
                 
-                return elem_builder.final();
+                // Add section content (remaining children)
+                uint32_t child_count = ts_node_child_count(node);
+                for (uint32_t i = 0; i < child_count; i++) {
+                    TSNode child = ts_node_child(node, i);
+                    const char* child_type = ts_node_type(child);
+                    
+                    // Skip the command, title, and toc nodes (already processed)
+                    if (strcmp(child_type, "section_command") == 0 ||
+                        strcmp(child_type, "curly_group") == 0 ||
+                        strcmp(child_type, "brack_group") == 0) {
+                        continue;
+                    }
+                    
+                    Item child_item = convert_latex_node(ctx, child, source);
+                    if (child_item.item != ITEM_NULL) {
+                        section_builder.child(child_item);
+                    }
+                }
+                
+                return section_builder.final();
             }
             
             // Special case: placeholder (#1, #2, etc.) - terminal node, extract text
@@ -527,8 +482,12 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
 
 // Convert command node
 static Item convert_command(InputContext& ctx, TSNode node, const char* source) {
-    // Extract command name
-    TSNode cmd_name_node = ts_node_child_by_field_name(node, "command", 7);
+    // Extract command name - hybrid grammar uses "name" field
+    TSNode cmd_name_node = ts_node_child_by_field_name(node, "name", 4);
+    if (ts_node_is_null(cmd_name_node)) {
+        // Fallback for old grammar structure
+        cmd_name_node = ts_node_child_by_field_name(node, "command", 7);
+    }
     if (ts_node_is_null(cmd_name_node)) {
         return {.item = ITEM_NULL};
     }
@@ -619,26 +578,67 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
 // Convert environment node
 static Item convert_environment(InputContext& ctx, TSNode node, const char* source) {
     // Extract environment name from \begin{name}
+    // Hybrid grammar: begin_env has name field containing curly_group
     TSNode begin_node = ts_node_child_by_field_name(node, "begin", 5);
     if (ts_node_is_null(begin_node)) {
         return {.item = ITEM_NULL};
     }
     
-    // Get the name field from begin node
+    // Get the name field from begin node (curly_group in hybrid grammar)
     TSNode name_node = ts_node_child_by_field_name(begin_node, "name", 4);
     if (ts_node_is_null(name_node)) {
         return {.item = ITEM_NULL};
     }
     
-    // Extract environment name from curly_group_text
-    // Need to get the text field from curly_group_text
-    TSNode text_node = ts_node_child_by_field_name(name_node, "text", 4);
-    if (ts_node_is_null(text_node)) {
-        // Fallback: extract from name_node directly
-        text_node = name_node;
+    // Extract environment name - may be curly_group, extract text content
+    String* env_name = nullptr;
+    const char* name_type = ts_node_type(name_node);
+    if (strcmp(name_type, "curly_group") == 0) {
+        // Find text child inside curly group
+        uint32_t child_count = ts_node_child_count(name_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(name_node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "text") == 0 || strcmp(child_type, "env_name") == 0) {
+                env_name = extract_text(ctx, child, source);
+                break;
+            }
+            // Skip braces
+            if (strcmp(child_type, "{") != 0 && strcmp(child_type, "}") != 0) {
+                env_name = extract_text(ctx, child, source);
+                break;
+            }
+        }
+        // If still null, extract entire group content (minus braces)
+        if (!env_name) {
+            uint32_t start = ts_node_start_byte(name_node);
+            uint32_t end = ts_node_end_byte(name_node);
+            const char* text = source + start;
+            size_t len = end - start;
+            // Skip leading { and trailing }
+            if (len >= 2 && text[0] == '{' && text[len-1] == '}') {
+                text++;
+                len -= 2;
+            }
+            env_name = ctx.builder.createString(text, len);
+        }
+    } else if (strcmp(name_type, "env_name") == 0) {
+        // Direct env_name node (for verbatim/math environments)
+        env_name = extract_text(ctx, name_node, source);
+    } else {
+        // Fallback: try extracting text directly
+        TSNode text_node = ts_node_child_by_field_name(name_node, "text", 4);
+        if (!ts_node_is_null(text_node)) {
+            env_name = extract_text(ctx, text_node, source);
+        } else {
+            env_name = extract_text(ctx, name_node, source);
+        }
     }
     
-    String* env_name = extract_text(ctx, text_node, source);
+    if (!env_name || env_name->len == 0) {
+        log_warn("Failed to extract environment name");
+        env_name = ctx.builder.createString("unknown", 7);
+    }
     
     // Create element with environment name as tag
     MarkBuilder& builder = ctx.builder;
@@ -650,8 +650,9 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
         TSNode child = ts_node_child(node, i);
         const char* child_type = ts_node_type(child);
         
-        // Skip begin/end nodes
-        if (strcmp(child_type, "begin") == 0 || strcmp(child_type, "end") == 0) {
+        // Skip begin/end nodes (old grammar: "begin"/"end", hybrid: "begin_env"/"end_env")
+        if (strcmp(child_type, "begin") == 0 || strcmp(child_type, "end") == 0 ||
+            strcmp(child_type, "begin_env") == 0 || strcmp(child_type, "end_env") == 0) {
             continue;
         }
         
