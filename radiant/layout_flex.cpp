@@ -80,7 +80,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->direction = DIR_ROW;
         flex->wrap = WRAP_NOWRAP;
         flex->justify = JUSTIFY_START;
-        flex->align_items = ALIGN_START;  // Changed from FLEX_START for consistency
+        flex->align_items = ALIGN_STRETCH;  // Default per CSS Flexbox spec
         flex->align_content = ALIGN_STRETCH;  // Default per CSS Flexbox spec
         flex->row_gap = 0;
         flex->column_gap = 0;
@@ -2337,10 +2337,12 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                         bool has_explicit_cross_size = false;
                         if (is_main_axis_horizontal(flex_layout)) {
                             // Row direction: cross-axis is height
-                            has_explicit_cross_size = (item->blk && item->blk->given_height >= 0);
+                            // given_height > 0 means explicit height (0 or negative means auto)
+                            has_explicit_cross_size = (item->blk && item->blk->given_height > 0);
                         } else {
                             // Column direction: cross-axis is width
-                            has_explicit_cross_size = (item->blk && item->blk->given_width >= 0);
+                            // given_width > 0 means explicit width (0 or negative means auto)
+                            has_explicit_cross_size = (item->blk && item->blk->given_width > 0);
                         }
 
                         if (has_explicit_cross_size) {
@@ -2834,10 +2836,12 @@ static bool item_has_definite_cross_size(ViewElement* item, FlexContainerLayout*
 
     if (is_main_axis_horizontal(flex_layout)) {
         // Cross-axis is height for row direction
-        return item->blk->given_height >= 0;
+        // given_height > 0 means explicit height (0 or negative means auto)
+        return item->blk->given_height > 0;
     } else {
         // Cross-axis is width for column direction
-        return item->blk->given_width >= 0;
+        // given_width > 0 means explicit width (0 or negative means auto)
+        return item->blk->given_width > 0;
     }
 }
 
@@ -2857,6 +2861,23 @@ static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layou
 void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
     if (!flex_layout || flex_layout->line_count == 0) return;
 
+    // CSS Flexbox §9.4 Step 8:
+    // If the flex container is single-line (flex-wrap: nowrap) and has a definite cross size,
+    // the cross size of the flex line is the flex container's inner cross size.
+    // Note: "single-line" refers to flex-wrap: nowrap, NOT to having only one line with wrap.
+    // align-content can still apply to a wrapping container even if it happens to have one line.
+    bool is_nowrap = (flex_layout->wrap == WRAP_NOWRAP);
+    bool has_definite_cross = (flex_layout->cross_axis_size > 0);
+    
+    if (is_nowrap && has_definite_cross) {
+        // Single-line (nowrap) with definite cross size: line cross = container cross
+        flex_layout->lines[0].cross_size = (int)flex_layout->cross_axis_size;
+        log_debug("LINE_CROSS_SIZE: nowrap with definite cross, line 0 = %.1f (container cross)",
+                  flex_layout->cross_axis_size);
+        return;
+    }
+
+    // Otherwise, calculate line cross sizes from item hypothetical cross sizes
     // Check if align-content is stretch - affects how we calculate line sizes
     bool align_content_stretch = (flex_layout->align_content == ALIGN_STRETCH);
 
