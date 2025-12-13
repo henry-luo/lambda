@@ -14,6 +14,10 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
 
     log_debug("Initializing track sizes\n");
 
+    // Get negative implicit offsets (tracks added before the explicit grid)
+    int neg_row_offset = grid_layout->negative_implicit_row_count;
+    int neg_col_offset = grid_layout->negative_implicit_column_count;
+
     // Allocate computed tracks
     if (grid_layout->computed_row_count > 0) {
         grid_layout->computed_rows = (GridTrack*)calloc(grid_layout->computed_row_count, sizeof(GridTrack));
@@ -22,19 +26,42 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
         for (int i = 0; i < grid_layout->computed_row_count; i++) {
             GridTrack* track = &grid_layout->computed_rows[i];
 
-            if (i < grid_layout->explicit_row_count &&
+            // Calculate the adjusted index relative to the explicit grid
+            // With neg_row_offset negative implicit tracks:
+            //   Tracks 0 to (neg_row_offset-1) = negative implicit (before explicit)
+            //   Tracks neg_row_offset to (neg_row_offset + explicit - 1) = explicit
+            //   Tracks (neg_row_offset + explicit) onwards = positive implicit
+            int explicit_start = neg_row_offset;
+            int explicit_end = neg_row_offset + grid_layout->explicit_row_count;
+
+            if (i >= explicit_start && i < explicit_end &&
                 grid_layout->grid_template_rows &&
-                i < grid_layout->grid_template_rows->track_count) {
+                (i - explicit_start) < grid_layout->grid_template_rows->track_count) {
                 // Explicit track - use template definition (shared, don't free)
-                track->size = grid_layout->grid_template_rows->tracks[i];
+                track->size = grid_layout->grid_template_rows->tracks[i - explicit_start];
                 track->is_implicit = false;
                 track->owns_size = false;  // Shared with template
             } else {
                 // Implicit track - use grid-auto-rows if defined, otherwise auto sizing
                 if (grid_layout->grid_auto_rows && grid_layout->grid_auto_rows->track_count > 0) {
-                    // Use the first auto-row track size (cycle through if multiple)
-                    // Note: this is shared, don't free
-                    int auto_track_idx = (i - grid_layout->explicit_row_count) % grid_layout->grid_auto_rows->track_count;
+                    // Calculate auto-row cycle index
+                    // For negative implicit tracks (i < explicit_start): cycle backwards
+                    // For positive implicit tracks (i >= explicit_end): cycle forwards
+                    int auto_track_idx;
+                    if (i < explicit_start) {
+                        // Negative implicit tracks - count backwards from explicit grid
+                        // Track at i=neg_row_offset-1 should be auto_rows[(auto_count-1)]
+                        // Track at i=neg_row_offset-2 should be auto_rows[(auto_count-2)]
+                        // etc.
+                        int distance_from_explicit = explicit_start - i;  // 1, 2, 3...
+                        int auto_count = grid_layout->grid_auto_rows->track_count;
+                        // Wrap backwards: -1 mod 3 should give 2, -2 mod 3 should give 1
+                        auto_track_idx = ((auto_count - (distance_from_explicit % auto_count)) % auto_count);
+                    } else {
+                        // Positive implicit tracks - count forwards from explicit grid end
+                        int distance_from_explicit = i - explicit_end;  // 0, 1, 2...
+                        auto_track_idx = distance_from_explicit % grid_layout->grid_auto_rows->track_count;
+                    }
                     track->size = grid_layout->grid_auto_rows->tracks[auto_track_idx];
                     track->owns_size = false;  // Shared with auto tracks
                 } else {
@@ -70,19 +97,30 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
         for (int i = 0; i < grid_layout->computed_column_count; i++) {
             GridTrack* track = &grid_layout->computed_columns[i];
 
-            if (i < grid_layout->explicit_column_count &&
+            // Calculate the adjusted index relative to the explicit grid
+            int explicit_start = neg_col_offset;
+            int explicit_end = neg_col_offset + grid_layout->explicit_column_count;
+
+            if (i >= explicit_start && i < explicit_end &&
                 grid_layout->grid_template_columns &&
-                i < grid_layout->grid_template_columns->track_count) {
+                (i - explicit_start) < grid_layout->grid_template_columns->track_count) {
                 // Explicit track - use template definition (shared, don't free)
-                track->size = grid_layout->grid_template_columns->tracks[i];
+                track->size = grid_layout->grid_template_columns->tracks[i - explicit_start];
                 track->is_implicit = false;
                 track->owns_size = false;  // Shared with template
             } else {
                 // Implicit track - use grid-auto-columns if defined, otherwise auto sizing
                 if (grid_layout->grid_auto_columns && grid_layout->grid_auto_columns->track_count > 0) {
-                    // Use the first auto-column track size (cycle through if multiple)
-                    // Note: this is shared, don't free
-                    int auto_track_idx = (i - grid_layout->explicit_column_count) % grid_layout->grid_auto_columns->track_count;
+                    // Calculate auto-column cycle index
+                    int auto_track_idx;
+                    if (i < explicit_start) {
+                        int distance_from_explicit = explicit_start - i;
+                        int auto_count = grid_layout->grid_auto_columns->track_count;
+                        auto_track_idx = ((auto_count - (distance_from_explicit % auto_count)) % auto_count);
+                    } else {
+                        int distance_from_explicit = i - explicit_end;
+                        auto_track_idx = distance_from_explicit % grid_layout->grid_auto_columns->track_count;
+                    }
                     track->size = grid_layout->grid_auto_columns->tracks[auto_track_idx];
                     track->owns_size = false;  // Shared with auto tracks
                 } else {

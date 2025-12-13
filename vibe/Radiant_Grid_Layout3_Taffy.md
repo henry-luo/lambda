@@ -9,7 +9,7 @@ This document provides a comprehensive analysis of Taffy (a Rust-based CSS layou
 | Test Suite | Pass Rate | Status |
 |------------|-----------|--------|
 | Baseline | 953/953 (100%) | ✅ Stable |
-| Grid | 76/290 (26.2%) | 🔄 In Progress |
+| Grid | 106/290 (36.6%) | 🔄 In Progress |
 
 ### Implementation Status
 
@@ -28,6 +28,9 @@ The following Taffy-inspired enhancements have been implemented:
 | Grid Column Flow Height | `radiant/intrinsic_sizing.cpp` | ✅ Complete |
 | fit-content() Parsing | `radiant/resolve_css_style.cpp` | ✅ Complete |
 | fit-content() Track Sizing | `radiant/grid_sizing.cpp` | ✅ Complete |
+| minmax() Track Sizing | `radiant/grid_sizing.cpp` | ✅ Complete |
+| Border-width/style Handling | `radiant/resolve_css_style.cpp` | ✅ Complete |
+| Negative Implicit Tracks | `radiant/grid.hpp`, `radiant/grid_sizing.cpp` | ✅ Complete |
 
 ### Recent Bug Fixes (December 2025)
 
@@ -48,6 +51,13 @@ The following Taffy-inspired enhancements have been implemented:
 | Single track value not parsed | Added LENGTH/PERCENTAGE handling for grid-template-rows | `resolve_css_style.cpp` |
 | Zero-width space breaks not detected | Added U+200B detection in intrinsic sizing | `intrinsic_sizing.cpp` |
 | ZeroWidthSpace HTML entity missing | Added entity to html_entities.cpp table | `html_entities.cpp` |
+| Border-width without border-style | Zero border widths when style is none/hidden/undef | `resolve_css_style.cpp` |
+| minmax() track sizing not implemented | Added MINMAX case to resolve_intrinsic_track_sizes | `grid_sizing.cpp` |
+| minmax(auto, X) wrong base size | Auto minimum now uses min(min-content, max) per CSS spec | `grid_sizing.cpp` |
+| Single-value grid-template-columns not parsed | Added LENGTH/PERCENTAGE handling for grid-template-columns | `resolve_css_style.cpp` |
+| Negative grid line numbers (e.g., -4) not handled | Fixed extract_grid_item_info to handle row_start != 0 | `grid_enhanced_adapter.hpp` |
+| Negative implicit tracks not sized correctly | Track sizing now accounts for negative_implicit offsets | `grid_sizing.cpp`, `grid.hpp` |
+| Auto-rows cycling wrong for negative implicit | Fixed auto-row index calculation for tracks before explicit grid | `grid_sizing.cpp` |
 
 ---
 
@@ -659,11 +669,25 @@ void align_tracks(
 - [x] Add item alignment (`justify-items`, `align-items`, `justify-self`, `align-self`)
 
 ### Milestone 6: Testing & Polish (ongoing)
-- [x] Port basic grid test fixtures (76/290 passing, up from 65)
+- [x] Port basic grid test fixtures (106/290 passing, 36.6%)
 - [x] Compare against browser layout (baseline 953/953 passing)
 - [ ] Performance optimization
 - [x] Fix nested grid support
 - [x] Fix relative coordinate system
+
+### Test Failure Analysis (184 remaining failures)
+| Category | Count | Notes |
+|----------|-------|-------|
+| grid_absolute | 23 | Absolute positioning in grid |
+| grid_span | 22 | Spanning item placement |
+| grid_align (negative_space_gap) | 21 | Alignment with overflow |
+| grid_max | 11 | Max sizing constraints |
+| grid_aspect | 11 | Aspect ratio in grid |
+| grid_percent | 10 | Percentage-based sizing |
+| grid_minmax | 10 | Complex minmax cases |
+| Elements 100%, Text 0% | 19 | Layout correct, text splitting differs |
+
+Note: 36 tests (19%) have ≥90% element match, failing only on text comparison or minor issues.
 
 ### Additional Fixes Completed
 - [x] Grid item relative positioning (Radiant coordinate system compliance)
