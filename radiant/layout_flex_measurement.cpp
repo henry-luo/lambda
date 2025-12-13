@@ -8,6 +8,9 @@
 #include <float.h>
 #include <limits.h>
 
+// Forward declaration for recursive function
+static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon);
+
 // Helper to get explicit CSS width from DOM element's specified_style
 // Returns -1 if no explicit width is set, otherwise returns the width in pixels
 static float get_explicit_css_width(LayoutContext* lycon, ViewElement* elem) {
@@ -46,6 +49,93 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
     }
 
     return -1;
+}
+
+// ============================================================================
+// Recursive DOM-based content height measurement for nested flex containers
+// ============================================================================
+// This function recursively traverses the DOM tree to find the content-based
+// height of nested flex containers before their Views are fully initialized.
+static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon) {
+    if (!node || !node->is_element()) return 0;
+
+    // Check if the View is already set with an explicit height
+    ViewElement* elem = (ViewElement*)node->as_element();
+    if (elem) {
+        log_debug("measure_content_height_recursive: checking elem %s, blk=%p height=%.1f",
+                  elem->tag_name ? elem->tag_name : "(null)",
+                  (void*)elem->blk, elem->height);
+        if (elem->blk && elem->blk->given_height > 0) {
+            log_debug("measure_content_height_recursive: elem %s has given_height=%.1f",
+                      elem->tag_name ? elem->tag_name : "(null)", elem->blk->given_height);
+            return elem->blk->given_height;
+        }
+        if (elem->height > 0) {
+            log_debug("measure_content_height_recursive: elem %s has height=%.1f",
+                      elem->tag_name ? elem->tag_name : "(null)", elem->height);
+            return (float)elem->height;
+        }
+        if (elem->fi && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
+            log_debug("measure_content_height_recursive: elem %s has intrinsic_height=%.1f",
+                      elem->tag_name ? elem->tag_name : "(null)", elem->fi->intrinsic_height.max_content);
+            return (float)elem->fi->intrinsic_height.max_content;
+        }
+        
+        // Also check specified_style for explicit height
+        if (elem->specified_style) {
+            CssDeclaration* height_decl = style_tree_get_declaration(
+                elem->specified_style, CSS_PROPERTY_HEIGHT);
+            if (height_decl && height_decl->value &&
+                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                float explicit_height = (float)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                                                    height_decl->value);
+                if (explicit_height > 0) {
+                    log_debug("measure_content_height_recursive: elem %s has specified height=%.1fpx",
+                              elem->tag_name ? elem->tag_name : "(null)", explicit_height);
+                    return explicit_height;
+                }
+            }
+        }
+    }
+
+    // Check if this is a flex container
+    DisplayValue display = resolve_display_value((void*)node);
+    if (display.inner != CSS_VALUE_FLEX) {
+        // Not a flex container - no recursive measurement needed
+        return 0;
+    }
+
+    // Traverse children to calculate content-based height
+    // Default to row direction (CSS default) unless we can determine otherwise
+    bool is_row = true;  // CSS default is row
+
+    float max_child_height = 0;
+    float sum_child_height = 0;
+
+    // Only elements can have children - get as_element() to access first_child
+    DomElement* dom_elem = node->as_element();
+    if (!dom_elem) return 0;
+
+    DomNode* child = dom_elem->first_child;
+    while (child) {
+        if (child->is_element()) {
+            float child_height = measure_content_height_recursive(child, lycon);
+            log_debug("measure_content_height_recursive: child %s height=%.1f",
+                      child->node_name(), child_height);
+
+            if (is_row) {
+                max_child_height = fmax(max_child_height, child_height);
+            } else {
+                sum_child_height += child_height;
+            }
+        }
+        child = child->next_sibling;
+    }
+
+    float result = is_row ? max_child_height : sum_child_height;
+    log_debug("measure_content_height_recursive: node %s = %.1f (is_row=%d)",
+              node->node_name(), result, is_row);
+    return result;
 }
 
 // Content measurement for multi-pass flex layout
@@ -824,8 +914,26 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 child_height = (int)dom_css_height;
                             }
                         } else if (child_view->fi) {
+                            // Child has fi - use cached intrinsic or calculate recursively
+                            if (!child_view->fi->has_intrinsic_height) {
+                                calculate_item_intrinsic_sizes(child_view, flex_layout);
+                            }
                             if (child_view->fi->has_intrinsic_height) {
                                 child_height = child_view->fi->intrinsic_height.max_content;
+                            }
+                        }
+
+                        // CRITICAL: If child is a flex container without proper height,
+                        // recursively measure its content-based height from the DOM tree
+                        if (child_height == 0 && !child_has_explicit_height) {
+                            // Check if child is a flex container by resolving display from DOM
+                            DisplayValue child_display = resolve_display_value((void*)c);
+                            log_debug("Child height is 0, checking if flex container - display.inner=%d",
+                                      child_display.inner);
+                            if (child_display.inner == CSS_VALUE_FLEX) {
+                                // Use recursive DOM-based measurement
+                                child_height = (int)measure_content_height_recursive(c, lycon);
+                                log_debug("Nested flex child height from recursive measurement: %d", child_height);
                             }
                         }
                         // Note: For height, we may not have a good fallback - leave as 0
