@@ -458,6 +458,52 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 return {.item = y2it(builder.createSymbol(source + start, len))};
             }
             
+            // Special case: control_symbol (\%, \&, \#, \\, etc.)
+            if (strcmp(node_type, "control_symbol") == 0) {
+                uint32_t start = ts_node_start_byte(node);
+                uint32_t end = ts_node_end_byte(node);
+                if (end > start + 1) {
+                    MarkBuilder& builder = ctx.builder;
+                    char escaped_char = source[start + 1];
+                    
+                    // Special case: \\ is a line break command, create element
+                    if (escaped_char == '\\') {
+                        ElementBuilder elem_builder = builder.element("linebreak");
+                        return elem_builder.final();
+                    }
+                    
+                    // For other control symbols, return the escaped character as string
+                    return {.item = s2it(builder.createString(source + start + 1, end - start - 1))};
+                }
+                return {.item = ITEM_NULL};
+            }
+            
+            // Special case: ligature (---, --, ``, '', <<, >>) - convert to proper characters
+            if (strcmp(node_type, "ligature") == 0) {
+                uint32_t start = ts_node_start_byte(node);
+                uint32_t end = ts_node_end_byte(node);
+                size_t len = end - start;
+                const char* text = source + start;
+                MarkBuilder& builder = ctx.builder;
+                
+                // Convert ligatures to proper Unicode characters
+                if (len == 3 && strncmp(text, "---", 3) == 0) {
+                    return {.item = s2it(builder.createString("\u2014", 3))}; // em dash
+                } else if (len == 2 && strncmp(text, "--", 2) == 0) {
+                    return {.item = s2it(builder.createString("\u2013", 3))}; // en dash
+                } else if (len == 2 && strncmp(text, "``", 2) == 0) {
+                    return {.item = s2it(builder.createString("\u201C", 3))}; // left double quote
+                } else if (len == 2 && strncmp(text, "''", 2) == 0) {
+                    return {.item = s2it(builder.createString("\u201D", 3))}; // right double quote
+                } else if (len == 2 && strncmp(text, "<<", 2) == 0) {
+                    return {.item = s2it(builder.createString("\u00AB", 2))}; // left guillemet
+                } else if (len == 2 && strncmp(text, ">>", 2) == 0) {
+                    return {.item = s2it(builder.createString("\u00BB", 2))}; // right guillemet
+                }
+                // Fallback: return as-is
+                return {.item = s2it(builder.createString(text, len))};
+            }
+            
             // TODO: Add more specific handlers
             // For now, create generic element with node type as tag
             {
@@ -545,15 +591,96 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
     MarkBuilder& builder = ctx.builder;
     ElementBuilder cmd_elem_builder = builder.element(cmd_name);
     
-    // Extract arguments (curly_group children)
+    // Special handling for macro definition commands
+    // For \newcommand{\name}{definition}, output: newcommand[ "\\name", Element(definition) ]
+    bool is_macro_def = (strcmp(cmd_name, "newcommand") == 0 || 
+                         strcmp(cmd_name, "renewcommand") == 0 ||
+                         strcmp(cmd_name, "providecommand") == 0 ||
+                         strcmp(cmd_name, "def") == 0 ||
+                         strcmp(cmd_name, "gdef") == 0 ||
+                         strcmp(cmd_name, "edef") == 0 ||
+                         strcmp(cmd_name, "xdef") == 0);
+    
+    // Extract arguments (curly_group and brack_group children)
     uint32_t child_count = ts_node_child_count(node);
+    int arg_index = 0;
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_child(node, i);
         const char* child_type = ts_node_type(child);
         
-        // Process argument groups
+        // Process bracket groups (optional arguments like [num])
+        if (strcmp(child_type, "brack_group") == 0) {
+            // Create brack_group element to preserve structure
+            ElementBuilder brack_builder = builder.element("brack_group");
+            uint32_t arg_child_count = ts_node_child_count(child);
+            for (uint32_t j = 0; j < arg_child_count; j++) {
+                TSNode arg_child = ts_node_child(child, j);
+                const char* arg_child_type = ts_node_type(arg_child);
+                // Skip brackets
+                if (strcmp(arg_child_type, "[") == 0 || strcmp(arg_child_type, "]") == 0) {
+                    continue;
+                }
+                Item arg_item = convert_latex_node(ctx, arg_child, source);
+                if (arg_item.item != ITEM_NULL) {
+                    brack_builder.child(arg_item);
+                }
+            }
+            cmd_elem_builder.child(brack_builder.final());
+            continue;
+        }
+        
+        // Process curly groups (required arguments)
         if (strcmp(child_type, "curly_group") == 0) {
-            // Unwrap curly group and add its contents
+            // For macro definitions, first curly_group contains the macro name
+            if (is_macro_def && arg_index == 0) {
+                // Extract macro name: {\hello} -> "\\hello"
+                uint32_t arg_child_count = ts_node_child_count(child);
+                for (uint32_t j = 0; j < arg_child_count; j++) {
+                    TSNode arg_child = ts_node_child(child, j);
+                    const char* arg_child_type = ts_node_type(arg_child);
+                    // Skip braces
+                    if (strcmp(arg_child_type, "{") == 0 || strcmp(arg_child_type, "}") == 0) {
+                        continue;
+                    }
+                    // If it's a command, extract its full name with backslash
+                    if (strcmp(arg_child_type, "command") == 0) {
+                        String* macro_name_str = extract_text(ctx, arg_child, source);
+                        // Store as string with backslash prefix
+                        cmd_elem_builder.child({.item = s2it(macro_name_str)});
+                    } else {
+                        // Some other content, process normally
+                        Item arg_item = convert_latex_node(ctx, arg_child, source);
+                        if (arg_item.item != ITEM_NULL) {
+                            cmd_elem_builder.child(arg_item);
+                        }
+                    }
+                }
+                arg_index++;
+                continue;
+            }
+            
+            // For macro definitions, wrap definition in curly_group element
+            if (is_macro_def) {
+                ElementBuilder curly_builder = builder.element("curly_group");
+                uint32_t arg_child_count = ts_node_child_count(child);
+                for (uint32_t j = 0; j < arg_child_count; j++) {
+                    TSNode arg_child = ts_node_child(child, j);
+                    const char* arg_child_type = ts_node_type(arg_child);
+                    // Skip braces
+                    if (strcmp(arg_child_type, "{") == 0 || strcmp(arg_child_type, "}") == 0) {
+                        continue;
+                    }
+                    Item arg_item = convert_latex_node(ctx, arg_child, source);
+                    if (arg_item.item != ITEM_NULL) {
+                        curly_builder.child(arg_item);
+                    }
+                }
+                cmd_elem_builder.child(curly_builder.final());
+                arg_index++;
+                continue;
+            }
+            
+            // Normal case: unwrap curly group and add its contents directly
             uint32_t arg_child_count = ts_node_child_count(child);
             for (uint32_t j = 0; j < arg_child_count; j++) {
                 TSNode arg_child = ts_node_child(child, j);

@@ -30,7 +30,7 @@ void HtmlGenerator::create(const char* tag, const char* attrs) {
 
 void HtmlGenerator::createWithChildren(const char* tag, const char* attrs) {
     // html-generator.ls create method - element with children
-    writer_->openTag(tag, attrs);
+    writer_->openTagRaw(tag, attrs);
 }
 
 void HtmlGenerator::closeElement() {

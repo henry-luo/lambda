@@ -1958,28 +1958,6 @@
                         "icon": "🔒"
                     },
                     {
-                        "source": "test/latex/test_latex_html_baseline.cpp",
-                        "name": "LaTeX to HTML Baseline Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_html_baseline.exe",
-                        "additional_sources": [
-                            "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp"
-                        ],
-                        "includes": [
-                            "test/latex"
-                        ],
-                        "special_flags": "-std=c++17 -I/opt/homebrew/include",
-                        "icon": "📄"
-                    },
-                    {
                         "source": "test/latex/test_latex_html_v2_baseline.cpp",
                         "name": "LaTeX to HTML V2 Baseline Tests",
                         "dependencies": [
@@ -2254,28 +2232,6 @@
                         ],
                         "binary": "test_http_gtest.exe",
                         "icon": "🌐"
-                    },
-                    {
-                        "source": "test/latex/test_latex_html_extended.cpp",
-                        "name": "LaTeX to HTML Extended Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_html_extended.exe",
-                        "additional_sources": [
-                            "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp"
-                        ],
-                        "includes": [
-                            "test/latex"
-                        ],
-                        "special_flags": "-std=c++17 -I/opt/homebrew/include",
-                        "icon": "📄"
                     },
                     {
                         "source": "test/test_lambda_proc_extended_gtest.cpp",
