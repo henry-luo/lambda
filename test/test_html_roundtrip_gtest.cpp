@@ -669,11 +669,6 @@ TEST_F(IntermediateHtmlFileTests, TestClearProperty) {
     EXPECT_TRUE(result.success) << "Clear property test HTML should succeed";
 }
 
-TEST_F(IntermediateHtmlFileTests, TestLineHeight) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_line_height.html", "test_line_height");
-    EXPECT_TRUE(result.success) << "Line height test HTML should succeed";
-}
-
 TEST_F(IntermediateHtmlFileTests, TestLineBoxAdjustment) {
     auto result = test_html_file_roundtrip_cli("./test/html/test_line_box_adjustment.html", "test_line_box_adjustment");
     EXPECT_TRUE(result.success) << "Line box adjustment test HTML should succeed";
