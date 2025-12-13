@@ -148,7 +148,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     bool is_horizontal = is_main_axis_horizontal(flex);
-    
+
     // Check if this is an absolutely positioned element with auto width (shrink-to-fit)
     // Also check for min-width/max-width constraints - if present, don't use shrink-to-fit
     bool has_min_width = container->blk && container->blk->given_min_width > 0;
@@ -162,7 +162,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             is_absolute_no_width = true;
         }
     }
-    
+
     if (is_horizontal) {
         // For row flex, main axis is width
         // If container is absolutely positioned with auto width, use shrink-to-fit
@@ -190,9 +190,10 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
               flex->main_axis_size, flex->cross_axis_size, content_width, content_height);
 
     // Detect indefinite main axis size (CSS Flexbox spec §9.2)
-    // A flex container has indefinite main size when:
-    // 1. No explicit CSS width/height in the main axis direction
-    // 2. Absolutely/fixed positioned without both left+right (for width) or top+bottom (for height)
+    // A flex container has definite main size when:
+    // 1. Has explicit CSS width/height in the main axis direction, OR
+    // 2. Has max-width/max-height that is actually constraining the size (container is clamped), OR
+    // 3. Is absolutely/fixed positioned with both left+right (for width) or top+bottom (for height)
     //
     // When main axis is indefinite, flex-grow should NOT distribute additional space
     // because the container should shrink-to-fit its content.
@@ -201,32 +202,85 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     bool is_absolute = container->position &&
         (container->position->position == CSS_VALUE_ABSOLUTE || container->position->position == CSS_VALUE_FIXED);
 
+    bool has_min_height = container->blk && container->blk->given_min_height > 0;
+    bool has_max_height = container->blk && container->blk->given_max_height > 0;
+
     if (is_horizontal) {
         // Main axis is width for row flex
+        // Width is definite if:
+        // - Explicit width is set, OR
+        // - max-width is actively constraining (container width == max-width and max-width < available), OR
+        // - Absolutely positioned with both left and right
         bool has_definite_width = has_explicit_width;
-        // Absolutely positioned elements have definite width only if both left and right are specified
+        
+        // Check if max-width is actually constraining the width
+        // This means: container.width equals max-width AND there was more available space
+        // For simplicity, we check if container.width == max-width (meaning it was clamped)
+        if (has_max_width && content_width > 0) {
+            float max_width_value = container->blk->given_max_width;
+            // The container's content_width would have been clamped to max_width if max_width < available
+            // We consider it definite if the actual content_width equals (approximately) the max_width content area
+            // Account for border-box vs content-box
+            float container_content_width = content_width;  // Already calculated as content area
+            float max_content_width = max_width_value;
+            if (container->blk && container->blk->box_sizing == CSS_VALUE_BORDER_BOX && container->bound) {
+                // For border-box, max_width includes padding/border, so subtract them
+                max_content_width -= (container->bound->padding.left + container->bound->padding.right);
+                if (container->bound->border) {
+                    max_content_width -= (container->bound->border->width.left + container->bound->border->width.right);
+                }
+            }
+            // If content_width is close to max_content_width, max-width is constraining
+            if (fabs(container_content_width - max_content_width) < 1.0f) {
+                has_definite_width = true;
+                log_debug("init_flex_container: max-width is constraining (content=%.1f, max=%.1f)",
+                          container_content_width, max_content_width);
+            }
+        }
+        
+        // For absolutely positioned elements, also check left+right
         if (is_absolute && container->position) {
-            has_definite_width = has_explicit_width ||
+            has_definite_width = has_definite_width ||
                 (container->position->has_left && container->position->has_right);
         }
         flex->main_axis_is_indefinite = !has_definite_width;
     } else {
         // Main axis is height for column flex
         bool has_definite_height = has_explicit_height;
+        
+        // Check if max-height is actually constraining
+        if (has_max_height && content_height > 0) {
+            float max_height_value = container->blk->given_max_height;
+            float max_content_height = max_height_value;
+            if (container->blk && container->blk->box_sizing == CSS_VALUE_BORDER_BOX && container->bound) {
+                max_content_height -= (container->bound->padding.top + container->bound->padding.bottom);
+                if (container->bound->border) {
+                    max_content_height -= (container->bound->border->width.top + container->bound->border->width.bottom);
+                }
+            }
+            if (fabs(content_height - max_content_height) < 1.0f) {
+                has_definite_height = true;
+                log_debug("init_flex_container: max-height is constraining (content=%.1f, max=%.1f)",
+                          (float)content_height, max_content_height);
+            }
+        }
+        
         // Absolutely positioned elements have definite height only if both top and bottom are specified
         if (is_absolute && container->position) {
-            has_definite_height = has_explicit_height ||
+            has_definite_height = has_definite_height ||
                 (container->position->has_top && container->position->has_bottom);
         }
         flex->main_axis_is_indefinite = !has_definite_height;
     }
 
-    log_debug("init_flex_container: main_axis_is_indefinite=%s (is_absolute=%s, is_horizontal=%s, has_width=%s, has_height=%s)",
+    log_debug("init_flex_container: main_axis_is_indefinite=%s (is_absolute=%s, is_horizontal=%s, has_width=%s, has_height=%s, has_max_width=%s, has_max_height=%s)",
               flex->main_axis_is_indefinite ? "true" : "false",
               is_absolute ? "true" : "false",
               is_horizontal ? "true" : "false",
               has_explicit_width ? "true" : "false",
-              has_explicit_height ? "true" : "false");
+              has_explicit_height ? "true" : "false",
+              has_max_width ? "true" : "false",
+              has_max_height ? "true" : "false");
 
     // Initialize dynamic arrays
     flex->allocated_items = 8;
@@ -305,7 +359,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 // Only use shrink-to-fit if truly auto-width (no width, min-width, or max-width constraints)
                 bool is_absolute_no_width = is_absolute && !has_explicit_width && !has_min_width && !has_max_width &&
                     !(container->position && container->position->has_left && container->position->has_right);
-                
+
                 if (is_absolute_no_width) {
                     // Calculate width from flex items (shrink-to-fit)
                     int total_item_width = 0;
@@ -1952,7 +2006,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         int hypothetical = calculate_hypothetical_main_size(item, flex_layout);
 
         // Check if item is inflexible (has 0 flex factor in ALL directions)
-        bool is_inflexible = (!item->fi || 
+        bool is_inflexible = (!item->fi ||
                               (item->fi->flex_grow == 0 && item->fi->flex_shrink == 0));
 
         if (is_inflexible) {
@@ -2060,7 +2114,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         int* clamped_sizes = (int*)calloc(line->item_count, sizeof(int));
         bool* has_min_violation = (bool*)calloc(line->item_count, sizeof(bool));
         bool* has_max_violation = (bool*)calloc(line->item_count, sizeof(bool));
-        
+
         if (!target_sizes || !clamped_sizes || !has_min_violation || !has_max_violation) {
             free(target_sizes); free(clamped_sizes); free(has_min_violation); free(has_max_violation);
             break;
@@ -2258,7 +2312,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
         log_debug("JUSTIFY_CONTENT - justify=%d, container_size=%d, total_size_with_gaps=%d, free_space=%d, direction=%d",
                justify, container_size, total_size_with_gaps, free_space, flex_layout->direction);
-        
+
         // CSS Alignment: 'start'/'end' are writing-mode aware, not flex-direction aware
         // For LTR horizontal-tb writing mode:
         // - 'start' always means physical start (top for column, left for row)
@@ -2266,7 +2320,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         // This differs from flex-start/flex-end which respect reversed directions
         bool is_reverse = (flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
                           flex_layout->direction == CSS_VALUE_COLUMN_REVERSE);
-        
+
         switch (justify) {
             case CSS_VALUE_START:  // Writing-mode 'start' - always physical start
                 if (is_reverse) {
@@ -3093,7 +3147,7 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
     // align-content can still apply to a wrapping container even if it happens to have one line.
     bool is_nowrap = (flex_layout->wrap == WRAP_NOWRAP);
     bool has_definite_cross = (flex_layout->cross_axis_size > 0);
-    
+
     if (is_nowrap && has_definite_cross) {
         // Single-line (nowrap) with definite cross size: line cross = container cross
         flex_layout->lines[0].cross_size = (int)flex_layout->cross_axis_size;
