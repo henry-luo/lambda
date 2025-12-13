@@ -6,15 +6,17 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 
 ---
 
-## 0. Progress Summary (Updated: Dec 14, 2025)
+## 0. Progress Summary (Updated: Dec 13, 2025)
 
 ### Current Test Status
 
 | Suite | Tests | Passing | Rate |
 |-------|-------|---------|------|
 | **Baseline** | 1330 | 1330 | 100% ✅ |
-| **Flex** | 271 | 5 (100%) / 125 (75%+) | 1.8% / 46% |
+| **Flex** | 271 | 6 | 2.2% |
 | **Grid** | 228 | 0 | 0% |
+
+**Note**: The flex test suite uses `test_base_style.css` which sets `div { display: flex }` and `body > * { position: absolute }`. Most tests are for absolute-positioned shrink-to-fit containers, which is a challenging edge case.
 
 ### Completed Tasks
 
@@ -59,7 +61,7 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
    - Block-level flex containers in normal flow inherit definite width from containing block
    - Only inline-block/inline and absolute elements with auto width are truly indefinite
    - **Impact**: sample5.html hero section now has proper widths (was 0)
-   - **Result**: 125 flex tests at 75%+ match rate (up from 124)
+   - **Result**: 5 flex tests passing at 100% match (baseline regression passed)
 
 ### Phase 2-5 Passing Tests (68 tests)
 
@@ -95,6 +97,15 @@ Analysis of flex layout tests reveals significant gaps in Radiant's flexbox impl
 - `absolute_margin_bottom_left`
 - `justify_content_column_start_reverse`
 - `wrap_child`, `wrap_grandchild`
+
+10. ✅ **Phase 7 Fixes** - Intrinsic sizing for nested flex containers:
+    - `measure_element_intrinsic_widths()` now detects flex containers from `specified_style`
+    - For row flex containers: SUM child widths (previously took MAX like block)
+    - Added gap handling in intrinsic width calculation
+    - Check both `CSS_PROPERTY_COLUMN_GAP` and `CSS_PROPERTY_GAP` shorthand
+    - Fixed hero image loading for flex items (replaced elements)
+    - **Impact**: sample5.html nav element now measures correct intrinsic width (307px vs previous 81px)
+    - **Result**: 6 flex tests passing (up from 5, +20% improvement)
 
 ### Key Findings
 
