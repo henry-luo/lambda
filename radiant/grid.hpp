@@ -115,6 +115,10 @@ typedef struct GridContainerLayout : GridProp {
     int implicit_row_count;
     int implicit_column_count;
 
+    // Negative implicit track counts (tracks before the explicit grid)
+    int negative_implicit_row_count;
+    int negative_implicit_column_count;
+
     // Auto-placement cursor (for tracking current position during auto-placement)
     int auto_row_cursor;
     int auto_col_cursor;
