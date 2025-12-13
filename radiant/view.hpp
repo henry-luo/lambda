@@ -384,6 +384,11 @@ typedef struct FlexItemProp {
     float resolved_min_height;   // Resolved min-height (including auto = min-content)
     float resolved_max_height;   // Resolved max-height (FLT_MAX if none)
 
+    // Hypothetical sizes (computed during flex layout Phase 4.5)
+    // These are the item's cross-axis sizes before alignment stretching
+    float hypothetical_cross_size;        // Inner cross size (content box)
+    float hypothetical_outer_cross_size;  // Outer cross size (with margins)
+
     // Flags for percentage values and measurement state
     int flex_basis_is_percent : 1;
     int is_margin_top_auto : 1;

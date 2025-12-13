@@ -169,6 +169,11 @@ typedef struct FlexContainerLayout : FlexProp {
     float cross_axis_size;
     bool needs_reflow;
 
+    // Sizing mode flags (CSS Flexbox spec §9.2)
+    // When true, the axis size is indefinite (fit-content/shrink-to-fit)
+    // and flex-grow should NOT distribute additional space
+    bool main_axis_is_indefinite;
+
     // Layout context for intrinsic sizing (set during init_flex_container)
     struct LayoutContext* lycon;
 } FlexContainerLayout;
