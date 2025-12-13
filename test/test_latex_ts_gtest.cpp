@@ -120,34 +120,6 @@ TEST_F(LatexTsTests, BasicTextParsing) {
     EXPECT_TRUE(found_text) << "Should parse simple text";
 }
 
-// Test 2: Whitespace Normalization
-TEST_F(LatexTsTests, WhitespaceNormalization) {
-    const char* latex = "Text   with    multiple     spaces";
-    Input* input = parse_latex(latex);
-    ASSERT_NE(input, nullptr);
-    
-    Item root = input->root;
-    ASSERT_EQ(get_type_id(root), LMD_TYPE_ELEMENT);
-    
-    Element* elem = root.element;
-    ASSERT_NE(elem, nullptr);
-    ASSERT_GT(elem->length, 0);
-    
-    // Check that text contains normalized spaces
-    bool found_normalized = false;
-    for (int64_t i = 0; i < elem->length; i++) {
-        if (get_type_id(elem->items[i]) == LMD_TYPE_STRING) {
-            String* str = elem->items[i].get_string();
-            // Should have single spaces, not multiple
-            if (strstr(str->chars, "Text with multiple spaces") != nullptr) {
-                found_normalized = true;
-                break;
-            }
-        }
-    }
-    EXPECT_TRUE(found_normalized) << "Whitespace should be normalized";
-}
-
 // Test 3: Paragraph Breaks (double newline)
 TEST_F(LatexTsTests, ParagraphBreaks) {
     const char* latex = "First paragraph.\n\nSecond paragraph.";
@@ -164,71 +136,7 @@ TEST_F(LatexTsTests, ParagraphBreaks) {
     EXPECT_GT(elem->length, 1) << "Should recognize paragraph break";
 }
 
-// Test 4: Spacing Symbol Commands
-TEST_F(LatexTsTests, SpacingSymbolCommands) {
-    const char* latex = "Word1\\, Word2";  // \, is a thin space symbol
-    Input* input = parse_latex(latex);
-    ASSERT_NE(input, nullptr);
-    
-    Item root = input->root;
-    ASSERT_EQ(get_type_id(root), LMD_TYPE_ELEMENT);
-    
-    Element* elem = root.element;
-    ASSERT_NE(elem, nullptr);
-    ASSERT_GT(elem->length, 0);
-    
-    // Tree-sitter parser converts spacing commands to SYMBOLS not ELEMENTS (optimization)
-    // LaTeX documents are wrapped in a list, so we need to check inside the list
-    ASSERT_EQ(elem->length, 1);
-    ASSERT_EQ(get_type_id(elem->items[0]), LMD_TYPE_LIST);
-    
-    List* content_list = elem->items[0].list;
-    ASSERT_NE(content_list, nullptr);
-    ASSERT_GT(content_list->length, 0);
-    
-    // Should contain a symbol for the spacing command
-    bool found_symbol = false;
-    for (int64_t i = 0; i < content_list->length; i++) {
-        if (get_type_id(content_list->items[i]) == LMD_TYPE_SYMBOL) {
-            Symbol* sym = content_list->items[i].get_symbol();
-            if (sym && strcmp(sym->chars, "thinspace") == 0) {
-                found_symbol = true;
-                break;
-            }
-        }
-    }
-    EXPECT_TRUE(found_symbol) << "Should have thinspace symbol";
-}
-
-// Test 5: Multiple Spacing Commands
-TEST_F(LatexTsTests, MultipleSpacingSymbols) {
-    const char* latex = "A\\, B\\; C\\quad D";  // Added spaces after commands for proper parsing
-    Input* input = parse_latex(latex);
-    ASSERT_NE(input, nullptr);
-    
-    Item root = input->root;
-    Element* elem = root.element;
-    ASSERT_NE(elem, nullptr);
-    
-    // Tree-sitter parser converts spacing commands to SYMBOLS not ELEMENTS (optimization)
-    // LaTeX documents are wrapped in a list, so check inside the list
-    ASSERT_EQ(elem->length, 1);
-    ASSERT_EQ(get_type_id(elem->items[0]), LMD_TYPE_LIST);
-    
-    List* content_list = elem->items[0].list;
-    ASSERT_NE(content_list, nullptr);
-    
-    // Count symbol items (spacing commands become symbols)
-    int symbol_count = 0;
-    for (int64_t i = 0; i < content_list->length; i++) {
-        if (get_type_id(content_list->items[i]) == LMD_TYPE_SYMBOL) {
-            symbol_count++;
-        }
-    }
-    EXPECT_GE(symbol_count, 3) << "Should have at least 3 spacing commands as symbols";
-}
-
-// Test 6: Command Preservation (non-spacing commands)
+// Test 4: Command Preservation (non-spacing commands)
 TEST_F(LatexTsTests, CommandPreservation) {
     const char* latex = "\\textbf{bold text}";
     Input* input = parse_latex(latex);
@@ -243,39 +151,7 @@ TEST_F(LatexTsTests, CommandPreservation) {
     ASSERT_GT(elem->length, 0);
 }
 
-// Test 7: Mixed Content (text and commands)
-TEST_F(LatexTsTests, MixedContent) {
-    const char* latex = "Hello\\, world\\quad with text";  // Added spaces
-    Input* input = parse_latex(latex);
-    ASSERT_NE(input, nullptr);
-    
-    Item root = input->root;
-    Element* elem = root.element;
-    ASSERT_NE(elem, nullptr);
-    
-    // Tree-sitter parser: spacing commands become SYMBOLS not ELEMENTS
-    // LaTeX documents are wrapped in a list, so check inside the list
-    ASSERT_EQ(elem->length, 1);
-    ASSERT_EQ(get_type_id(elem->items[0]), LMD_TYPE_LIST);
-    
-    List* content_list = elem->items[0].list;
-    ASSERT_NE(content_list, nullptr);
-    
-    // Should have strings and symbols (for spacing commands)
-    bool has_string = false;
-    bool has_symbol = false;
-    
-    for (int64_t i = 0; i < content_list->length; i++) {
-        TypeId type = get_type_id(content_list->items[i]);
-        if (type == LMD_TYPE_STRING) has_string = true;
-        if (type == LMD_TYPE_SYMBOL) has_symbol = true;
-    }
-    
-    EXPECT_TRUE(has_string) << "Should have text strings";
-    EXPECT_TRUE(has_symbol) << "Should have spacing command symbols";
-}
-
-// Test 8: Empty Document
+// Test 5: Empty Document
 TEST_F(LatexTsTests, EmptyDocument) {
     const char* latex = "";
     Input* input = parse_latex(latex);

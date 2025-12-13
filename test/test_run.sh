@@ -767,10 +767,12 @@ if [ -n "$TARGET_CATEGORY" ]; then
     for test_exe in "${test_executables[@]}"; do
         base_name=$(basename "$test_exe" .exe)
         # Get the category from build configuration
+        # First check for per-test category override, then fall back to suite category
         test_category=$(jq -r --arg exe "$base_name.exe" '
-            .test.test_suites[] |
-            select(.tests[]?.binary == $exe) |
-            .category // "baseline"
+            .test.test_suites[] as $suite |
+            $suite.tests[]? |
+            select(.binary == $exe) |
+            .category // $suite.category // "baseline"
         ' build_lambda_config.json | head -n1)
 
         if [ "$test_category" = "$TARGET_CATEGORY" ]; then
