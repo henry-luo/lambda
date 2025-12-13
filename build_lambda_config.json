@@ -23,6 +23,7 @@
         "lib/mempool.c",
         "lib/arena.c",
         "lib/avl_tree.c",
+        "lib/pdf_writer.c",
         "lib/url.c",
         "lib/url_parser.c",
         "lib/utf.c",
@@ -283,6 +284,8 @@
             "sources": [
                 "lib/mempool.c",
                 "lib/arena.c",
+                "lib/arraylist.c",
+                "lib/pdf_writer.c",
                 "lib/strbuf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
@@ -1057,6 +1060,20 @@
                         ],
                         "binary": "test_arena_gtest.exe",
                         "icon": "🏟️"
+                    },
+                    {
+                        "source": "test_pdf_writer_gtest.cpp",
+                        "name": "PDF Writer Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_pdf_writer_gtest.exe",
+                        "icon": "📄"
                     },
                     {
                         "source": "perf/test_avl_tree_perf.cpp",
