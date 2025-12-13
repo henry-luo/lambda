@@ -1,9 +1,14 @@
 [
   {
-    "type": "acronym_command",
+    "type": "begin_document",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "begin_env",
     "named": true,
     "fields": {
-      "extra": {
+      "arg": {
         "multiple": true,
         "required": false,
         "types": [
@@ -18,89 +23,7 @@
         "required": true,
         "types": [
           {
-            "type": "curly_group_text",
-            "named": true
-          }
-        ]
-      },
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_key_value",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "asy_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "code": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "source_code",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "begin",
-    "named": true,
-    "fields": {
-      "command": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\begin",
-            "named": false
-          }
-        ]
-      },
-      "language": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group_text",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text",
+            "type": "curly_group",
             "named": true
           }
         ]
@@ -112,46 +35,6 @@
           {
             "type": "brack_group",
             "named": true
-          },
-          {
-            "type": "brack_group_key_value",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "block_comment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\iffalse",
-            "named": false
-          }
-        ]
-      },
-      "comment": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "comment",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "\\fi",
-            "named": false
           }
         ]
       }
@@ -166,43 +49,15 @@
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
           "type": "brack_group",
           "named": true
         },
         {
-          "type": "changes_replaced",
+          "type": "command",
           "named": true
         },
         {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
+          "type": "control_symbol",
           "named": true
         },
         {
@@ -210,593 +65,62 @@
           "named": true
         },
         {
-          "type": "diacritic_command",
+          "type": "ligature",
           "named": true
         },
         {
-          "type": "displayed_equation",
+          "type": "math",
           "named": true
         },
         {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
+          "type": "space",
           "named": true
         },
         {
           "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
           "named": true
         }
       ]
     }
   },
   {
-    "type": "brack_group_argc",
+    "type": "command",
     "named": true,
     "fields": {
-      "value": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "argc",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "brack_group_key_value",
-    "named": true,
-    "fields": {
-      "pair": {
+      "arg": {
         "multiple": true,
         "required": false,
         "types": [
           {
-            "type": "key_value_pair",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "brack_group_text",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "text",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "changes_replaced",
-    "named": true,
-    "fields": {
-      "command": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\replaced",
-            "named": false
-          }
-        ]
-      },
-      "text_added": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "text_deleted": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "chapter",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "toc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
             "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "citation",
-    "named": true,
-    "fields": {
-      "keys": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text_list",
-            "named": true
-          }
-        ]
-      },
-      "postnote": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      },
-      "prenote": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "code_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "code": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "source_code",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "color_command",
-    "named": true,
-    "fields": {
-      "arg1": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_text",
-            "named": true
-          }
-        ]
-      },
-      "arg2": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text",
-            "named": true
-          }
-        ]
-      },
-      "extra": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "comment_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "comment": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "comment",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "counter_command",
-    "named": true,
-    "fields": {
-      "arg1": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text",
-            "named": true
-          }
-        ]
-      },
-      "arg2": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_text",
             "named": true
           },
           {
-            "type": "curly_group_text",
+            "type": "curly_group",
+            "named": true
+          },
+          {
+            "type": "star",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "command_name",
             "named": true
           }
         ]
       }
     }
+  },
+  {
+    "type": "control_symbol",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "curly_group",
@@ -807,43 +131,15 @@
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
+          "type": "brack_group",
           "named": true
         },
         {
-          "type": "asy_environment",
+          "type": "command",
           "named": true
         },
         {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "chapter",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
+          "type": "control_symbol",
           "named": true
         },
         {
@@ -851,91 +147,73 @@
           "named": true
         },
         {
-          "type": "diacritic_command",
+          "type": "ligature",
           "named": true
         },
         {
-          "type": "displayed_equation",
+          "type": "math",
           "named": true
         },
         {
-          "type": "double_path_include",
+          "type": "space",
           "named": true
         },
         {
-          "type": "enum_item",
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "display_math",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "command",
           "named": true
         },
         {
-          "type": "environment_definition",
+          "type": "curly_group",
           "named": true
         },
         {
-          "type": "escape_sequence",
+          "type": "math_text",
           "named": true
         },
         {
-          "type": "generic_command",
+          "type": "subscript",
           "named": true
         },
         {
-          "type": "generic_environment",
+          "type": "superscript",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "document",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "begin_document",
           "named": true
         },
         {
-          "type": "glossary_command",
+          "type": "end_document",
           "named": true
         },
         {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
+          "type": "environment",
           "named": true
         },
         {
@@ -947,1040 +225,46 @@
           "named": true
         },
         {
-          "type": "part",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
           "type": "section",
           "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "subparagraph",
-          "named": true
-        },
-        {
-          "type": "subsection",
-          "named": true
-        },
-        {
-          "type": "subsubsection",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
         }
       ]
     }
   },
   {
-    "type": "curly_group_command_name",
-    "named": true,
-    "fields": {
-      "command": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "curly_group_impl",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "curly_group_key_value",
-    "named": true,
-    "fields": {
-      "pair": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "key_value_pair",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "curly_group_label_list",
-    "named": true,
-    "fields": {
-      "label": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "label",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "curly_group_path",
-    "named": true,
-    "fields": {
-      "path": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "path",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "curly_group_path_list",
-    "named": true,
-    "fields": {
-      "path": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "path",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "curly_group_spec",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "curly_group_text",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "text",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "curly_group_text_list",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "text",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "curly_group_uri",
-    "named": true,
-    "fields": {
-      "uri": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "uri",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "diacritic_command",
-    "named": true,
-    "fields": {
-      "base": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group_text",
-            "named": true
-          },
-          {
-            "type": "letter",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "displayed_equation",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "chapter",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "enum_item",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "part",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "section",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "subparagraph",
-          "named": true
-        },
-        {
-          "type": "subsection",
-          "named": true
-        },
-        {
-          "type": "subsubsection",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "double_path_include",
-    "named": true,
-    "fields": {
-      "directory": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_path",
-            "named": true
-          }
-        ]
-      },
-      "file": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_path",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "end",
-    "named": true,
-    "fields": {
-      "command": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\end",
-            "named": false
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "enum_item",
-    "named": true,
-    "fields": {
-      "label": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_text",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "environment_definition",
-    "named": true,
-    "fields": {
-      "argc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_argc",
-            "named": true
-          }
-        ]
-      },
-      "begin": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group_impl",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group_impl",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text",
-            "named": true
-          }
-        ]
-      },
-      "spec": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group_spec",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "escape_sequence",
+    "type": "end_document",
     "named": true,
     "fields": {}
   },
   {
-    "type": "generic_command",
+    "type": "end_env",
     "named": true,
     "fields": {
-      "arg": {
-        "multiple": true,
-        "required": false,
+      "name": {
+        "multiple": false,
+        "required": true,
         "types": [
           {
             "type": "curly_group",
             "named": true
           }
         ]
-      },
-      "command": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          }
-        ]
       }
+    }
+  },
+  {
+    "type": "environment",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "generic_environment",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -1992,7 +276,7 @@
         "required": true,
         "types": [
           {
-            "type": "begin",
+            "type": "begin_env",
             "named": true
           }
         ]
@@ -2002,7 +286,7 @@
         "required": true,
         "types": [
           {
-            "type": "end",
+            "type": "end_env",
             "named": true
           }
         ]
@@ -2013,135 +297,7 @@
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "chapter",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "enum_item",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
+          "type": "environment",
           "named": true
         },
         {
@@ -2153,132 +309,14 @@
           "named": true
         },
         {
-          "type": "part",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
           "type": "section",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "subparagraph",
-          "named": true
-        },
-        {
-          "type": "subsection",
-          "named": true
-        },
-        {
-          "type": "subsubsection",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
           "named": true
         }
       ]
     }
   },
   {
-    "type": "glossary_command",
-    "named": true,
-    "fields": {
-      "extra": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group_key_value",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text",
-            "named": true
-          }
-        ]
-      },
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_key_value",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "hyperlink",
-    "named": true,
-    "fields": {
-      "label": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "uri": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_uri",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "inline_formula",
+    "type": "inline_math",
     "named": true,
     "fields": {},
     "children": {
@@ -2286,43 +324,7 @@
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "chapter",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
+          "type": "command",
           "named": true
         },
         {
@@ -2330,1043 +332,62 @@
           "named": true
         },
         {
-          "type": "diacritic_command",
+          "type": "math_text",
           "named": true
         },
         {
-          "type": "displayed_equation",
+          "type": "subscript",
           "named": true
         },
         {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "enum_item",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "part",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "section",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "subparagraph",
-          "named": true
-        },
-        {
-          "type": "subsection",
-          "named": true
-        },
-        {
-          "type": "subsubsection",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
+          "type": "superscript",
           "named": true
         }
       ]
     }
   },
   {
-    "type": "key_value_pair",
+    "type": "ligature",
     "named": true,
-    "fields": {
-      "key": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "text",
-            "named": true
-          }
-        ]
-      },
-      "value": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "value",
-            "named": true
-          }
-        ]
-      }
-    }
+    "fields": {}
   },
   {
-    "type": "label_command",
+    "type": "math",
     "named": true,
-    "fields": {
-      "arg2": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_label_list",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "let_command_definition",
-    "named": true,
-    "fields": {
-      "declaration": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          }
-        ]
-      },
-      "implementation": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "linebreak_command",
-    "named": true,
-    "fields": {
-      "spacing": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "listing_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "code": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "source_code",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "math_delimiter",
-    "named": true,
-    "fields": {
-      "left_delimiter": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "(",
-            "named": false
-          },
-          {
-            "type": ")",
-            "named": false
-          },
-          {
-            "type": "[",
-            "named": false
-          },
-          {
-            "type": "]",
-            "named": false
-          },
-          {
-            "type": "command_name",
-            "named": true
-          },
-          {
-            "type": "word",
-            "named": true
-          },
-          {
-            "type": "|",
-            "named": false
-          }
-        ]
-      },
-      "right_delimiter": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "(",
-            "named": false
-          },
-          {
-            "type": ")",
-            "named": false
-          },
-          {
-            "type": "[",
-            "named": false
-          },
-          {
-            "type": "]",
-            "named": false
-          },
-          {
-            "type": "command_name",
-            "named": true
-          },
-          {
-            "type": "word",
-            "named": true
-          },
-          {
-            "type": "|",
-            "named": false
-          }
-        ]
-      }
-    },
+    "fields": {},
     "children": {
-      "multiple": true,
-      "required": false,
+      "multiple": false,
+      "required": true,
       "types": [
         {
-          "type": "acronym_command",
+          "type": "display_math",
           "named": true
         },
         {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "chapter",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "enum_item",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "part",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "section",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "subparagraph",
-          "named": true
-        },
-        {
-          "type": "subsection",
-          "named": true
-        },
-        {
-          "type": "subsubsection",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
+          "type": "inline_math",
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "math_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "metadata_command",
-    "named": true,
-    "fields": {
-      "content": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "minted_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "code": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "source_code",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "new_command_definition",
-    "named": true,
-    "fields": {
-      "argc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_argc",
-            "named": true
-          }
-        ]
-      },
-      "declaration": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          },
-          {
-            "type": "curly_group_command_name",
-            "named": true
-          }
-        ]
-      },
-      "default": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      },
-      "implementation": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          },
-          {
-            "type": "curly_group_command_name",
-            "named": true
-          }
-        ]
-      },
-      "spec": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group_spec",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "old_command_definition",
-    "named": true,
-    "fields": {
-      "declaration": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "paired_delimiter_definition",
-    "named": true,
-    "fields": {
-      "argc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_argc",
-            "named": true
-          }
-        ]
-      },
-      "body": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "declaration": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_command_name",
-            "named": true
-          }
-        ]
-      },
-      "left": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          },
-          {
-            "type": "curly_group_impl",
-            "named": true
-          }
-        ]
-      },
-      "right": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          },
-          {
-            "type": "curly_group_impl",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
     "type": "paragraph",
     "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "toc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    },
+    "fields": {},
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
-          "type": "acronym_command",
+          "type": "brack_group",
           "named": true
         },
         {
-          "type": "asy_environment",
+          "type": "command",
           "named": true
         },
         {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
+          "type": "control_symbol",
           "named": true
         },
         {
@@ -3374,379 +395,45 @@
           "named": true
         },
         {
-          "type": "diacritic_command",
+          "type": "environment",
           "named": true
         },
         {
-          "type": "displayed_equation",
+          "type": "ligature",
           "named": true
         },
         {
-          "type": "double_path_include",
+          "type": "math",
           "named": true
         },
         {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
+          "type": "space",
           "named": true
         },
         {
           "type": "text",
           "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "part",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "toc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "sage_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "code": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "source_code",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
     "type": "section",
     "named": true,
     "fields": {
-      "text": {
+      "command": {
         "multiple": false,
-        "required": false,
+        "required": true,
+        "types": [
+          {
+            "type": "section_command",
+            "named": true
+          }
+        ]
+      },
+      "title": {
+        "multiple": false,
+        "required": true,
         "types": [
           {
             "type": "curly_group",
@@ -3770,127 +457,11 @@
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
+          "type": "environment",
           "named": true
         },
         {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
+          "type": "paragraph",
           "named": true
         },
         {
@@ -3898,77 +469,10 @@
           "named": true
         },
         {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
+          "type": "section",
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "simple_command",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "single_path_include",
-    "named": true,
-    "fields": {
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_key_value",
-            "named": true
-          }
-        ]
-      },
-      "path": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_path_list",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -3981,43 +485,11 @@
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
+          "type": "brack_group",
           "named": true
         },
         {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "chapter",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
+          "type": "command",
           "named": true
         },
         {
@@ -4025,95 +497,15 @@
           "named": true
         },
         {
-          "type": "diacritic_command",
+          "type": "document",
           "named": true
         },
         {
-          "type": "displayed_equation",
+          "type": "environment",
           "named": true
         },
         {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "enum_item",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph",
+          "type": "line_comment",
           "named": true
         },
         {
@@ -4121,268 +513,11 @@
           "named": true
         },
         {
-          "type": "part",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "section",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "subparagraph",
-          "named": true
-        },
-        {
-          "type": "subsection",
-          "named": true
-        },
-        {
-          "type": "subsubsection",
+          "type": "space",
           "named": true
         },
         {
           "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "space",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "subparagraph",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "toc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
           "named": true
         }
       ]
@@ -4391,422 +526,13 @@
   {
     "type": "subscript",
     "named": true,
-    "fields": {
-      "subscript": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          },
-          {
-            "type": "curly_group",
-            "named": true
-          },
-          {
-            "type": "letter",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "subsection",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "toc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    },
+    "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
           "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "subsubsection",
-    "named": true,
-    "fields": {
-      "text": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "toc": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "asy_environment",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "code_environment",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "comment_environment",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
-          "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "generic_environment",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "listing_environment",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "math_environment",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "minted_environment",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "sage_environment",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
-          "named": true
-        },
-        {
-          "type": "verbatim_environment",
           "named": true
         }
       ]
@@ -4815,471 +541,16 @@
   {
     "type": "superscript",
     "named": true,
-    "fields": {
-      "superscript": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "command_name",
-            "named": true
-          },
-          {
-            "type": "curly_group",
-            "named": true
-          },
-          {
-            "type": "letter",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "text",
-    "named": true,
-    "fields": {
-      "word": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "acronym_command",
-            "named": true
-          },
-          {
-            "type": "block_comment",
-            "named": true
-          },
-          {
-            "type": "changes_replaced",
-            "named": true
-          },
-          {
-            "type": "citation",
-            "named": true
-          },
-          {
-            "type": "color_command",
-            "named": true
-          },
-          {
-            "type": "counter_command",
-            "named": true
-          },
-          {
-            "type": "delimiter",
-            "named": true
-          },
-          {
-            "type": "diacritic_command",
-            "named": true
-          },
-          {
-            "type": "double_path_include",
-            "named": true
-          },
-          {
-            "type": "environment_definition",
-            "named": true
-          },
-          {
-            "type": "escape_sequence",
-            "named": true
-          },
-          {
-            "type": "generic_command",
-            "named": true
-          },
-          {
-            "type": "glossary_command",
-            "named": true
-          },
-          {
-            "type": "hyperlink",
-            "named": true
-          },
-          {
-            "type": "label_command",
-            "named": true
-          },
-          {
-            "type": "let_command_definition",
-            "named": true
-          },
-          {
-            "type": "linebreak_command",
-            "named": true
-          },
-          {
-            "type": "metadata_command",
-            "named": true
-          },
-          {
-            "type": "new_command_definition",
-            "named": true
-          },
-          {
-            "type": "old_command_definition",
-            "named": true
-          },
-          {
-            "type": "operator",
-            "named": true
-          },
-          {
-            "type": "paired_delimiter_definition",
-            "named": true
-          },
-          {
-            "type": "placeholder",
-            "named": true
-          },
-          {
-            "type": "simple_command",
-            "named": true
-          },
-          {
-            "type": "single_path_include",
-            "named": true
-          },
-          {
-            "type": "space",
-            "named": true
-          },
-          {
-            "type": "subscript",
-            "named": true
-          },
-          {
-            "type": "superscript",
-            "named": true
-          },
-          {
-            "type": "theorem_definition",
-            "named": true
-          },
-          {
-            "type": "tikz_library_import",
-            "named": true
-          },
-          {
-            "type": "todo",
-            "named": true
-          },
-          {
-            "type": "verb_command",
-            "named": true
-          },
-          {
-            "type": "word",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "text_mode",
-    "named": true,
-    "fields": {
-      "content": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "theorem_definition",
-    "named": true,
-    "fields": {
-      "counter": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_text",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_text_list",
-            "named": true
-          }
-        ]
-      },
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group_key_value",
-            "named": true
-          }
-        ]
-      },
-      "title": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "tikz_library_import",
-    "named": true,
-    "fields": {
-      "paths": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group_path_list",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "todo",
-    "named": true,
-    "fields": {
-      "arg": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "curly_group",
-            "named": true
-          }
-        ]
-      },
-      "command": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "todo_command_name",
-            "named": true
-          }
-        ]
-      },
-      "options": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "brack_group",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "value",
-    "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
         {
-          "type": "acronym_command",
-          "named": true
-        },
-        {
-          "type": "block_comment",
-          "named": true
-        },
-        {
-          "type": "brack_group",
-          "named": true
-        },
-        {
-          "type": "changes_replaced",
-          "named": true
-        },
-        {
-          "type": "citation",
-          "named": true
-        },
-        {
-          "type": "color_command",
-          "named": true
-        },
-        {
-          "type": "counter_command",
-          "named": true
-        },
-        {
           "type": "curly_group",
-          "named": true
-        },
-        {
-          "type": "diacritic_command",
-          "named": true
-        },
-        {
-          "type": "displayed_equation",
-          "named": true
-        },
-        {
-          "type": "double_path_include",
-          "named": true
-        },
-        {
-          "type": "environment_definition",
-          "named": true
-        },
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "generic_command",
-          "named": true
-        },
-        {
-          "type": "glossary_command",
-          "named": true
-        },
-        {
-          "type": "hyperlink",
-          "named": true
-        },
-        {
-          "type": "inline_formula",
-          "named": true
-        },
-        {
-          "type": "label_command",
-          "named": true
-        },
-        {
-          "type": "let_command_definition",
-          "named": true
-        },
-        {
-          "type": "linebreak_command",
-          "named": true
-        },
-        {
-          "type": "math_delimiter",
-          "named": true
-        },
-        {
-          "type": "metadata_command",
-          "named": true
-        },
-        {
-          "type": "new_command_definition",
-          "named": true
-        },
-        {
-          "type": "old_command_definition",
-          "named": true
-        },
-        {
-          "type": "paired_delimiter_definition",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "simple_command",
-          "named": true
-        },
-        {
-          "type": "single_path_include",
-          "named": true
-        },
-        {
-          "type": "text",
-          "named": true
-        },
-        {
-          "type": "text_mode",
-          "named": true
-        },
-        {
-          "type": "theorem_definition",
-          "named": true
-        },
-        {
-          "type": "tikz_library_import",
-          "named": true
-        },
-        {
-          "type": "todo",
-          "named": true
-        },
-        {
-          "type": "verb_command",
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "verb_command",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "verbatim_environment",
-    "named": true,
-    "fields": {
-      "begin": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "begin",
-            "named": true
-          }
-        ]
-      },
-      "end": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "end",
-            "named": true
-          }
-        ]
-      },
-      "verbatim": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "comment",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -5291,11 +562,7 @@
     "named": false
   },
   {
-    "type": "(",
-    "named": false
-  },
-  {
-    "type": ")",
+    "type": "''",
     "named": false
   },
   {
@@ -5303,7 +570,23 @@
     "named": false
   },
   {
+    "type": "--",
+    "named": false
+  },
+  {
+    "type": "---",
+    "named": false
+  },
+  {
+    "type": "<<",
+    "named": false
+  },
+  {
     "type": "=",
+    "named": false
+  },
+  {
+    "type": ">>",
     "named": false
   },
   {
@@ -5327,10 +610,6 @@
     "named": false
   },
   {
-    "type": "\\\\",
-    "named": false
-  },
-  {
     "type": "\\]",
     "named": false
   },
@@ -5340,18 +619,6 @@
   },
   {
     "type": "\\end",
-    "named": false
-  },
-  {
-    "type": "\\fi",
-    "named": false
-  },
-  {
-    "type": "\\iffalse",
-    "named": false
-  },
-  {
-    "type": "\\replaced",
     "named": false
   },
   {
@@ -5367,27 +634,11 @@
     "named": false
   },
   {
-    "type": "argc",
-    "named": true
+    "type": "``",
+    "named": false
   },
   {
     "type": "command_name",
-    "named": true
-  },
-  {
-    "type": "comment",
-    "named": true
-  },
-  {
-    "type": "delimiter",
-    "named": true
-  },
-  {
-    "type": "label",
-    "named": true
-  },
-  {
-    "type": "letter",
     "named": true
   },
   {
@@ -5395,7 +646,7 @@
     "named": true
   },
   {
-    "type": "operator",
+    "type": "math_text",
     "named": true
   },
   {
@@ -5403,35 +654,23 @@
     "named": true
   },
   {
-    "type": "path",
+    "type": "section_command",
     "named": true
   },
   {
-    "type": "placeholder",
+    "type": "space",
     "named": true
   },
   {
-    "type": "source_code",
+    "type": "star",
     "named": true
   },
   {
-    "type": "todo_command_name",
-    "named": true
-  },
-  {
-    "type": "uri",
-    "named": true
-  },
-  {
-    "type": "word",
+    "type": "text",
     "named": true
   },
   {
     "type": "{",
-    "named": false
-  },
-  {
-    "type": "|",
     "named": false
   },
   {
