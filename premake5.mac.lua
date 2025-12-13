@@ -503,7 +503,6 @@ project "lambda"
         "/opt/homebrew/lib/libmbedtls.a",
         "/opt/homebrew/lib/libmbedx509.a",
         "/opt/homebrew/lib/libmbedcrypto.a",
-        "/opt/homebrew/lib/libhpdf.a",
         "/opt/homebrew/lib/libnghttp2.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
@@ -518,7 +517,6 @@ project "lambda"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libhpdf.a",
     }
     
     -- Dynamic libraries

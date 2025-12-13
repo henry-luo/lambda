@@ -197,13 +197,6 @@
             "link": "static"
         },
         {
-            "name": "hpdf",
-            "description": "libharu PDF generation library",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libhpdf.a",
-            "link": "static"
-        },
-        {
             "name": "nghttp2",
             "description": "HTTP/2 library required by curl",
             "include": "/opt/homebrew/include",
@@ -512,10 +505,6 @@
                     "link": "static"
                 },
                 {
-                    "name": "hpdf",
-                    "link": "none"
-                },
-                {
                     "name": "mingw32",
                     "lib": "-lmingw32",
                     "link": "dynamic"
@@ -717,12 +706,6 @@
                     "include": "/usr/include",
                     "lib": "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
                     "link": "static"
-                },
-                {
-                    "name": "hpdf",
-                    "include": "/usr/local/include",
-                    "lib": "-lhpdf",
-                    "link": "dynamic"
                 },
                 {
                     "name": "mbedtls",
