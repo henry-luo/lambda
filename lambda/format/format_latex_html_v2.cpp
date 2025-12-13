@@ -44,6 +44,7 @@ public:
         std::string name;
         int num_params;
         Element* definition;
+        Element* default_value;  // optional default value for first parameter (LaTeX [default] syntax)
     };
     
 public:
@@ -75,7 +76,7 @@ public:
     Input* input() { return input_; }
     
     // Macro system functions (public so command handlers can access)
-    void registerMacro(const std::string& name, int num_params, Element* definition);
+    void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
     bool isMacro(const std::string& name);
     MacroDefinition* getMacro(const std::string& name);
     Element* expandMacro(const std::string& name, const std::vector<Element*>& args);
@@ -133,12 +134,13 @@ private:
 // Macro System - Member Function Implementations
 // =============================================================================
 
-void LatexProcessor::registerMacro(const std::string& name, int num_params, Element* definition) {
+void LatexProcessor::registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value) {
     
     MacroDefinition macro;
     macro.name = name;
     macro.num_params = num_params;
     macro.definition = definition;
+    macro.default_value = default_value;
     macro_table_[name] = macro;
 }
 
@@ -647,6 +649,8 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
     std::string macro_name;
     int num_params = 0;
     Element* definition = nullptr;
+    Element* default_value = nullptr;  // optional default value for first parameter
+    bool have_num_params = false;  // track if we've seen [num] bracket group
     
     // Parse arguments: first is command name, second (optional) is num params, third is definition
     auto iter = reader.children();
@@ -679,164 +683,108 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             
             // Check for brack_group FIRST before other processing
             if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "brack_group_argc") == 0) {
-                fprintf(stderr, "DEBUG: Found bracket group '%s'\n", tag);
-                // [num] parameter count - extract number from bracket group
-                Element* brack_elem = const_cast<Element*>(child_elem.element());
-                List* brack_list = (List*)brack_elem;
+                fprintf(stderr, "DEBUG: Found bracket group '%s', have_num_params=%d\n", tag, have_num_params);
                 
-                fprintf(stderr, "DEBUG: Bracket group has %lld items\n", brack_list->length);
-                
-                // Look through items to find the number
-                // The Tree-sitter grammar stores it as a symbol "argc" with value as attribute
-                // or as plain text/number
-                fprintf(stderr, "DEBUG: Bracket group has extra=%lld items beyond length\n", brack_list->extra);
-                
-                // First, dump ALL items (including extra)
-                for (int64_t j = 0; j < brack_list->length + brack_list->extra; j++) {
-                    Item item = brack_list->items[j];
-                    TypeId item_type = get_type_id(item);
-                    fprintf(stderr, "DEBUG:   Item %lld: type=%d", j, item_type);
-                    if (item_type == LMD_TYPE_STRING) {
-                        String* str = (String*)item.string_ptr;
-                        fprintf(stderr, " STRING='%s'", str->chars);
-                    } else if (item_type == LMD_TYPE_INT) {
-                        int val = (int)(item.item >> 32);
-                        fprintf(stderr, " INT=%d", val);
-                    } else if (item_type == LMD_TYPE_SYMBOL) {
-                        String* sym = (String*)item.string_ptr;
-                        fprintf(stderr, " SYMBOL='%s'", sym->chars);
-                    }
-                    fprintf(stderr, "\n");
-                }
-                
-                for (int64_t j = 0; j < brack_list->length; j++) {
-                    Item item = brack_list->items[j];
-                    TypeId item_type = get_type_id(item);
+                // First brack_group is [num] - number of parameters
+                // Second brack_group is [default] - default value for first parameter
+                if (!have_num_params) {
+                    // [num] parameter count - extract number from bracket group
+                    Element* brack_elem = const_cast<Element*>(child_elem.element());
+                    List* brack_list = (List*)brack_elem;
                     
-                    fprintf(stderr, "DEBUG:   Processing item %lld: type=%d\n", j, item_type);
+                    fprintf(stderr, "DEBUG: Bracket group has %lld items\n", brack_list->length);
                     
-                    if (item_type == LMD_TYPE_STRING) {
-                        String* str = (String*)item.string_ptr;
-                        fprintf(stderr, "DEBUG:   Item %lld: STRING '%s'\n", j, str->chars);
-                        
-                        // Try to parse as number
-                        if (str->len > 0 && str->chars[0] >= '0' && str->chars[0] <= '9') {
-                            num_params = atoi(str->chars);
-                            fprintf(stderr, "DEBUG:   Parsed num_params=%d from string\n", num_params);
-                            break;
+                    // Look through items to find the number
+                    fprintf(stderr, "DEBUG: Bracket group has extra=%lld items beyond length\n", brack_list->extra);
+                    
+                    // Dump ALL items for debugging
+                    for (int64_t j = 0; j < brack_list->length + brack_list->extra; j++) {
+                        Item item = brack_list->items[j];
+                        TypeId item_type = get_type_id(item);
+                        fprintf(stderr, "DEBUG:   Item %lld: type=%d", j, item_type);
+                        if (item_type == LMD_TYPE_STRING) {
+                            String* str = (String*)item.string_ptr;
+                            fprintf(stderr, " STRING='%s'", str->chars);
+                        } else if (item_type == LMD_TYPE_INT) {
+                            int val = (int)(item.item >> 32);
+                            fprintf(stderr, " INT=%d", val);
+                        } else if (item_type == LMD_TYPE_SYMBOL) {
+                            String* sym = (String*)item.string_ptr;
+                            fprintf(stderr, " SYMBOL='%s'", sym->chars);
                         }
-                    } else if (item_type == LMD_TYPE_SYMBOL) {
-                        String* sym = (String*)item.string_ptr;
-                        fprintf(stderr, "DEBUG:   Item %lld: SYMBOL '%s'\n", j, sym->chars);
+                        fprintf(stderr, "\n");
+                    }
+                    
+                    for (int64_t j = 0; j < brack_list->length; j++) {
+                        Item item = brack_list->items[j];
+                        TypeId item_type = get_type_id(item);
                         
-                        // The symbol "argc" itself doesn't contain the value
-                        // We need to look for numeric text in the bracket group
-                    } else if (item_type == LMD_TYPE_INT) {
-                        // Direct int value
-                        int64_t val = item.item >> 32;
-                        fprintf(stderr, "DEBUG:   Item %lld: INT %lld\n", j, val);
-                        num_params = (int)val;
-                        fprintf(stderr, "DEBUG:   Parsed num_params=%d from int\n", num_params);
-                        break;
-                    } else if (item_type == LMD_TYPE_ELEMENT) {
-                        // Type 19 - ELEMENT
-                        fprintf(stderr, "DEBUG:   Item %lld: ELEMENT handler entered\n", j);
-                        Item elem_item;
-                        elem_item.item = (uint64_t)item.element;
-                        ElementReader elem_reader(elem_item);
-                        const char* elem_tag = elem_reader.tagName();
-                        fprintf(stderr, "DEBUG:   ELEMENT tag='%s'\n", elem_tag);
+                        fprintf(stderr, "DEBUG:   Processing item %lld: type=%d\n", j, item_type);
                         
-                        // Check if this is an "argc" element - if so, extract its text content
-                        if (strcmp(elem_tag, "argc") == 0) {
-                            // Check attributes first
-                            fprintf(stderr, "DEBUG:   argc element has %lld attributes\n", elem_reader.attrCount());
+                        if (item_type == LMD_TYPE_STRING) {
+                            String* str = (String*)item.string_ptr;
+                            fprintf(stderr, "DEBUG:   Item %lld: STRING '%s'\n", j, str->chars);
                             
-                            // Try to get "value" attribute
-                            if (elem_reader.has_attr("value")) {
-                                const char* value_str = elem_reader.get_attr_string("value");
-                                fprintf(stderr, "DEBUG:   argc has 'value' attribute: '%s'\n", value_str);
-                                if (value_str && value_str[0] >= '0' && value_str[0] <= '9') {
-                                    num_params = atoi(value_str);
-                                    fprintf(stderr, "DEBUG:   Parsed num_params=%d from value attribute\n", num_params);
-                                    break;
-                                }
+                            // Try to parse as number
+                            if (str->len > 0 && str->chars[0] >= '0' && str->chars[0] <= '9') {
+                                num_params = atoi(str->chars);
+                                fprintf(stderr, "DEBUG:   Parsed num_params=%d from string\n", num_params);
+                                have_num_params = true;
+                                break;
                             }
+                        } else if (item_type == LMD_TYPE_INT) {
+                            // Direct int value
+                            int64_t val = item.item >> 32;
+                            fprintf(stderr, "DEBUG:   Item %lld: INT %lld\n", j, val);
+                            num_params = (int)val;
+                            fprintf(stderr, "DEBUG:   Parsed num_params=%d from int\n", num_params);
+                            have_num_params = true;
+                            break;
+                        } else if (item_type == LMD_TYPE_ELEMENT) {
+                            Item elem_item;
+                            elem_item.item = (uint64_t)item.element;
+                            ElementReader elem_reader(elem_item);
+                            const char* elem_tag = elem_reader.tagName();
                             
-                            // Dump the raw element structure
-                            Element* argc_elem = item.element;
-                            List* argc_list = (List*)argc_elem;
-                            fprintf(stderr, "DEBUG:   argc element has length=%lld, extra=%lld\n", 
-                                    argc_list->length, argc_list->extra);
-                            
-                            // Dump all items in the element (including extra)
-                            for (int64_t k = 0; k < argc_list->length + argc_list->extra; k++) {
-                                Item elem_item = argc_list->items[k];
-                                TypeId elem_type = get_type_id(elem_item);
-                                fprintf(stderr, "DEBUG:     Item %lld: type=%d", k, elem_type);
-                                if (elem_type == LMD_TYPE_STRING) {
-                                    String* str = (String*)elem_item.string_ptr;
-                                    fprintf(stderr, " STRING='%s'", str->chars);
-                                } else if (elem_type == LMD_TYPE_INT) {
-                                    int val = (int)(elem_item.item >> 32);
-                                    fprintf(stderr, " INT=%d", val);
-                                }
-                                fprintf(stderr, "\n");
-                            }
-                            
-                            // Use textContent to get the number from this element
-                            Pool* pool = proc->pool();
-                            StringBuf* sb = stringbuf_new(pool);
-                            elem_reader.textContent(sb);
-                            String* argc_str = stringbuf_to_string(sb);
-                            
-                            fprintf(stderr, "DEBUG:   argc textContent len=%lld, text='%s'\n", argc_str->len, 
-                                    argc_str->len > 0 ? argc_str->chars : "(empty)");
-                            
-                            // The argc element might have the number stored as text or in children
-                            // Try parsing it
-                            if (argc_str->len > 0) {
-                                num_params = atoi(argc_str->chars);
-                                fprintf(stderr, "DEBUG:   Parsed num_params=%d from argc textContent\n", num_params);
-                            }
-                            
-                            // If still 0, the number might be stored in the element's attributes or elsewhere
-                            // For now, try looking at raw items
-                            if (num_params == 0) {
-                                fprintf(stderr, "DEBUG:   num_params still 0, checking children\n");
-                                Element* argc_elem = item.element;
-                                List* argc_list = (List*)argc_elem;
-                                fprintf(stderr, "DEBUG:   argc element has %lld children\n", argc_list->length);
+                            if (strcmp(elem_tag, "argc") == 0) {
+                                Pool* pool = proc->pool();
+                                StringBuf* sb = stringbuf_new(pool);
+                                elem_reader.textContent(sb);
+                                String* argc_str = stringbuf_to_string(sb);
                                 
-                                for (int64_t k = 0; k < argc_list->length; k++) {
-                                    Item argc_item = argc_list->items[k];
-                                    TypeId argc_type = get_type_id(argc_item);
-                                    fprintf(stderr, "DEBUG:   argc child %lld: type=%d\n", k, argc_type);
-                                    if (argc_type == LMD_TYPE_STRING) {
-                                        String* argc_str_inner = (String*)argc_item.string_ptr;
-                                        fprintf(stderr, "DEBUG:   argc child %lld: STRING '%s'\n", k, argc_str_inner->chars);
-                                        
-                                        if (argc_str_inner->len > 0 && argc_str_inner->chars[0] >= '0' && argc_str_inner->chars[0] <= '9') {
-                                            num_params = atoi(argc_str_inner->chars);
-                                            fprintf(stderr, "DEBUG:   Parsed num_params=%d from child string\n", num_params);
-                                            break;
-                                        }
-                                    }
+                                if (argc_str->len > 0) {
+                                    num_params = atoi(argc_str->chars);
+                                    fprintf(stderr, "DEBUG:   Parsed num_params=%d from argc textContent\n", num_params);
+                                    have_num_params = true;
                                 }
+                                break;
                             }
-                            break;
                         }
-                    } else {
-                        
                     }
-                }
-                
-                // WORKAROUND: If we found brack_group_argc but num_params is still 0,
-                // the Tree-sitter parser didn't properly capture the number
-                // Default to 1 (most common case)
-                if (num_params == 0) {
-                    num_params = 1;
                     
+                    // If we found brack_group but num_params is still 0, default to 1
+                    if (num_params == 0) {
+                        num_params = 1;
+                        have_num_params = true;
+                    }
+                } else {
+                    // Second brack_group: [default] - default value for first parameter
+                    fprintf(stderr, "DEBUG: Found second brack_group - this is default value\n");
+                    // Store the entire brack_group element as the default value
+                    // (we'll wrap its content when needed)
+                    MarkBuilder builder(proc->input());
+                    auto default_elem = builder.element("arg");
+                    
+                    // Copy children from brack_group to default_elem
+                    auto brack_iter = child_elem.children();
+                    ItemReader brack_child;
+                    while (brack_iter.next(&brack_child)) {
+                        default_elem.child(brack_child.item());
+                    }
+                    
+                    Item default_item = default_elem.final();
+                    default_value = (Element*)default_item.item;
+                    fprintf(stderr, "DEBUG: Stored default_value=%p\n", default_value);
                 }
                 
                 
@@ -902,6 +850,13 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
                 
+                // NEW: If macro_name is already set, treat this as the definition
+                if (!macro_name.empty()) {
+                    definition = const_cast<Element*>(child_elem.element());
+                    arg_index++;
+                    continue;
+                }
+                
                 if (arg_index == 0) {
                     // First arg: command name (like {\greet})
                     // The command is stored as a symbol (if no children) or element (if has children)
@@ -952,16 +907,19 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
         }
     }
     
+    // Remove leading backslash from macro_name if present
+    if (!macro_name.empty() && macro_name[0] == '\\') {
+        macro_name = macro_name.substr(1);
+    }
     
-    
-    fprintf(stderr, "DEBUG: newcommand parsed: name='%s', num_params=%d, definition=%p\n", macro_name.c_str(), num_params, definition);
+    fprintf(stderr, "DEBUG: newcommand parsed: name='%s', num_params=%d, definition=%p, default_value=%p\n", macro_name.c_str(), num_params, definition, default_value);
     
     if (!macro_name.empty() && definition) {
         // Check if macro already exists
         if (proc->isMacro(macro_name)) {
             log_error("Macro \\%s already defined (use \\renewcommand to redefine)", macro_name.c_str());
         } else {
-            proc->registerMacro(macro_name, num_params, definition);
+            proc->registerMacro(macro_name, num_params, definition, default_value);
         }
     } else {
         
@@ -983,11 +941,24 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
     int arg_index = 0;
     
     while (iter.next(&child)) {
-        if (child.isElement()) {
+        // NEW: Check for string child (macro name from hybrid grammar)
+        if (child.isString()) {
+            String* str = child.asString();
+            if (macro_name.empty() && str->chars[0] == '\\') {
+                macro_name = str->chars;
+            }
+        } else if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
+                // NEW: If macro_name is already set, treat this as the definition
+                if (!macro_name.empty()) {
+                    definition = const_cast<Element*>(child_elem.element());
+                    arg_index++;
+                    continue;
+                }
+                
                 if (arg_index == 0) {
                     Pool* pool = proc->pool();
                     StringBuf* sb = stringbuf_new(pool);
@@ -1021,6 +992,11 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
                 num_params = atoi(num_str->chars);
             }
         }
+    }
+    
+    // Remove leading backslash from macro_name if present
+    if (!macro_name.empty() && macro_name[0] == '\\') {
+        macro_name = macro_name.substr(1);
     }
     
     if (!macro_name.empty() && definition) {
@@ -1047,11 +1023,24 @@ static void cmd_providecommand(LatexProcessor* proc, Item elem) {
     int arg_index = 0;
     
     while (iter.next(&child)) {
-        if (child.isElement()) {
+        // NEW: Check for string child (macro name from hybrid grammar)
+        if (child.isString()) {
+            String* str = child.asString();
+            if (macro_name.empty() && str->chars[0] == '\\') {
+                macro_name = str->chars;
+            }
+        } else if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
+                // NEW: If macro_name is already set, treat this as the definition
+                if (!macro_name.empty()) {
+                    definition = const_cast<Element*>(child_elem.element());
+                    arg_index++;
+                    continue;
+                }
+                
                 if (arg_index == 0) {
                     Pool* pool = proc->pool();
                     StringBuf* sb = stringbuf_new(pool);
@@ -1085,6 +1074,11 @@ static void cmd_providecommand(LatexProcessor* proc, Item elem) {
                 num_params = atoi(num_str->chars);
             }
         }
+    }
+    
+    // Remove leading backslash from macro_name if present
+    if (!macro_name.empty() && macro_name[0] == '\\') {
+        macro_name = macro_name.substr(1);
     }
     
     if (!macro_name.empty() && definition) {
@@ -1337,20 +1331,44 @@ static void cmd_section(LatexProcessor* proc, Item elem) {
     
     ElementReader elem_reader(elem);
     
-    // Find the title argument (first curly_group child)
+    // Find the title argument
+    // New grammar stores it as "title" field, old grammar as first curly_group child
+    // Generic command parsing may store it as a string child
     std::string title;
-    auto iter = elem_reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
-                // Extract title text from this group
-                Pool* pool = proc->pool();
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* title_str = stringbuf_to_string(sb);
-                title = title_str->chars;
+    
+    // First try to get title from "title" field (new grammar section node structure)
+    if (elem_reader.has_attr("title")) {
+        ItemReader title_reader = elem_reader.get_attr("title");
+        if (title_reader.isElement()) {
+            ElementReader title_elem(title_reader.item());
+            Pool* pool = proc->pool();
+            StringBuf* sb = stringbuf_new(pool);
+            title_elem.textContent(sb);
+            String* title_str = stringbuf_to_string(sb);
+            title = title_str->chars;
+        }
+    }
+    
+    // Fallback: try first curly_group child or string child (command parsing structure)
+    if (title.empty()) {
+        auto iter = elem_reader.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem(child.item());
+                if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                    // Extract title text from this group
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* title_str = stringbuf_to_string(sb);
+                    title = title_str->chars;
+                    break;
+                }
+            } else if (child.isString()) {
+                // Generic command parsing: title is first string child
+                String* str = child.asString();
+                title = str->chars;
                 break;
             }
         }
@@ -1367,19 +1385,40 @@ static void cmd_subsection(LatexProcessor* proc, Item elem) {
     
     ElementReader elem_reader(elem);
     
-    // Find the title argument (first curly_group child)
+    // Find the title argument (from "title" field or first curly_group child)
     std::string title;
-    auto iter = elem_reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
-                Pool* pool = proc->pool();
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* title_str = stringbuf_to_string(sb);
-                title = title_str->chars;
+    
+    // First try to get title from "title" field (new grammar structure)
+    if (elem_reader.has_attr("title")) {
+        ItemReader title_reader = elem_reader.get_attr("title");
+        if (title_reader.isElement()) {
+            ElementReader title_elem(title_reader.item());
+            Pool* pool = proc->pool();
+            StringBuf* sb = stringbuf_new(pool);
+            title_elem.textContent(sb);
+            String* title_str = stringbuf_to_string(sb);
+            title = title_str->chars;
+        }
+    }
+    
+    // Fallback: try first curly_group child or string child (command parsing structure)
+    if (title.empty()) {
+        auto iter = elem_reader.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem(child.item());
+                if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* title_str = stringbuf_to_string(sb);
+                    title = title_str->chars;
+                    break;
+                }
+            } else if (child.isString()) {
+                String* str = child.asString();
+                title = str->chars;
                 break;
             }
         }
@@ -1394,19 +1433,40 @@ static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
     
     ElementReader elem_reader(elem);
     
-    // Find the title argument (first curly_group child)
+    // Find the title argument (from "title" field or first curly_group/string child)
     std::string title;
-    auto iter = elem_reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
-                Pool* pool = proc->pool();
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* title_str = stringbuf_to_string(sb);
-                title = title_str->chars;
+    
+    // First try to get title from "title" field (new grammar structure)
+    if (elem_reader.has_attr("title")) {
+        ItemReader title_reader = elem_reader.get_attr("title");
+        if (title_reader.isElement()) {
+            ElementReader title_elem(title_reader.item());
+            Pool* pool = proc->pool();
+            StringBuf* sb = stringbuf_new(pool);
+            title_elem.textContent(sb);
+            String* title_str = stringbuf_to_string(sb);
+            title = title_str->chars;
+        }
+    }
+    
+    // Fallback: try first curly_group child or string child (command parsing structure)
+    if (title.empty()) {
+        auto iter = elem_reader.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem(child.item());
+                if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* title_str = stringbuf_to_string(sb);
+                    title = title_str->chars;
+                    break;
+                }
+            } else if (child.isString()) {
+                String* str = child.asString();
+                title = str->chars;
                 break;
             }
         }
@@ -1420,11 +1480,29 @@ static void cmd_chapter(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     ElementReader elem_reader(elem);
-    Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* title_str = stringbuf_to_string(sb);
-    std::string title = title_str->chars;
+    
+    // Find the title argument (from "title" field or textContent)
+    std::string title;
+    
+    if (elem_reader.has_attr("title")) {
+        ItemReader title_reader = elem_reader.get_attr("title");
+        if (title_reader.isElement()) {
+            ElementReader title_elem(title_reader.item());
+            Pool* pool = proc->pool();
+            StringBuf* sb = stringbuf_new(pool);
+            title_elem.textContent(sb);
+            String* title_str = stringbuf_to_string(sb);
+            title = title_str->chars;
+        }
+    }
+    
+    if (title.empty()) {
+        Pool* pool = proc->pool();
+        StringBuf* sb = stringbuf_new(pool);
+        elem_reader.textContent(sb);
+        String* title_str = stringbuf_to_string(sb);
+        title = title_str->chars;
+    }
     
     gen->startSection("chapter", false, title, title);
 }
@@ -1433,11 +1511,29 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     ElementReader elem_reader(elem);
-    Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* title_str = stringbuf_to_string(sb);
-    std::string title = title_str->chars;
+    
+    // Find the title argument (from "title" field or textContent)
+    std::string title;
+    
+    if (elem_reader.has_attr("title")) {
+        ItemReader title_reader = elem_reader.get_attr("title");
+        if (title_reader.isElement()) {
+            ElementReader title_elem(title_reader.item());
+            Pool* pool = proc->pool();
+            StringBuf* sb = stringbuf_new(pool);
+            title_elem.textContent(sb);
+            String* title_str = stringbuf_to_string(sb);
+            title = title_str->chars;
+        }
+    }
+    
+    if (title.empty()) {
+        Pool* pool = proc->pool();
+        StringBuf* sb = stringbuf_new(pool);
+        elem_reader.textContent(sb);
+        String* title_str = stringbuf_to_string(sb);
+        title = title_str->chars;
+    }
     
     gen->startSection("part", false, title, title);
 }
@@ -3537,6 +3633,19 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Handle document wrapper (from \begin{document}...\end{document})
+    if (strcmp(cmd_name, "document") == 0) {
+        // Just process children - document is a transparent container
+        processChildren(elem);
+        return;
+    }
+    
+    // Handle paragraph wrapper (transparent container for text content)
+    if (strcmp(cmd_name, "paragraph") == 0) {
+        processChildren(elem);
+        return;
+    }
+    
     // Handle Tree-sitter special node types that should be silent
     if (strcmp(cmd_name, "class_include") == 0) {
         cmd_documentclass(this, elem);
@@ -3610,7 +3719,23 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             ItemReader child;
             int args_collected = 0;
             
+            // Check if first child is a brack_group (optional arg override)
+            // If so, use it for #1 instead of default; otherwise use default if available
+            bool first_is_optional = false;
+            
             fprintf(stderr, "DEBUG: Macro %s needs %d params, has %lld children\n", cmd_name, macro->num_params, reader.childCount());
+            
+            // Peek at first child to check if it's a brack_group (optional arg)
+            ItemReader peek_child;
+            auto peek_iter = reader.children();
+            if (peek_iter.next(&peek_child) && peek_child.isElement()) {
+                ElementReader peek_elem(peek_child.item());
+                const char* peek_tag = peek_elem.tagName();
+                if (peek_tag && strcmp(peek_tag, "brack_group") == 0) {
+                    first_is_optional = true;
+                    fprintf(stderr, "DEBUG: Macro %s first arg is optional brack_group\n", cmd_name);
+                }
+            }
             
             while (iter.next(&child) && args_collected < macro->num_params) {
                 TypeId child_type = child.getType();
@@ -3618,6 +3743,24 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                 
                 // Create a wrapper element for this argument
                 ElementBuilder arg_elem = builder.element("arg");
+                
+                // Check if this is a brack_group (optional arg) - extract content
+                if (child.isElement()) {
+                    ElementReader child_elem(child.item());
+                    const char* child_tag = child_elem.tagName();
+                    if (child_tag && strcmp(child_tag, "brack_group") == 0) {
+                        // Extract content from brack_group for first optional parameter
+                        auto brack_iter = child_elem.children();
+                        ItemReader brack_child;
+                        while (brack_iter.next(&brack_child)) {
+                            arg_elem.child(brack_child.item());
+                        }
+                        Item arg_item = arg_elem.final();
+                        args.push_back((Element*)arg_item.item);
+                        args_collected++;
+                        continue;
+                    }
+                }
                 
                 // Add the child to the wrapper
                 arg_elem.child(child.item());
@@ -3629,6 +3772,21 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             }
             
             fprintf(stderr, "DEBUG: Macro %s collected %d/%d args\n", cmd_name, args_collected, macro->num_params);
+            
+            // If we have fewer args than num_params and there's a default value,
+            // prepend the default value as the first argument
+            // This handles \newcommand{\cmd}[2][default]{#1 #2} when called as \cmd{arg}
+            if ((int)args.size() < macro->num_params && macro->default_value != nullptr && !first_is_optional) {
+                fprintf(stderr, "DEBUG: Macro %s using default value for first param\n", cmd_name);
+                // Prepend default value to args
+                std::vector<Element*> new_args;
+                new_args.push_back(macro->default_value);
+                for (Element* arg : args) {
+                    new_args.push_back(arg);
+                }
+                args = new_args;
+                fprintf(stderr, "DEBUG: Macro %s now has %zu args after adding default\n", cmd_name, args.size());
+            }
             
             // Expand the macro with arguments
             Element* expanded = expandMacro(cmd_name, args);
