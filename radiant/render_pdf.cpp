@@ -4,11 +4,11 @@
 #include "font_face.h"
 extern "C" {
 #include "../lib/url.h"
+#include "../lib/pdf_writer.h"
 }
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include <hpdf.h>
 
 // Forward declarations for functions from other modules
 int ui_context_init(UiContext* uicon, bool headless);
