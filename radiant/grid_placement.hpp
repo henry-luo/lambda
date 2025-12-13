@@ -194,6 +194,108 @@ inline void place_definite_item(
 }
 
 /**
+ * Place an item with definite row but indefinite column (CSS Grid spec step 2)
+ *
+ * @param matrix The cell occupancy matrix
+ * @param item The item to place
+ * @param auto_flow The auto-flow mode
+ * @param explicit_row_count Number of explicit row tracks
+ * @param explicit_col_count Number of explicit column tracks
+ */
+inline void place_definite_row_item(
+    CellOccupancyMatrix& matrix,
+    GridItemInfo& item,
+    GridAutoFlow auto_flow,
+    uint16_t explicit_row_count,
+    uint16_t explicit_col_count
+) {
+    // Row is definite, column is indefinite
+    LineSpan row_span = item.row.to_origin_zero(explicit_row_count);
+    uint16_t column_item_span = item.column.get_span();
+
+    // Find first available column position in the specified row(s)
+    OriginZeroLine col_start = matrix.track_counts(AbsoluteAxis::Horizontal).implicit_start_line();
+    constexpr int MAX_SEARCH_ITERATIONS = 10000;
+    int iterations = 0;
+
+    while (iterations < MAX_SEARCH_ITERATIONS) {
+        LineSpan col_span(col_start, col_start + column_item_span);
+
+        // Ensure matrix can accommodate this position
+        matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
+
+        if (matrix.line_area_is_unoccupied(AbsoluteAxis::Horizontal, col_span, row_span)) {
+            // Found a free space
+            item.resolved_row = row_span;
+            item.resolved_column = col_span;
+            return;
+        }
+
+        col_start += 1;
+        iterations++;
+    }
+
+    // Fallback: place at end of grid
+    OriginZeroLine fallback_col = matrix.track_counts(AbsoluteAxis::Horizontal).implicit_end_line();
+    LineSpan col_span(fallback_col, fallback_col + column_item_span);
+    matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
+
+    item.resolved_row = row_span;
+    item.resolved_column = col_span;
+}
+
+/**
+ * Place an item with definite column but indefinite row (CSS Grid spec step 3)
+ *
+ * @param matrix The cell occupancy matrix
+ * @param item The item to place
+ * @param auto_flow The auto-flow mode
+ * @param explicit_row_count Number of explicit row tracks
+ * @param explicit_col_count Number of explicit column tracks
+ */
+inline void place_definite_column_item(
+    CellOccupancyMatrix& matrix,
+    GridItemInfo& item,
+    GridAutoFlow auto_flow,
+    uint16_t explicit_row_count,
+    uint16_t explicit_col_count
+) {
+    // Column is definite, row is indefinite
+    LineSpan col_span = item.column.to_origin_zero(explicit_col_count);
+    uint16_t row_item_span = item.row.get_span();
+
+    // Find first available row position in the specified column(s)
+    OriginZeroLine row_start = matrix.track_counts(AbsoluteAxis::Vertical).implicit_start_line();
+    constexpr int MAX_SEARCH_ITERATIONS = 10000;
+    int iterations = 0;
+
+    while (iterations < MAX_SEARCH_ITERATIONS) {
+        LineSpan row_span(row_start, row_start + row_item_span);
+
+        // Ensure matrix can accommodate this position
+        matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
+
+        if (matrix.line_area_is_unoccupied(AbsoluteAxis::Horizontal, col_span, row_span)) {
+            // Found a free space
+            item.resolved_row = row_span;
+            item.resolved_column = col_span;
+            return;
+        }
+
+        row_start += 1;
+        iterations++;
+    }
+
+    // Fallback: place at end of grid
+    OriginZeroLine fallback_row = matrix.track_counts(AbsoluteAxis::Vertical).implicit_end_line();
+    LineSpan row_span(fallback_row, fallback_row + row_item_span);
+    matrix.ensure_fits(AbsoluteAxis::Horizontal, col_span, row_span);
+
+    item.resolved_row = row_span;
+    item.resolved_column = col_span;
+}
+
+/**
  * Place an item with definite secondary axis position
  *
  * @param matrix The cell occupancy matrix
@@ -446,17 +548,12 @@ inline void place_grid_items(
         }
     }
 
-    // Step 2: Place items with definite secondary axis positions
+    // Step 2: Place items with definite row positions (auto column)
+    // Per CSS Grid spec §8.5: "Process the items locked to a given row"
+    // These are items with definite row position but auto column position
     for (auto& item : items) {
-        bool secondary_definite = (secondary == AbsoluteAxis::Vertical)
-            ? item.row.is_definite
-            : item.column.is_definite;
-        bool primary_definite = (primary == AbsoluteAxis::Vertical)
-            ? item.row.is_definite
-            : item.column.is_definite;
-
-        if (secondary_definite && !primary_definite) {
-            place_definite_secondary_axis_item(
+        if (item.row.is_definite && !item.column.is_definite) {
+            place_definite_row_item(
                 matrix, item, auto_flow, explicit_row_count, explicit_col_count
             );
 
@@ -470,10 +567,15 @@ inline void place_grid_items(
         }
     }
 
-    // Step 3: Determine implicit grid size
+    // Step 3: Determine implicit grid columns
     // This is handled implicitly by CellOccupancyMatrix's expand_to_fit_range
 
-    // Step 4: Place remaining items
+    // Step 4: Place remaining items in order-modified document order
+    // Per CSS Grid spec §8.5: "Position the remaining grid items"
+    // This includes:
+    // - Items with definite column but auto row (use column, find row)
+    // - Items with auto in both axes (use cursor)
+    // Both are processed in DOM order, which is critical for correct placement
     OriginZeroLine primary_neg_tracks = matrix.track_counts(primary).implicit_start_line();
     OriginZeroLine secondary_neg_tracks = matrix.track_counts(secondary).implicit_start_line();
     auto cursor = std::make_pair(primary_neg_tracks, secondary_neg_tracks);
@@ -482,16 +584,23 @@ inline void place_grid_items(
     for (auto& item : items) {
         bool row_definite = item.row.is_definite;
         bool col_definite = item.column.is_definite;
-        bool secondary_definite = (secondary == AbsoluteAxis::Vertical)
-            ? row_definite
-            : col_definite;
 
-        // Skip items already placed
-        if ((row_definite && col_definite) || secondary_definite) {
+        // Skip items already placed in step 1 or step 2
+        if (row_definite) {
             continue;
         }
 
-        cursor = place_indefinite_item(matrix, item, auto_flow, cursor);
+        if (col_definite) {
+            // Item has definite column but auto row
+            // Per spec: "If the item has a definite column position:"
+            // Use the column position and search for available row
+            place_definite_column_item(
+                matrix, item, auto_flow, explicit_row_count, explicit_col_count
+            );
+        } else {
+            // Item has auto in both axes
+            cursor = place_indefinite_item(matrix, item, auto_flow, cursor);
+        }
 
         // Mark as occupied
         matrix.mark_area_as(
