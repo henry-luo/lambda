@@ -210,7 +210,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Width is definite if:
         // - Explicit width is set, OR
         // - max-width is actively constraining (container width == max-width and max-width < available), OR
-        // - Absolutely positioned with both left and right
+        // - Absolutely positioned with both left and right, OR
+        // - Block-level element in normal flow (inherits definite width from containing block)
         bool has_definite_width = has_explicit_width;
         
         // Check if max-width is actually constraining the width
@@ -243,6 +244,22 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             has_definite_width = has_definite_width ||
                 (container->position->has_left && container->position->has_right);
         }
+        
+        // Block-level elements in normal flow have definite width from containing block
+        // Only inline-block/inline elements with auto width are shrink-to-fit (indefinite)
+        // Absolute/fixed positioned elements with auto width are also shrink-to-fit (indefinite)
+        if (!has_definite_width && !is_absolute && content_width > 0) {
+            // Check if this is a block-level element (not inline-block, inline, or flex item)
+            bool is_inline_level = (container->display.outer == CSS_VALUE_INLINE_BLOCK ||
+                                    container->display.outer == CSS_VALUE_INLINE);
+            if (!is_inline_level) {
+                // Block-level element with computed width from containing block - it's definite
+                has_definite_width = true;
+                log_debug("init_flex_container: block-level element has definite width from containing block (%.1f)",
+                          (float)content_width);
+            }
+        }
+        
         flex->main_axis_is_indefinite = !has_definite_width;
     } else {
         // Main axis is height for column flex
