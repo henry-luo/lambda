@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Grid Complex Template Areas\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: 80px 1fr 100px 80px;\n            grid-template-rows: 60px 1fr 80px 50px;\n            grid-template-areas: \n                \"nav    header  header  ads\"\n                \"nav    main    aside   ads\"\n                \"nav    main    aside   ads\"\n                \"footer footer  footer  footer\";\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .nav { \n            grid-area: nav; \n            background-color: #ffcccc; \n        }\n        .header { \n            grid-area: header; \n            background-color: #ccffcc; \n        }\n        .main { \n            grid-area: main; \n            background-color: #ccccff; \n        }\n        .aside { \n            grid-area: aside; \n            background-color: #ffffcc; \n        }\n        .ads { \n            grid-area: ads; \n            background-color: #ffccff; \n        }\n        .footer { \n            grid-area: footer; \n            background-color: #ccffff; \n        }\n    \n\n\n    \n        Nav\n        Header\n        Main Content\n        Aside\n        Ads\n        Footer\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_020_complex_areas\",\n        \"category\": \"advanced\",\n        \"features\": [\"complex-template-areas\", \"multi-span-areas\", \"layout-regions\"],\n        \"description\": \"Complex layout using grid template areas with multiple spanning regions\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-template-areas-property\"],\n        \"complexity\": \"advanced\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Grid Complex Template Areas\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: 80px 1fr 100px 80px;\n            grid-template-rows: 60px 1fr 80px 50px;\n            grid-template-areas: \n                \"nav    header  header  ads\"\n                \"nav    main    aside   ads\"\n                \"nav    main    aside   ads\"\n                \"footer footer  footer  footer\";\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .nav { \n            grid-area: nav; \n            background-color: #ffcccc; \n        }\n        .header { \n            grid-area: header; \n            background-color: #ccffcc; \n        }\n        .main { \n            grid-area: main; \n            background-color: #ccccff; \n        }\n        .aside { \n            grid-area: aside; \n            background-color: #ffffcc; \n        }\n        .ads { \n            grid-area: ads; \n            background-color: #ffccff; \n        }\n        .footer { \n            grid-area: footer; \n            background-color: #ccffff; \n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Grid Complex Template Areas",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Grid Complex Template Areas",
+                "length": 33,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: 80px 1fr 100px 80px;\n            grid-template-rows: 60px 1fr 80px 50px;\n            grid-template-areas: \n                \"nav    header  header  ads\"\n                \"nav    main    aside   ads\"\n                \"nav    main    aside   ads\"\n                \"footer footer  footer  footer\";\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .nav { \n            grid-area: nav; \n            background-color: #ffcccc; \n        }\n        .header { \n            grid-area: header; \n            background-color: #ccffcc; \n        }\n        .main { \n            grid-area: main; \n            background-color: #ccccff; \n        }\n        .aside { \n            grid-area: aside; \n            background-color: #ffffcc; \n        }\n        .ads { \n            grid-area: ads; \n            background-color: #ffccff; \n        }\n        .footer { \n            grid-area: footer; \n            background-color: #ccffff; \n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: grid;\n            grid-template-columns: 80px 1fr 100px 80px;\n            grid-template-rows: 60px 1fr 80px 50px;\n            grid-template-areas: \n                \"nav    header  header  ads\"\n                \"nav    main    aside   ads\"\n                \"nav    main    aside   ads\"\n                \"footer footer  footer  footer\";\n            gap: 10px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            font-size: 12px;\n        }\n        .nav { \n            grid-area: nav; \n            background-color: #ffcccc; \n        }\n        .header { \n            grid-area: header; \n            background-color: #ccffcc; \n        }\n        .main { \n            grid-area: main; \n            background-color: #ccccff; \n        }\n        .aside { \n            grid-area: aside; \n            background-color: #ffffcc; \n        }\n        .ads { \n            grid-area: ads; \n            background-color: #ffccff; \n        }\n        .footer { \n            grid-area: footer; \n            background-color: #ccffff; \n        }\n    ",
+                "length": 1472,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Nav\n        Header\n        Main Content\n        Aside\n        Ads\n        Footer\n    \n    \n    \n    \n    {\n        \"test_id\": \"grid_020_complex_areas\",\n        \"category\": \"advanced\",\n        \"features\": [\"complex-template-areas\", \"multi-span-areas\", \"layout-regions\"],\n        \"description\": \"Complex layout using grid template areas with multiple spanning regions\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-template-areas-property\"],\n        \"complexity\": \"advanced\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Nav\n        Header\n        Main Content\n        Aside\n        Ads\n        Footer",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 6,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.item.nav:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -569,33 +668,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Nav",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Nav",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 41.33,
-                        "y": 22,
-                        "width": 21.34,
-                        "height": 14,
-                        "right": 62.67,
-                        "bottom": 36
-                      }
-                    ],
                     "length": 3,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 3
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 41.33,
+                          "y": 22,
+                          "width": 21.34,
+                          "height": 14,
+                          "right": 62.67,
+                          "bottom": 36,
+                          "text": "Nav",
+                          "startIndex": 0,
+                          "endIndex": 3
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item.header:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -654,33 +761,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Header",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Header",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 180.31,
-                        "y": 22,
-                        "width": 39.36,
-                        "height": 14,
-                        "right": 219.67,
-                        "bottom": 36
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 180.31,
+                          "y": 22,
+                          "width": 39.36,
+                          "height": 14,
+                          "right": 219.67,
+                          "bottom": 36,
+                          "text": "Header",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item.main:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -739,41 +854,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Main Content",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "Main Content",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 131.98,
-                        "y": 92,
-                        "width": 26.02,
-                        "height": 14,
-                        "right": 158,
-                        "bottom": 106
-                      },
-                      {
-                        "x": 123.98,
-                        "y": 106,
-                        "width": 42.03,
-                        "height": 14,
-                        "right": 166.02,
-                        "bottom": 120
-                      }
-                    ],
-                    "length": 12,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 12
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 5,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "Main ",
+                    "length": 5,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 131.98,
+                          "y": 92,
+                          "width": 26.02,
+                          "height": 14,
+                          "right": 158,
+                          "bottom": 106,
+                          "text": "Main ",
+                          "startIndex": 0,
+                          "endIndex": 5
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "Content",
+                    "length": 7,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 123.98,
+                          "y": 106,
+                          "width": 42.03,
+                          "height": 14,
+                          "right": 166.02,
+                          "bottom": 120,
+                          "text": "Content",
+                          "startIndex": 0,
+                          "endIndex": 7
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item.aside:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -832,33 +975,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Aside",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 7,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Aside",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 232.98,
-                        "y": 92,
-                        "width": 30.03,
-                        "height": 14,
-                        "right": 263.02,
-                        "bottom": 106
-                      }
-                    ],
                     "length": 5,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 5
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 232.98,
+                          "y": 92,
+                          "width": 30.03,
+                          "height": 14,
+                          "right": 263.02,
+                          "bottom": 106,
+                          "text": "Aside",
+                          "startIndex": 0,
+                          "endIndex": 5
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item.ads:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -917,33 +1068,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Ads",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 9,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Ads",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 337.66,
-                        "y": 22,
-                        "width": 20.69,
-                        "height": 14,
-                        "right": 358.34,
-                        "bottom": 36
-                      }
-                    ],
                     "length": 3,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 3
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 337.66,
+                          "y": 22,
+                          "width": 20.69,
+                          "height": 14,
+                          "right": 358.34,
+                          "bottom": 36,
+                          "text": "Ads",
+                          "startIndex": 0,
+                          "endIndex": 3
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.item.footer:nth-of-type(6)",
                 "tag": "div",
                 "id": null,
@@ -1002,35 +1161,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Footer",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 11,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Footer",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 182.66,
-                        "y": 248,
-                        "width": 34.69,
-                        "height": 14,
-                        "right": 217.34,
-                        "bottom": 262
-                      }
-                    ],
                     "length": 6,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 6
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 182.66,
+                          "y": 248,
+                          "width": 34.69,
+                          "height": 14,
+                          "right": 217.34,
+                          "bottom": 262,
+                          "text": "Footer",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1086,12 +1253,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"grid_020_complex_areas\",\n        \"category\": \"advanced\",\n        \"features\": [\"complex-template-areas\", \"multi-span-areas\", \"layout-regions\"],\n        \"description\": \"Complex layout using grid template areas with multiple spanning regions\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-template-areas-property\"],\n        \"complexity\": \"advanced\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"grid_020_complex_areas\",\n        \"category\": \"advanced\",\n        \"features\": [\"complex-template-areas\", \"multi-span-areas\", \"layout-regions\"],\n        \"description\": \"Complex layout using grid template areas with multiple spanning regions\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-grid-1/#grid-template-areas-property\"],\n        \"complexity\": \"advanced\"\n    }\n    ",
+                "length": 406,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }
