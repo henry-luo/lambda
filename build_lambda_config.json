@@ -23,6 +23,7 @@
         "lib/mempool.c",
         "lib/arena.c",
         "lib/avl_tree.c",
+        "lib/pdf_writer.c",
         "lib/url.c",
         "lib/url_parser.c",
         "lib/utf.c",
@@ -196,13 +197,6 @@
             "link": "static"
         },
         {
-            "name": "hpdf",
-            "description": "libharu PDF generation library",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libhpdf.a",
-            "link": "static"
-        },
-        {
             "name": "nghttp2",
             "description": "HTTP/2 library required by curl",
             "include": "/opt/homebrew/include",
@@ -283,6 +277,8 @@
             "sources": [
                 "lib/mempool.c",
                 "lib/arena.c",
+                "lib/arraylist.c",
+                "lib/pdf_writer.c",
                 "lib/strbuf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
@@ -509,10 +505,6 @@
                     "link": "static"
                 },
                 {
-                    "name": "hpdf",
-                    "link": "none"
-                },
-                {
                     "name": "mingw32",
                     "lib": "-lmingw32",
                     "link": "dynamic"
@@ -714,12 +706,6 @@
                     "include": "/usr/include",
                     "lib": "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
                     "link": "static"
-                },
-                {
-                    "name": "hpdf",
-                    "include": "/usr/local/include",
-                    "lib": "-lhpdf",
-                    "link": "dynamic"
                 },
                 {
                     "name": "mbedtls",
@@ -1057,6 +1043,20 @@
                         ],
                         "binary": "test_arena_gtest.exe",
                         "icon": "🏟️"
+                    },
+                    {
+                        "source": "test_pdf_writer_gtest.cpp",
+                        "name": "PDF Writer Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_pdf_writer_gtest.exe",
+                        "icon": "📄"
                     },
                     {
                         "source": "perf/test_avl_tree_perf.cpp",
@@ -1958,30 +1958,9 @@
                         "icon": "🔒"
                     },
                     {
-                        "source": "test/latex/test_latex_html_baseline.cpp",
-                        "name": "LaTeX to HTML Baseline Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_html_baseline.exe",
-                        "additional_sources": [
-                            "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp"
-                        ],
-                        "includes": [
-                            "test/latex"
-                        ],
-                        "special_flags": "-std=c++17 -I/opt/homebrew/include",
-                        "icon": "📄"
-                    },
-                    {
                         "source": "test/latex/test_latex_html_v2_baseline.cpp",
                         "name": "LaTeX to HTML V2 Baseline Tests",
+                        "category": "extended",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2254,28 +2233,6 @@
                         ],
                         "binary": "test_http_gtest.exe",
                         "icon": "🌐"
-                    },
-                    {
-                        "source": "test/latex/test_latex_html_extended.cpp",
-                        "name": "LaTeX to HTML Extended Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_html_extended.exe",
-                        "additional_sources": [
-                            "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp"
-                        ],
-                        "includes": [
-                            "test/latex"
-                        ],
-                        "special_flags": "-std=c++17 -I/opt/homebrew/include",
-                        "icon": "📄"
                     },
                     {
                         "source": "test/test_lambda_proc_extended_gtest.cpp",

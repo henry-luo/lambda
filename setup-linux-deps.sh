@@ -38,31 +38,6 @@ RADIANT_DEPS=(
     "libegl1-mesa-dev"       # EGL development libraries
 )
 
-# Function to build libharu from source
-build_libharu_for_linux() {
-    echo "Building libharu from source..."
-    mkdir -p build_temp
-    cd build_temp
-    if [ ! -d "libharu" ]; then
-        git clone https://github.com/libharu/libharu.git || {
-            echo "Failed to clone libharu repository."
-            cd - > /dev/null
-            return 1
-        }
-    fi
-    cd libharu
-    mkdir -p build
-    cd build
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" .. && \
-    make -j$(nproc) && \
-    sudo make install && \
-    sudo ldconfig
-    cd - > /dev/null
-    cd - > /dev/null
-    cd - > /dev/null
-    echo "libharu built and installed."
-}
-
 # Check for cleanup option
 if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
@@ -407,37 +382,6 @@ for dep in "${RADIANT_DEPS[@]}"; do
 
     install_if_missing "$dep" "$dep"
 done
-
-# Build libharu from source (not available in repos)
-if ! build_libharu_for_linux; then
-    echo "Warning: libharu build failed"
-fi
-
-
-# Function to build libharu from source
-build_libharu_for_linux() {
-    echo "Building libharu from source..."
-    mkdir -p build_temp
-    cd build_temp
-    if [ ! -d "libharu" ]; then
-        git clone https://github.com/libharu/libharu.git || {
-            echo "Failed to clone libharu repository."
-            cd - > /dev/null
-            return 1
-        }
-    fi
-    cd libharu
-    mkdir -p build
-    cd build
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" .. && \
-    make -j$(nproc) && \
-    sudo make install && \
-    sudo ldconfig
-    cd - > /dev/null
-    cd - > /dev/null
-    cd - > /dev/null
-    echo "libharu built and installed."
-}
 
 # Verify mpdecimal header installation
 echo "Verifying mpdecimal header installation..."

@@ -82,6 +82,28 @@ void TextHtmlWriter::openTag(const char* tag, const char* classes,
     tag_stack_.push_back(tag);  // Track open tag
 }
 
+void TextHtmlWriter::openTagRaw(const char* tag, const char* raw_attrs) {
+    if (!tag) return;
+    
+    closeTagStart();  // Close any previous tag
+    
+    if (pretty_print_) {
+        appendIndent();
+    }
+    
+    strbuf_append_char(buf_, '<');
+    strbuf_append_str(buf_, tag);
+    
+    // Add raw attributes
+    if (raw_attrs && raw_attrs[0]) {
+        strbuf_append_char(buf_, ' ');
+        strbuf_append_str(buf_, raw_attrs);
+    }
+    
+    in_tag_ = true;  // Mark that we're inside a tag
+    tag_stack_.push_back(tag);  // Track open tag
+}
+
 void TextHtmlWriter::closeTag(const char* tag) {
     closeTagStart();  // Close tag start if needed
     
@@ -142,8 +164,8 @@ void TextHtmlWriter::writeSelfClosingTag(const char* tag, const char* classes,
         strbuf_append_str(buf_, attrs);
     }
     
-    strbuf_append_str(buf_, " />");
-    
+    strbuf_append_str(buf_, ">");
+
     if (pretty_print_) {
         strbuf_append_char(buf_, '\n');
     }
@@ -338,6 +360,60 @@ void NodeHtmlWriter::openTag(const char* tag, const char* classes,
         Item style_item;
         style_item.item = s2it(style_str);
         elem.attr("style", style_item);
+    }
+    
+    stack_.push_back(std::move(elem));
+}
+
+void NodeHtmlWriter::openTagRaw(const char* tag, const char* raw_attrs) {
+    if (!tag || !builder_) return;
+    
+    ElementBuilder elem = builder_->element(tag);
+    
+    // Parse raw attributes string (e.g., "id=\"foo\" class=\"bar\"")
+    // Simple parser for id="...", class="...", style="..." patterns
+    if (raw_attrs && raw_attrs[0]) {
+        std::string attrs_str(raw_attrs);
+        size_t pos = 0;
+        while (pos < attrs_str.size()) {
+            // Skip whitespace
+            while (pos < attrs_str.size() && isspace(attrs_str[pos])) pos++;
+            if (pos >= attrs_str.size()) break;
+            
+            // Find attr name
+            size_t name_start = pos;
+            while (pos < attrs_str.size() && attrs_str[pos] != '=' && !isspace(attrs_str[pos])) pos++;
+            std::string name = attrs_str.substr(name_start, pos - name_start);
+            
+            // Skip whitespace and =
+            while (pos < attrs_str.size() && (isspace(attrs_str[pos]) || attrs_str[pos] == '=')) pos++;
+            
+            // Get value (handle quoted values)
+            std::string value;
+            if (pos < attrs_str.size() && attrs_str[pos] == '"') {
+                pos++;  // Skip opening quote
+                size_t value_start = pos;
+                while (pos < attrs_str.size() && attrs_str[pos] != '"') pos++;
+                value = attrs_str.substr(value_start, pos - value_start);
+                if (pos < attrs_str.size()) pos++;  // Skip closing quote
+            } else {
+                size_t value_start = pos;
+                while (pos < attrs_str.size() && !isspace(attrs_str[pos])) pos++;
+                value = attrs_str.substr(value_start, pos - value_start);
+            }
+            
+            // Set attribute
+            if (!name.empty() && !value.empty()) {
+                String* str = (String*)pool_calloc(pool_, sizeof(String) + value.size() + 1);
+                str->len = value.size();
+                str->ref_cnt = 0;
+                strcpy(str->chars, value.c_str());
+                
+                Item item;
+                item.item = s2it(str);
+                elem.attr(name.c_str(), item);
+            }
+        }
     }
     
     stack_.push_back(std::move(elem));
