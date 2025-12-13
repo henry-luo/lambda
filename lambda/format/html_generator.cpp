@@ -71,6 +71,11 @@ void HtmlGenerator::div(const char* attrs) {
     createWithChildren("div", attrs);
 }
 
+void HtmlGenerator::divWithStyle(const char* style_value) {
+    // Create div with style attribute only
+    writer_->openTag("div", nullptr, nullptr, style_value);
+}
+
 void HtmlGenerator::divWithClassAndStyle(const char* css_class, const char* style_value) {
     // Create div with both class and style attributes
     writer_->openTag("div", css_class, nullptr, style_value);

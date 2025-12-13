@@ -1264,7 +1264,7 @@ static void cmd_TeX(LatexProcessor* proc, Item elem) {
     // \TeX - TeX logo
     HtmlGenerator* gen = proc->generator();
     
-    gen->span("class=\"tex\"");
+    gen->span("tex");
     gen->text("T");
     gen->span("e");
     gen->text("e");
@@ -1277,7 +1277,7 @@ static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
     // \LaTeX - LaTeX logo
     HtmlGenerator* gen = proc->generator();
     
-    gen->span("class=\"latex\"");
+    gen->span("latex");
     gen->text("L");
     gen->span("a");
     gen->text("a");
@@ -1539,6 +1539,121 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
     gen->startSection("part", false, title, title);
 }
 
+// Helper to process list items - handles the tree structure where item and its content are siblings
+static void processListItems(LatexProcessor* proc, Item elem, const char* list_type) {
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    bool in_item = false;
+    
+    for (size_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (!tag) continue;
+            
+            // Handle paragraph wrapper
+            if (strcmp(tag, "paragraph") == 0) {
+                // Process paragraph contents for items
+                for (size_t j = 0; j < child_elem.childCount(); j++) {
+                    ItemReader para_child = child_elem.childAt(j);
+                    
+                    if (para_child.isElement()) {
+                        ElementReader para_child_elem = para_child.asElement();
+                        const char* para_tag = para_child_elem.tagName();
+                        if (!para_tag) continue;
+                        
+                        if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
+                            // Close previous item if open
+                            if (in_item) {
+                                gen->closeElement();  // Close li/dd
+                            }
+                            
+                            // Get optional label from item
+                            const char* label = nullptr;
+                            if (para_child_elem.childCount() > 0) {
+                                ItemReader first = para_child_elem.childAt(0);
+                                if (first.isString()) {
+                                    label = first.cstring();
+                                }
+                            }
+                            
+                            gen->createItem(label);
+                            in_item = true;
+                        } else {
+                            // Other element within paragraph
+                            if (in_item) {
+                                proc->processNode(para_child.item());
+                            }
+                        }
+                    } else if (para_child.isString()) {
+                        // Text content
+                        const char* text = para_child.cstring();
+                        if (in_item && text && text[0] != '\0') {
+                            // Skip leading whitespace-only strings
+                            bool has_content = false;
+                            for (const char* p = text; *p; p++) {
+                                if (!isspace((unsigned char)*p)) {
+                                    has_content = true;
+                                    break;
+                                }
+                            }
+                            if (has_content) {
+                                gen->text(text);
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            
+            // Direct item (not in paragraph wrapper)
+            if (strcmp(tag, "item") == 0 || strcmp(tag, "enum_item") == 0) {
+                if (in_item) {
+                    gen->closeElement();
+                }
+                
+                const char* label = nullptr;
+                if (child_elem.childCount() > 0) {
+                    ItemReader first = child_elem.childAt(0);
+                    if (first.isString()) {
+                        label = first.cstring();
+                    }
+                }
+                
+                gen->createItem(label);
+                in_item = true;
+            } else {
+                // Other element
+                if (in_item) {
+                    proc->processNode(child.item());
+                }
+            }
+        } else if (child.isString()) {
+            const char* text = child.cstring();
+            if (in_item && text && text[0] != '\0') {
+                bool has_content = false;
+                for (const char* p = text; *p; p++) {
+                    if (!isspace((unsigned char)*p)) {
+                        has_content = true;
+                        break;
+                    }
+                }
+                if (has_content) {
+                    gen->text(text);
+                }
+            }
+        }
+    }
+    
+    // Close last item
+    if (in_item) {
+        gen->closeElement();
+    }
+}
+
 // List environment commands
 
 static void cmd_itemize(LatexProcessor* proc, Item elem) {
@@ -1546,7 +1661,7 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->startItemize();
-    proc->processChildren(elem);
+    processListItems(proc, elem, "itemize");
     gen->endItemize();
 }
 
@@ -1555,7 +1670,7 @@ static void cmd_enumerate(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->startEnumerate();
-    proc->processChildren(elem);
+    processListItems(proc, elem, "enumerate");
     gen->endEnumerate();
 }
 
@@ -1564,7 +1679,7 @@ static void cmd_description(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
     gen->startDescription();
-    proc->processChildren(elem);
+    processListItems(proc, elem, "description");
     gen->endDescription();
 }
 
@@ -1776,35 +1891,35 @@ static void cmd_addvspace(LatexProcessor* proc, Item elem) {
 static void cmd_smallbreak(LatexProcessor* proc, Item elem) {
     // \smallbreak - small vertical break
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"vspace smallskip\"");
+    gen->div("vspace smallskip");
     gen->closeElement();
 }
 
 static void cmd_medbreak(LatexProcessor* proc, Item elem) {
     // \medbreak - medium vertical break
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"vspace medskip\"");
+    gen->div("vspace medskip");
     gen->closeElement();
 }
 
 static void cmd_bigbreak(LatexProcessor* proc, Item elem) {
     // \bigbreak - big vertical break
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"vspace bigskip\"");
+    gen->div("vspace bigskip");
     gen->closeElement();
 }
 
 static void cmd_vfill(LatexProcessor* proc, Item elem) {
     // \vfill - vertical fill (flexible space)
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"vfill\" style=\"flex-grow:1\"");
+    gen->divWithClassAndStyle("vfill", "flex-grow:1");
     gen->closeElement();
 }
 
 static void cmd_hfill(LatexProcessor* proc, Item elem) {
     // \hfill - horizontal fill (flexible space)
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"hfill\" style=\"flex-grow:1\"");
+    gen->spanWithClassAndStyle("hfill", "flex-grow:1");
     gen->closeElement();
 }
 
@@ -1812,7 +1927,7 @@ static void cmd_nolinebreak(LatexProcessor* proc, Item elem) {
     // \nolinebreak[priority] - discourage line break
     // In HTML, use non-breaking space or CSS hint
     HtmlGenerator* gen = proc->generator();
-    gen->span("style=\"white-space:nowrap\"");
+    gen->spanWithStyle("white-space:nowrap");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1821,7 +1936,7 @@ static void cmd_nopagebreak(LatexProcessor* proc, Item elem) {
     // \nopagebreak[priority] - discourage page break
     // In HTML, use CSS page-break hint
     HtmlGenerator* gen = proc->generator();
-    gen->span("style=\"page-break-inside:avoid\"");
+    gen->spanWithStyle("page-break-inside:avoid");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1829,21 +1944,21 @@ static void cmd_nopagebreak(LatexProcessor* proc, Item elem) {
 static void cmd_pagebreak(LatexProcessor* proc, Item elem) {
     // \pagebreak[priority] - encourage page break
     HtmlGenerator* gen = proc->generator();
-    gen->div("style=\"page-break-after:always\"");
+    gen->divWithClassAndStyle(nullptr, "page-break-after:always");
     gen->closeElement();
 }
 
 static void cmd_clearpage(LatexProcessor* proc, Item elem) {
     // \clearpage - end page and flush floats
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"clearpage\" style=\"clear:both;page-break-after:always\"");
+    gen->divWithClassAndStyle("clearpage", "clear:both;page-break-after:always");
     gen->closeElement();
 }
 
 static void cmd_cleardoublepage(LatexProcessor* proc, Item elem) {
     // \cleardoublepage - clear to next odd page
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"cleardoublepage\" style=\"clear:both;page-break-after:always\"");
+    gen->divWithClassAndStyle("cleardoublepage", "clear:both;page-break-after:always");
     gen->closeElement();
 }
 
@@ -1857,7 +1972,7 @@ static void cmd_enlargethispage(LatexProcessor* proc, Item elem) {
 static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
     // \negthinspace or \! - negative thin space
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"negthinspace\" style=\"margin-left:-0.16667em\"");
+    gen->spanWithClassAndStyle("negthinspace", "margin-left:-0.16667em");
     gen->closeElement();
 }
 
@@ -1868,7 +1983,7 @@ static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
 static void cmd_mbox(LatexProcessor* proc, Item elem) {
     // \mbox{text} - make box (prevent line breaking)
     HtmlGenerator* gen = proc->generator();
-    gen->span("style=\"white-space:nowrap\"");
+    gen->spanWithStyle("white-space:nowrap");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1876,7 +1991,7 @@ static void cmd_mbox(LatexProcessor* proc, Item elem) {
 static void cmd_fbox(LatexProcessor* proc, Item elem) {
     // \fbox{text} - framed box
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"fbox\" style=\"border:1px solid black;padding:3px\"");
+    gen->spanWithClassAndStyle("fbox", "border:1px solid black;padding:3px");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1885,7 +2000,7 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
     // \framebox[width][pos]{text} - framed box with options
     // TODO: Parse width and position parameters
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"framebox\" style=\"border:1px solid black;padding:3px\"");
+    gen->spanWithClassAndStyle("framebox", "border:1px solid black;padding:3px");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1893,7 +2008,7 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
 static void cmd_frame(LatexProcessor* proc, Item elem) {
     // \frame{text} - simple frame
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"frame\" style=\"border:1px solid black\"");
+    gen->spanWithClassAndStyle("frame", "border:1px solid black");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1902,7 +2017,7 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     // \parbox[pos][height][inner-pos]{width}{text} - paragraph box
     // TODO: Parse all parameters
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"parbox\" style=\"display:inline-block\"");
+    gen->divWithClassAndStyle("parbox", "display:inline-block");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1911,7 +2026,7 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
     // \makebox[width][pos]{text} - make box with size
     // TODO: Parse width and position
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"makebox\"");
+    gen->span("makebox");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1919,7 +2034,7 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
 static void cmd_phantom(LatexProcessor* proc, Item elem) {
     // \phantom{text} - invisible box with dimensions
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"phantom\" style=\"visibility:hidden\"");
+    gen->spanWithClassAndStyle("phantom", "visibility:hidden");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1927,7 +2042,7 @@ static void cmd_phantom(LatexProcessor* proc, Item elem) {
 static void cmd_hphantom(LatexProcessor* proc, Item elem) {
     // \hphantom{text} - horizontal phantom (width only)
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"hphantom\" style=\"visibility:hidden\"");
+    gen->spanWithClassAndStyle("hphantom", "visibility:hidden");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1935,7 +2050,7 @@ static void cmd_hphantom(LatexProcessor* proc, Item elem) {
 static void cmd_vphantom(LatexProcessor* proc, Item elem) {
     // \vphantom{text} - vertical phantom (height/depth only)
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"vphantom\" style=\"visibility:hidden;width:0\"");
+    gen->spanWithClassAndStyle("vphantom", "visibility:hidden;width:0");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1943,7 +2058,7 @@ static void cmd_vphantom(LatexProcessor* proc, Item elem) {
 static void cmd_smash(LatexProcessor* proc, Item elem) {
     // \smash[tb]{text} - smash height/depth
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"smash\" style=\"display:inline-block;height:0\"");
+    gen->spanWithClassAndStyle("smash", "display:inline-block;height:0");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1951,7 +2066,7 @@ static void cmd_smash(LatexProcessor* proc, Item elem) {
 static void cmd_clap(LatexProcessor* proc, Item elem) {
     // \clap{text} - centered lap (zero width, centered)
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"clap\" style=\"display:inline-block;width:0;text-align:center\"");
+    gen->spanWithClassAndStyle("clap", "display:inline-block;width:0;text-align:center");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1959,7 +2074,7 @@ static void cmd_clap(LatexProcessor* proc, Item elem) {
 static void cmd_llap(LatexProcessor* proc, Item elem) {
     // \llap{text} - left lap (zero width, right-aligned)
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"llap\" style=\"display:inline-block;width:0;text-align:right\"");
+    gen->spanWithClassAndStyle("llap", "display:inline-block;width:0;text-align:right");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1967,7 +2082,7 @@ static void cmd_llap(LatexProcessor* proc, Item elem) {
 static void cmd_rlap(LatexProcessor* proc, Item elem) {
     // \rlap{text} - right lap (zero width, left-aligned)
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"rlap\" style=\"display:inline-block;width:0;text-align:left\"");
+    gen->spanWithClassAndStyle("rlap", "display:inline-block;width:0;text-align:left");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1979,7 +2094,7 @@ static void cmd_rlap(LatexProcessor* proc, Item elem) {
 static void cmd_centering(LatexProcessor* proc, Item elem) {
     // \centering - center alignment (declaration)
     HtmlGenerator* gen = proc->generator();
-    gen->div("style=\"text-align:center\"");
+    gen->divWithStyle("text-align:center");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1987,7 +2102,7 @@ static void cmd_centering(LatexProcessor* proc, Item elem) {
 static void cmd_raggedright(LatexProcessor* proc, Item elem) {
     // \raggedright - ragged right (left-aligned, declaration)
     HtmlGenerator* gen = proc->generator();
-    gen->div("style=\"text-align:left\"");
+    gen->divWithStyle("text-align:left");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -1995,7 +2110,7 @@ static void cmd_raggedright(LatexProcessor* proc, Item elem) {
 static void cmd_raggedleft(LatexProcessor* proc, Item elem) {
     // \raggedleft - ragged left (right-aligned, declaration)
     HtmlGenerator* gen = proc->generator();
-    gen->div("style=\"text-align:right\"");
+    gen->divWithStyle("text-align:right");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -2009,7 +2124,7 @@ static void cmd_author(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     // Store author for \maketitle
     // For now, just output inline with span - \maketitle will format properly later
-    gen->span("class=\"latex-author\"");
+    gen->span("latex-author");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -2019,7 +2134,7 @@ static void cmd_title(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     // Store title for \maketitle  
     // For now, just output inline with span - \maketitle will format properly later
-    gen->span("class=\"latex-title\"");
+    gen->span("latex-title");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -2029,7 +2144,7 @@ static void cmd_date(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     // Store date for \maketitle
     // For now, just output inline with span - \maketitle will format properly later
-    gen->span("class=\"latex-date\"");
+    gen->span("latex-date");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -2037,7 +2152,7 @@ static void cmd_date(LatexProcessor* proc, Item elem) {
 static void cmd_thanks(LatexProcessor* proc, Item elem) {
     // \thanks{text} - thanks footnote in title
     HtmlGenerator* gen = proc->generator();
-    gen->span("class=\"thanks\" style=\"vertical-align:super;font-size:smaller\"");
+    gen->spanWithClassAndStyle("thanks", "vertical-align:super;font-size:smaller");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -2045,7 +2160,7 @@ static void cmd_thanks(LatexProcessor* proc, Item elem) {
 static void cmd_maketitle(LatexProcessor* proc, Item elem) {
     // \maketitle - generate title page
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"maketitle\"");
+    gen->div("maketitle");
     // TODO: Combine stored title, author, date
     // For now, just create a placeholder
     gen->closeElement();
@@ -3112,7 +3227,7 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
     }
     
     // Start bibliography item
-    gen->div("class=\"bibitem\"");
+    gen->div("bibitem");
     
     // Output label/number
     gen->span("bibitem-label");
@@ -3170,8 +3285,8 @@ static void cmd_input(LatexProcessor* proc, Item elem) {
 static void cmd_abstract(LatexProcessor* proc, Item elem) {
     // \begin{abstract}...\end{abstract}
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"abstract\"");
-    gen->h(3, "class=\"abstract-title\"");
+    gen->div("abstract");
+    gen->h(3, "abstract-title");
     gen->text("Abstract");
     gen->closeElement();
     proc->processChildren(elem);
@@ -3183,7 +3298,7 @@ static void cmd_tableofcontents(LatexProcessor* proc, Item elem) {
     // Generate table of contents from section headings
     // For now, just output a placeholder
     HtmlGenerator* gen = proc->generator();
-    gen->div("class=\"toc\"");
+    gen->div("toc");
     gen->h(2, nullptr);
     gen->text("Contents");
     gen->closeElement();
