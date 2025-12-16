@@ -4,6 +4,7 @@
 #include "../lib/avl_tree.h"
 #include "../lambda/input/css/css_style.hpp"
 #include <string.h>
+#include <math.h>
 #include <chrono>
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
@@ -329,12 +330,101 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     rdcon->list = pa_list;
 }
 
+// Helper function to render linear gradient
+static void render_linear_gradient(RenderContext* rdcon, Rect* rect, BackgroundProp* bg, Bound* clip) {
+    LinearGradient* lg = bg->linear_gradient;
+    if (!lg || lg->stop_count < 2) return;
+
+    ImageSurface* surface = rdcon->ui_context->surface;
+
+    // Convert angle to radians (CSS: 0deg = to top, 90deg = to right)
+    // CSS angle convention: 0 = up, increases clockwise
+    float angle_rad = (lg->angle - 90.0f) * 3.14159265f / 180.0f;
+
+    // Calculate gradient direction vector
+    float dx = cosf(angle_rad);
+    float dy = sinf(angle_rad);
+
+    // Calculate the gradient line length for this rect
+    // The gradient line goes through the center and extends to corners
+    float half_w = rect->width / 2.0f;
+    float half_h = rect->height / 2.0f;
+    float gradient_length = fabsf(dx) * rect->width + fabsf(dy) * rect->height;
+
+    // Fill the rectangle with gradient
+    int x0 = (int)rect->x;
+    int y0 = (int)rect->y;
+    int x1 = (int)(rect->x + rect->width);
+    int y1 = (int)(rect->y + rect->height);
+
+    // Clipping
+    if (clip) {
+        x0 = max(x0, (int)clip->left);
+        y0 = max(y0, (int)clip->top);
+        x1 = min(x1, (int)clip->right);
+        y1 = min(y1, (int)clip->bottom);
+    }
+
+    // Center of the gradient
+    float cx = rect->x + half_w;
+    float cy = rect->y + half_h;
+
+    // Draw pixel by pixel
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int pitch = surface->pitch / 4;  // pitch in pixels
+
+    for (int y = y0; y < y1; y++) {
+        for (int x = x0; x < x1; x++) {
+            // Calculate position along gradient line (0.0 to 1.0)
+            float px = (float)x - cx;
+            float py = (float)y - cy;
+            float proj = (px * dx + py * dy) / (gradient_length / 2.0f);
+            float t = (proj + 1.0f) / 2.0f;  // normalize to 0..1
+            t = fmaxf(0.0f, fminf(1.0f, t));
+
+            // Find the two color stops to interpolate between
+            Color c1 = lg->stops[0].color;
+            Color c2 = lg->stops[lg->stop_count - 1].color;
+            float t1 = 0.0f, t2 = 1.0f;
+
+            for (int i = 0; i < lg->stop_count - 1; i++) {
+                if (t >= lg->stops[i].position && t <= lg->stops[i + 1].position) {
+                    c1 = lg->stops[i].color;
+                    c2 = lg->stops[i + 1].color;
+                    t1 = lg->stops[i].position;
+                    t2 = lg->stops[i + 1].position;
+                    break;
+                }
+            }
+
+            // Interpolate between the two colors
+            float local_t = (t2 > t1) ? (t - t1) / (t2 - t1) : 0.0f;
+            uint8_t r = (uint8_t)(c1.r + local_t * (c2.r - c1.r));
+            uint8_t g = (uint8_t)(c1.g + local_t * (c2.g - c1.g));
+            uint8_t b = (uint8_t)(c1.b + local_t * (c2.b - c1.b));
+            uint8_t a = (uint8_t)(c1.a + local_t * (c2.a - c1.a));
+
+            // Pack color (RGBA format, same as fill_surface_rect)
+            uint32_t color = (r << 24) | (g << 16) | (b << 8) | a;
+            pixels[y * pitch + x] = color;
+        }
+    }
+    log_debug("Rendered linear gradient: angle=%.1f, %d stops, rect=(%.0f,%.0f,%.0f,%.0f)",
+        lg->angle, lg->stop_count, rect->x, rect->y, rect->width, rect->height);
+}
+
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.width = view->width;  rect.height = view->height;
+
+    // Check for gradient background first
+    if (view->bound->background && view->bound->background->gradient_type == GRADIENT_LINEAR &&
+        view->bound->background->linear_gradient) {
+        render_linear_gradient(rdcon, &rect, view->bound->background, &rdcon->block.clip);
+    }
     // fill background, if bg-color is non-transparent
-    if (view->bound->background && (view->bound->background->color.a)) {
+    else if (view->bound->background && (view->bound->background->color.a)) {
         if (view->bound->border && (view->bound->border->radius.top_left > 0 ||
             view->bound->border->radius.top_right > 0 || view->bound->border->radius.bottom_left > 0 ||
             view->bound->border->radius.bottom_right > 0)) {
@@ -676,16 +766,11 @@ void render_children(RenderContext* rdcon, View* view) {
             view->view_type == RDT_VIEW_TABLE || view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
             view->view_type == RDT_VIEW_TABLE_ROW || view->view_type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
-            if (block->embed) {
-                if (block->embed->img) {
-                    render_image_view(rdcon, block);
-                }
-                else if (block->embed->doc) {
-                    render_embed_doc(rdcon, block);
-                }
-                else if (block->embed->flex) {
-                    render_block_view(rdcon, block);
-                }
+            if (block->embed && block->embed->img) {
+                render_image_view(rdcon, block);
+            }
+            else if (block->embed && block->embed->doc) {
+                render_embed_doc(rdcon, block);
             }
             else if (block->blk && block->blk->list_style_type) {
                 render_list_view(rdcon, block);
@@ -732,6 +817,8 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     log_debug("render_init default font: %s, html version: %d", default_font->family, view_tree->html_version);
     setup_font(uicon, &rdcon->font, default_font);
     rdcon->block.clip = (Bound){0, 0, (float)uicon->surface->width, (float)uicon->surface->height};
+    // initialize default text color to opaque black (ABGR format: 0xFF000000)
+    rdcon->color.c = 0xFF000000;
     log_debug("render_init clip: [%.0f, %.0f, %.0f, %.0f]", rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
 }
 
