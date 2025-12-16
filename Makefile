@@ -1556,6 +1556,59 @@ layout-devtool:
 		exit 1; \
 	fi
 
+# download: Download a web page and save it to test/layout/data/page/
+# Usage: make download <url>
+# Example: make download https://example.com
+# This will download the page and extract the domain as prefix
+download:
+	@if [ -z "$(filter-out download,$(MAKECMDGOALS))" ]; then \
+		echo "Usage: make download <url>"; \
+		echo ""; \
+		echo "Example:"; \
+		echo "  make download https://example.com/path/page.html"; \
+		echo ""; \
+		echo "This will:"; \
+		echo "  1. Download the web page from the URL"; \
+		echo "  2. Save to test/layout/data/page/"; \
+		echo "  3. Use cleansed full URL path as filename"; \
+		echo "  4. Extract domain name as resource prefix"; \
+		exit 1; \
+	fi; \
+	URL_VAR="$(filter-out download,$(MAKECMDGOALS))"; \
+	if [ -z "$$URL_VAR" ]; then \
+		echo "❌ Error: No URL provided"; \
+		exit 1; \
+	fi; \
+	if ! echo "$$URL_VAR" | grep -qE '^https?://'; then \
+		echo "❌ Error: Invalid URL - must start with http:// or https://"; \
+		echo "   Provided: $$URL_VAR"; \
+		exit 1; \
+	fi; \
+	DOMAIN=$$(echo "$$URL_VAR" | sed -E 's|^https?://([^/:]+).*|\1|' | sed -E 's/^www\.//' | sed -E 's/\..*//' | tr '[:upper:]' '[:lower:]'); \
+	PREFIX="$$DOMAIN"; \
+	FULL_PATH=$$(echo "$$URL_VAR" | sed -E 's|^https?://[^/]+||' | sed -E 's|^/||' | sed -E 's|[^a-zA-Z0-9._-]|_|g' | sed -E 's|_+|_|g' | sed -E 's|^[^a-zA-Z0-9]+||'); \
+	if [ -z "$$FULL_PATH" ] || [ "$$FULL_PATH" = "_" ]; then \
+		FILENAME="$$PREFIX.html"; \
+	else \
+		FILENAME="$$FULL_PATH"; \
+		if ! echo "$$FILENAME" | grep -qE '\.(html?|htm)$$'; then \
+			FILENAME="$$FILENAME.html"; \
+		fi; \
+	fi; \
+	OUTPUT_DIR="test/layout/data/page"; \
+	echo "📥 Downloading web page..."; \
+	echo "  URL: $$URL_VAR"; \
+	echo "  Output directory: $$OUTPUT_DIR"; \
+	echo "  Filename: $$FILENAME"; \
+	echo "  Prefix: $$PREFIX"; \
+	echo ""; \
+	mkdir -p "$$OUTPUT_DIR"; \
+	node utils/downloader/download-page.js "$$URL_VAR" "$$OUTPUT_DIR" --prefix "$$PREFIX" --name "$$FILENAME"
+
+# Catch-all target to allow filenames as targets for download
+%:
+	@:
+
 # Count lines of code in the repository
 count-loc:
 	@./utils/count_loc.sh
