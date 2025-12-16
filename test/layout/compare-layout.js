@@ -597,7 +597,8 @@ class LayoutComparator {
       lambdaPath = path.join(this.projectRoot, 'test_output', `view_tree_${testName}.html.json`);
     }
     if (testName) {
-      browserPath = path.join(this.projectRoot, 'test', 'layout', 'reference', category, `${testName}.json`);
+      // Reference files are now consolidated in a single directory (no category subdirectory)
+      browserPath = path.join(this.projectRoot, 'test', 'layout', 'reference', `${testName}.json`);
     }
 
     if (!lambdaPath || !browserPath) {
