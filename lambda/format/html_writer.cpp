@@ -113,6 +113,18 @@ bool TextHtmlWriter::removeLastOpenedTagIfEmpty(const char* tag) {
     return false;
 }
 
+bool TextHtmlWriter::isTagOpen(const char* tag) const {
+    // Check if a specific tag is currently in the open tag stack
+    if (!tag) return false;
+    
+    for (const auto& t : tag_stack_) {
+        if (t == tag) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void TextHtmlWriter::openTag(const char* tag, const char* classes, 
                              const char* id, const char* style) {
     if (!tag) return;
