@@ -669,21 +669,53 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // This must happen BEFORE Phase 6 (main axis alignment) so justify-content
     // has the correct container size to distribute space
     if (container->blk) {
+        // Get padding values for content-box calculation
+        float padding_main = 0.0f;
+        float padding_cross = 0.0f;
+        if (container->bound) {
+            if (is_main_axis_horizontal(flex_layout)) {
+                padding_main = container->bound->padding.left + container->bound->padding.right;
+                padding_cross = container->bound->padding.top + container->bound->padding.bottom;
+            } else {
+                padding_main = container->bound->padding.top + container->bound->padding.bottom;
+                padding_cross = container->bound->padding.left + container->bound->padding.right;
+            }
+        }
+
         if (is_main_axis_horizontal(flex_layout)) {
+            // Row flex: min-width affects main_axis_size (for justify-content)
+            // CRITICAL: min-width is border-box, main_axis_size is content-box
+            float min_content_width = container->blk->given_min_width - padding_main;
+            if (container->blk->given_min_width > 0 && flex_layout->main_axis_size < min_content_width) {
+                log_debug("Phase 5b: Applying min-width to main axis: %.1f -> %.1f (min-width=%.1f, padding=%.1f)",
+                          flex_layout->main_axis_size, min_content_width, container->blk->given_min_width, padding_main);
+                flex_layout->main_axis_size = min_content_width;
+                container->width = (int)container->blk->given_min_width;  // Keep border-box width
+            }
             // Row flex: min-height affects cross_axis_size
+            float min_content_height = container->blk->given_min_height - padding_cross;
             if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
                 log_debug("Phase 5b: Applying min-height to cross axis: %.1f -> %.1f",
                           container->height, container->blk->given_min_height);
                 container->height = container->blk->given_min_height;
-                flex_layout->cross_axis_size = container->blk->given_min_height;
+                flex_layout->cross_axis_size = min_content_height > 0 ? min_content_height : container->blk->given_min_height;
             }
         } else {
             // Column flex: min-height affects main_axis_size (and justify-content)
+            float min_content_height = container->blk->given_min_height - padding_main;
             if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
                 log_debug("Phase 5b: Applying min-height to main axis: %.1f -> %.1f",
                           container->height, container->blk->given_min_height);
                 container->height = container->blk->given_min_height;
-                flex_layout->main_axis_size = container->blk->given_min_height;
+                flex_layout->main_axis_size = min_content_height > 0 ? min_content_height : container->blk->given_min_height;
+            }
+            // Column flex: min-width affects cross_axis_size
+            float min_content_width = container->blk->given_min_width - padding_cross;
+            if (container->blk->given_min_width > 0 && flex_layout->cross_axis_size < min_content_width) {
+                log_debug("Phase 5b: Applying min-width to cross axis: %.1f -> %.1f",
+                          flex_layout->cross_axis_size, container->blk->given_min_width);
+                flex_layout->cross_axis_size = min_content_width > 0 ? min_content_width : container->blk->given_min_width;
+                container->width = (int)container->blk->given_min_width;
             }
         }
     }
@@ -2949,7 +2981,13 @@ float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
             log_debug("Using CSS height for cross-axis: %.1f", item->blk->given_height);
             return item->blk->given_height;
         }
-        return item->height;
+        // Also check min-height constraint
+        float height = item->height;
+        if (item->blk && item->blk->given_min_height > 0 && height < item->blk->given_min_height) {
+            height = item->blk->given_min_height;
+            log_debug("Using CSS min-height for cross-axis: %.1f", height);
+        }
+        return height;
     } else {
         // Cross-axis is width for vertical flex containers
         // CRITICAL FIX: Check CSS width first
@@ -2957,7 +2995,13 @@ float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
             log_debug("Using CSS width for cross-axis: %.1f", item->blk->given_width);
             return item->blk->given_width;
         }
-        return item->width;
+        // Also check min-width constraint
+        float width = item->width;
+        if (item->blk && item->blk->given_min_width > 0 && width < item->blk->given_min_width) {
+            width = item->blk->given_min_width;
+            log_debug("Using CSS min-width for cross-axis: %.1f", width);
+        }
+        return width;
     }
 }
 
