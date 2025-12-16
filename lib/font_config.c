@@ -1,9 +1,9 @@
 /**
  * Lambda FontConfig Replacement
- * 
+ *
  * Cross-platform font discovery and matching system for Lambda Script.
  * Replaces FontConfig dependency with lightweight, custom implementation.
- * 
+ *
  * Features:
  * - Zero external dependencies (beyond system APIs)
  * - Consistent cross-platform behavior
@@ -11,7 +11,7 @@
  * - Persistent caching for fast startup
  * - Unicode coverage detection
  * - Advanced font matching algorithm
- * 
+ *
  * Copyright (c) 2025 Lambda Script Project
  */
 
@@ -78,7 +78,7 @@
 
 // TTF/OTF table tags (big-endian)
 #define TTF_TAG_NAME 0x6E616D65  // 'name'
-#define TTF_TAG_CMAP 0x636D6170  // 'cmap' 
+#define TTF_TAG_CMAP 0x636D6170  // 'cmap'
 #define TTF_TAG_OS2  0x4F532F32  // 'OS/2'
 #define TTF_TAG_HEAD 0x68656164  // 'head'
 #define TTF_TAG_HHEA 0x68686561  // 'hhea'
@@ -107,7 +107,7 @@ static const char* macos_font_dirs[] = {
 
 static const char* linux_font_dirs[] = {
     "/usr/share/fonts",
-    "/usr/local/share/fonts", 
+    "/usr/local/share/fonts",
     "/usr/X11R6/lib/X11/fonts",
     NULL  // User fonts added dynamically
 };
@@ -121,17 +121,17 @@ static const char* windows_font_dirs[] = {
 static const char* priority_font_families[] = {
     // CSS web-safe fonts - most commonly used
     "Arial",
-    "Helvetica", 
+    "Helvetica",
     "Times",
     "Times New Roman",
     "Courier",
     "Courier New",
     "Verdana",
-    "Georgia", 
+    "Georgia",
     "Trebuchet MS",
     "Comic Sans MS",
     "Impact",
-    
+
     // System fonts commonly used in web design
     "Helvetica Neue",
     "Monaco",
@@ -139,11 +139,11 @@ static const char* priority_font_families[] = {
     "San Francisco",
     "SF Pro Display",
     "SF Pro Text",
-    
+
     // Common fallback fonts
     "DejaVu Sans",
     "DejaVu Serif",
-    "Liberation Sans", 
+    "Liberation Sans",
     "Liberation Serif",
     NULL
 };
@@ -239,7 +239,7 @@ static uint32_t be32toh_local(uint32_t big_endian_32bits) {
            ((big_endian_32bits & 0x000000FF) << 24);
 }
 
-// Convert big-endian 16-bit value to host byte order  
+// Convert big-endian 16-bit value to host byte order
 static uint16_t be16toh_local(uint16_t big_endian_16bits) {
     return ((big_endian_16bits & 0xFF00) >> 8) |
            ((big_endian_16bits & 0x00FF) << 8);
@@ -257,13 +257,13 @@ static int font_entry_compare(const void *a, const void *b, void *udata) {
     (void)udata;  // Suppress unused parameter warning
     const FontEntry *fa = (const FontEntry*)a;
     const FontEntry *fb = (const FontEntry*)b;
-    
+
     // Handle NULL pointers
     if (!fa || !fb) return 0;
     if (!fa->file_path && !fb->file_path) return 0;
     if (!fa->file_path) return -1;
     if (!fb->file_path) return 1;
-    
+
     return strcmp(fa->file_path, fb->file_path);
 }
 
@@ -279,16 +279,16 @@ static int font_entry_ptr_compare(const void *a, const void *b, void *udata) {
     (void)udata;  // Suppress unused parameter warning
     const FontEntry **fa_ptr = (const FontEntry**)a;
     const FontEntry **fb_ptr = (const FontEntry**)b;
-    
+
     if (!fa_ptr || !fb_ptr || !*fa_ptr || !*fb_ptr) return 0;
-    
+
     const FontEntry *fa = *fa_ptr;
     const FontEntry *fb = *fb_ptr;
-    
+
     if (!fa->file_path && !fb->file_path) return 0;
     if (!fa->file_path) return -1;
     if (!fb->file_path) return 1;
-    
+
     return strcmp(fa->file_path, fb->file_path);
 }
 
@@ -304,12 +304,12 @@ static int font_family_compare(const void *a, const void *b, void *udata) {
     (void)udata;  // Suppress unused parameter warning
     const FontFamily *fa = (const FontFamily*)a;
     const FontFamily *fb = (const FontFamily*)b;
-    
+
     if (!fa || !fb) return 0;
     if (!fa->family_name && !fb->family_name) return 0;
     if (!fa->family_name) return -1;
     if (!fb->family_name) return 1;
-    
+
     return strcasecmp(fa->family_name, fb->family_name);
 }
 
@@ -323,14 +323,14 @@ static bool string_match_ignore_case(const char *a, const char *b) {
 static uint32_t calculate_unicode_coverage_hash(FontUnicodeRange *ranges) {
     uint32_t hash = 0;
     FontUnicodeRange *current = ranges;
-    
+
     while (current) {
         hash ^= current->start_codepoint;
         hash ^= (current->end_codepoint << 16);
         hash = (hash << 1) | (hash >> 31);  // Rotate left
         current = current->next;
     }
-    
+
     return hash;
 }
 
@@ -353,15 +353,15 @@ static bool get_font_metadata_with_core_text(const char *file_path, FontEntry *e
     // Use Core Text APIs for enhanced metadata extraction on macOS
     CFStringRef path_str = CFStringCreateWithCString(NULL, file_path, kCFStringEncodingUTF8);
     CFURLRef url = CFURLCreateWithFileSystemPath(NULL, path_str, kCFURLPOSIXPathStyle, false);
-    
+
     if (!url) {
         CFRelease(path_str);
         return false;
     }
-    
+
     CGDataProviderRef provider = CGDataProviderCreateWithURL(url);
     CGFontRef cg_font = CGFontCreateWithDataProvider(provider);
-    
+
     bool success = false;
     if (cg_font) {
         CTFontRef font = CTFontCreateWithGraphicsFont(cg_font, 12.0, NULL, NULL);
@@ -379,11 +379,11 @@ static bool get_font_metadata_with_core_text(const char *file_path, FontEntry *e
         CFRelease(font);
         CGFontRelease(cg_font);
     }
-    
+
     CGDataProviderRelease(provider);
     CFRelease(url);
     CFRelease(path_str);
-    
+
     return success;
 }
 #endif
@@ -396,13 +396,13 @@ static void add_linux_user_fonts(ArrayList *directories) {
         StrBuf *user_fonts_old = strbuf_create(home);
         strbuf_append_str(user_fonts_old, "/.fonts");
         arraylist_append(directories, user_fonts_old->str);
-        
+
         // ~/.local/share/fonts (XDG standard)
         StrBuf *user_fonts_xdg = strbuf_create(home);
         strbuf_append_str(user_fonts_xdg, "/.local/share/fonts");
         arraylist_append(directories, user_fonts_xdg->str);
     }
-    
+
     // Check XDG_DATA_HOME
     const char *xdg_data_home = getenv("XDG_DATA_HOME");
     if (xdg_data_home) {
@@ -418,13 +418,13 @@ static void add_linux_user_fonts(ArrayList *directories) {
 static void add_windows_font_directories(ArrayList *directories) {
     char windows_fonts[260];  // MAX_PATH equivalent
     char user_fonts[260];
-    
+
     // System fonts directory
     if (SHGetFolderPathA(NULL, 0x0014, NULL, 0, windows_fonts) == 0) {  // CSIDL_FONTS, SHGFP_TYPE_CURRENT, S_OK
         arraylist_add(directories, strdup(windows_fonts));
     }
-    
-    // User fonts directory  
+
+    // User fonts directory
     if (SHGetFolderPathA(NULL, 0x001c, NULL, 0, user_fonts) == 0) {  // CSIDL_LOCAL_APPDATA, SHGFP_TYPE_CURRENT, S_OK
         strcat(user_fonts, "\\Microsoft\\Windows\\Fonts");
         arraylist_add(directories, strdup(user_fonts));
@@ -433,34 +433,34 @@ static void add_windows_font_directories(ArrayList *directories) {
 
 static void scan_windows_registry_fonts(FontDatabase *db) {
     HKEY hkey;
-    LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, 
+    LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
         "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
         0, KEY_READ, &hkey);
-    
+
     if (result != ERROR_SUCCESS) {
         log_warn("Failed to open Windows font registry key");
         return;
     }
-    
+
     DWORD index = 0;
     char font_name[256];
     char font_file[260];  // MAX_PATH equivalent
     DWORD name_size, file_size;
-    
+
     while (true) {
         name_size = sizeof(font_name);
         file_size = sizeof(font_file);
-        
+
         result = RegEnumValueA(hkey, index++, font_name, &name_size,
             NULL, NULL, (LPBYTE)font_file, &file_size);
-            
+
         if (result != ERROR_SUCCESS) {
             break;
         }
-        
+
         // Process registry font entry
         log_debug("Registry font: %s -> %s", font_name, font_file);
-        
+
         // Convert relative path to absolute if needed
         char full_path[260];  // MAX_PATH equivalent
         if (font_file[0] != '\\' && font_file[1] != ':') {
@@ -476,7 +476,7 @@ static void scan_windows_registry_fonts(FontDatabase *db) {
             strncpy(full_path, font_file, sizeof(full_path) - 1);
             full_path[sizeof(full_path) - 1] = '\0';  // Ensure null termination
         }
-        
+
         // Check if file exists and add to database
         struct stat file_stat;
         if (stat(full_path, &file_stat) == 0) {
@@ -488,7 +488,7 @@ static void scan_windows_registry_fonts(FontDatabase *db) {
             }
         }
     }
-    
+
     RegCloseKey(hkey);
 }
 #else
@@ -513,16 +513,16 @@ static FontFormat detect_font_format(const char *file_path) {
     if (!file) {
         return FONT_FORMAT_UNKNOWN;
     }
-    
+
     uint32_t signature;
     if (fread(&signature, sizeof(signature), 1, file) != 1) {
         fclose(file);
         return FONT_FORMAT_UNKNOWN;
     }
     fclose(file);
-    
+
     signature = be32toh_local(signature);
-    
+
     switch (signature) {
         case 0x00010000:  // TTF
         case 0x74727565:  // 'true' (Mac TTF)
@@ -545,20 +545,20 @@ static bool read_ttf_table_directory(FILE *file, TTF_Header *header, TTF_Table_D
     if (!*tables) {
         return false;
     }
-    
+
     for (int i = 0; i < header->num_tables; i++) {
         if (fread(&(*tables)[i], sizeof(TTF_Table_Directory), 1, file) != 1) {
             free(*tables);
             *tables = NULL;
             return false;
         }
-        
+
         // Convert from big-endian
         (*tables)[i].tag = be32toh_local((*tables)[i].tag);
         (*tables)[i].offset = be32toh_local((*tables)[i].offset);
         (*tables)[i].length = be32toh_local((*tables)[i].length);
     }
-    
+
     return true;
 }
 
@@ -575,18 +575,18 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
     if (fseek(file, name_table->offset, SEEK_SET) != 0) {
         return false;
     }
-    
+
     uint16_t format, count, string_offset;
     if (fread(&format, 2, 1, file) != 1 ||
         fread(&count, 2, 1, file) != 1 ||
         fread(&string_offset, 2, 1, file) != 1) {
         return false;
     }
-    
+
     format = be16toh_local(format);
     count = be16toh_local(count);
     string_offset = be16toh_local(string_offset);
-    
+
     // Read name records
     for (int i = 0; i < count; i++) {
         // Early exit if we already have family name (performance optimization)
@@ -594,7 +594,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
             break;
         }
         uint16_t platform_id, encoding_id, language_id, name_id, length, offset;
-        
+
         if (fread(&platform_id, 2, 1, file) != 1 ||
             fread(&encoding_id, 2, 1, file) != 1 ||
             fread(&language_id, 2, 1, file) != 1 ||
@@ -603,14 +603,14 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
             fread(&offset, 2, 1, file) != 1) {
             return false;
         }
-        
+
         platform_id = be16toh_local(platform_id);
         encoding_id = be16toh_local(encoding_id);
         language_id = be16toh_local(language_id);
         name_id = be16toh_local(name_id);
         length = be16toh_local(length);
         offset = be16toh_local(offset);
-        
+
         // Debug: show the first few name records (only in verbose mode)
         #ifdef FONT_DEBUG_VERBOSE
         if (i < 5) {
@@ -618,26 +618,26 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                       i, platform_id, encoding_id, language_id, name_id, length);
         }
         #endif
-        
+
         // We're interested in family names (name_id == 1) from various platforms:
         // Platform 1 (Mac): language 0, Platform 3 (Microsoft): language 0x0409/1033
         bool is_family_name = (name_id == 1);
-        bool is_supported_platform = 
+        bool is_supported_platform =
             (platform_id == 1 && language_id == 0) ||  // Mac platform
             (platform_id == 3 && (language_id == 0x0409 || language_id == 1033 || language_id == 0));  // Microsoft platform
-            
+
         if (is_family_name && is_supported_platform) {
             long current_pos = ftell(file);
             long string_pos = name_table->offset + string_offset + offset;
-            
+
             if (fseek(file, string_pos, SEEK_SET) == 0) {
                 char *name_buffer = arena_alloc(arena, length + 1);
                 if (name_buffer && fread(name_buffer, 1, length, file) == length) {
                     name_buffer[length] = '\0';
-                    
+
                     // Convert to ASCII based on platform encoding
                     char *ascii_name = NULL;
-                    
+
                     // Debug: show raw bytes for family name records (only in debug builds)
                     #ifdef FONT_DEBUG_VERBOSE
                     if (name_id == 1 && length <= 20) {
@@ -650,7 +650,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                         log_debug("%s", hex_buffer);
                     }
                     #endif
-                    
+
                     if (platform_id == 1) {
                         // Platform 1 (Mac): usually MacRoman encoding (single byte)
                         ascii_name = arena_alloc(arena, length + 1);
@@ -665,7 +665,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                                 }
                             }
                             ascii_name[ascii_len] = '\0';
-                            
+
                             // Debug output for platform 1
                             #ifdef FONT_DEBUG_VERBOSE
                             if (name_id == 1) {
@@ -681,7 +681,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                             for (int j = 0; j < length - 1; j += 2) {
                                 uint8_t high_byte = (uint8_t)name_buffer[j];
                                 uint8_t low_byte = (uint8_t)name_buffer[j + 1];
-                                
+
                                 // For ASCII characters, high byte should be 0
                                 if (high_byte == 0 && low_byte >= 32 && low_byte < 127) {
                                     ascii_name[ascii_len++] = low_byte;
@@ -690,7 +690,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                                 }
                             }
                             ascii_name[ascii_len] = '\0';
-                            
+
                             // Debug output for platform 3
                             #ifdef FONT_DEBUG_VERBOSE
                             if (name_id == 1) {
@@ -699,7 +699,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                             #endif
                         }
                     }
-                        
+
                         if (ascii_name && strlen(ascii_name) > 0) {
                             switch (name_id) {
                                 case NAME_ID_FAMILY_NAME:
@@ -724,11 +724,11 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                     }
                 }
             }
-            
+
             fseek(file, current_pos, SEEK_SET);
         }
     }
-    
+
     return entry->family_name != NULL;
 }
 
@@ -736,25 +736,25 @@ static bool parse_os2_table(FILE *file, TTF_Table_Directory *os2_table, FontEntr
     if (fseek(file, os2_table->offset, SEEK_SET) != 0) {
         return false;
     }
-    
+
     uint16_t version;
     if (fread(&version, 2, 1, file) != 1) {
         return false;
     }
     version = be16toh_local(version);
-    
+
     // Skip to weight class (offset 4 from start of table)
     if (fseek(file, os2_table->offset + OS2_WEIGHT_CLASS_OFFSET, SEEK_SET) != 0) {
         return false;
     }
-    
+
     uint16_t weight_class;
     if (fread(&weight_class, 2, 1, file) != 1) {
         return false;
     }
     weight_class = be16toh_local(weight_class);
     entry->weight = weight_class;
-    
+
     // Check selection flags for italic
     if (fseek(file, os2_table->offset + OS2_SELECTION_OFFSET, SEEK_SET) == 0) {
         uint16_t selection;
@@ -765,10 +765,10 @@ static bool parse_os2_table(FILE *file, TTF_Table_Directory *os2_table, FontEntr
             }
         }
     }
-    
-    log_debug("Parsed OS/2 table: weight=%d, italic=%s", 
+
+    log_debug("Parsed OS/2 table: weight=%d, italic=%s",
         entry->weight, entry->style == FONT_STYLE_ITALIC ? "yes" : "no");
-    
+
     return true;
 }
 
@@ -776,16 +776,16 @@ static bool parse_cmap_table(FILE *file, TTF_Table_Directory *cmap_table, FontEn
     if (fseek(file, cmap_table->offset, SEEK_SET) != 0) {
         return false;
     }
-    
+
     uint16_t version, num_tables;
     if (fread(&version, 2, 1, file) != 1 ||
         fread(&num_tables, 2, 1, file) != 1) {
         return false;
     }
-    
+
     version = be16toh_local(version);
     num_tables = be16toh_local(num_tables);
-    
+
     // For now, just mark that we found a cmap table
     // Full Unicode range parsing would be more complex
     FontUnicodeRange *basic_range = arena_alloc(arena, sizeof(FontUnicodeRange));
@@ -796,7 +796,7 @@ static bool parse_cmap_table(FILE *file, TTF_Table_Directory *cmap_table, FontEn
         entry->unicode_ranges = basic_range;
         entry->unicode_coverage_hash = calculate_unicode_coverage_hash(basic_range);
     }
-    
+
     log_debug("Parsed cmap table with %d subtables", num_tables);
     return true;
 }
@@ -815,38 +815,38 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
         log_warn("Failed to open TTC file: %s", file_path);
         return false;
     }
-    
+
     TTC_Header ttc_header;
     if (fread(&ttc_header, sizeof(ttc_header), 1, file) != 1) {
         log_warn("Failed to read TTC header: %s", file_path);
         fclose(file);
         return false;
     }
-    
+
     ttc_header.num_fonts = be32toh_local(ttc_header.num_fonts);
     #ifdef FONT_DEBUG_VERBOSE
     log_debug("TTC file %s contains %u fonts", file_path, ttc_header.num_fonts);
     #endif
-    
+
     // Read offsets to individual fonts
     uint32_t *font_offsets = calloc(ttc_header.num_fonts, sizeof(uint32_t));
     if (!font_offsets) {
         fclose(file);
         return false;
     }
-    
+
     if (fread(font_offsets, sizeof(uint32_t), ttc_header.num_fonts, file) != ttc_header.num_fonts) {
         log_warn("Failed to read TTC font offsets: %s", file_path);
         free(font_offsets);
         fclose(file);
         return false;
     }
-    
+
     // Convert offsets from big-endian
     for (uint32_t i = 0; i < ttc_header.num_fonts; i++) {
         font_offsets[i] = be32toh_local(font_offsets[i]);
     }
-    
+
     // Parse each font in the collection (limit to first 8 for performance)
     uint32_t max_fonts_to_process = ttc_header.num_fonts > 8 ? 8 : ttc_header.num_fonts;
     bool success = false;
@@ -855,11 +855,11 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
             log_warn("Failed to seek to font %u in TTC: %s", i, file_path);
             continue;
         }
-        
+
         // Create a new font entry for this font in the collection
         FontEntry* entry = pool_calloc(db->font_pool, sizeof(FontEntry));
         if (!entry) continue;
-        
+
         // Initialize entry for this collection font
         entry->file_path = arena_strdup(arena, file_path);
         entry->format = FONT_FORMAT_TTC;
@@ -868,33 +868,33 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
         entry->is_monospace = false;
         entry->collection_index = i;
         entry->is_collection = true;
-        
+
         // Get file metadata
         struct stat file_stat;
         if (stat(file_path, &file_stat) == 0) {
             entry->file_mtime = file_stat.st_mtime;
             entry->file_size = file_stat.st_size;
         }
-        
+
         // Read TTF header at this offset
         TTF_Header header;
         if (fread(&header, sizeof(header), 1, file) != 1) {
             log_debug("Failed to read TTF header for font %u in TTC: %s", i, file_path);
             continue;
         }
-        
+
         header.num_tables = be16toh_local(header.num_tables);
-        
+
         // Read table directory
         TTF_Table_Directory *tables;
         if (!read_ttf_table_directory(file, &header, &tables)) {
             log_debug("Failed to read TTF table directory for font %u in TTC: %s", i, file_path);
             continue;
         }
-        
+
         // Parse essential tables
         bool font_success = true;
-        
+
         TTF_Table_Directory *name_table = find_ttf_table(tables, header.num_tables, TTF_TAG_NAME);
         if (name_table) {
             // Adjust table offset to be relative to start of file
@@ -912,28 +912,28 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
             #endif
             font_success = false;
         }
-        
+
         TTF_Table_Directory *os2_table = find_ttf_table(tables, header.num_tables, TTF_TAG_OS2);
         if (os2_table) {
             os2_table->offset += font_offsets[i];
             parse_os2_table(file, os2_table, entry);
         }
-        
+
         TTF_Table_Directory *cmap_table = find_ttf_table(tables, header.num_tables, TTF_TAG_CMAP);
         if (cmap_table) {
             cmap_table->offset += font_offsets[i];
             parse_cmap_table(file, cmap_table, entry, arena);
         }
-        
+
         free(tables);
-        
+
         // Set fallback names if needed
         if (!entry->family_name) {
             char fallback_name[256];
             snprintf(fallback_name, sizeof(fallback_name), "TTC Font %u", i);
             entry->family_name = arena_strdup(arena, fallback_name);
         }
-        
+
         if (!entry->subfamily_name) {
             if (entry->style == FONT_STYLE_ITALIC && entry->weight > 600) {
                 entry->subfamily_name = arena_strdup(arena, "Bold Italic");
@@ -945,7 +945,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
                 entry->subfamily_name = arena_strdup(arena, "Regular");
             }
         }
-        
+
         if (font_success && entry->family_name) {
             arraylist_append(db->all_fonts, entry);
             #ifdef FONT_DEBUG_VERBOSE
@@ -958,7 +958,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
             #endif
         }
     }
-    
+
     free(font_offsets);
     fclose(file);
     return success;
@@ -970,7 +970,7 @@ static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *
         log_warn("Failed to open font file: %s", file_path);
         return false;
     }
-    
+
     // Initialize entry
     entry->file_path = arena_strdup(arena, file_path);
     if (!entry->file_path) {
@@ -984,27 +984,27 @@ static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *
     entry->is_monospace = false;
     entry->collection_index = 0;
     entry->is_collection = (entry->format == FONT_FORMAT_TTC);
-    
+
     // Get file metadata
     struct stat file_stat;
     if (stat(file_path, &file_stat) == 0) {
         entry->file_mtime = file_stat.st_mtime;
         entry->file_size = file_stat.st_size;
     }
-    
+
     if (entry->format == FONT_FORMAT_UNKNOWN) {
         log_debug("Unknown font format: %s", file_path);
         fclose(file);
         return false;
     }
-    
+
     // Handle TTC files differently - they need special processing
     if (entry->format == FONT_FORMAT_TTC) {
         fclose(file);
         log_debug("TTC file detected, but parse_font_metadata called for single entry: %s", file_path);
         return false;  // TTC files should be handled by parse_ttc_font_metadata
     }
-    
+
     // Read TTF/OTF header
     TTF_Header header;
     if (fread(&header, sizeof(header), 1, file) != 1) {
@@ -1012,9 +1012,9 @@ static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *
         fclose(file);
         return false;
     }
-    
+
     header.num_tables = be16toh_local(header.num_tables);
-    
+
     // Read table directory
     TTF_Table_Directory *tables;
     if (!read_ttf_table_directory(file, &header, &tables)) {
@@ -1022,43 +1022,43 @@ static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *
         fclose(file);
         return false;
     }
-    
+
     // Parse essential tables
     bool success = true;
-    
+
     TTF_Table_Directory *name_table = find_ttf_table(tables, header.num_tables, TTF_TAG_NAME);
     if (name_table) {
         success &= parse_name_table(file, name_table, entry, arena);
     }
-    
+
     TTF_Table_Directory *os2_table = find_ttf_table(tables, header.num_tables, TTF_TAG_OS2);
     if (os2_table) {
         parse_os2_table(file, os2_table, entry);  // Non-critical
     }
-    
+
     TTF_Table_Directory *cmap_table = find_ttf_table(tables, header.num_tables, TTF_TAG_CMAP);
     if (cmap_table) {
         parse_cmap_table(file, cmap_table, entry, arena);  // Non-critical
     }
-    
+
     free(tables);
     fclose(file);
-    
+
     // Fallback to filename if parsing failed
     if (!entry->family_name) {
         const char *filename = strrchr(file_path, '/');
         if (!filename) filename = strrchr(file_path, '\\');
         filename = filename ? filename + 1 : file_path;
-        
+
         // Strip extension
         char *family_fallback = arena_strdup(arena, filename);
         char *ext = strrchr(family_fallback, '.');
         if (ext) *ext = '\0';
-        
+
         entry->family_name = family_fallback;
         log_debug("Using filename as family name: %s", entry->family_name);
     }
-    
+
     // Set subfamily if not parsed
     if (!entry->subfamily_name) {
         if (entry->style == FONT_STYLE_ITALIC && entry->weight > 600) {
@@ -1071,10 +1071,10 @@ static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *
             entry->subfamily_name = arena_strdup(arena, "Regular");
         }
     }
-    
-    log_debug("Successfully parsed font: %s (%s %s)", 
+
+    log_debug("Successfully parsed font: %s (%s %s)",
         entry->family_name, entry->subfamily_name, entry->file_path);
-    
+
     return success;
 }
 
@@ -1087,31 +1087,31 @@ FontDatabase* font_database_create(struct Pool* pool, struct Arena* arena) {
         log_error("Font database requires valid memory pool and arena");
         return NULL;
     }
-    
+
     FontDatabase* db = pool_calloc(pool, sizeof(FontDatabase));
     if (!db) {
         log_error("Failed to allocate font database");
         return NULL;
     }
-    
+
     // Initialize hashmaps
-    db->families = hashmap_new(sizeof(FontFamily), 0, 0, 0, 
+    db->families = hashmap_new(sizeof(FontFamily), 0, 0, 0,
         font_family_hash, font_family_compare, NULL, NULL);
     db->postscript_names = hashmap_new(sizeof(FontEntry*), 0, 0, 0,
         font_entry_ptr_hash, font_entry_ptr_compare, NULL, NULL);
     db->file_paths = hashmap_new(sizeof(FontEntry*), 0, 0, 0,
         font_entry_ptr_hash, font_entry_ptr_compare, NULL, NULL);
-    
+
     if (!db->families || !db->postscript_names || !db->file_paths) {
         log_error("Failed to create font database hashmaps");
         return NULL;
     }
-    
+
     // Initialize arrays
     db->all_fonts = arraylist_new(0);
     db->scan_directories = arraylist_new(0);
     db->font_files = arraylist_new(0);
-    
+
     if (!db->all_fonts || !db->scan_directories || !db->font_files) {
         log_error("Failed to create font database arrays");
         if (db->families) hashmap_free(db->families);
@@ -1122,20 +1122,20 @@ FontDatabase* font_database_create(struct Pool* pool, struct Arena* arena) {
         if (db->font_files) arraylist_free(db->font_files);
         return NULL;
     }
-    
+
     // Store memory management references
     db->font_pool = pool;
     db->string_arena = arena;
-    
+
     log_debug("Created font database");
     return db;
 }
 
 void font_database_destroy(FontDatabase* db) {
     if (!db) return;
-    
+
     log_debug("Destroying font database");
-    
+
     if (db->families) hashmap_free(db->families);
     if (db->postscript_names) hashmap_free(db->postscript_names);
     if (db->file_paths) hashmap_free(db->file_paths);
@@ -1148,13 +1148,13 @@ void font_database_destroy(FontDatabase* db) {
         // Note: Font file strings are arena-allocated, don't free individually
         arraylist_free(db->font_files);
     }
-    
+
     // Note: Don't destroy pool/arena - they're managed by caller
 }
 
 static void add_platform_font_directories(FontDatabase* db) {
     const char **dirs = NULL;
-    
+
 #ifdef __APPLE__
     dirs = macos_font_dirs;
     while (*dirs) {
@@ -1176,7 +1176,7 @@ static void add_platform_font_directories(FontDatabase* db) {
 
 void font_add_scan_directory(FontDatabase* db, const char* directory) {
     if (!db || !directory) return;
-    
+
     // Check if directory already exists
     for (size_t i = 0; i < db->scan_directories->length; i++) {
         const char* existing = (const char*)db->scan_directories->data[i];
@@ -1184,7 +1184,7 @@ void font_add_scan_directory(FontDatabase* db, const char* directory) {
             return;  // Already added
         }
     }
-    
+
     char* dir_copy = arena_strdup(db->string_arena, directory);
     arraylist_append(db->scan_directories, dir_copy);
     log_debug("Added font scan directory: %s", directory);
@@ -1193,40 +1193,40 @@ void font_add_scan_directory(FontDatabase* db, const char* directory) {
 // Fast font file extension checking using suffix matching
 static bool is_font_file(const char* filename) {
     if (!filename) return false;
-    
+
     size_t len = strlen(filename);
     if (len < 5) return false; // Minimum: "a.ttf"
-    
+
     // Check for common extensions using fast suffix matching
     const char* end = filename + len;
-    
+
     // Check .ttf (most common)
-    if (len >= 4 && 
+    if (len >= 4 &&
         (end[-4] == '.' || end[-4] == '.') &&
         (end[-3] == 't' || end[-3] == 'T') &&
         (end[-2] == 't' || end[-2] == 'T') &&
         (end[-1] == 'f' || end[-1] == 'F')) {
         return true;
     }
-    
+
     // Check .otf
-    if (len >= 4 && 
+    if (len >= 4 &&
         (end[-4] == '.' || end[-4] == '.') &&
         (end[-3] == 'o' || end[-3] == 'O') &&
         (end[-2] == 't' || end[-2] == 'T') &&
         (end[-1] == 'f' || end[-1] == 'F')) {
         return true;
     }
-    
-    // Check .ttc 
-    if (len >= 4 && 
+
+    // Check .ttc
+    if (len >= 4 &&
         (end[-4] == '.' || end[-4] == '.') &&
         (end[-3] == 't' || end[-3] == 'T') &&
         (end[-2] == 't' || end[-2] == 'T') &&
         (end[-1] == 'c' || end[-1] == 'C')) {
         return true;
     }
-    
+
     return false; // Skip woff/woff2 for now - less common and slower to parse
 }
 
@@ -1241,19 +1241,19 @@ static bool is_valid_font_file_size(off_t file_size) {
 // Skip known non-font directories for performance
 static bool should_skip_directory(const char* dirname) {
     if (!dirname) return true;
-    
+
     // Skip common non-font directories
     const char* skip_dirs[] = {
         "Cache", "Caches", "cache", "caches",
         "Temp", "temp", "tmp", "TMP",
-        "Logs", "logs", "Log", "log", 
+        "Logs", "logs", "Log", "log",
         "Backup", "backup", "Backups", "backups",
         "Archive", "archive", "Archives", "archives",
         "Documentation", "Docs", "docs",
         "Preferences", "Settings", "Config", "config",
         NULL
     };
-    
+
     for (const char** skip = skip_dirs; *skip; skip++) {
         if (strcmp(dirname, *skip) == 0) {
             return true;
@@ -1265,7 +1265,7 @@ static bool should_skip_directory(const char* dirname) {
 // Check if a font family is a high-priority web font
 static bool is_priority_font_family(const char* family_name) {
     if (!family_name) return false;
-    
+
     for (int i = 0; priority_font_families[i]; i++) {
         if (strcasecmp(family_name, priority_font_families[i]) == 0) {
             return true;
@@ -1277,24 +1277,26 @@ static bool is_priority_font_family(const char* family_name) {
 // Create placeholder font entry without parsing - for lazy loading
 static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
     if (!file_path || !arena) return NULL;
-    
+
     FontEntry* font = (FontEntry*)arena_alloc(arena, sizeof(FontEntry));
     if (!font) return NULL;
-    
+
     // Initialize with minimal data
     memset(font, 0, sizeof(FontEntry));
     font->file_path = arena_strdup(arena, file_path);
     font->is_placeholder = true;  // Mark for lazy parsing
     font->weight = 400;  // Default weight
     font->style = FONT_STYLE_NORMAL;  // Default style
-    
+
     // Try to guess family from filename for priority checking
     const char* filename = strrchr(file_path, '/');
     filename = filename ? filename + 1 : file_path;
-    
+
     // Simple heuristics for common font families based on filename
     if (strstr(filename, "Arial") || strstr(filename, "arial")) {
         font->family_name = arena_strdup(arena, "Arial");
+    } else if (strstr(filename, "Verdana") || strstr(filename, "verdana")) {
+        font->family_name = arena_strdup(arena, "Verdana");
     } else if (strstr(filename, "Times New Roman") || strstr(filename, "times new roman")) {
         // Must check "Times New Roman" before "Times" since strstr("Times New Roman", "Times") == true
         font->family_name = arena_strdup(arena, "Times New Roman");
@@ -1309,6 +1311,12 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
         font->family_name = arena_strdup(arena, "Courier");
     } else if (strstr(filename, "Georgia") || strstr(filename, "georgia")) {
         font->family_name = arena_strdup(arena, "Georgia");
+    } else if (strstr(filename, "Trebuchet") || strstr(filename, "trebuchet")) {
+        font->family_name = arena_strdup(arena, "Trebuchet MS");
+    } else if (strstr(filename, "Comic Sans") || strstr(filename, "comic sans")) {
+        font->family_name = arena_strdup(arena, "Comic Sans MS");
+    } else if (strstr(filename, "Impact") || strstr(filename, "impact")) {
+        font->family_name = arena_strdup(arena, "Impact");
     } else if (strstr(filename, "Apple Color Emoji") || strstr(filename, "AppleColorEmoji")) {
         font->family_name = arena_strdup(arena, "Apple Color Emoji");
     } else if (strstr(filename, "PingFang") || strstr(filename, "pingfang")) {
@@ -1323,15 +1331,15 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
         // Unknown family - will be parsed on demand
         font->family_name = NULL;
     }
-    
+
     return font;
 }
 
 static void scan_directory_recursive(FontDatabase* db, const char* directory, int max_depth) {
     if (max_depth <= 0) return;
-    
+
     log_debug("Scanning directory: %s (depth: %d)", directory, max_depth);
-    
+
 #ifdef _WIN32
     // Simplified Windows directory scanning - will implement properly later
     log_debug("Windows directory scanning not fully implemented yet: %s", directory);
@@ -1342,31 +1350,31 @@ static void scan_directory_recursive(FontDatabase* db, const char* directory, in
         log_debug("Failed to open directory: %s", directory);
         return;
     }
-    
+
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
         // Skip . and .. directories
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
-        
+
         // Skip hidden files and system temporary files for performance
-        if (entry->d_name[0] == '.' || strstr(entry->d_name, "~$") || 
+        if (entry->d_name[0] == '.' || strstr(entry->d_name, "~$") ||
             strstr(entry->d_name, ".tmp") || strstr(entry->d_name, ".cache")) {
             continue;
         }
-        
+
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
-        
+
         // Fast path: check if it's a font file BEFORE expensive stat() call
         bool is_potential_font = is_font_file(entry->d_name);
-        
+
         struct stat stat_buf;
         if (stat(full_path, &stat_buf) != 0) {
             continue;
         }
-        
+
         if (S_ISDIR(stat_buf.st_mode)) {
             // Skip known non-font directories for performance
             if (!should_skip_directory(entry->d_name)) {
@@ -1378,15 +1386,15 @@ static void scan_directory_recursive(FontDatabase* db, const char* directory, in
             if (placeholder) {
                 arraylist_append(db->all_fonts, placeholder);
                 hashmap_set(db->file_paths, &placeholder);
-                
+
                 #ifdef FONT_DEBUG_VERBOSE
-                log_debug("Created placeholder for font: %s (family: %s)", 
+                log_debug("Created placeholder for font: %s (family: %s)",
                           full_path, placeholder->family_name ? placeholder->family_name : "unknown");
                 #endif
             }
         }
     }
-    
+
     closedir(dir);
 #endif
 }
@@ -1396,11 +1404,11 @@ static bool parse_placeholder_font(FontEntry* placeholder, Arena* arena) {
     if (!placeholder || !placeholder->is_placeholder || !placeholder->file_path) {
         return false;
     }
-    
+
     #ifdef FONT_DEBUG_VERBOSE
     log_debug("Parsing placeholder font: %s", placeholder->file_path);
     #endif
-    
+
     // Check if this is a TTC file - TTC files cannot be parsed in-place
     // because they contain multiple fonts
     FontFormat format = detect_font_format(placeholder->file_path);
@@ -1414,21 +1422,21 @@ static bool parse_placeholder_font(FontEntry* placeholder, Arena* arena) {
         placeholder->family_name = arena_strdup(arena, "TTC-Placeholder");  // Dummy name
         return false;  // Signal that we couldn't parse in-place
     }
-    
+
     // Parse the font metadata in-place for single-font files
     bool success = parse_font_metadata(placeholder->file_path, placeholder, arena);
     if (success) {
         placeholder->is_placeholder = false;  // No longer a placeholder
         return true;
     }
-    
+
     return false;
 }
 
 // Lazy loading: parse a single font file on demand
 static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
     if (!db || !file_path) return NULL;
-    
+
     // Check if already loaded
     FontEntry search_key = {.file_path = (char*)file_path};
     FontEntry** existing = (FontEntry**)hashmap_get(db->file_paths, &search_key);
@@ -1438,14 +1446,14 @@ static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
         #endif
         return *existing;
     }
-    
+
     // Parse the font now
     FontEntry* font_entry = pool_calloc(db->font_pool, sizeof(FontEntry));
     if (!font_entry) return NULL;
-    
+
     FontFormat format = detect_font_format(file_path);
     bool parsed = false;
-    
+
     if (format == FONT_FORMAT_TTC) {
         #ifdef FONT_DEBUG_VERBOSE
         log_debug("Lazy loading TTC file: %s", file_path);
@@ -1467,15 +1475,15 @@ static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
             hashmap_set(db->file_paths, &font_entry);
         }
     }
-    
+
     if (!parsed) {
         log_debug("Failed to lazy load font: %s", file_path);
         return NULL;
     }
-    
-    log_debug("Successfully lazy loaded font: %s (family: %s)", file_path, 
+
+    log_debug("Successfully lazy loaded font: %s (family: %s)", file_path,
         font_entry->family_name ? font_entry->family_name : "unknown");
-    
+
     return font_entry;
 }
 
@@ -1483,34 +1491,34 @@ static void organize_fonts_into_families(FontDatabase* db) {
     for (size_t i = 0; i < db->all_fonts->length; i++) {
         FontEntry* font = (FontEntry*)db->all_fonts->data[i];
         if (!font || !font->family_name) continue;
-        
+
         // Find or create font family
         FontFamily search_key = {.family_name = font->family_name};
         FontFamily* family = (FontFamily*)hashmap_get(db->families, &search_key);
-        
+
         if (!family) {
             // Create new family
             family = pool_calloc(db->font_pool, sizeof(FontFamily));
             if (!family) continue;
-            
+
             family->family_name = font->family_name;  // Already arena-allocated
             family->fonts = arraylist_new(0);
             family->aliases = arraylist_new(0);
             family->is_system_family = true;  // Assume system fonts for now
-            
+
             if (!family->fonts || !family->aliases) continue;
-            
+
             hashmap_set(db->families, family);
             log_debug("Created font family: %s", family->family_name);
         }
-        
+
         arraylist_append(family->fonts, font);
-        
+
         // Add PostScript name mapping if available
         if (font->postscript_name) {
             hashmap_set(db->postscript_names, &font);
         }
-        
+
         // Add file path mapping
         hashmap_set(db->file_paths, &font);
     }
@@ -1518,82 +1526,82 @@ static void organize_fonts_into_families(FontDatabase* db) {
 
 bool font_database_scan(FontDatabase* db) {
     if (!db) return false;
-    
+
     log_info("Starting font database scan with priority loading");
-    
+
     // Add platform-specific directories
     add_platform_font_directories(db);
-    
+
     // PHASE 1: Quick scan to identify all font files (no parsing yet)
     log_debug("Phase 1: Building font file inventory");
     for (size_t i = 0; i < db->scan_directories->length; i++) {
         const char* directory = (const char*)db->scan_directories->data[i];
-        
+
         // Use shallow scan for most directories, deeper for system font dirs
         int scan_depth = 1;
-        if (strstr(directory, "/System/Library/Fonts") || 
+        if (strstr(directory, "/System/Library/Fonts") ||
             strstr(directory, "/Library/Fonts") ||
             strstr(directory, "supplemental") || strstr(directory, "Supplemental")) {
             scan_depth = 2;
         }
-        
+
         scan_directory_recursive(db, directory, scan_depth);
-        
+
         // Limit total font files to prevent excessive scanning
         if (db->all_fonts->length > 300) {
             log_debug("Font file limit reached: found %d files", db->all_fonts->length);
             break;
         }
     }
-    
-    // PHASE 2: Parse priority fonts immediately 
+
+    // PHASE 2: Parse priority fonts immediately
     log_debug("Phase 2: Parsing priority fonts (%d total files found)", db->all_fonts->length);
     int priority_fonts_parsed = 0;
     for (size_t i = 0; i < db->all_fonts->length; i++) {
         FontEntry* font = (FontEntry*)db->all_fonts->data[i];
-        if (font && font->is_placeholder && font->family_name && 
+        if (font && font->is_placeholder && font->family_name &&
             is_priority_font_family(font->family_name)) {
-            
+
             // Parse priority font fully
             if (parse_placeholder_font(font, db->string_arena)) {
                 priority_fonts_parsed++;
-                
+
                 #ifdef FONT_DEBUG_VERBOSE
-                log_debug("Parsed priority font: %s (%s)", 
+                log_debug("Parsed priority font: %s (%s)",
                           font->family_name, font->file_path);
                 #endif
             }
-            
+
             if (priority_fonts_parsed >= 20) {  // Reasonable limit for priority fonts
                 log_debug("Priority font limit reached: parsed %d priority fonts", priority_fonts_parsed);
                 break;
             }
         }
     }
-    
+
 #ifdef _WIN32
     // Also scan Windows registry
     scan_windows_registry_fonts(db);
 #endif
-    
+
     // PHASE 3: Organize parsed priority fonts into families
     if (priority_fonts_parsed > 0) {
         log_debug("Phase 3: Organizing %d priority fonts into families", priority_fonts_parsed);
         organize_fonts_into_families(db);
     }
-    
+
     db->last_scan = time(NULL);
     db->cache_dirty = true;
-    
-    log_info("Font scan completed: found %zu font files (%d priority fonts parsed)", 
+
+    log_info("Font scan completed: found %zu font files (%d priority fonts parsed)",
         db->all_fonts->length, priority_fonts_parsed);
-    
+
     return true;
 }
 
 static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criteria) {
     float score = 0.0f;
-    
+
     // Family name match (highest priority - 40 points max)
     if (string_match_ignore_case(font->family_name, criteria->family_name)) {
         score += 40.0f;  // Exact match
@@ -1611,7 +1619,7 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
             }
         }
     }
-    
+
     // Weight matching (20 points max)
     if (criteria->weight > 0) {
         int weight_diff = abs(font->weight - criteria->weight);
@@ -1625,7 +1633,7 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
     } else {
         score += 20.0f;  // No preference
     }
-    
+
     // Style matching (15 points max)
     if (font->style == criteria->style) {
         score += 15.0f;
@@ -1633,7 +1641,7 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
         // Prefer normal style when requested but allow others
         score += 5.0f;
     }
-    
+
     // Monospace preference (10 points max)
     if (criteria->prefer_monospace) {
         if (font->is_monospace) {
@@ -1644,7 +1652,7 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
     } else if (font->is_monospace) {
         score -= 2.0f;  // Slight penalty for monospace when not preferred
     }
-    
+
     // Unicode support (15 points max, or disqualifying)
     if (criteria->required_codepoint != 0) {
         if (font_entry_supports_codepoint(font, criteria->required_codepoint)) {
@@ -1653,28 +1661,28 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
             return 0.0f;  // Hard requirement - disqualify
         }
     }
-    
+
     // Language support bonus (5 points max)
     if (criteria->language && font_supports_language(font, criteria->language)) {
         score += 5.0f;
     }
-    
+
     // Standard font preference (10 points max)
     // Prefer standard variants over Unicode/specialty variants for better browser compatibility
     if (font->file_path) {
         const char* filename = strrchr(font->file_path, '/');
         filename = filename ? filename + 1 : font->file_path;
-        
+
         // Penalty for Unicode variants when standard font requested
         if (strstr(filename, "Unicode") && !strstr(criteria->family_name, "Unicode")) {
             score -= 8.0f;  // Significant penalty for Unicode variants
         }
-        
+
         // Penalty for oversized font files (likely comprehensive Unicode fonts)
         if (font->file_size > 5 * 1024 * 1024) {  // > 5MB
             score -= 5.0f;  // Penalty for very large fonts
         }
-        
+
         // Bonus for exact filename matches (e.g., "Arial.ttf" for "Arial")
         char expected_filename[256];
         snprintf(expected_filename, sizeof(expected_filename), "%s.ttf", criteria->family_name);
@@ -1682,31 +1690,31 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
             score += 10.0f;  // Bonus for exact filename match
         }
     }
-    
+
     return score;
 }
 
 FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseCriteria* criteria) {
     FontDatabaseResult result = {0};
-    
+
     if (!db || !criteria || !criteria->family_name) {
         return result;
     }
-    
+
     float best_score = 0.0f;
     FontEntry* best_font = NULL;
     bool exact_family = false;
-    
+
     // First, check if we have the family loaded already
     FontFamily search_key = {.family_name = criteria->family_name};
     FontFamily* family = (FontFamily*)hashmap_get(db->families, &search_key);
-    
+
     // If family not found, try lazy loading some placeholder fonts
     if (!family && db->all_fonts->length > 0) {
         #ifdef FONT_DEBUG_VERBOSE
         printf("DEBUG: Family '%s' not found, attempting lazy loading\n", criteria->family_name);
         #endif
-        
+
         // Load a few placeholder fonts to see if we can find the requested family
         int parsed_count = 0;
         for (size_t i = 0; i < db->all_fonts->length && parsed_count < 10; i++) {
@@ -1717,7 +1725,7 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
                 if (placeholder->family_name) {
                     potential_match = string_match_ignore_case(placeholder->family_name, criteria->family_name);
                 }
-                
+
                 // For TTC files, trigger full lazy loading which parses all fonts in the collection
                 FontFormat format = detect_font_format(placeholder->file_path);
                 if (format == FONT_FORMAT_TTC && potential_match) {
@@ -1735,9 +1743,9 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
                     // For single-font files, parse in-place
                     if (parse_placeholder_font(placeholder, db->string_arena)) {
                         parsed_count++;
-                        
+
                         // Check if this font matches what we're looking for
-                        if (placeholder->family_name && 
+                        if (placeholder->family_name &&
                             string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
                             // Found matching family, organize it and break
                             organize_fonts_into_families(db);
@@ -1748,12 +1756,12 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
             }
         }
     }
-    
+
     // Search through all fonts
     for (size_t i = 0; i < db->all_fonts->length; i++) {
         FontEntry* font = (FontEntry*)db->all_fonts->data[i];
         if (!font) continue;
-        
+
         float score = calculate_match_score(font, criteria);
         if (score > best_score && score >= FONT_MATCH_SCORE_THRESHOLD) {
             best_score = score;
@@ -1761,33 +1769,33 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
             exact_family = string_match_ignore_case(font->family_name, criteria->family_name);
         }
     }
-    
+
     result.font = best_font;
     result.match_score = best_score / 100.0f;  // Normalize to 0-1 range
     result.exact_family_match = exact_family;
     result.requires_synthesis = false;  // TODO: Implement synthesis detection
     result.synthetic_style = NULL;
-    
+
     // Commented out verbose font matching logs - called very frequently during layout
     // if (best_font) {
-    //     log_debug("Best font match for '%s': %s (score: %.2f)", 
+    //     log_debug("Best font match for '%s': %s (score: %.2f)",
     //         criteria->family_name, best_font->family_name, result.match_score);
     // } else {
     //     log_debug("No font match found for: %s", criteria->family_name);
     // }
-    
+
     return result;
 }
 
 ArrayList* font_database_find_all_matches(FontDatabase* db, const char* family_name) {
     if (!db || !family_name) return NULL;
-    
+
     ArrayList* matches = arraylist_new(0);
     if (!matches) return NULL;
-    
+
     FontFamily search_key = {.family_name = (char*)family_name};
     FontFamily* family = (FontFamily*)hashmap_get(db->families, &search_key);
-    
+
     if (family && family->fonts) {
         for (size_t i = 0; i < family->fonts->length; i++) {
             FontEntry* font = (FontEntry*)family->fonts->data[i];
@@ -1796,13 +1804,13 @@ ArrayList* font_database_find_all_matches(FontDatabase* db, const char* family_n
             }
         }
     }
-    
+
     return matches;
 }
 
 FontEntry* font_database_get_by_postscript_name(FontDatabase* db, const char* ps_name) {
     if (!db || !ps_name) return NULL;
-    
+
     FontEntry search_key = {.postscript_name = (char*)ps_name};
     FontEntry** entry_ptr = (FontEntry**)hashmap_get(db->postscript_names, &search_key);
     return entry_ptr ? *entry_ptr : NULL;
@@ -1810,7 +1818,7 @@ FontEntry* font_database_get_by_postscript_name(FontDatabase* db, const char* ps
 
 FontEntry* font_database_get_by_file_path(FontDatabase* db, const char* file_path) {
     if (!db || !file_path) return NULL;
-    
+
     FontEntry search_key = {.file_path = (char*)file_path};
     FontEntry** entry_ptr = (FontEntry**)hashmap_get(db->file_paths, &search_key);
     return entry_ptr ? *entry_ptr : NULL;
@@ -1821,7 +1829,7 @@ bool font_entry_supports_codepoint(FontEntry* font, uint32_t codepoint) {
         // If no Unicode info, assume basic ASCII support
         return (codepoint >= 0x0020 && codepoint <= 0x007E);
     }
-    
+
     FontUnicodeRange* range = font->unicode_ranges;
     while (range) {
         if (codepoint >= range->start_codepoint && codepoint <= range->end_codepoint) {
@@ -1829,7 +1837,7 @@ bool font_entry_supports_codepoint(FontEntry* font, uint32_t codepoint) {
         }
         range = range->next;
     }
-    
+
     return false;
 }
 
@@ -1837,7 +1845,7 @@ bool font_supports_language(FontEntry* font, const char* language) {
     if (!font || !language || !font->unicode_ranges) {
         return false;
     }
-    
+
     // Check Unicode blocks for language support
     for (int i = 0; unicode_blocks[i].name; i++) {
         for (int j = 0; unicode_blocks[i].languages[j]; j++) {
@@ -1849,41 +1857,41 @@ bool font_supports_language(FontEntry* font, const char* language) {
             }
         }
     }
-    
+
     return false;
 }
 
 ArrayList* font_get_available_families(FontDatabase* db) {
     if (!db || !db->families) return NULL;
-    
+
     ArrayList* families = arraylist_new(0);
     if (!families) return NULL;
-    
+
     size_t iter = 0;
     void* item;
     while (hashmap_iter(db->families, &iter, &item)) {
         FontFamily* family = (FontFamily*)item;
         arraylist_append(families, family->family_name);
     }
-    
+
     return families;
 }
 
 bool font_is_file_changed(FontEntry* font) {
     if (!font || !font->file_path) return false;
-    
+
     struct stat file_stat;
     if (stat(font->file_path, &file_stat) != 0) {
         return true;  // File doesn't exist anymore
     }
-    
-    return (file_stat.st_mtime != font->file_mtime || 
+
+    return (file_stat.st_mtime != font->file_mtime ||
             file_stat.st_size != font->file_size);
 }
 
 void font_database_refresh_changed_files(FontDatabase* db) {
     if (!db) return;
-    
+
     // TODO: Implement incremental refresh
     log_debug("Font database refresh not yet implemented");
 }
@@ -1925,7 +1933,7 @@ const char* font_style_to_string(FontStyle style) {
 
 FontStyle font_style_from_string(const char* style_str) {
     if (!style_str) return FONT_STYLE_NORMAL;
-    
+
     if (strcasecmp(style_str, "italic") == 0) return FONT_STYLE_ITALIC;
     if (strcasecmp(style_str, "oblique") == 0) return FONT_STYLE_OBLIQUE;
     return FONT_STYLE_NORMAL;
@@ -1933,7 +1941,7 @@ FontStyle font_style_from_string(const char* style_str) {
 
 void font_database_set_cache_path(FontDatabase* db, const char* cache_path) {
     if (!db || !cache_path) return;
-    
+
     db->cache_file_path = arena_strdup(db->string_arena, cache_path);
 }
 
@@ -1957,7 +1965,7 @@ size_t font_database_get_family_count(FontDatabase* db) {
 
 void font_database_print_statistics(FontDatabase* db) {
     if (!db) return;
-    
+
     log_info("Font Database Statistics:");
     log_info("  Total fonts: %zu", font_database_get_font_count(db));
     log_info("  Font families: %zu", font_database_get_family_count(db));
@@ -1972,7 +1980,7 @@ FontDatabase* font_database_get_global() {
         // Create global pools for font database
         Pool* global_pool = pool_create();
         Arena* global_font_arena = arena_create(global_pool, 64 * 1024, 1024 * 1024);  // 64KB->1MB chunks
-        
+
         if (global_pool && global_font_arena) {
             g_global_font_db = font_database_create(global_pool, global_font_arena);
             if (g_global_font_db) {
@@ -1980,7 +1988,7 @@ FontDatabase* font_database_get_global() {
                 char cache_path[512];
                 snprintf(cache_path, sizeof(cache_path), "%s/.lambda_font_cache", getenv("HOME") ?: "/tmp");
                 font_database_set_cache_path(g_global_font_db, cache_path);
-                
+
                 // Try to load from cache first
                 if (!font_database_load_cache(g_global_font_db)) {
                     // If cache load fails, scan fonts
@@ -1993,10 +2001,10 @@ FontDatabase* font_database_get_global() {
                 }
             }
         }
-        
+
         g_font_db_initialized = true;
     }
-    
+
     return g_global_font_db;
 }
 
@@ -2004,7 +2012,7 @@ void font_database_cleanup_global() {
     if (g_global_font_db) {
         // Save cache before cleanup
         font_database_save_cache(g_global_font_db);
-        
+
         // Note: We don't actually free the database here since it uses pools
         // The pools will be cleaned up when the program exits
         g_global_font_db = NULL;
