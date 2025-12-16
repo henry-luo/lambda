@@ -37,6 +37,35 @@ static Color parse_html_color(const char* color_str) {
     return result;
 }
 
+// Get the cellpadding attribute value from the parent TABLE element
+// Returns -1 if no cellpadding attribute is found, otherwise returns the pixel value
+// The HTML spec says: cellpadding on TABLE maps to padding on TD/TH cells
+static float get_parent_table_cellpadding(DomNode* elmt, float pixel_ratio) {
+    // Traverse up to find the TABLE element (TD -> TR -> TBODY/THEAD/TFOOT -> TABLE, or TD -> TR -> TABLE)
+    DomNode* node = elmt->parent;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->tag_id == HTM_TAG_TABLE) {
+                const char* cellpadding_attr = elem->get_attribute("cellpadding");
+                if (cellpadding_attr) {
+                    StrView cp_view = strview_init(cellpadding_attr, strlen(cellpadding_attr));
+                    float cellpadding = strview_to_int(&cp_view);
+                    if (cellpadding >= 0) {
+                        log_debug("[HTML] TABLE cellpadding attribute: %.0fpx", cellpadding);
+                        return cellpadding * pixel_ratio;
+                    }
+                }
+                // Found parent table but no cellpadding attribute
+                return -1;
+            }
+        }
+        node = node->parent;
+    }
+    // No parent table found
+    return -1;
+}
+
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = (ViewSpan*)elmt;  ViewBlock* block = (ViewBlock*)elmt;
     float em_size = 0;  uintptr_t elmt_name = elmt->tag();
@@ -184,7 +213,66 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Get color attribute using DomNode interface
         const char* color_attr = span->get_attribute("color");
         if (color_attr) {
-            log_debug("font color: %s", color_attr);
+            if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+            span->in_line->color = parse_html_color(color_attr);
+            log_debug("HTM_TAG_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
+                      span->in_line->color.r, span->in_line->color.g, span->in_line->color.b);
+        }
+        // Handle font size attribute (deprecated HTML but still supported)
+        // size="1" = x-small (10px), size="2" = small (13px), size="3" = medium (16px, default)
+        // size="4" = large (18px), size="5" = x-large (24px), size="6" = xx-large (32px), size="7" = 48px
+        const char* size_attr = span->get_attribute("size");
+        if (size_attr) {
+            int size_value = atoi(size_attr);
+            float font_size = 16;  // default medium
+            // CSS absolute-size keywords mapped to pixels (based on 16px base)
+            switch (size_value) {
+                case 1: font_size = 10; break;  // x-small
+                case 2: font_size = 13; break;  // small
+                case 3: font_size = 16; break;  // medium (default)
+                case 4: font_size = 18; break;  // large
+                case 5: font_size = 24; break;  // x-large
+                case 6: font_size = 32; break;  // xx-large
+                case 7: font_size = 48; break;  // xxx-large
+                default:
+                    // Handle relative sizes: +1, -1, etc.
+                    if (size_attr[0] == '+' || size_attr[0] == '-') {
+                        int delta = atoi(size_attr);
+                        // Map current font size to approximate level and apply delta
+                        float current = lycon->font.style->font_size;
+                        int level = 3;  // assume medium
+                        if (current <= 10) level = 1;
+                        else if (current <= 13) level = 2;
+                        else if (current <= 16) level = 3;
+                        else if (current <= 18) level = 4;
+                        else if (current <= 24) level = 5;
+                        else if (current <= 32) level = 6;
+                        else level = 7;
+                        level += delta;
+                        if (level < 1) level = 1;
+                        if (level > 7) level = 7;
+                        switch (level) {
+                            case 1: font_size = 10; break;
+                            case 2: font_size = 13; break;
+                            case 3: font_size = 16; break;
+                            case 4: font_size = 18; break;
+                            case 5: font_size = 24; break;
+                            case 6: font_size = 32; break;
+                            case 7: font_size = 48; break;
+                        }
+                    }
+                    break;
+            }
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
+            span->font->font_size = font_size * lycon->ui_context->pixel_ratio;
+            log_debug("HTM_TAG_FONT size='%s' -> %.1fpx", size_attr, span->font->font_size);
+        }
+        // Handle font face attribute
+        const char* face_attr = span->get_attribute("face");
+        if (face_attr) {
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
+            span->font->family = (char*)face_attr;  // store font family name
+            log_debug("HTM_TAG_FONT face: %s", face_attr);
         }
         break;
     }
@@ -391,6 +479,25 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
+        // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
+        // However, the cellpadding attribute on the parent TABLE overrides this default
+        float cellpadding = get_parent_table_cellpadding(elmt, lycon->ui_context->pixel_ratio);
+        if (cellpadding >= 0) {
+            // Use cellpadding from parent table (can be 0)
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            block->bound->padding.top = block->bound->padding.right =
+                block->bound->padding.bottom = block->bound->padding.left = cellpadding;
+            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
+                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+        } else {
+            // No cellpadding attribute - apply UA default of 1px
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            block->bound->padding.top = block->bound->padding.right =
+                block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
+            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
+                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+        }
+
         // Handle HTML align attribute (e.g., align="left", align="right", align="center")
         const char* align_attr = elmt->get_attribute("align");
         if (align_attr) {
@@ -425,19 +532,33 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_TD: {
-        // table data: default padding 1px (browsers vary), vertical-align: middle;
-        // TD defaults to text-align: start (left in LTR) - does not inherit from outside table
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->padding.top = block->bound->padding.right =
-            block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
-        block->bound->padding.top_specificity = block->bound->padding.right_specificity =
-            block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+        // TD defaults to vertical-align: middle (CSS 2.1), text-align: start
         if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
         // Set default text-align to left (start) - table cells don't inherit text-align from outside
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_LEFT;  // Default for TD
+
+        // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
+        // However, the cellpadding attribute on the parent TABLE overrides this default
+        // Per HTML spec: cellpadding maps to padding-top/right/bottom/left on TD/TH elements
+        float cellpadding = get_parent_table_cellpadding(elmt, lycon->ui_context->pixel_ratio);
+        if (cellpadding >= 0) {
+            // Use cellpadding from parent table (can be 0)
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            block->bound->padding.top = block->bound->padding.right =
+                block->bound->padding.bottom = block->bound->padding.left = cellpadding;
+            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
+                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+        } else {
+            // No cellpadding attribute - apply UA default of 1px
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            block->bound->padding.top = block->bound->padding.right =
+                block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
+            block->bound->padding.top_specificity = block->bound->padding.right_specificity =
+                block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+        }
 
         // Handle HTML align attribute (e.g., align="left", align="right", align="center")
         const char* align_attr = elmt->get_attribute("align");
@@ -465,6 +586,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {
             Color bg_color = parse_html_color(bgcolor_attr);
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
             block->bound->background->color = bg_color;
             log_debug("[HTML] TD bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
