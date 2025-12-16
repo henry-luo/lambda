@@ -606,7 +606,7 @@ void HtmlGenerator::endVerse() {
 }
 
 void HtmlGenerator::startCenter() {
-    writer_->openTag("div", "center");
+    writer_->openTag("div", "list center");
     setAlignment("center");
 }
 
@@ -615,7 +615,7 @@ void HtmlGenerator::endCenter() {
 }
 
 void HtmlGenerator::startFlushLeft() {
-    writer_->openTag("div", "flushleft");
+    writer_->openTag("div", "list flushleft");
     setAlignment("left");
 }
 
@@ -624,7 +624,7 @@ void HtmlGenerator::endFlushLeft() {
 }
 
 void HtmlGenerator::startFlushRight() {
-    writer_->openTag("div", "flushright");
+    writer_->openTag("div", "list flushright");
     setAlignment("right");
 }
 

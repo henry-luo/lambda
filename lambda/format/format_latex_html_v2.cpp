@@ -90,6 +90,7 @@ public:
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
+    void closeParagraphIfOpen();  // Alias for endParagraph
     void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
     
     // Macro system functions (public so command handlers can access)
@@ -131,7 +132,6 @@ private:
     
     // Helper methods for paragraph management
     void ensureParagraph();
-    void closeParagraphIfOpen();
     bool isBlockCommand(const char* cmd_name);
     bool isInlineCommand(const char* cmd_name);
     
@@ -1913,27 +1913,36 @@ static void cmd_center(LatexProcessor* proc, Item elem) {
     // \begin{center} ... \end{center}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startCenter();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endCenter();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_flushleft(LatexProcessor* proc, Item elem) {
     // \begin{flushleft} ... \end{flushleft}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startFlushLeft();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endFlushLeft();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_flushright(LatexProcessor* proc, Item elem) {
     // \begin{flushright} ... \end{flushright}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startFlushRight();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endFlushRight();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_verbatim(LatexProcessor* proc, Item elem) {
