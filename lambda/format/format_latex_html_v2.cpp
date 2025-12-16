@@ -1248,9 +1248,11 @@ static void cmd_tiny(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Tiny;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("tiny");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1258,9 +1260,11 @@ static void cmd_scriptsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::ScriptSize;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("scriptsize");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1268,9 +1272,11 @@ static void cmd_footnotesize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::FootnoteSize;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("footnotesize");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1278,9 +1284,11 @@ static void cmd_small(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Small;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("small");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1288,9 +1296,11 @@ static void cmd_normalsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::NormalSize;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("normalsize");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1298,9 +1308,11 @@ static void cmd_large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Large;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("large");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1308,9 +1320,11 @@ static void cmd_Large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Large2;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("Large");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1318,9 +1332,11 @@ static void cmd_LARGE(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Large3;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("LARGE");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1328,9 +1344,11 @@ static void cmd_huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Huge;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("huge");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1338,9 +1356,11 @@ static void cmd_Huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->enterGroup();
     gen->currentFont().size = FontSize::Huge2;
+    proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("Huge");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitStyledSpan();
     gen->exitGroup();
 }
 
@@ -1667,6 +1687,46 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
     gen->startSection("part", false, title, title);
 }
 
+// Helper to extract label string from brack_group children
+// Renders elements like \textendash to their text equivalents
+static std::string extractLabelFromBrackGroup(ElementReader& brack_elem) {
+    std::string label_buf;
+    
+    for (size_t k = 0; k < brack_elem.childCount(); k++) {
+        ItemReader brack_child = brack_elem.childAt(k);
+        if (brack_child.isString()) {
+            label_buf += brack_child.cstring();
+        } else if (brack_child.isElement()) {
+            ElementReader child_elem = brack_child.asElement();
+            const char* child_tag = child_elem.tagName();
+            if (child_tag) {
+                // Convert common symbol commands to their unicode equivalents
+                if (strcmp(child_tag, "textendash") == 0) {
+                    label_buf += "–";  // U+2013 EN DASH
+                } else if (strcmp(child_tag, "textemdash") == 0) {
+                    label_buf += "—";  // U+2014 EM DASH
+                } else if (strcmp(child_tag, "textbullet") == 0) {
+                    label_buf += "•";  // U+2022 BULLET
+                } else if (strcmp(child_tag, "textperiodcentered") == 0) {
+                    label_buf += "·";  // U+00B7 MIDDLE DOT
+                } else if (strcmp(child_tag, "textasteriskcentered") == 0) {
+                    label_buf += "*";
+                } else {
+                    // For other elements, try to extract text content
+                    for (size_t m = 0; m < child_elem.childCount(); m++) {
+                        ItemReader inner = child_elem.childAt(m);
+                        if (inner.isString()) {
+                            label_buf += inner.cstring();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return label_buf;
+}
+
 // Helper to process list items - handles the tree structure where item and its content are siblings
 static void processListItems(LatexProcessor* proc, Item elem, const char* list_type) {
     HtmlGenerator* gen = proc->generator();
@@ -1701,15 +1761,29 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             }
                             
                             // Get optional label from item
+                            // For description/itemize/enumerate lists, label is in brack_group child: \item[label]
                             const char* label = nullptr;
+                            std::string label_buf;  // Buffer to hold extracted label
+                            bool has_brack_group = false;  // Track if brack_group exists (for empty label)
+                            
                             if (para_child_elem.childCount() > 0) {
                                 ItemReader first = para_child_elem.childAt(0);
-                                if (first.isString()) {
+                                if (first.isElement()) {
+                                    ElementReader first_elem = first.asElement();
+                                    const char* first_tag = first_elem.tagName();
+                                    if (first_tag && strcmp(first_tag, "brack_group") == 0) {
+                                        has_brack_group = true;
+                                        // Extract label from brack_group using helper
+                                        label_buf = extractLabelFromBrackGroup(first_elem);
+                                        // Use empty string for empty brack_group, or the extracted text
+                                        label = label_buf.c_str();
+                                    }
+                                } else if (first.isString()) {
                                     label = first.cstring();
                                 }
                             }
                             
-                            gen->createItem(label);
+                            gen->createItem(has_brack_group ? label : nullptr);
                             in_item = true;
                             at_item_start = true;  // Next text should be trimmed
                         } else {
@@ -1781,15 +1855,29 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                     gen->endItem();  // Close previous item with proper structure
                 }
                 
+                // Get optional label from item
+                // For description/itemize/enumerate lists, label is in brack_group child: \item[label]
                 const char* label = nullptr;
+                std::string label_buf2;  // Buffer to hold extracted label
+                bool has_brack_group2 = false;  // Track if brack_group exists
+                
                 if (child_elem.childCount() > 0) {
                     ItemReader first = child_elem.childAt(0);
-                    if (first.isString()) {
+                    if (first.isElement()) {
+                        ElementReader first_elem = first.asElement();
+                        const char* first_tag = first_elem.tagName();
+                        if (first_tag && strcmp(first_tag, "brack_group") == 0) {
+                            has_brack_group2 = true;
+                            // Extract label from brack_group using helper
+                            label_buf2 = extractLabelFromBrackGroup(first_elem);
+                            label = label_buf2.c_str();
+                        }
+                    } else if (first.isString()) {
                         label = first.cstring();
                     }
                 }
                 
-                gen->createItem(label);
+                gen->createItem(has_brack_group2 ? label : nullptr);
                 in_item = true;
                 at_item_start = true;  // Next text should be trimmed
             } else {
@@ -1857,6 +1945,9 @@ static void cmd_description(LatexProcessor* proc, Item elem) {
     gen->startDescription();
     processListItems(proc, elem, "description");
     gen->endDescription();
+    
+    // Next paragraph should have class="continue"
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_item(LatexProcessor* proc, Item elem) {
@@ -3544,13 +3635,25 @@ static void cmd_input(LatexProcessor* proc, Item elem) {
 
 static void cmd_abstract(LatexProcessor* proc, Item elem) {
     // \begin{abstract}...\end{abstract}
+    // Expected format:
+    // <div class="list center"><span class="bf small">Abstract</span></div>
+    // <div class="list quotation"><p><span class="... small">content</span></p></div>
     HtmlGenerator* gen = proc->generator();
-    gen->div("abstract");
-    gen->h(3, "abstract-title");
+    
+    // Title div
+    gen->div("list center");
+    gen->span("bf small");
     gen->text("Abstract");
-    gen->closeElement();
+    gen->closeElement();  // close span
+    gen->closeElement();  // close title div
+    
+    // Content div with quotation styling and small font
+    gen->div("list quotation");
+    gen->enterGroup();
+    gen->currentFont().size = FontSize::Small;  // set small font for content
     proc->processChildren(elem);
-    gen->closeElement();
+    gen->exitGroup();
+    gen->closeElement();  // close content div
 }
 
 static void cmd_tableofcontents(LatexProcessor* proc, Item elem) {
