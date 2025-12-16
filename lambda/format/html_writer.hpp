@@ -22,6 +22,9 @@ public:
     virtual void writeText(const char* text, size_t len = 0) = 0;
     virtual void writeRawHtml(const char* html) = 0;
     
+    // Trim trailing whitespace from the output buffer (for paragraph handling)
+    virtual void trimTrailingWhitespace() = 0;
+    
     // Element creation
     virtual void openTag(const char* tag, const char* classes = nullptr, 
                          const char* id = nullptr, const char* style = nullptr) = 0;
@@ -61,6 +64,7 @@ public:
     
     void writeText(const char* text, size_t len = 0) override;
     void writeRawHtml(const char* html) override;
+    void trimTrailingWhitespace() override;
     void openTag(const char* tag, const char* classes = nullptr, 
                 const char* id = nullptr, const char* style = nullptr) override;
     void openTagRaw(const char* tag, const char* raw_attrs) override;
@@ -99,6 +103,7 @@ public:
     
     void writeText(const char* text, size_t len = 0) override;
     void writeRawHtml(const char* html) override;  // Parse HTML → Elements (not implemented yet)
+    void trimTrailingWhitespace() override { /* no-op for node mode */ }
     void openTag(const char* tag, const char* classes = nullptr,
                 const char* id = nullptr, const char* style = nullptr) override;
     void openTagRaw(const char* tag, const char* raw_attrs) override;
