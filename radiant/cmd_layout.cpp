@@ -168,9 +168,10 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
         }
     }
 
-    // No DOCTYPE found - assume HTML5 (modern default)
-    log_debug("No DOCTYPE found in Lambda Element tree, defaulting to HTML5");
-    return HTML5;
+    // No DOCTYPE found - use quirks mode (legacy HTML)
+    // Per HTML spec, missing DOCTYPE triggers quirks mode, which uses serif fonts
+    log_debug("No DOCTYPE found in Lambda Element tree, using quirks mode (HTML4_01_TRANSITIONAL)");
+    return HTML4_01_TRANSITIONAL;
 }
 
 /**
@@ -996,7 +997,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     }
 
     // Detect HTML version from the original input tree (contains DOCTYPE)
-    int detected_version = HTML5;  // Default fallback
+    int detected_version = HTML4_01_TRANSITIONAL;  // Default to quirks mode
     if (input) {
         detected_version = detect_html_version_from_lambda_element(nullptr, input);
         log_debug("[Lambda CSS] Detected HTML version: %d", detected_version);
