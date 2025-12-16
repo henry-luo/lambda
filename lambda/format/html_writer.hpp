@@ -29,6 +29,9 @@ public:
     // Returns true if tag was removed, false otherwise
     virtual bool removeLastOpenedTagIfEmpty(const char* tag) = 0;
     
+    // Check if a specific tag is currently open on the tag stack
+    virtual bool isTagOpen(const char* tag) const = 0;
+    
     // Element creation
     virtual void openTag(const char* tag, const char* classes = nullptr, 
                          const char* id = nullptr, const char* style = nullptr) = 0;
@@ -70,6 +73,7 @@ public:
     void writeRawHtml(const char* html) override;
     void trimTrailingWhitespace() override;
     bool removeLastOpenedTagIfEmpty(const char* tag) override;
+    bool isTagOpen(const char* tag) const override;
     void openTag(const char* tag, const char* classes = nullptr, 
                 const char* id = nullptr, const char* style = nullptr) override;
     void openTagRaw(const char* tag, const char* raw_attrs) override;
@@ -110,6 +114,7 @@ public:
     void writeRawHtml(const char* html) override;  // Parse HTML → Elements (not implemented yet)
     void trimTrailingWhitespace() override { /* no-op for node mode */ }
     bool removeLastOpenedTagIfEmpty(const char* tag) override { return false; /* TODO: implement for node mode */ }
+    bool isTagOpen(const char* tag) const override { return false; /* TODO: implement for node mode */ }
     void openTag(const char* tag, const char* classes = nullptr,
                 const char* id = nullptr, const char* style = nullptr) override;
     void openTagRaw(const char* tag, const char* raw_attrs) override;
