@@ -388,6 +388,25 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 return convert_command(ctx, node, source);
             }
             
+            // Handle "environment" node - transparent wrapper from grammar choice rule
+            // The grammar has: environment -> choice(generic_environment, math_environment, ...)
+            // This unwraps the choice node and returns the actual environment directly
+            if (strcmp(node_type, "environment") == 0) {
+                uint32_t child_count = ts_node_child_count(node);
+                for (uint32_t i = 0; i < child_count; i++) {
+                    TSNode child = ts_node_child(node, i);
+                    const char* child_type = ts_node_type(child);
+                    // Skip any ERROR nodes
+                    if (strcmp(child_type, "ERROR") == 0) continue;
+                    // Return the first valid child (should be generic_environment, math_environment, etc.)
+                    Item child_item = convert_latex_node(ctx, child, source);
+                    if (child_item.item != ITEM_NULL) {
+                        return child_item;
+                    }
+                }
+                return {.item = ITEM_NULL};
+            }
+            
             if (strcmp(node_type, "generic_environment") == 0) {
                 return convert_environment(ctx, node, source);
             }
@@ -472,6 +491,19 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                         return elem_builder.final();
                     }
                     
+                    // Spacing commands: \, \! \; \: \/ \@ \space - preserve as space_cmd element
+                    // These need special handling in the formatter
+                    if (escaped_char == ',' || escaped_char == '!' || 
+                        escaped_char == ';' || escaped_char == ':' ||
+                        escaped_char == '/' || escaped_char == '@' ||
+                        escaped_char == ' ') {
+                        ElementBuilder elem_builder = builder.element("space_cmd");
+                        // Store the full command including backslash
+                        String* cmd_str = builder.createString(source + start, end - start);
+                        elem_builder.child({.item = s2it(cmd_str)});
+                        return elem_builder.final();
+                    }
+                    
                     // For other control symbols, return the escaped character as string
                     return {.item = s2it(builder.createString(source + start + 1, end - start - 1))};
                 }
@@ -502,6 +534,13 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 }
                 // Fallback: return as-is
                 return {.item = s2it(builder.createString(text, len))};
+            }
+            
+            // Special case: nbsp (~) - convert to non-breaking space element
+            if (strcmp(node_type, "nbsp") == 0) {
+                MarkBuilder& builder = ctx.builder;
+                ElementBuilder elem_builder = builder.element("nbsp");
+                return elem_builder.final();
             }
             
             // TODO: Add more specific handlers

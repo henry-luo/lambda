@@ -37,6 +37,9 @@ public:
     // Close current element
     void closeElement();
     
+    // Trim trailing whitespace from output (for paragraph handling)
+    void trimTrailingWhitespace();
+    
     // Create heading element (h1-h6)
     void h(int level, const char* attrs = nullptr);
     
@@ -116,6 +119,9 @@ public:
     
     // Create list item
     void createItem(const char* label = nullptr);
+    
+    // End list item (closes <p> and <li> for itemize/enumerate)
+    void endItem();
     
     // Get enumerate label for current depth and format
     std::string getEnumerateLabel(int depth) const;
