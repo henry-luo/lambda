@@ -25,6 +25,10 @@ public:
     // Trim trailing whitespace from the output buffer (for paragraph handling)
     virtual void trimTrailingWhitespace() = 0;
     
+    // Remove last opened tag if it's empty (e.g., removes "<p>" if nothing written after it)
+    // Returns true if tag was removed, false otherwise
+    virtual bool removeLastOpenedTagIfEmpty(const char* tag) = 0;
+    
     // Element creation
     virtual void openTag(const char* tag, const char* classes = nullptr, 
                          const char* id = nullptr, const char* style = nullptr) = 0;
@@ -65,6 +69,7 @@ public:
     void writeText(const char* text, size_t len = 0) override;
     void writeRawHtml(const char* html) override;
     void trimTrailingWhitespace() override;
+    bool removeLastOpenedTagIfEmpty(const char* tag) override;
     void openTag(const char* tag, const char* classes = nullptr, 
                 const char* id = nullptr, const char* style = nullptr) override;
     void openTagRaw(const char* tag, const char* raw_attrs) override;
@@ -104,6 +109,7 @@ public:
     void writeText(const char* text, size_t len = 0) override;
     void writeRawHtml(const char* html) override;  // Parse HTML → Elements (not implemented yet)
     void trimTrailingWhitespace() override { /* no-op for node mode */ }
+    bool removeLastOpenedTagIfEmpty(const char* tag) override { return false; /* TODO: implement for node mode */ }
     void openTag(const char* tag, const char* classes = nullptr,
                 const char* id = nullptr, const char* style = nullptr) override;
     void openTagRaw(const char* tag, const char* raw_attrs) override;

@@ -123,6 +123,9 @@ public:
     // End list item (closes <p> and <li> for itemize/enumerate)
     void endItem();
     
+    // Handle paragraph break within list item - closes <p> and opens new <p>
+    void itemParagraphBreak();
+    
     // Get enumerate label for current depth and format
     std::string getEnumerateLabel(int depth) const;
     
