@@ -37,6 +37,7 @@ static const HtmlElementInfo html_elements[] = {
     {"base", HTM_TAG_BASE},
     {"bdi", HTM_TAG_BDI},
     {"bdo", HTM_TAG_BDO},
+    {"big", HTM_TAG_BIG},
     {"blockquote", HTM_TAG_BLOCKQUOTE},
     {"body", HTM_TAG_BODY},
     {"br", HTM_TAG_BR},
@@ -63,6 +64,7 @@ static const HtmlElementInfo html_elements[] = {
     {"fieldset", HTM_TAG_FIELDSET},
     {"figcaption", HTM_TAG_FIGCAPTION},
     {"figure", HTM_TAG_FIGURE},
+    {"font", HTM_TAG_FONT},
     {"footer", HTM_TAG_FOOTER},
     {"form", HTM_TAG_FORM},
     {"h1", HTM_TAG_H1},
@@ -87,6 +89,7 @@ static const HtmlElementInfo html_elements[] = {
     {"li", HTM_TAG_LI},
     {"lineargradient", HTM_TAG_LINEARGRADIENT},
     {"link", HTM_TAG_LINK},
+    {"listing", HTM_TAG_LISTING},
     {"main", HTM_TAG_MAIN},
     {"map", HTM_TAG_MAP},
     {"mark", HTM_TAG_MARK},
@@ -115,6 +118,7 @@ static const HtmlElementInfo html_elements[] = {
     {"small", HTM_TAG_SMALL},
     {"source", HTM_TAG_SOURCE},
     {"span", HTM_TAG_SPAN},
+    {"strike", HTM_TAG_STRIKE},
     {"strong", HTM_TAG_STRONG},
     {"style", HTM_TAG_STYLE},
     {"sub", HTM_TAG_SUB},
@@ -133,11 +137,13 @@ static const HtmlElementInfo html_elements[] = {
     {"title", HTM_TAG_TITLE},
     {"tr", HTM_TAG_TR},
     {"track", HTM_TAG_TRACK},
+    {"tt", HTM_TAG_TT},
     {"u", HTM_TAG_U},
     {"ul", HTM_TAG_UL},
     {"var", HTM_TAG_VAR},
     {"video", HTM_TAG_VIDEO},
     {"wbr", HTM_TAG_WBR},
+    {"xmp", HTM_TAG_XMP},
 };
 
 static const size_t html_elements_count = sizeof(html_elements) / sizeof(html_elements[0]);
@@ -169,7 +175,7 @@ static int html_element_compare(const void* a, const void* b, void* udata) {
  */
 static void init_tag_name_map() {
     if (g_tag_name_map) return;
-    
+
     // create hashtable with capacity for all HTML elements
     g_tag_name_map = hashmap_new(
         sizeof(HtmlElementInfo),
@@ -180,17 +186,17 @@ static void init_tag_name_map() {
         nullptr,  // no element free function needed (static data)
         nullptr   // no user data
     );
-    
+
     if (!g_tag_name_map) {
         log_error("Failed to create tag name hashtable");
         return;
     }
-    
+
     // populate hashtable with all HTML elements
     for (size_t i = 0; i < html_elements_count; i++) {
         hashmap_set(g_tag_name_map, &html_elements[i]);
     }
-    
+
     log_debug("Initialized tag name hashtable with %zu elements", html_elements_count);
 }
 
@@ -200,26 +206,26 @@ static void init_tag_name_map() {
  */
 uintptr_t DomNode::tag_name_to_id(const char* tag_name) {
     if (!tag_name) return 0;
-    
+
     // lazy initialization of hashtable on first use
     if (!g_tag_name_map) {
         init_tag_name_map();
     }
-    
+
     if (!g_tag_name_map) {
         log_error("Tag name hashtable not initialized");
         return 0;
     }
-    
+
     // lookup tag name in hashtable (O(1) average case)
     // strcasecmp in comparison function handles case-insensitive matching
     HtmlElementInfo search_key = {tag_name, 0};
     const HtmlElementInfo* result = (const HtmlElementInfo*)hashmap_get(g_tag_name_map, &search_key);
-    
+
     if (result) {
         return result->tag_id;
     }
-    
+
     // for unknown tags, return 0 (similar to HTM_TAG__UNDEF behavior)
     return 0;
 }
@@ -530,7 +536,7 @@ void DomNode::print(StrBuf* buf, int indent) const {
     // Buffer-based printing (detailed format from dom_element_print)
     if (this->is_element()) {
         const DomElement* element = this->as_element();
-        
+
         // Add indentation
         strbuf_append_char_n(buf, ' ', indent);
 
