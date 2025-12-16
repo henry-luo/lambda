@@ -69,11 +69,12 @@ LatexGenerator::LatexGenerator(Pool* pool, HtmlWriter* writer)
 
 void LatexGenerator::initStandardCounters() {
     // latex.js generator.ls lines 110-145 - standard LaTeX counters
+    // Default configuration is like article class (no chapter)
     
     // Document structure counters
     newCounter("part");
     newCounter("chapter");
-    newCounter("section", "chapter");
+    newCounter("section");  // no parent by default (article-like behavior)
     newCounter("subsection", "section");
     newCounter("subsubsection", "subsection");
     newCounter("paragraph", "subsubsection");
@@ -86,13 +87,13 @@ void LatexGenerator::initStandardCounters() {
     newCounter("enumiv");      // enumerate level 4
     
     // Float counters
-    newCounter("figure", "chapter");
-    newCounter("table", "chapter");
+    newCounter("figure");  // no parent by default
+    newCounter("table");
     
     // Footnote and equation counters
-    newCounter("footnote", "chapter");
+    newCounter("footnote");
     newCounter("mpfootnote");
-    newCounter("equation", "chapter");
+    newCounter("equation");
     
     // Page counter
     newCounter("page");
