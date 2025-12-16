@@ -1060,6 +1060,22 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
+
+        // CSS behavior for <center> element: block children should be horizontally centered
+        // This is achieved by applying margin:auto to block children
+        // Note: <center> is deprecated HTML but still widely used
+        if (block->parent && block->parent->is_element() && block->parent->tag() == HTM_TAG_CENTER) {
+            // Only apply centering to blocks that don't already have explicit margin values
+            // and that are not full-width (i.e., have a defined width less than parent)
+            if (block->width < pa_block->content_width &&
+                block->bound->margin.left_type != CSS_VALUE_AUTO &&
+                block->bound->margin.right_type != CSS_VALUE_AUTO) {
+                block->bound->margin.left_type = CSS_VALUE_AUTO;
+                block->bound->margin.right_type = CSS_VALUE_AUTO;
+                log_debug("applied margin:auto centering for block inside <center>");
+            }
+        }
+
         log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
         if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO)  {
