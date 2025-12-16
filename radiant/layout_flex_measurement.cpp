@@ -732,7 +732,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     log_debug("Calculating intrinsic sizes for item %p (%s)", item, item->node_name());
 
     // Initialize to zero
-    int min_width = 0, max_width = 0, min_height = 0, max_height = 0;
+    // Use float to preserve precision from text measurement (avoids truncation)
+    float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
 
     // Check if this is a replaced element (img, video) - needs special handling
     LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
@@ -768,27 +769,27 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
                 if (explicit_width > 0 && explicit_height > 0) {
                     // Both dimensions specified
-                    min_width = max_width = (int)explicit_width;
-                    min_height = max_height = (int)explicit_height;
+                    min_width = max_width = explicit_width;
+                    min_height = max_height = explicit_height;
                 } else if (explicit_width > 0) {
                     // Width specified, compute height from aspect ratio
-                    min_width = max_width = (int)explicit_width;
-                    min_height = max_height = (int)(explicit_width * h / w);
+                    min_width = max_width = explicit_width;
+                    min_height = max_height = explicit_width * h / w;
                 } else if (explicit_height > 0) {
                     // Height specified, compute width from aspect ratio
-                    min_height = max_height = (int)explicit_height;
-                    min_width = max_width = (int)(explicit_height * w / h);
+                    min_height = max_height = explicit_height;
+                    min_width = max_width = explicit_height * w / h;
                 } else if (max_width_constraint > 0 && max_width_constraint < w) {
                     // Max-width constrains the image
-                    min_width = max_width = (int)max_width_constraint;
-                    min_height = max_height = (int)(max_width_constraint * h / w);
+                    min_width = max_width = max_width_constraint;
+                    min_height = max_height = max_width_constraint * h / w;
                 } else {
                     // Use intrinsic dimensions
-                    min_width = max_width = (int)w;
-                    min_height = max_height = (int)h;
+                    min_width = max_width = w;
+                    min_height = max_height = h;
                 }
-                log_debug("calculate_item_intrinsic_sizes: image intrinsic size=%dx%d (source=%dx%d)",
-                          min_width, min_height, (int)w, (int)h);
+                log_debug("calculate_item_intrinsic_sizes: image intrinsic size=%.1fx%.1f (source=%.1fx%.1f)",
+                          min_width, min_height, w, h);
             } else {
                 // Failed to load image - use placeholder size
                 log_debug("calculate_item_intrinsic_sizes: failed to load image %s", src_value);
@@ -810,7 +811,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         item->fi->intrinsic_height.max_content = max_height;
         item->fi->has_intrinsic_height = true;
 
-        log_debug("calculate_item_intrinsic_sizes: image final intrinsic=%dx%d", max_width, max_height);
+        log_debug("calculate_item_intrinsic_sizes: image final intrinsic=%.1fx%.1f", max_width, max_height);
         return;
     }
 
@@ -821,16 +822,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // CRITICAL FIX: Don't use item->width/height which may have been pre-set
         // to container size. Use given_width/given_height which are the CSS-specified values.
         if (item->blk && item->blk->given_width > 0) {
-            min_width = max_width = (int)item->blk->given_width;
+            min_width = max_width = item->blk->given_width;
         } else {
             min_width = max_width = 0;  // No explicit width, intrinsic is 0
         }
         if (item->blk && item->blk->given_height > 0) {
-            min_height = max_height = (int)item->blk->given_height;
+            min_height = max_height = item->blk->given_height;
         } else {
             min_height = max_height = 0;  // No explicit height, intrinsic is 0
         }
-        log_debug("Empty element intrinsic sizes: width=%d, height=%d (explicit)", min_width, min_height);
+        log_debug("Empty element intrinsic sizes: width=%.1f, height=%.1f (explicit)", min_width, min_height);
     } else if (child->is_text() && !child->next_sibling) {
         // Simple text node - use unified intrinsic sizing API if available
         const char* text = (const char*)child->text_data();
@@ -843,22 +844,22 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 min_width = widths.min_content;
                 max_width = widths.max_content;
                 min_height = max_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-                    (int)(lycon->font.style->font_size + 0.5f) : 20;
+                    lycon->font.style->font_size : 20.0f;
             } else {
                 // Fallback: rough estimation when no layout context
-                max_width = len * 10;
-                int current_word = 0;
-                min_width = 0;
+                max_width = len * 10.0f;
+                float current_word = 0.0f;
+                min_width = 0.0f;
                 for (size_t i = 0; i < len; i++) {
                     if (is_space(text[i])) {
-                        min_width = max(min_width, current_word * 10);
-                        current_word = 0;
+                        min_width = fmaxf(min_width, current_word * 10.0f);
+                        current_word = 0.0f;
                     } else {
-                        current_word++;
+                        current_word += 1.0f;
                     }
                 }
-                min_width = max(min_width, current_word * 10);
-                min_height = max_height = 20;
+                min_width = fmaxf(min_width, current_word * 10.0f);
+                min_height = max_height = 20.0f;
             }
         }
     } else {
@@ -894,9 +895,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
         // First, try to calculate intrinsic sizes from children
         // This handles both width and height by traversing child elements
-        int max_child_width = 0;
-        int total_child_width = 0;  // For row flex containers: sum of child widths
-        int total_child_height = 0;
+        float max_child_width = 0.0f;
+        float total_child_width = 0.0f;  // For row flex containers: sum of child widths
+        float total_child_height = 0.0f;
         int child_count = 0;  // Count children for gap calculation
 
         {
@@ -917,15 +918,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
                         if (!is_whitespace_only) {
                             int text_len = strlen(text);
-                            int text_width, text_height;
+                            float text_width, text_height;
                             if (lycon) {
                                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len);
                                 text_width = widths.max_content;
                                 text_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-                                    (int)(lycon->font.style->font_size + 0.5f) : 20;
+                                    lycon->font.style->font_size : 20.0f;
                             } else {
-                                text_width = text_len * 10;
-                                text_height = 20;
+                                text_width = text_len * 10.0f;
+                                text_height = 20.0f;
                             }
                             max_child_width = max(max_child_width, text_width);
                             total_child_height += text_height;
@@ -960,15 +961,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             }
                         }
 
-                        int child_width = 0;
-                        int child_height = 0;
+                        float child_width = 0.0f;
+                        float child_height = 0.0f;
 
                         // Get child width - explicit (from View or DOM) or intrinsic
                         if (child_has_explicit_width) {
                             if (child_view->blk && child_view->blk->given_width > 0) {
-                                child_width = (int)child_view->blk->given_width;
+                                child_width = child_view->blk->given_width;
                             } else if (dom_css_width > 0) {
-                                child_width = (int)dom_css_width;
+                                child_width = dom_css_width;
                             }
                         } else if (child_view->fi) {
                             // Child has fi - use cached intrinsic or calculate
@@ -983,15 +984,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             // This handles the case where intrinsic sizing runs before fi is initialized
                             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)child_view);
                             child_width = child_sizes.max_content;
-                            log_debug("Used measure_element_intrinsic_widths for child: width=%d", child_width);
+                            log_debug("Used measure_element_intrinsic_widths for child: width=%.1f", child_width);
                         }
 
                         // Get child height - explicit (from View or DOM) or intrinsic
                         if (child_has_explicit_height) {
                             if (child_view->blk && child_view->blk->given_height > 0) {
-                                child_height = (int)child_view->blk->given_height;
+                                child_height = child_view->blk->given_height;
                             } else if (dom_css_height > 0) {
-                                child_height = (int)dom_css_height;
+                                child_height = dom_css_height;
                             }
                         } else if (child_view->fi) {
                             // Child has fi - use cached intrinsic or calculate recursively
@@ -1005,15 +1006,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
                         // CRITICAL: If child is a flex container without proper height,
                         // recursively measure its content-based height from the DOM tree
-                        if (child_height == 0 && !child_has_explicit_height) {
+                        if (child_height == 0.0f && !child_has_explicit_height) {
                             // Check if child is a flex container by resolving display from DOM
                             DisplayValue child_display = resolve_display_value((void*)c);
                             log_debug("Child height is 0, checking if flex container - display.inner=%d",
                                       child_display.inner);
                             if (child_display.inner == CSS_VALUE_FLEX) {
                                 // Use recursive DOM-based measurement
-                                child_height = (int)measure_content_height_recursive(c, lycon);
-                                log_debug("Nested flex child height from recursive measurement: %d", child_height);
+                                child_height = measure_content_height_recursive(c, lycon);
+                                log_debug("Nested flex child height from recursive measurement: %.1f", child_height);
                             }
                         }
                         // Note: For height, we may not have a good fallback - leave as 0
@@ -1033,7 +1034,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             total_child_height += child_height;
                         }
 
-                        log_debug("Child element: width=%d, height=%d (explicit=%d/%d)",
+                        log_debug("Child element: width=%.1f, height=%.1f (explicit=%d/%d)",
                                   child_width, child_height, child_has_explicit_width, child_has_explicit_height);
                     }
                 }
@@ -1050,12 +1051,12 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         gap = block_view->embed->flex->column_gap;
                     }
                 }
-                total_child_width += (int)(gap * (child_count - 1));
-                log_debug("Row flex: added %d gaps of %.1f = %d total gap pixels",
-                          child_count - 1, gap, (int)(gap * (child_count - 1)));
+                total_child_width += gap * (child_count - 1);
+                log_debug("Row flex: added %d gaps of %.1f = %.1f total gap pixels",
+                          child_count - 1, gap, gap * (child_count - 1));
             }
 
-            log_debug("Traversed children: max_width=%d, total_width=%d, total_height=%d, is_row_flex=%d",
+            log_debug("Traversed children: max_width=%.1f, total_width=%.1f, total_height=%.1f, is_row_flex=%d",
                       max_child_width, total_child_width, total_child_height, is_row_flex_container);
         }
 
@@ -1063,16 +1064,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         if (cached && cached->measured_width > 0 && has_explicit_width) {
             min_width = cached->measured_width;
             max_width = cached->measured_width;
-            log_debug("Using cached width for complex content (has explicit width): width=%d", min_width);
-        } else if (is_row_flex_container && total_child_width > 0) {
+            log_debug("Using cached width for complex content (has explicit width): width=%.1f", min_width);
+        } else if (is_row_flex_container && total_child_width > 0.0f) {
             // Row flex container: use sum of child widths + gaps
             min_width = total_child_width;
             max_width = total_child_width;
-            log_debug("Using sum of child widths for row flex container: width=%d", min_width);
-        } else if (max_child_width > 0) {
+            log_debug("Using sum of child widths for row flex container: width=%.1f", min_width);
+        } else if (max_child_width > 0.0f) {
             min_width = max_child_width;
             max_width = max_child_width;
-            log_debug("Using calculated width from children: width=%d", min_width);
+            log_debug("Using calculated width from children: width=%.1f", min_width);
         } else {
             min_width = max_width = 0;
             log_debug("No width from children or cache, using 0");
@@ -1082,16 +1083,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         if (cached && cached->measured_height > 0 && has_explicit_height) {
             min_height = cached->measured_height;
             max_height = cached->measured_height;
-            log_debug("Using cached height for complex content (has explicit height): height=%d", min_height);
-        } else if (total_child_height > 0) {
+            log_debug("Using cached height for complex content (has explicit height): height=%.1f", min_height);
+        } else if (total_child_height > 0.0f) {
             min_height = total_child_height;
             max_height = total_child_height;
-            log_debug("Using calculated height from children: height=%d", min_height);
+            log_debug("Using calculated height from children: height=%.1f", min_height);
         } else if (cached && cached->measured_height > 0) {
             // Fallback to cache without explicit height requirement
             min_height = cached->measured_height;
             max_height = cached->measured_height;
-            log_debug("Using cached height for complex content: height=%d", min_height);
+            log_debug("Using cached height for complex content: height=%.1f", min_height);
         } else {
             min_height = max_height = 0;
             log_debug("No height from children or cache, using 0");
@@ -1146,13 +1147,13 @@ void measure_block_intrinsic_sizes(LayoutContext* lycon, ViewBlock* block,
 
 // Layout block in measurement mode (without creating permanent views)
 // REFACTORED: Now uses unified intrinsic sizing API
-int layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool constrain_width) {
+float layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool constrain_width) {
     if (!block) return 0;
 
     // In measurement mode, traverse children and measure their contributions
     // using the unified intrinsic sizing API
 
-    int max_width = 0;
+    float max_width = 0;
     DomNode* child = block->first_child;
 
     while (child) {
@@ -1163,26 +1164,26 @@ int layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool const
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len);
                 if (constrain_width) {
                     // Min-content: use longest word width
-                    max_width = max(max_width, widths.min_content);
+                    max_width = fmaxf(max_width, widths.min_content);
                 } else {
                     // Max-content: use full text width
-                    max_width = max(max_width, widths.max_content);
+                    max_width = fmaxf(max_width, widths.max_content);
                 }
             } else if (text) {
                 // Fallback when no layout context
                 size_t len = strlen(text);
-                max_width = max(max_width, (int)(len * 10));
+                max_width = fmaxf(max_width, len * 10.0f);
             }
         } else if (child->is_element()) {
             // For element children, use unified API if available
             if (lycon && child) {
                 if (constrain_width) {
-                    max_width = max(max_width, calculate_min_content_width(lycon, child));
+                    max_width = fmaxf(max_width, calculate_min_content_width(lycon, child));
                 } else {
-                    max_width = max(max_width, calculate_max_content_width(lycon, child));
+                    max_width = fmaxf(max_width, calculate_max_content_width(lycon, child));
                 }
             } else {
-                max_width = max(max_width, 100);  // Fallback placeholder
+                max_width = fmaxf(max_width, 100.0f);  // Fallback placeholder
             }
         }
         child = child->next_sibling;

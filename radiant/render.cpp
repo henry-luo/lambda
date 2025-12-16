@@ -766,16 +766,11 @@ void render_children(RenderContext* rdcon, View* view) {
             view->view_type == RDT_VIEW_TABLE || view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
             view->view_type == RDT_VIEW_TABLE_ROW || view->view_type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
-            if (block->embed) {
-                if (block->embed->img) {
-                    render_image_view(rdcon, block);
-                }
-                else if (block->embed->doc) {
-                    render_embed_doc(rdcon, block);
-                }
-                else if (block->embed->flex) {
-                    render_block_view(rdcon, block);
-                }
+            if (block->embed && block->embed->img) {
+                render_image_view(rdcon, block);
+            }
+            else if (block->embed && block->embed->doc) {
+                render_embed_doc(rdcon, block);
             }
             else if (block->blk && block->blk->list_style_type) {
                 render_list_view(rdcon, block);
@@ -822,6 +817,8 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     log_debug("render_init default font: %s, html version: %d", default_font->family, view_tree->html_version);
     setup_font(uicon, &rdcon->font, default_font);
     rdcon->block.clip = (Bound){0, 0, (float)uicon->surface->width, (float)uicon->surface->height};
+    // initialize default text color to opaque black (ABGR format: 0xFF000000)
+    rdcon->color.c = 0xFF000000;
     log_debug("render_init clip: [%.0f, %.0f, %.0f, %.0f]", rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
 }
 
