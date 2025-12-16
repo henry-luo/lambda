@@ -563,6 +563,7 @@ struct SelectorIndex {
     std::unordered_map<std::string, std::vector<IndexedRule>> by_class;    // rules indexed by class
     std::unordered_map<std::string, std::vector<IndexedRule>> by_id;       // rules indexed by id
     std::vector<IndexedRule> universal;                                     // rules that match any element (*, etc.)
+    std::vector<CssRule*> media_rules;                                      // @media rules requiring runtime evaluation
     Pool* pool;
 };
 
@@ -616,7 +617,15 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
 
     for (size_t rule_idx = 0; rule_idx < stylesheet->rule_count; rule_idx++) {
         CssRule* rule = stylesheet->rules[rule_idx];
-        if (!rule || rule->type != CSS_RULE_STYLE) continue;
+        if (!rule) continue;
+
+        // Collect media rules separately for runtime evaluation
+        if (rule->type == CSS_RULE_MEDIA) {
+            index->media_rules.push_back(rule);
+            continue;
+        }
+
+        if (rule->type != CSS_RULE_STYLE) continue;
 
         // Handle selector groups (comma-separated)
         CssSelectorGroup* group = rule->data.style_rule.selector_group;
@@ -773,7 +782,10 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
     // Handle media rules by evaluating the condition
     if (rule->type == CSS_RULE_MEDIA) {
         const char* media_condition = rule->data.conditional_rule.condition;
+        log_debug("[MediaQuery] Evaluating condition: '%s' for element <%s>",
+                  media_condition ? media_condition : "(null)", elem->tag_name ? elem->tag_name : "?");
         bool matches = css_evaluate_media_query(engine, media_condition);
+        log_debug("[MediaQuery] Result: %s", matches ? "MATCHES" : "does not match");
         if (matches) {
             for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
                 CssRule* nested_rule = rule->data.conditional_rule.rules[i];
@@ -913,6 +925,11 @@ static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex
     // Only check candidate rules (much fewer than all rules)
     for (const auto& entry : candidates) {
         apply_rule_to_dom_element(root, entry.rule, matcher, pool, engine);
+    }
+
+    // Also process media rules (need runtime evaluation for each element)
+    for (CssRule* media_rule : index->media_rules) {
+        apply_rule_to_dom_element(root, media_rule, matcher, pool, engine);
     }
 
     // Recursively apply to children (only element children)

@@ -538,7 +538,7 @@ Lambda Element Tree            CssStylesheet (rules)
 
 ### 9.1 Test Architecture
 
-- **HTML Test Files:** `test/layout/data/basic/`
+- **HTML Test Files:** `test/layout/data/*`
 - **Reference Data:** Browser-rendered JSON from Puppeteer
 - **Comparison:** Element-by-element position/size matching
 - **Tolerance:** 1-2px for floating-point variations
