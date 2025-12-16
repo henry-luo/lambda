@@ -1513,6 +1513,27 @@ static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     gen->text("\\");
 }
 
+static void cmd_textellipsis(LatexProcessor* proc, Item elem) {
+    // \textellipsis - Outputs an ellipsis character (…)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("…");
+}
+
+static void cmd_ldots(LatexProcessor* proc, Item elem) {
+    // \ldots - Outputs an ellipsis character (…) - alias for \textellipsis
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("…");
+}
+
+static void cmd_dots(LatexProcessor* proc, Item elem) {
+    // \dots - Outputs an ellipsis character (…)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("…");
+}
+
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
     // \makeatletter - Make @ a letter (category code change)
     // In HTML output, this doesn't affect anything
@@ -4051,6 +4072,9 @@ void LatexProcessor::initCommandTable() {
     command_table_["today"] = cmd_today;
     command_table_["empty"] = cmd_empty;
     command_table_["textbackslash"] = cmd_textbackslash;
+    command_table_["textellipsis"] = cmd_textellipsis;
+    command_table_["ldots"] = cmd_ldots;
+    command_table_["dots"] = cmd_dots;
     command_table_["makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;
     
@@ -4583,22 +4607,55 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     if (strcmp(cmd_name, "curly_group") == 0) {
         gen_->enterGroup();
         
-        // Check if first child is a string starting with whitespace
-        // If so, output ZWS at group entry (latex.js behavior: { → ​ when followed by space)
+        // Check if group is empty (has no children or only whitespace)
         ElementReader reader(elem);
+        bool is_empty_group = true;
         bool has_leading_space = false;
+        bool has_trailing_space = false;
         
+        // Iterate through children to check emptiness and whitespace
         auto iter = reader.children();
-        ItemReader first_child;
-        if (iter.next(&first_child) && first_child.isString()) {
-            String* str = first_child.asString();
-            if (str && str->len > 0 && str->chars[0] == ' ') {
-                has_leading_space = true;
+        ItemReader child;
+        ItemReader last_string_child;
+        bool found_last_string = false;
+        bool is_first = true;
+        
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                String* str = child.asString();
+                if (str && str->len > 0) {
+                    // Check for non-whitespace content
+                    for (int64_t i = 0; i < str->len; i++) {
+                        if (str->chars[i] != ' ' && str->chars[i] != '\t' && str->chars[i] != '\n') {
+                            is_empty_group = false;
+                            break;
+                        }
+                    }
+                    // Check first child for leading space
+                    if (is_first && str->chars[0] == ' ') {
+                        has_leading_space = true;
+                    }
+                    // Track last string for trailing space check
+                    last_string_child = child;
+                    found_last_string = true;
+                }
+            } else if (child.isElement()) {
+                // Any element makes the group non-empty
+                is_empty_group = false;
+            }
+            is_first = false;
+        }
+        
+        // Check trailing space
+        if (found_last_string) {
+            String* str = last_string_child.asString();
+            if (str && str->len > 0 && str->chars[str->len - 1] == ' ') {
+                has_trailing_space = true;
             }
         }
         
-        // Output ZWS at entry if leading space
-        if (has_leading_space) {
+        // Output ZWS at entry if leading space (and not empty group)
+        if (has_leading_space && !is_empty_group) {
             ensureParagraph();
             gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
         }
@@ -4606,8 +4663,9 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         processChildren(elem);
         gen_->exitGroup();
         
-        // ZWS at exit for depth <= 2
-        if (gen_->groupDepth() <= 2) {
+        // ZWS at exit for depth <= 2, but NOT for empty groups
+        // Note: We output ZWS at exit regardless of trailing whitespace for non-empty groups
+        if (gen_->groupDepth() <= 2 && !is_empty_group) {
             ensureParagraph();
             // Output ZWS with current font styling (if any)
             std::string font_class = gen_->getFontClass(gen_->currentFont());
