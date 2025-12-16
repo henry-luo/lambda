@@ -6,14 +6,15 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <float.h>
 }
 
 // NOTE: All conversion functions removed - enums now align directly with Lexbor constants
 // This eliminates the need for any enum conversion throughout the flex layout system
 
 // Forward declarations
-int get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
-int get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout);
+float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout);
 
 // ============================================================================
 // Overflow Alignment Fallback (Yoga-inspired)
@@ -379,22 +380,22 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
                 if (is_absolute_no_width) {
                     // Calculate width from flex items (shrink-to-fit)
-                    int total_item_width = 0;
+                    float total_item_width = 0.0f;
                     View* child = container->first_child;
                     while (child) {
                         if (child->view_type == RDT_VIEW_BLOCK) {
                             ViewElement* item = (ViewElement*)child->as_element();
                             if (item) {
-                                int item_width = 0;
+                                float item_width = 0.0f;
                                 if (item->blk && item->blk->given_width > 0) {
-                                    item_width = (int)item->blk->given_width;
+                                    item_width = item->blk->given_width;
                                 } else if (item->width > 0) {
                                     item_width = item->width;
                                 } else if (item->fi && item->fi->has_intrinsic_width) {
-                                    item_width = (int)item->fi->intrinsic_width.max_content;
+                                    item_width = item->fi->intrinsic_width.max_content;
                                 }
                                 total_item_width += item_width;
-                                log_debug("ROW FLEX SHRINK-TO-FIT: item width=%d, total=%d",
+                                log_debug("ROW FLEX SHRINK-TO-FIT: item width=%.1f, total=%.1f",
                                           item_width, total_item_width);
                             }
                         }
@@ -408,11 +409,11 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         child = child->next();
                     }
                     if (child_count > 1) {
-                        total_item_width += (int)(flex_layout->column_gap * (child_count - 1));
+                        total_item_width += flex_layout->column_gap * (child_count - 1);
                     }
-                    flex_layout->main_axis_size = (float)total_item_width;
+                    flex_layout->main_axis_size = total_item_width;
                     // Also update container width
-                    int padding_width = 0;
+                    float padding_width = 0.0f;
                     if (container->bound) {
                         padding_width = container->bound->padding.left + container->bound->padding.right;
                     }
@@ -551,38 +552,38 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 bool has_explicit_width = container->blk && container->blk->given_width > 0;
                 if (!has_explicit_width && content_width > 0) {
                     // Calculate max width from flex items (cross-axis for column flex)
-                    int max_item_width = 0;
+                    float max_item_width = 0.0f;
                     View* child = container->first_child;
                     while (child) {
                         if (child->view_type == RDT_VIEW_BLOCK) {
                             ViewElement* item = (ViewElement*)child->as_element();
                             if (item) {
-                                int item_width = 0;
+                                float item_width = 0.0f;
                                 if (item->blk && item->blk->given_width > 0) {
-                                    item_width = (int)item->blk->given_width;
+                                    item_width = item->blk->given_width;
                                 } else if (item->width > 0) {
                                     item_width = item->width;
                                 } else if (item->fi && item->fi->has_intrinsic_width) {
-                                    item_width = (int)item->fi->intrinsic_width.max_content;
+                                    item_width = item->fi->intrinsic_width.max_content;
                                 }
                                 if (item_width > max_item_width) {
                                     max_item_width = item_width;
                                 }
-                                log_debug("COLUMN FLEX: item width = %d, max = %d", item_width, max_item_width);
+                                log_debug("COLUMN FLEX: item width = %.1f, max = %.1f", item_width, max_item_width);
                             }
                         }
                         child = child->next();
                     }
-                    if (max_item_width > 0) {
-                        flex_layout->cross_axis_size = (float)max_item_width;
+                    if (max_item_width > 0.0f) {
+                        flex_layout->cross_axis_size = max_item_width;
                         // Also update container width for shrink-to-fit behavior
-                        int padding_width = 0;
+                        float padding_width = 0.0f;
                         if (container->bound) {
                             padding_width = container->bound->padding.left + container->bound->padding.right;
                         }
                         container->width = max_item_width + padding_width;
-                        log_debug("COLUMN FLEX: auto-width calculated as %d from items (container=%d)",
-                                  max_item_width, (int)container->width);
+                        log_debug("COLUMN FLEX: auto-width calculated as %.1f from items (container=%.1f)",
+                                  max_item_width, container->width);
                     } else {
                         flex_layout->cross_axis_size = (float)content_width;
                     }
@@ -1253,7 +1254,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 }
 
 // Calculate flex basis for an item
-int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
+float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!item->fi) return 0;
 
     log_debug("calculate_flex_basis for item %p", item);
@@ -1264,13 +1265,13 @@ int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
             // Percentage relative to container (including 0%)
             float container_size = is_main_axis_horizontal(flex_layout) ?
                 flex_layout->main_axis_size : flex_layout->cross_axis_size;
-            int basis = (int)(item->fi->flex_basis * container_size / 100.0f);
-            log_info("FLEX_BASIS - explicit percent: %.1f%% of %.1f = %d",
+            float basis = item->fi->flex_basis * container_size / 100.0f;
+            log_info("FLEX_BASIS - explicit percent: %.1f%% of %.1f = %.1f",
                      item->fi->flex_basis, container_size, basis);
             return basis;
         }
         log_info("FLEX_BASIS - explicit: %d", item->fi->flex_basis);
-        return item->fi->flex_basis;
+        return (float)item->fi->flex_basis;
     }
 
     // Case 2: flex-basis: auto - use main axis size if explicit
@@ -1280,12 +1281,12 @@ int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (is_horizontal && item->blk && item->blk->given_width > 0) {
         log_debug("calculate_flex_basis - using explicit width: %f", item->blk->given_width);
         item->fi->has_explicit_width = 1;
-        return (int)item->blk->given_width;
+        return item->blk->given_width;
     }
     if (!is_horizontal && item->blk && item->blk->given_height > 0) {
         log_debug("calculate_flex_basis - using explicit height: %f", item->blk->given_height);
         item->fi->has_explicit_height = 1;
-        return (int)item->blk->given_height;
+        return item->blk->given_height;
     }
 
     // Case 3: flex-basis: auto + no explicit size = use content size (intrinsic sizing)
@@ -1299,7 +1300,7 @@ int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
     }
 
     // Use max-content size as basis for auto (per CSS Flexbox spec)
-    int basis;
+    float basis;
     if (is_horizontal) {
         basis = item->fi->intrinsic_width.max_content;
     } else {
@@ -1321,7 +1322,7 @@ int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
         }
     }
 
-    log_debug("calculate_flex_basis - using intrinsic size: %d (including padding/border)", basis);
+    log_debug("calculate_flex_basis - using intrinsic size: %.1f (including padding/border)", basis);
     return basis;
 }
 
@@ -1329,8 +1330,8 @@ int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
 // This is used for line breaking decisions per CSS Flexbox spec 9.3
 // IMPORTANT: For wrapping purposes, only use EXPLICITLY SET min/max constraints,
 // not the automatic minimum (min-content) that is used for flex shrinking
-int calculate_hypothetical_main_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    int basis = calculate_flex_basis(item, flex_layout);
+float calculate_hypothetical_main_size(ViewElement* item, FlexContainerLayout* flex_layout) {
+    float basis = calculate_flex_basis(item, flex_layout);
 
     if (!item->fi) return basis;
 
@@ -1338,37 +1339,37 @@ int calculate_hypothetical_main_size(ViewElement* item, FlexContainerLayout* fle
 
     // Get EXPLICIT min/max constraints from CSS (not automatic minimum)
     // Only use explicitly set min-width/min-height values, not resolved auto values
-    int min_main = 0, max_main = INT_MAX;
+    float min_main = 0, max_main = FLT_MAX;
     if (is_horizontal) {
         // Only use explicitly set min-width (given_min_width > 0)
         if (item->blk && item->blk->given_min_width > 0) {
-            min_main = (int)item->blk->given_min_width;
+            min_main = item->blk->given_min_width;
         }
         if (item->blk && item->blk->given_max_width > 0) {
-            max_main = (int)item->blk->given_max_width;
+            max_main = item->blk->given_max_width;
         }
     } else {
         // Only use explicitly set min-height (given_min_height > 0)
         if (item->blk && item->blk->given_min_height > 0) {
-            min_main = (int)item->blk->given_min_height;
+            min_main = item->blk->given_min_height;
         }
         if (item->blk && item->blk->given_max_height > 0) {
-            max_main = (int)item->blk->given_max_height;
+            max_main = item->blk->given_max_height;
         }
     }
 
     // Clamp basis by explicit min/max constraints
-    int hypothetical = basis;
+    float hypothetical = basis;
     if (min_main > 0 && hypothetical < min_main) {
         hypothetical = min_main;
-        log_debug("calculate_hypothetical_main_size: clamped to min=%d (basis=%d)", min_main, basis);
+        log_debug("calculate_hypothetical_main_size: clamped to min=%.1f (basis=%.1f)", min_main, basis);
     }
-    if (max_main < INT_MAX && hypothetical > max_main) {
+    if (max_main < FLT_MAX && hypothetical > max_main) {
         hypothetical = max_main;
-        log_debug("calculate_hypothetical_main_size: clamped to max=%d (basis=%d)", max_main, basis);
+        log_debug("calculate_hypothetical_main_size: clamped to max=%.1f (basis=%.1f)", max_main, basis);
     }
 
-    log_debug("calculate_hypothetical_main_size: item=%p, basis=%d, min=%d, max=%d, result=%d",
+    log_debug("calculate_hypothetical_main_size: item=%p, basis=%.1f, min=%.1f, max=%.1f, result=%.1f",
               item, basis, min_main, max_main, hypothetical);
 
     return hypothetical;
@@ -1502,45 +1503,45 @@ float clamp_value(float value, float min_val, float max_val) {
 }
 
 // Helper function to resolve percentage values
-int resolve_percentage(int value, bool is_percent, int container_size) {
+float resolve_percentage(float value, bool is_percent, float container_size) {
     if (is_percent) {
-        float percentage = (float)value / 100.0f;
-        return (int)(percentage * container_size);
+        float percentage = value / 100.0f;
+        return percentage * container_size;
     }
     return value;
 }
 
 // Apply constraints including aspect ratio and min/max values
-void apply_constraints(ViewBlock* item, int container_width, int container_height) {
+void apply_constraints(ViewBlock* item, float container_width, float container_height) {
     if (!item) return;
 
     // Resolve percentage-based values
-    int actual_width = resolve_percentage(item->width, false, container_width);
-    int actual_height = resolve_percentage(item->height, false, container_height);
-    int min_width = item->blk? item->blk->given_min_width : 0;
-    int max_width = item->blk? item->blk->given_max_width : 0;
-    int min_height = item->blk? item->blk->given_min_height : 0;
-    int max_height = item->blk? item->blk->given_max_height : 0;
+    float actual_width = resolve_percentage(item->width, false, container_width);
+    float actual_height = resolve_percentage(item->height, false, container_height);
+    float min_width = item->blk ? item->blk->given_min_width : 0.0f;
+    float max_width = item->blk ? item->blk->given_max_width : 0.0f;
+    float min_height = item->blk ? item->blk->given_min_height : 0.0f;
+    float max_height = item->blk ? item->blk->given_max_height : 0.0f;
 
     // Apply aspect ratio if specified
     if (item->fi && item->fi->aspect_ratio > 0) {
-        if (actual_width > 0 && actual_height == 0) {
-            actual_height = (int)(actual_width / item->fi->aspect_ratio);
-        } else if (actual_height > 0 && actual_width == 0) {
-            actual_width = (int)(actual_height * item->fi->aspect_ratio);
+        if (actual_width > 0.0f && actual_height == 0.0f) {
+            actual_height = actual_width / item->fi->aspect_ratio;
+        } else if (actual_height > 0.0f && actual_width == 0.0f) {
+            actual_width = actual_height * item->fi->aspect_ratio;
         }
     }
 
     // Apply min/max constraints
-    actual_width = (int)clamp_value(actual_width, min_width, max_width);
-    actual_height = (int)clamp_value(actual_height, min_height, max_height);
+    actual_width = clamp_value(actual_width, min_width, max_width);
+    actual_height = clamp_value(actual_height, min_height, max_height);
 
     // Reapply aspect ratio after clamping if needed
     if (item->fi && item->fi->aspect_ratio > 0) {
-        if (actual_width > 0 && actual_height == 0) {
-            actual_height = (int)(actual_width / item->fi->aspect_ratio);
-        } else if (actual_height > 0 && actual_width == 0) {
-            actual_width = (int)(actual_height * item->fi->aspect_ratio);
+        if (actual_width > 0.0f && actual_height == 0.0f) {
+            actual_height = actual_width / item->fi->aspect_ratio;
+        } else if (actual_height > 0.0f && actual_width == 0.0f) {
+            actual_width = actual_height * item->fi->aspect_ratio;
         }
     }
 
@@ -1565,9 +1566,9 @@ void apply_constraints(ViewBlock* item, int container_width, int container_heigh
  * @param hit_max       Output: true if clamped to maximum
  * @return The constrained (clamped) size
  */
-int apply_flex_constraint(
+float apply_flex_constraint(
     ViewElement* item,
-    int computed_size,
+    float computed_size,
     bool is_main_axis,
     FlexContainerLayout* flex_layout,
     bool* hit_min,
@@ -1578,28 +1579,28 @@ int apply_flex_constraint(
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
     // Determine which constraints to use based on axis
-    int min_size = 0;
-    int max_size = INT_MAX;
+    float min_size = 0;
+    float max_size = FLT_MAX;
 
     if (is_main_axis) {
         // Main axis constraints
         if (is_horizontal) {
             min_size = item->fi->resolved_min_width;
-            max_size = item->fi->resolved_max_width;
+            max_size = item->fi->resolved_max_width > 0 ? item->fi->resolved_max_width : FLT_MAX;
         } else {
             min_size = item->fi->resolved_min_height;
-            max_size = item->fi->resolved_max_height;
+            max_size = item->fi->resolved_max_height > 0 ? item->fi->resolved_max_height : FLT_MAX;
         }
     } else {
         // Cross axis constraints
         if (is_horizontal) {
             // Row direction: cross-axis is height
             min_size = item->fi->resolved_min_height;
-            max_size = item->fi->resolved_max_height;
+            max_size = item->fi->resolved_max_height > 0 ? item->fi->resolved_max_height : FLT_MAX;
         } else {
             // Column direction: cross-axis is width
             min_size = item->fi->resolved_min_width;
-            max_size = item->fi->resolved_max_width;
+            max_size = item->fi->resolved_max_width > 0 ? item->fi->resolved_max_width : FLT_MAX;
         }
     }
 
@@ -1607,26 +1608,26 @@ int apply_flex_constraint(
     if (hit_min) *hit_min = false;
     if (hit_max) *hit_max = false;
 
-    int clamped = computed_size;
+    float clamped = computed_size;
 
     // Apply max constraint first (per CSS spec, min takes precedence if conflict)
-    if (max_size > 0 && max_size < INT_MAX && clamped > max_size) {
+    if (max_size > 0 && max_size < FLT_MAX && clamped > max_size) {
         clamped = max_size;
         if (hit_max) *hit_max = true;
-        log_debug("CONSTRAINT: clamped to max=%d (wanted %d)", max_size, computed_size);
+        log_debug("CONSTRAINT: clamped to max=%.1f (wanted %.1f)", max_size, computed_size);
     }
 
     // Apply min constraint (takes precedence over max)
     // Note: min_size <= 0 means "no explicit minimum", but we still enforce 0 as absolute minimum
-    int effective_min = (min_size > 0) ? min_size : 0;
+    float effective_min = (min_size > 0) ? min_size : 0;
     if (clamped < effective_min) {
         clamped = effective_min;
         if (hit_min) *hit_min = true;
-        log_debug("CONSTRAINT: clamped to min=%d (wanted %d)", effective_min, computed_size);
+        log_debug("CONSTRAINT: clamped to min=%.1f (wanted %.1f)", effective_min, computed_size);
     }
 
     if (clamped != computed_size) {
-        log_debug("apply_flex_constraint: %s axis, computed=%d, min=%d, max=%d, result=%d",
+        log_debug("apply_flex_constraint: %s axis, computed=%.1f, min=%.1f, max=%.1f, result=%.1f",
                   is_main_axis ? "main" : "cross", computed_size, min_size, max_size, clamped);
     }
 
@@ -1636,9 +1637,9 @@ int apply_flex_constraint(
 /**
  * Overloaded version without hit flags for simpler use cases.
  */
-int apply_flex_constraint(
+float apply_flex_constraint(
     ViewElement* item,
-    int computed_size,
+    float computed_size,
     bool is_main_axis,
     FlexContainerLayout* flex_layout
 ) {
@@ -1652,17 +1653,17 @@ int apply_flex_constraint(
  * Note: Stretch can both expand AND shrink items to fit the line.
  * The resolved min/max constraints are still applied.
  */
-int apply_stretch_constraint(
+float apply_stretch_constraint(
     ViewElement* item,
-    int container_cross_size,
+    float container_cross_size,
     FlexContainerLayout* flex_layout
 ) {
     if (!item || !item->fi) return container_cross_size;
 
     // Apply cross-axis constraint
-    int constrained = apply_flex_constraint(item, container_cross_size, false, flex_layout);
+    float constrained = apply_flex_constraint(item, container_cross_size, false, flex_layout);
 
-    log_debug("apply_stretch_constraint: container_cross=%d, constrained=%d",
+    log_debug("apply_stretch_constraint: container_cross=%.1f, constrained=%.1f",
               container_cross_size, constrained);
 
     return constrained;
@@ -1674,7 +1675,7 @@ int apply_stretch_constraint(
 // NOTE: This is a simplified implementation that synthesizes the baseline
 // from the item's outer margin edge. Proper baseline alignment requires
 // running after all nested content is laid out, which is not yet implemented.
-int calculate_item_baseline(ViewElement* item) {
+float calculate_item_baseline(ViewElement* item) {
     if (!item) return 0;
 
     // Get top margin
@@ -1748,13 +1749,13 @@ int calculate_item_baseline(ViewElement* item) {
 
     // Synthesize baseline from outer margin edge (bottom of margin box)
     // This is the CSS spec fallback for elements without text or participating children
-    return margin_top + (int)item->height;
+    return margin_top + item->height;
 }
 
 // Find maximum baseline in a flex line for baseline alignment
 // container_align_items: the align-items value from the flex container
-int find_max_baseline(FlexLineInfo* line, int container_align_items) {
-    int max_baseline = 0;
+float find_max_baseline(FlexLineInfo* line, int container_align_items) {
+    float max_baseline = 0;
     bool found = false;
 
     for (int i = 0; i < line->item_count; i++) {
@@ -1768,16 +1769,16 @@ int find_max_baseline(FlexLineInfo* line, int container_align_items) {
                             (align_self == ALIGN_AUTO && container_align_items == ALIGN_BASELINE);
 
         if (uses_baseline) {
-            int baseline = calculate_item_baseline(item);
-            log_debug("find_max_baseline: item %d - baseline=%d, height=%d, margin_top=%d",
-                      i, baseline, (int)item->height, item->bound ? item->bound->margin.top : 0);
+            float baseline = calculate_item_baseline(item);
+            log_debug("find_max_baseline: item %d - baseline=%.1f, height=%.1f, margin_top=%d",
+                      i, baseline, item->height, item->bound ? item->bound->margin.top : 0);
             if (baseline > max_baseline) {
                 max_baseline = baseline;
             }
             found = true;
         }
     }
-    log_debug("find_max_baseline: max_baseline=%d, found=%d", max_baseline, found);
+    log_debug("find_max_baseline: max_baseline=%.1f, found=%d", max_baseline, found);
     return found ? max_baseline : 0;
 }
 
@@ -2036,11 +2037,11 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         return;
     }
 
-    int container_main_size = flex_layout->main_axis_size;
+    float container_main_size = flex_layout->main_axis_size;
 
     // CRITICAL: Store original flex basis for each item (needed for correct flex-shrink calculation)
     // Per CSS Flexbox spec §9.7, scaled shrink factor uses the original flex base size
-    int* item_flex_basis = (int*)calloc(line->item_count, sizeof(int));
+    float* item_flex_basis = (float*)calloc(line->item_count, sizeof(float));
     if (!item_flex_basis) return;
 
     // Track which items are frozen (have flex factor 0 or hit constraints during distribution)
@@ -2050,8 +2051,8 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         return;
     }
 
-    int total_initial_size = 0;
-    int total_margin_size = 0;
+    float total_initial_size = 0.0f;
+    float total_margin_size = 0.0f;
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
     // CSS Flexbox §9.7: Initialize items and freeze inflexible ones
@@ -2061,11 +2062,11 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         if (!item) continue;
 
         // Store original flex-basis for scaled shrink calculation
-        int basis = calculate_flex_basis(item, flex_layout);
+        float basis = calculate_flex_basis(item, flex_layout);
         item_flex_basis[i] = basis;
 
         // Calculate hypothetical main size (basis clamped by min/max constraints)
-        int hypothetical = calculate_hypothetical_main_size(item, flex_layout);
+        float hypothetical = calculate_hypothetical_main_size(item, flex_layout);
 
         // Check if item is inflexible (has 0 flex factor in ALL directions)
         bool is_inflexible = (!item->fi ||
@@ -2076,12 +2077,12 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             set_main_axis_size(item, hypothetical, flex_layout);
             frozen[i] = true;
             total_initial_size += hypothetical;
-            log_debug("ITERATIVE_FLEX - item %d: PRE-FROZEN (inflexible), size=%d", i, hypothetical);
+            log_debug("ITERATIVE_FLEX - item %d: PRE-FROZEN (inflexible), size=%.1f", i, hypothetical);
         } else {
             // Flexible items start at their flex-basis (will be adjusted during distribution)
             set_main_axis_size(item, basis, flex_layout);
             total_initial_size += basis;
-            log_debug("ITERATIVE_FLEX - item %d: FLEXIBLE (grow=%.2f, shrink=%.2f), basis=%d",
+            log_debug("ITERATIVE_FLEX - item %d: FLEXIBLE (grow=%.2f, shrink=%.2f), basis=%.1f",
                       i, item->fi->flex_grow, item->fi->flex_shrink, basis);
         }
 
@@ -2096,19 +2097,19 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     }
 
     // Calculate gap space
-    int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
+    float gap_space = calculate_gap_space(flex_layout, line->item_count, true);
 
     // Calculate initial free space
-    int free_space = container_main_size - total_initial_size - total_margin_size - gap_space;
+    float free_space = container_main_size - total_initial_size - total_margin_size - gap_space;
     line->free_space = free_space;
 
-    log_debug("FLEX FREE_SPACE: container=%d, initial=%d, margins=%d, gaps=%d, free=%d",
+    log_debug("FLEX FREE_SPACE: container=%.1f, initial=%.1f, margins=%.1f, gaps=%.1f, free=%.1f",
               container_main_size, total_initial_size, total_margin_size, gap_space, free_space);
 
-    log_info("ITERATIVE_FLEX START - container=%d, initial=%d, gap=%d, free_space=%d",
+    log_info("ITERATIVE_FLEX START - container=%.1f, initial=%.1f, gap=%.1f, free_space=%.1f",
               container_main_size, total_initial_size, gap_space, free_space);
 
-    if (free_space == 0) {
+    if (free_space == 0.0f) {
         free(item_flex_basis);
         free(frozen);
         return;  // No space to distribute
@@ -2118,11 +2119,11 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     // Per CSS Flexbox Spec: https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths
     const int MAX_ITERATIONS = 10;  // Prevent infinite loops
     int iteration = 0;
-    int remaining_free_space = free_space;
+    float remaining_free_space = free_space;
 
     while (iteration < MAX_ITERATIONS) {
         iteration++;
-        log_debug("ITERATIVE_FLEX - iteration %d, remaining_free_space=%d", iteration, remaining_free_space);
+        log_debug("ITERATIVE_FLEX - iteration %d, remaining_free_space=%.1f", iteration, remaining_free_space);
 
         // Re-evaluate whether we're growing or shrinking based on CURRENT remaining_free_space
         // CRITICAL: When main axis is indefinite (shrink-to-fit), NEVER grow items
@@ -2153,11 +2154,11 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             } else if (is_shrinking && item->fi->flex_shrink > 0) {
                 // CRITICAL FIX: Use original flex_basis for scaled shrink factor
                 // Per CSS Flexbox spec: scaled_flex_shrink_factor = flex_shrink × flex_base_size
-                int flex_basis = item_flex_basis[i];
+                float flex_basis = item_flex_basis[i];
                 double scaled = (double)flex_basis * item->fi->flex_shrink;
                 total_scaled_shrink += scaled;
                 unfrozen_count++;
-                log_debug("FLEX_SHRINK - item %d: flex_shrink=%.2f, flex_basis=%d, scaled=%.2f",
+                log_debug("FLEX_SHRINK - item %d: flex_shrink=%.2f, flex_basis=%.1f, scaled=%.2f",
                           i, item->fi->flex_shrink, flex_basis, scaled);
             }
         }
@@ -2172,8 +2173,8 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
         // CSS Flexbox §9.7 Step 5: Calculate target sizes for unfrozen items
         // Store target sizes and violation info for two-phase freezing
-        int* target_sizes = (int*)calloc(line->item_count, sizeof(int));
-        int* clamped_sizes = (int*)calloc(line->item_count, sizeof(int));
+        float* target_sizes = (float*)calloc(line->item_count, sizeof(float));
+        float* clamped_sizes = (float*)calloc(line->item_count, sizeof(float));
         bool* has_min_violation = (bool*)calloc(line->item_count, sizeof(bool));
         bool* has_max_violation = (bool*)calloc(line->item_count, sizeof(bool));
 
@@ -2182,7 +2183,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             break;
         }
 
-        int total_violation = 0;
+        float total_violation = 0.0f;
 
         for (int i = 0; i < line->item_count; i++) {
             if (frozen[i]) continue;
@@ -2190,8 +2191,8 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             ViewElement* item = (ViewElement*)line->items[i]->as_element();
             if (!item || !item->fi) continue;
 
-            int current_size = get_main_axis_size(item, flex_layout);
-            int target_size = current_size;
+            float current_size = get_main_axis_size(item, flex_layout);
+            float target_size = current_size;
 
             if (is_growing && item->fi->flex_grow > 0) {
                 // FLEX-GROW: Distribute positive free space
@@ -2199,21 +2200,21 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
                     ? remaining_free_space * total_flex_factor
                     : remaining_free_space;
                 double grow_ratio = item->fi->flex_grow / total_flex_factor;
-                int grow_amount = (int)round(grow_ratio * effective_free_space);
+                float grow_amount = (float)(grow_ratio * effective_free_space);
                 target_size = current_size + grow_amount;
 
-                log_debug("ITERATIVE_FLEX - item %d: grow_ratio=%.4f, grow_amount=%d, %d→%d",
+                log_debug("ITERATIVE_FLEX - item %d: grow_ratio=%.4f, grow_amount=%.1f, %.1f→%.1f",
                           i, grow_ratio, grow_amount, current_size, target_size);
 
             } else if (is_shrinking && item->fi->flex_shrink > 0) {
                 // FLEX-SHRINK: Distribute negative space using scaled shrink factor
-                int flex_basis = item_flex_basis[i];
+                float flex_basis = item_flex_basis[i];
                 double scaled_shrink = (double)flex_basis * item->fi->flex_shrink;
                 double shrink_ratio = scaled_shrink / total_scaled_shrink;
-                int shrink_amount = (int)round(shrink_ratio * (-remaining_free_space));
+                float shrink_amount = (float)(shrink_ratio * (-remaining_free_space));
                 target_size = current_size - shrink_amount;
 
-                log_debug("FLEX_SHRINK - item %d: shrink_ratio=%.4f, shrink=%d, %d→%d",
+                log_debug("FLEX_SHRINK - item %d: shrink_ratio=%.4f, shrink=%.1f, %.1f→%.1f",
                           i, shrink_ratio, shrink_amount, current_size, target_size);
             }
 
@@ -2221,17 +2222,17 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
             // Step 5c: Clamp and detect violations
             bool hit_min = false, hit_max = false;
-            int clamped = apply_flex_constraint(item, target_size, true, flex_layout, &hit_min, &hit_max);
+            float clamped = apply_flex_constraint(item, target_size, true, flex_layout, &hit_min, &hit_max);
             clamped_sizes[i] = clamped;
 
             // Track violation type and amount
-            int adjustment = clamped - target_size;
-            if (adjustment > 0) {
+            float adjustment = clamped - target_size;
+            if (adjustment > 0.0f) {
                 has_min_violation[i] = true;  // Made larger by min constraint
-                log_debug("ITERATIVE_FLEX - item %d: MIN violation, %d→%d (+%d)", i, target_size, clamped, adjustment);
-            } else if (adjustment < 0) {
+                log_debug("ITERATIVE_FLEX - item %d: MIN violation, %.1f→%.1f (+%.1f)", i, target_size, clamped, adjustment);
+            } else if (adjustment < 0.0f) {
                 has_max_violation[i] = true;  // Made smaller by max constraint
-                log_debug("ITERATIVE_FLEX - item %d: MAX violation, %d→%d (%d)", i, target_size, clamped, adjustment);
+                log_debug("ITERATIVE_FLEX - item %d: MAX violation, %.1f→%.1f (%.1f)", i, target_size, clamped, adjustment);
             }
             total_violation += adjustment;
         }
@@ -2240,7 +2241,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         // - Positive total: freeze items with min violations
         // - Negative total: freeze items with max violations
         // - Zero total: freeze all items (converged)
-        log_debug("ITERATIVE_FLEX - total_violation=%d", total_violation);
+        log_debug("ITERATIVE_FLEX - total_violation=%.1f", total_violation);
 
         bool any_frozen_this_iteration = false;
         for (int i = 0; i < line->item_count; i++) {
@@ -2250,11 +2251,11 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             if (!item) continue;
 
             bool should_freeze = false;
-            if (total_violation == 0) {
+            if (total_violation == 0.0f) {
                 should_freeze = true;  // Converged - freeze all
-            } else if (total_violation > 0 && has_min_violation[i]) {
+            } else if (total_violation > 0.0f && has_min_violation[i]) {
                 should_freeze = true;  // Positive total - freeze min violations
-            } else if (total_violation < 0 && has_max_violation[i]) {
+            } else if (total_violation < 0.0f && has_max_violation[i]) {
                 should_freeze = true;  // Negative total - freeze max violations
             }
 
@@ -2264,15 +2265,15 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             if (should_freeze) {
                 frozen[i] = true;
                 any_frozen_this_iteration = true;
-                log_debug("ITERATIVE_FLEX - item %d: FROZEN at size %d", i, clamped_sizes[i]);
+                log_debug("ITERATIVE_FLEX - item %d: FROZEN at size %.1f", i, clamped_sizes[i]);
             }
 
             // Adjust cross axis size based on aspect ratio
             if (item->fi && item->fi->aspect_ratio > 0) {
                 if (is_main_axis_horizontal(flex_layout)) {
-                    item->height = (int)(clamped_sizes[i] / item->fi->aspect_ratio);
+                    item->height = clamped_sizes[i] / item->fi->aspect_ratio;
                 } else {
-                    item->width = (int)(clamped_sizes[i] * item->fi->aspect_ratio);
+                    item->width = clamped_sizes[i] * item->fi->aspect_ratio;
                 }
             }
         }
@@ -2297,10 +2298,10 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             }
         }
         remaining_free_space = container_main_size - total_current_size - gap_space;
-        log_debug("ITERATIVE_FLEX - recalculated remaining_free_space=%d", remaining_free_space);
+        log_debug("ITERATIVE_FLEX - recalculated remaining_free_space=%.1f", remaining_free_space);
 
         // If remaining free space is negligible, stop
-        if (abs(remaining_free_space) < 2) {
+        if (fabsf(remaining_free_space) < 2.0f) {
             log_debug("ITERATIVE_FLEX - remaining space negligible, stopping");
             break;
         }
@@ -2315,21 +2316,21 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
 
-    int container_size = flex_layout->main_axis_size;
-    log_info("MAIN_AXIS_ALIGN - container_size=%d, item_count=%d, justify=%d",
+    float container_size = flex_layout->main_axis_size;
+    log_info("MAIN_AXIS_ALIGN - container_size=%.1f, item_count=%d, justify=%d",
              container_size, line->item_count, flex_layout->justify);
 
     // *** FIX 1: Calculate total item size INCLUDING margins for positioning ***
     // CSS Flexbox: margins are part of the item's outer size for justify-content
-    int total_item_size = 0;
+    float total_item_size = 0.0f;
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
-        int item_size = get_main_axis_outer_size(item, flex_layout);
-        log_debug("MAIN_AXIS_ALIGN - item %d outer size: %d", i, item_size);
+        float item_size = get_main_axis_outer_size(item, flex_layout);
+        log_debug("MAIN_AXIS_ALIGN - item %d outer size: %.1f", i, item_size);
         total_item_size += item_size;
     }
-    log_info("MAIN_AXIS_ALIGN - total_item_size=%d (with margins, without gaps)", total_item_size);
+    log_info("MAIN_AXIS_ALIGN - total_item_size=%.1f (with margins, without gaps)", total_item_size);
 
     // Check for auto margins on main axis
     int auto_margin_count = 0;
@@ -2345,18 +2346,18 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         }
     }
 
-    int current_pos = 0;
-    int spacing = 0;
-    float auto_margin_size = 0;
+    float current_pos = 0.0f;
+    float spacing = 0.0f;
+    float auto_margin_size = 0.0f;
 
     // *** FIX 2: For justify-content calculations, include gaps in total size ***
-    int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
-    int total_size_with_gaps = total_item_size + gap_space;
-    int free_space = container_size - total_size_with_gaps;
+    float gap_space = calculate_gap_space(flex_layout, line->item_count, true);
+    float total_size_with_gaps = total_item_size + gap_space;
+    float free_space = container_size - total_size_with_gaps;
 
-    if (auto_margin_count > 0 && free_space > 0) {
+    if (auto_margin_count > 0 && free_space > 0.0f) {
         // Distribute free space among auto margins
-        auto_margin_size = (float)free_space / auto_margin_count;
+        auto_margin_size = free_space / auto_margin_count;
     } else {
         // Apply justify-content if no auto margins
         // CRITICAL FIX: Use justify value directly - it's now stored as Lexbor constant
@@ -2585,27 +2586,27 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                     if (is_row_flex_with_wrap) {
                         // Row flex containers with wrap should use available width for proper wrapping
                         // Set width to container's cross-axis size (available width)
-                        int available_width = (int)flex_layout->cross_axis_size;
-                        if (available_width > 0 && item->width <= 0) {
+                        float available_width = flex_layout->cross_axis_size;
+                        if (available_width > 0.0f && item->width <= 0.0f) {
                             item->width = available_width;
-                            log_debug("ROW_FLEX_WRAP_WIDTH: Set item width=%d from available width (align=%d)",
+                            log_debug("ROW_FLEX_WRAP_WIDTH: Set item width=%.1f from available width (align=%d)",
                                       available_width, align_type);
                         }
-                    } else if (item->width <= 0 && item->fi->has_intrinsic_width) {
-                        int intrinsic_width = item->fi->intrinsic_width.max_content;
-                        if (intrinsic_width > 0) {
+                    } else if (item->width <= 0.0f && item->fi->has_intrinsic_width) {
+                        float intrinsic_width = item->fi->intrinsic_width.max_content;
+                        if (intrinsic_width > 0.0f) {
                             item->width = intrinsic_width;
-                            log_debug("INTRINSIC_WIDTH: Set item width=%d from intrinsic content (align=%d)",
+                            log_debug("INTRINSIC_WIDTH: Set item width=%.1f from intrinsic content (align=%d)",
                                       intrinsic_width, align_type);
                         }
                     }
                 } else {
                     // Row flex: cross-axis is height
-                    if (item->height <= 0 && item->fi->has_intrinsic_height) {
-                        int intrinsic_height = item->fi->intrinsic_height.max_content;
-                        if (intrinsic_height > 0) {
+                    if (item->height <= 0.0f && item->fi->has_intrinsic_height) {
+                        float intrinsic_height = item->fi->intrinsic_height.max_content;
+                        if (intrinsic_height > 0.0f) {
                             item->height = intrinsic_height;
-                            log_debug("INTRINSIC_HEIGHT: Set item height=%d from intrinsic content (align=%d)",
+                            log_debug("INTRINSIC_HEIGHT: Set item height=%.1f from intrinsic content (align=%d)",
                                       intrinsic_height, align_type);
                         }
                     }
@@ -2869,7 +2870,7 @@ void align_content(FlexContainerLayout* flex_layout) {
 // CRITICAL FIX: Box model aware utility functions
 // These functions properly handle content vs border-box dimensions like block layout
 
-int get_border_box_width(ViewElement* item) {
+float get_border_box_width(ViewElement* item) {
     // FIXED: Now that we have proper box-sizing implementation in layout_block.cpp,
     // the item->width already represents the correct dimensions based on box-sizing property.
     // No need to subtract padding again - that would cause double-subtraction!
@@ -2882,48 +2883,48 @@ int get_border_box_width(ViewElement* item) {
     return item->width;
 }
 
-int get_content_width(ViewBlock* item) {
-    int border_box_width = get_border_box_width(item);
+float get_content_width(ViewBlock* item) {
+    float border_box_width = get_border_box_width(item);
 
     if (!item->bound) {
         return border_box_width;
     }
 
     // Subtract padding and border from border-box width to get content width
-    int padding_and_border = item->bound->padding.left + item->bound->padding.right +
+    float padding_and_border = item->bound->padding.left + item->bound->padding.right +
         (item->bound->border ? item->bound->border->width.left + item->bound->border->width.right : 0);
 
-    return max(border_box_width - padding_and_border, 0);
+    return fmaxf(border_box_width - padding_and_border, 0);
 }
 
-int get_content_height(ViewBlock* item) {
+float get_content_height(ViewBlock* item) {
     if (!item->bound) {
         return item->height;
     }
 
     // CRITICAL WORKAROUND for missing box-sizing: border-box implementation
-    int padding_and_border = item->bound->padding.top + item->bound->padding.bottom +
+    float padding_and_border = item->bound->padding.top + item->bound->padding.bottom +
         (item->bound->border ? item->bound->border->width.top + item->bound->border->width.bottom : 0);
 
     // HACK: For flex items with padding, assume box-sizing: border-box was intended
     if (padding_and_border > 0) {
-        int intended_border_box_height = item->height - padding_and_border;  // 120 - 20 = 100
-        int content_height = intended_border_box_height - padding_and_border;  // 100 - 20 = 80
-        return max(content_height, 0);
+        float intended_border_box_height = item->height - padding_and_border;  // 120 - 20 = 100
+        float content_height = intended_border_box_height - padding_and_border;  // 100 - 20 = 80
+        return fmaxf(content_height, 0);
     }
 
     // No padding/border: use height as-is
     return item->height;
 }
 
-int get_border_offset_left(ViewBlock* item) {
+float get_border_offset_left(ViewBlock* item) {
     if (!item->bound || !item->bound->border) {
         return 0;
     }
     return item->bound->border->width.left;
 }
 
-int get_border_offset_top(ViewBlock* item) {
+float get_border_offset_top(ViewBlock* item) {
     if (!item->bound || !item->bound->border) {
         return 0;
     }
@@ -2931,17 +2932,17 @@ int get_border_offset_top(ViewBlock* item) {
 }
 
 // Utility functions for axis-agnostic positioning
-int get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
+float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     // Returns the CONTENT SIZE (border-box) of the item, WITHOUT margins
     // Margins are handled separately in free space and positioning calculations
     // This matches CSS Flexbox spec: flex-grow/shrink operates on content sizes
-    int base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
+    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
     return base_size;
 }
 
 // Get the outer size including margins - used for justify-content calculations
-int get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    int base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
+float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout) {
+    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
 
     // Include margins in main axis size for positioning calculations
     if (item->bound) {
@@ -2955,7 +2956,7 @@ int get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout
     return base_size;
 }
 
-int get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
+float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (is_main_axis_horizontal(flex_layout)) {
         // Cross-axis is height for horizontal flex containers
         // CRITICAL FIX: Check CSS height first
@@ -2975,10 +2976,10 @@ int get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     }
 }
 
-int get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout) {
+float get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Return position relative to container content area, not absolute position
     ViewBlock* container = (ViewBlock*)item->parent;
-    int border_offset = 0;
+    float border_offset = 0;
 
     if (container && container->bound && container->bound->border) {
         if (is_main_axis_horizontal(flex_layout)) {
@@ -2996,10 +2997,10 @@ int get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout)
     }
 }
 
-void set_main_axis_position(ViewElement* item, int position, FlexContainerLayout* flex_layout) {
+void set_main_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout) {
     // ENHANCED: Account for container border AND padding offset
     ViewElement* container = (ViewElement*)item->parent;
-    int offset = 0;  // Combined border + padding offset
+    float offset = 0;  // Combined border + padding offset
 
     if (container && container->bound) {
         if (container->bound->border) {
@@ -3017,36 +3018,36 @@ void set_main_axis_position(ViewElement* item, int position, FlexContainerLayout
         }
     }
 
-    log_debug("set_main_axis_position: item=%p, position=%d, offset=%d (border+padding)", item, position, offset);
+    log_debug("set_main_axis_position: item=%p, position=%.1f, offset=%.1f (border+padding)", item, position, offset);
 
     if (is_main_axis_horizontal(flex_layout)) {
         log_debug("DIRECTION_CHECK - flex_layout->direction=%d, CSS_VALUE_ROW_REVERSE=%d",
                flex_layout->direction, CSS_VALUE_ROW_REVERSE);
         if (flex_layout->direction == CSS_VALUE_ROW_REVERSE) {
             // ROW-REVERSE: Position from right edge
-            int container_width = (int)flex_layout->main_axis_size;
-            int item_width = get_main_axis_size(item, flex_layout);
-            int calculated_x = container_width - position - item_width + offset;
+            float container_width = flex_layout->main_axis_size;
+            float item_width = get_main_axis_size(item, flex_layout);
+            float calculated_x = container_width - position - item_width + offset;
             item->x = calculated_x;
-            log_debug("ROW_REVERSE - container_width=%d, position=%d, item_width=%d, offset=%d, calculated_x=%d, final_x=%d",
+            log_debug("ROW_REVERSE - container_width=%.1f, position=%.1f, item_width=%.1f, offset=%.1f, calculated_x=%.1f, final_x=%.1f",
                    container_width, position, item_width, offset, calculated_x, item->x);
         } else {
             // Normal left-to-right positioning
-            int final_x = position + offset;
-            log_debug("set_main_axis_position: Setting item->x to %d (before: %.0f)", final_x, item->x);
+            float final_x = position + offset;
+            log_debug("set_main_axis_position: Setting item->x to %.1f (before: %.1f)", final_x, item->x);
             item->x = final_x;
-            log_debug("set_main_axis_position: After setting, item->x = %.0f", item->x);
-            log_debug("NORMAL_ROW - position=%d, offset=%d, final_x=%d",
+            log_debug("set_main_axis_position: After setting, item->x = %.1f", item->x);
+            log_debug("NORMAL_ROW - position=%.1f, offset=%.1f, final_x=%.1f",
                    position, offset, item->x);
         }
     } else {
         if (flex_layout->direction == CSS_VALUE_COLUMN_REVERSE) {
             // COLUMN-REVERSE: Position from bottom edge
-            int container_height = (int)flex_layout->main_axis_size;
-            int item_height = get_main_axis_size(item, flex_layout);
-            int calculated_y = container_height - position - item_height + offset;
+            float container_height = flex_layout->main_axis_size;
+            float item_height = get_main_axis_size(item, flex_layout);
+            float calculated_y = container_height - position - item_height + offset;
             item->y = calculated_y;
-            log_debug("COLUMN_REVERSE - container_height=%d, position=%d, item_height=%d, offset=%d, calculated_y=%d, final_y=%d",
+            log_debug("COLUMN_REVERSE - container_height=%.1f, position=%.1f, item_height=%.1f, offset=%.1f, calculated_y=%.1f, final_y=%.1f",
                    container_height, position, item_height, offset, calculated_y, item->y);
         } else {
             // Normal top-to-bottom positioning
@@ -3055,10 +3056,10 @@ void set_main_axis_position(ViewElement* item, int position, FlexContainerLayout
     }
 }
 
-void set_cross_axis_position(ViewElement* item, int position, FlexContainerLayout* flex_layout) {
+void set_cross_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Account for container border AND padding offset on cross axis
     ViewElement* container = (ViewElement*)item->parent;
-    int offset = 0;  // Combined border + padding offset
+    float offset = 0;  // Combined border + padding offset
 
     if (container && container->bound) {
         if (container->bound->border) {
@@ -3076,7 +3077,7 @@ void set_cross_axis_position(ViewElement* item, int position, FlexContainerLayou
         }
     }
 
-    log_debug("SET_CROSS_POS - position=%d, offset=%d (border+padding), final=%d",
+    log_debug("SET_CROSS_POS - position=%.1f, offset=%.1f (border+padding), final=%.1f",
            position, offset, position + offset);
 
     if (is_main_axis_horizontal(flex_layout)) {
@@ -3086,7 +3087,7 @@ void set_cross_axis_position(ViewElement* item, int position, FlexContainerLayou
     }
 }
 
-void set_main_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_layout) {
+void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Store the correct border-box size (like browsers do)
     // The flex algorithm works with border-box dimensions (100px)
     // We should store this directly to match browser behavior
@@ -3099,7 +3100,7 @@ void set_main_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_l
     }
 }
 
-void set_cross_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_layout) {
+void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout) {
     if (is_main_axis_horizontal(flex_layout)) {
         item->height = size;
     } else {
@@ -3108,10 +3109,10 @@ void set_cross_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_
 }
 
 // Calculate gap space for items or lines
-int calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis) {
+float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis) {
     if (item_count <= 1) return 0;
 
-    int gap = is_main_axis ?
+    float gap = is_main_axis ?
               (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) :
               (is_main_axis_horizontal(flex_layout) ? flex_layout->row_gap : flex_layout->column_gap);
 
