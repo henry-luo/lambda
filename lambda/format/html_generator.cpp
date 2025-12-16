@@ -238,6 +238,20 @@ std::string HtmlGenerator::getFontClass(const FontContext& font) const {
         case FontShape::Upright: break;
     }
     
+    // Include font size as class (e.g., "small", "large") for LaTeX.js compatibility
+    switch (font.size) {
+        case FontSize::Tiny: ss << "tiny "; break;
+        case FontSize::ScriptSize: ss << "scriptsize "; break;
+        case FontSize::FootnoteSize: ss << "footnotesize "; break;
+        case FontSize::Small: ss << "small "; break;
+        case FontSize::NormalSize: break;  // Default, don't output
+        case FontSize::Large: ss << "large "; break;
+        case FontSize::Large2: ss << "Large "; break;
+        case FontSize::Large3: ss << "LARGE "; break;
+        case FontSize::Huge: ss << "huge "; break;
+        case FontSize::Huge2: ss << "Huge "; break;
+    }
+    
     std::string result = ss.str();
     if (!result.empty() && result.back() == ' ') {
         result.pop_back();  // Remove trailing space
@@ -409,7 +423,7 @@ void HtmlGenerator::startDescription() {
     LatexGenerator::startList();
     pushListState("description");
     
-    writer_->openTag("dl", "description");
+    writer_->openTag("dl", "list");
 }
 
 void HtmlGenerator::endDescription() {
@@ -441,19 +455,25 @@ void HtmlGenerator::createItem(const char* label) {
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
         
-        // Use different bullet markers based on nesting depth (matching LaTeX default)
-        int depth = getListDepth();
-        if (depth == 2) {
-            // Level 2: en-dash with rm bf up styling
-            writer_->openTag("span", "rm bf up");
-            writer_->writeRawHtml("–");  // U+2013 EN DASH
-            writer_->closeTag("span");  // close rm bf up
-        } else if (depth == 3) {
-            writer_->writeRawHtml("*");  // Level 3: asterisk
-        } else if (depth >= 4) {
-            writer_->writeRawHtml("·");  // Level 4+: middle dot (U+00B7)
+        // Check if custom label is provided
+        if (label != nullptr) {
+            // Use custom label (can be empty string for \item[])
+            writer_->writeRawHtml(label);
         } else {
-            writer_->writeRawHtml("•");  // Level 1: bullet (U+2022)
+            // Use different bullet markers based on nesting depth (matching LaTeX default)
+            int depth = getListDepth();
+            if (depth == 2) {
+                // Level 2: en-dash with rm bf up styling
+                writer_->openTag("span", "rm bf up");
+                writer_->writeRawHtml("–");  // U+2013 EN DASH
+                writer_->closeTag("span");  // close rm bf up
+            } else if (depth == 3) {
+                writer_->writeRawHtml("*");  // Level 3: asterisk
+            } else if (depth >= 4) {
+                writer_->writeRawHtml("·");  // Level 4+: middle dot (U+00B7)
+            } else {
+                writer_->writeRawHtml("•");  // Level 1: bullet (U+2022)
+            }
         }
         
         writer_->closeTag("span");  // close hbox llap
@@ -479,6 +499,8 @@ void HtmlGenerator::createItem(const char* label) {
             writer_->closeTag("dt");
         }
         writer_->openTag("dd", nullptr);
+        // Open paragraph for content (same as itemize/enumerate)
+        writer_->openTag("p", nullptr);
     }
 }
 
@@ -509,6 +531,13 @@ void HtmlGenerator::endItem() {
         // Close <li> tag
         writer_->closeTag("li");
     } else if (state.type == "description") {
+        // Close <p> tag first if open
+        if (!writer_->removeLastOpenedTagIfEmpty("p")) {
+            if (writer_->isTagOpen("p")) {
+                writer_->trimTrailingWhitespace();
+                writer_->closeTag("p");
+            }
+        }
         // Close <dd> tag
         writer_->closeTag("dd");
     }
@@ -525,7 +554,7 @@ void HtmlGenerator::itemParagraphBreak() {
     
     ListState& state = currentList();
     
-    if (state.type == "itemize" || state.type == "enumerate") {
+    if (state.type == "itemize" || state.type == "enumerate" || state.type == "description") {
         // Trim trailing whitespace before closing paragraph
         writer_->trimTrailingWhitespace();
         // Close current <p>
@@ -533,7 +562,6 @@ void HtmlGenerator::itemParagraphBreak() {
         // Open new <p>
         writer_->openTag("p", nullptr);
     }
-    // For description lists, we don't do paragraph breaks inside <dd>
 }
 
 std::string HtmlGenerator::getEnumerateLabel(int depth) const {
