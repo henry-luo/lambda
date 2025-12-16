@@ -432,12 +432,16 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_H6 || tag_id == HTM_TAG_P ||
             tag_id == HTM_TAG_DIV || tag_id == HTM_TAG_CENTER ||
             tag_id == HTM_TAG_UL || tag_id == HTM_TAG_OL ||
+            tag_id == HTM_TAG_DL || tag_id == HTM_TAG_DT || tag_id == HTM_TAG_DD ||
             tag_id == HTM_TAG_HEADER || tag_id == HTM_TAG_MAIN ||
             tag_id == HTM_TAG_SECTION || tag_id == HTM_TAG_FOOTER ||
             tag_id == HTM_TAG_ARTICLE || tag_id == HTM_TAG_ASIDE ||
             tag_id == HTM_TAG_NAV || tag_id == HTM_TAG_ADDRESS ||
             tag_id == HTM_TAG_BLOCKQUOTE || tag_id == HTM_TAG_DETAILS ||
             tag_id == HTM_TAG_DIALOG || tag_id == HTM_TAG_FIGURE ||
+            tag_id == HTM_TAG_FIGCAPTION || tag_id == HTM_TAG_HGROUP ||
+            tag_id == HTM_TAG_PRE || tag_id == HTM_TAG_FIELDSET ||
+            tag_id == HTM_TAG_LEGEND || tag_id == HTM_TAG_FORM ||
             tag_id == HTM_TAG_MENU) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
