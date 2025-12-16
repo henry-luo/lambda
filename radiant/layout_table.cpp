@@ -612,7 +612,7 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
             // Set HTML UA default (can be overridden by CSS or cellspacing attribute below)
             table->tb->border_spacing_h = 2.0f;
             table->tb->border_spacing_v = 2.0f;
-            
+
             // Handle HTML cellspacing attribute (e.g., cellspacing="0")
             // This overrides the UA default but can be overridden by CSS border-spacing
             const char* cellspacing_attr = dom_elem->get_attribute("cellspacing");
