@@ -511,6 +511,15 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                         return elem_builder.final();
                     }
                     
+                    // Discretionary hyphen: \- - preserve as space_cmd element
+                    // Formatter will convert to soft hyphen U+00AD
+                    if (escaped_char == '-') {
+                        ElementBuilder elem_builder = builder.element("space_cmd");
+                        String* cmd_str = builder.createString(source + start, end - start);
+                        elem_builder.child({.item = s2it(cmd_str)});
+                        return elem_builder.final();
+                    }
+                    
                     // For other control symbols, return the escaped character as string
                     return {.item = s2it(builder.createString(source + start + 1, end - start - 1))};
                 }
