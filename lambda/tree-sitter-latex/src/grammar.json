@@ -116,8 +116,15 @@
       }
     },
     "paragraph_break": {
-      "type": "PATTERN",
-      "value": "\\n[ \\t]*\\n"
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "PATTERN",
+          "value": "\\n[ \\t]*\\n"
+        }
+      }
     },
     "section": {
       "type": "PREC_RIGHT",
@@ -187,6 +194,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "paragraph_break"
+        },
+        {
+          "type": "SYMBOL",
           "name": "line_comment"
         },
         {
@@ -220,6 +231,10 @@
         {
           "type": "SYMBOL",
           "name": "placeholder"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nbsp"
         }
       ]
     },
@@ -229,7 +244,7 @@
     },
     "space": {
       "type": "PATTERN",
-      "value": "[ \\t\\n]+"
+      "value": "[ \\t]+|\\n"
     },
     "line_comment": {
       "type": "PATTERN",
@@ -415,6 +430,10 @@
         {
           "type": "SYMBOL",
           "name": "placeholder"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nbsp"
         },
         {
           "type": "STRING",
