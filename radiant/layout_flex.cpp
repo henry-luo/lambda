@@ -1399,26 +1399,68 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
               item, item->blk ? item->blk->given_min_width : -1.0f, min_width, item->fi->has_explicit_width);
 
     // Resolve 'auto' min-width/height for flex items
-    // Per CSS Flexbox spec, min-width: auto = min-content size (automatic minimum)
-    // Check for explicit width/height from CSS directly (more reliable than has_explicit flags)
+    // Per CSS Flexbox spec section 4.5:
+    // - For MAIN AXIS: min-size: auto = min-content (automatic minimum size)
+    //   EXCEPT when flex-basis is 0 (not 0%), the automatic minimum is 0
+    // - For CROSS AXIS: min-size: auto = 0 (no automatic minimum for cross-axis)
+    //
+    // For cross-axis in row layout, we still use intrinsic height to prevent shrinking
+    // below content (this is different from the automatic minimum spec - it's about
+    // respecting existing content size during stretch operations).
     bool has_css_width = item->blk && item->blk->given_width > 0;
     bool has_css_height = item->blk && item->blk->given_height > 0;
 
+    // Check if flex-basis is exactly 0 (not 0% and not auto)
+    bool flex_basis_is_zero = item->fi->flex_basis == 0 && !item->fi->flex_basis_is_percent;
+
     if (min_width <= 0 && !has_css_width) {
-        // For flex items, min-width: auto uses min-content size as the minimum
-        if (!item->fi->has_intrinsic_width) {
-            calculate_item_intrinsic_sizes(item, flex_layout);
+        if (is_horizontal) {
+            // Row layout: width is main axis
+            if (flex_basis_is_zero) {
+                // flex-basis: 0 means items start from 0 and grow/shrink
+                // The automatic minimum should be 0 to allow equal distribution
+                min_width = 0;
+                log_debug("resolve_flex_item_constraints: flex-basis=0, auto min-width set to 0");
+            } else {
+                // Use min-content for automatic minimum
+                if (!item->fi->has_intrinsic_width) {
+                    calculate_item_intrinsic_sizes(item, flex_layout);
+                }
+                min_width = item->fi->intrinsic_width.min_content;
+                log_debug("resolve_flex_item_constraints: main axis auto min-width = min-content: %d", min_width);
+            }
+        } else {
+            // Column layout: width is cross axis - automatic minimum is 0
+            min_width = 0;
+            log_debug("resolve_flex_item_constraints: column layout, cross-axis min-width set to 0");
         }
-        min_width = item->fi->intrinsic_width.min_content;
-        log_debug("resolve_flex_item_constraints: auto min-width resolved to min-content: %d", min_width);
     }
 
     if (min_height <= 0 && !has_css_height) {
-        if (!item->fi->has_intrinsic_height) {
-            calculate_item_intrinsic_sizes(item, flex_layout);
+        if (!is_horizontal) {
+            // Column layout: height is main axis
+            if (flex_basis_is_zero) {
+                // flex-basis: 0 means items start from 0 and grow/shrink
+                // The automatic minimum should be 0 to allow equal distribution
+                min_height = 0;
+                log_debug("resolve_flex_item_constraints: flex-basis=0, auto min-height set to 0");
+            } else {
+                // Use min-content for automatic minimum
+                if (!item->fi->has_intrinsic_height) {
+                    calculate_item_intrinsic_sizes(item, flex_layout);
+                }
+                min_height = item->fi->intrinsic_height.min_content;
+                log_debug("resolve_flex_item_constraints: main axis auto min-height = min-content: %d", min_height);
+            }
+        } else {
+            // Row layout: height is cross axis
+            // Use intrinsic height to prevent shrinking below content during stretch
+            if (!item->fi->has_intrinsic_height) {
+                calculate_item_intrinsic_sizes(item, flex_layout);
+            }
+            min_height = item->fi->intrinsic_height.min_content;
+            log_debug("resolve_flex_item_constraints: row layout, cross-axis min-height = intrinsic %d", min_height);
         }
-        min_height = item->fi->intrinsic_height.min_content;
-        log_debug("resolve_flex_item_constraints: auto min-height resolved to min-content: %d", min_height);
     }
 
     // Store resolved constraints in FlexItemProp for use during flex algorithm
@@ -1606,6 +1648,9 @@ int apply_flex_constraint(
 /**
  * Apply cross-axis constraints for align-items: stretch.
  * Returns the constrained cross size for stretching.
+ * 
+ * Note: Stretch can both expand AND shrink items to fit the line.
+ * The resolved min/max constraints are still applied.
  */
 int apply_stretch_constraint(
     ViewElement* item,
