@@ -1648,7 +1648,7 @@ int apply_flex_constraint(
 /**
  * Apply cross-axis constraints for align-items: stretch.
  * Returns the constrained cross size for stretching.
- * 
+ *
  * Note: Stretch can both expand AND shrink items to fit the line.
  * The resolved min/max constraints are still applied.
  */
