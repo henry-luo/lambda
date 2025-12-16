@@ -46,6 +46,22 @@ void TextHtmlWriter::writeRawHtml(const char* html) {
     strbuf_append_str(buf_, html);
 }
 
+void TextHtmlWriter::trimTrailingWhitespace() {
+    // Trim trailing whitespace from the buffer (spaces and tabs, not newlines)
+    // This is used before closing paragraph tags to match LaTeX.js behavior
+    size_t len = buf_->length;
+    while (len > 0) {
+        char c = buf_->str[len - 1];
+        if (c == ' ' || c == '\t') {
+            len--;
+        } else {
+            break;
+        }
+    }
+    buf_->length = len;
+    buf_->str[len] = '\0';
+}
+
 void TextHtmlWriter::openTag(const char* tag, const char* classes, 
                              const char* id, const char* style) {
     if (!tag) return;
@@ -241,6 +257,7 @@ void TextHtmlWriter::appendIndent() {
 
 void TextHtmlWriter::escapeHtml(const char* text, size_t len) {
     // HTML entity escaping
+    // Note: Quotes don't need escaping in text content, only in attributes
     for (size_t i = 0; i < len; i++) {
         char c = text[i];
         switch (c) {
@@ -253,9 +270,8 @@ void TextHtmlWriter::escapeHtml(const char* text, size_t len) {
             case '&':
                 strbuf_append_str(buf_, "&amp;");
                 break;
-            case '"':
-                strbuf_append_str(buf_, "&quot;");
-                break;
+            // Note: " is not escaped to match LaTeX.js behavior
+            // Quotes only need escaping inside attribute values
             default:
                 strbuf_append_char(buf_, c);
                 break;

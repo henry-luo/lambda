@@ -76,7 +76,7 @@ module.exports = grammar({
 
     paragraph: $ => prec.right(repeat1($._inline)),
 
-    paragraph_break: $ => /\n[ \t]*\n/,
+    paragraph_break: $ => token(prec(1, /\n[ \t]*\n/)),
 
     // ========================================================================
     // Sections (matches LaTeX.js section handling via macros)
@@ -98,6 +98,7 @@ module.exports = grammar({
     _inline: $ => choice(
       $.text,
       $.space,
+      $.paragraph_break, // Paragraph break (double newline) - must be checked as inline too
       $.line_comment,   // Comments can appear inline
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
       $.command,
@@ -107,13 +108,16 @@ module.exports = grammar({
       $.ligature,
       $.control_symbol,
       $.placeholder,    // #1, #2, etc. in macro definitions
+      $.nbsp,           // Non-breaking space ~
     ),
 
     // Text is everything that's not a special character
     // NOTE: ^ and _ are allowed here (subscript/superscript only special in math mode)
     text: $ => /[^\\{}$%\[\]\n~&#]+/,
 
-    space: $ => /[ \t\n]+/,  // spaces, tabs, newlines (paragraph break handled separately)
+    // Space: horizontal whitespace and single newlines only
+    // Paragraph break (higher precedence) will match \n\n sequences
+    space: $ => /[ \t]+|\n/,
 
     line_comment: $ => /%[^\n]*/,
 
@@ -174,6 +178,7 @@ module.exports = grammar({
       $.ligature,
       $.control_symbol,
       $.placeholder,  // #1, #2, etc. in macro definitions
+      $.nbsp,         // Non-breaking space ~
       ',',   // Common in group content
       '=',   // For key=value
     ),

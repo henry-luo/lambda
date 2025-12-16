@@ -443,21 +443,32 @@ static void cmd_textit(LatexProcessor* proc, Item elem) {
 
 static void cmd_emph(LatexProcessor* proc, Item elem) {
     // \emph{text} - emphasized text (toggles italic)
+    // When already in italic, toggle to upright; otherwise toggle to italic
+    // LaTeX.js wraps the outer state + inner toggled state
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
+    
     // Toggle italic state
     bool was_italic = (gen->currentFont().shape == FontShape::Italic);
+    
     if (was_italic) {
+        // Wrap in current state (italic), then inner upright
+        gen->span("it");  // Outer span reflects current state
         gen->currentFont().shape = FontShape::Upright;
-        gen->span("up");  // Use "up" class for upright when inside italic
+        gen->span("up");  // Inner span for toggled state
+        proc->processChildren(elem);
+        gen->closeElement();  // Close "up"
+        gen->closeElement();  // Close "it"
     } else {
+        // Not italic, just add italic span
         gen->currentFont().shape = FontShape::Italic;
         gen->span("it");
+        proc->processChildren(elem);
+        gen->closeElement();  // Close "it"
     }
-    proc->processChildren(elem);
-    gen->closeElement();
+    
     proc->exitStyledSpan();
     gen->exitGroup();
 }
@@ -1375,9 +1386,12 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_empty(LatexProcessor* proc, Item elem) {
-    // \empty - Empty macro (produces nothing)
-    // When used as \begin{empty}...\end{empty}, just process children transparently
-    proc->processChildren(elem);
+    // \empty - Empty macro (produces a zero-width space when followed by {} or \)
+    // Match LaTeX.js behavior: output U+200B (zero-width space)
+    HtmlGenerator* gen = proc->generator();
+    
+    // Output zero-width space (Unicode U+200B)
+    gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
 }
 
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
@@ -1616,6 +1630,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     ElementReader elem_reader(elem);
     
     bool in_item = false;
+    bool at_item_start = false;  // Track if we're at the very start of an item (for whitespace trimming)
     
     for (size_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
@@ -1639,7 +1654,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
                             // Close previous item if open
                             if (in_item) {
-                                gen->closeElement();  // Close li/dd
+                                gen->endItem();  // Close li/dd with proper structure
                             }
                             
                             // Get optional label from item
@@ -1653,6 +1668,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             
                             gen->createItem(label);
                             in_item = true;
+                            at_item_start = true;  // Next text should be trimmed
                         } else {
                             // Other element within paragraph
                             if (in_item) {
@@ -1663,15 +1679,16 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         // Text content
                         const char* text = para_child.cstring();
                         if (in_item && text && text[0] != '\0') {
-                            // Skip leading whitespace-only strings
-                            bool has_content = false;
-                            for (const char* p = text; *p; p++) {
-                                if (!isspace((unsigned char)*p)) {
-                                    has_content = true;
-                                    break;
+                            // Trim leading whitespace at start of item
+                            if (at_item_start) {
+                                while (*text && isspace((unsigned char)*text)) {
+                                    text++;
                                 }
+                                at_item_start = false;
                             }
-                            if (has_content) {
+                            
+                            // Skip if now empty after trimming
+                            if (text[0] != '\0') {
                                 gen->text(text);
                             }
                         }
@@ -1683,7 +1700,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
             // Direct item (not in paragraph wrapper)
             if (strcmp(tag, "item") == 0 || strcmp(tag, "enum_item") == 0) {
                 if (in_item) {
-                    gen->closeElement();
+                    gen->endItem();  // Close previous item with proper structure
                 }
                 
                 const char* label = nullptr;
@@ -1696,23 +1713,27 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                 
                 gen->createItem(label);
                 in_item = true;
+                at_item_start = true;  // Next text should be trimmed
             } else {
                 // Other element
                 if (in_item) {
                     proc->processNode(child.item());
+                    at_item_start = false;  // Content processed
                 }
             }
         } else if (child.isString()) {
             const char* text = child.cstring();
             if (in_item && text && text[0] != '\0') {
-                bool has_content = false;
-                for (const char* p = text; *p; p++) {
-                    if (!isspace((unsigned char)*p)) {
-                        has_content = true;
-                        break;
+                // Trim leading whitespace at start of item
+                if (at_item_start) {
+                    while (*text && isspace((unsigned char)*text)) {
+                        text++;
                     }
+                    at_item_start = false;
                 }
-                if (has_content) {
+                
+                // Skip if now empty after trimming
+                if (text[0] != '\0') {
                     gen->text(text);
                 }
             }
@@ -1721,7 +1742,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     
     // Close last item
     if (in_item) {
-        gen->closeElement();
+        gen->endItem();  // Close last item with proper structure
     }
 }
 
@@ -1935,10 +1956,10 @@ static void cmd_hspace(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* length_str = stringbuf_to_string(sb);
     
-    // Create inline spacer
-    char attrs[256];
-    snprintf(attrs, sizeof(attrs), "class=\"hspace\" style=\"display:inline-block;width:%s\"", length_str->chars);
-    gen->span(attrs);
+    // Create inline spacer using spanWithClassAndStyle for proper attribute handling
+    char style[256];
+    snprintf(style, sizeof(style), "display:inline-block;width:%s", length_str->chars);
+    gen->spanWithClassAndStyle("hspace", style);
     gen->closeElement();
 }
 
@@ -1953,10 +1974,10 @@ static void cmd_vspace(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* length_str = stringbuf_to_string(sb);
     
-    // Create block spacer
-    char attrs[256];
-    snprintf(attrs, sizeof(attrs), "class=\"vspace\" style=\"display:block;height:%s\"", length_str->chars);
-    gen->div(attrs);
+    // Create block spacer using divWithClassAndStyle for proper attribute handling
+    char style[256];
+    snprintf(style, sizeof(style), "display:block;height:%s", length_str->chars);
+    gen->divWithClassAndStyle("vspace", style);
     gen->closeElement();
 }
 
@@ -2050,8 +2071,32 @@ static void cmd_enlargethispage(LatexProcessor* proc, Item elem) {
 static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
     // \negthinspace or \! - negative thin space
     HtmlGenerator* gen = proc->generator();
-    gen->spanWithClassAndStyle("negthinspace", "margin-left:-0.16667em");
+    gen->span("negthinspace");
     gen->closeElement();
+}
+
+static void cmd_thinspace(LatexProcessor* proc, Item elem) {
+    // \thinspace or \, - thin space (1/6 em)
+    HtmlGenerator* gen = proc->generator();
+    gen->text("\u2009");  // U+2009 thin space
+}
+
+static void cmd_enspace(LatexProcessor* proc, Item elem) {
+    // \enspace - en space (1/2 em)
+    HtmlGenerator* gen = proc->generator();
+    gen->text("\u2002");  // U+2002 en space
+}
+
+static void cmd_quad(LatexProcessor* proc, Item elem) {
+    // \quad - 1 em space
+    HtmlGenerator* gen = proc->generator();
+    gen->text("\u2003");  // U+2003 em space
+}
+
+static void cmd_qquad(LatexProcessor* proc, Item elem) {
+    // \qquad - 2 em space
+    HtmlGenerator* gen = proc->generator();
+    gen->text("\u2003\u2003");  // two em spaces
 }
 
 // =============================================================================
@@ -3588,6 +3633,11 @@ void LatexProcessor::initCommandTable() {
     command_table_["enlargethispage"] = cmd_enlargethispage;
     command_table_["negthinspace"] = cmd_negthinspace;
     command_table_["!"] = cmd_negthinspace;  // \! is an alias for \negthinspace
+    command_table_["thinspace"] = cmd_thinspace;
+    command_table_[","] = cmd_thinspace;  // \, is an alias for \thinspace
+    command_table_["enspace"] = cmd_enspace;
+    command_table_["quad"] = cmd_quad;
+    command_table_["qquad"] = cmd_qquad;
     
     // Box commands
     command_table_["mbox"] = cmd_mbox;
@@ -3765,6 +3815,7 @@ void LatexProcessor::ensureParagraph() {
 
 void LatexProcessor::closeParagraphIfOpen() {
     if (in_paragraph_) {
+        gen_->trimTrailingWhitespace();  // Trim trailing whitespace before closing paragraph
         gen_->closeElement();
         in_paragraph_ = false;
     }
@@ -3884,6 +3935,19 @@ void LatexProcessor::processNode(Item node) {
             return;
         }
         
+        // Special handling for space_cmd (\, \! \; \: \/ \@ \ )
+        if (strcmp(tag, "space_cmd") == 0) {
+            processSpacingCommand(node);
+            return;
+        }
+        
+        // Special handling for nbsp (~) - non-breaking space
+        if (strcmp(tag, "nbsp") == 0) {
+            ensureParagraph();
+            gen_->writer()->writeRawHtml("&nbsp;");
+            return;
+        }
+        
         // Process command
         processCommand(tag, node);
         return;
@@ -3944,6 +4008,12 @@ void LatexProcessor::processSpacingCommand(Item elem) {
             } else if (strcmp(cmd, "\\space") == 0) {
                 // Normal space
                 gen_->text(" ");
+            } else if (strcmp(cmd, "\\ ") == 0 || strcmp(cmd, "~") == 0) {
+                // Backslash-space or ~ (non-breaking space) produces a regular space
+                gen_->text(" ");
+            } else if (strcmp(cmd, "\\/") == 0 || strcmp(cmd, "\\@") == 0) {
+                // Italic correction or inter-sentence space marker - output nothing
+                // These are zero-width commands
             }
             break;
         }
@@ -3986,6 +4056,12 @@ void LatexProcessor::processText(const char* text) {
     // Skip if only whitespace AND more than one space (e.g., paragraph breaks)
     // Keep single spaces as they're part of inline formatting
     if (all_whitespace && normalized.length() > 1) {
+        return;
+    }
+    
+    // Skip whitespace (even single space) if not inside a paragraph
+    // This prevents empty paragraphs when whitespace appears between \par and parbreak
+    if (all_whitespace && !in_paragraph_) {
         return;
     }
     

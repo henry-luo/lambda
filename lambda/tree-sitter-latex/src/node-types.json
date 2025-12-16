@@ -73,6 +73,10 @@
           "named": true
         },
         {
+          "type": "nbsp",
+          "named": true
+        },
+        {
           "type": "placeholder",
           "named": true
         },
@@ -151,6 +155,10 @@
         },
         {
           "type": "math",
+          "named": true
+        },
+        {
+          "type": "nbsp",
           "named": true
         },
         {
@@ -414,6 +422,14 @@
           "named": true
         },
         {
+          "type": "nbsp",
+          "named": true
+        },
+        {
+          "type": "paragraph_break",
+          "named": true
+        },
+        {
           "type": "placeholder",
           "named": true
         },
@@ -662,6 +678,10 @@
   },
   {
     "type": "math_text",
+    "named": true
+  },
+  {
+    "type": "nbsp",
     "named": true
   },
   {

@@ -5,8 +5,75 @@
 #include "../../lib/log.h"
 #include <sstream>
 #include <algorithm>
+#include <cstring>
 
 namespace lambda {
+
+// =============================================================================
+// Typography Helper Functions
+// =============================================================================
+
+// Process typography substitutions (dashes, ligatures, quotes)
+// Returns processed string - caller owns the result
+static std::string processTypography(const char* input) {
+    if (!input) return "";
+    
+    std::string result;
+    result.reserve(strlen(input) * 2);  // Reserve extra space for potential expansions
+    
+    const char* p = input;
+    while (*p) {
+        // Check for --- (em dash) first (before --)
+        if (p[0] == '-' && p[1] == '-' && p[2] == '-') {
+            result += "\xE2\x80\x94";  // U+2014 em dash
+            p += 3;
+            continue;
+        }
+        // Check for -- (en dash)
+        if (p[0] == '-' && p[1] == '-') {
+            result += "\xE2\x80\x93";  // U+2013 en dash
+            p += 2;
+            continue;
+        }
+        // Note: Single hyphens (-) are NOT converted to Unicode hyphens (U+2010)
+        // LaTeX.js keeps regular ASCII hyphens for words like "daughter-in-law"
+        
+        // Check for fi ligature
+        if (p[0] == 'f' && p[1] == 'i') {
+            result += "\xEF\xAC\x81";  // U+FB01 fi ligature
+            p += 2;
+            continue;
+        }
+        // Check for fl ligature
+        if (p[0] == 'f' && p[1] == 'l') {
+            result += "\xEF\xAC\x82";  // U+FB02 fl ligature
+            p += 2;
+            continue;
+        }
+        // Check for `` (opening double quote)
+        if (p[0] == '`' && p[1] == '`') {
+            result += "\xE2\x80\x9C";  // U+201C left double quotation mark
+            p += 2;
+            continue;
+        }
+        // Check for '' (closing double quote)
+        if (p[0] == '\'' && p[1] == '\'') {
+            result += "\xE2\x80\x9D";  // U+201D right double quotation mark
+            p += 2;
+            continue;
+        }
+        // Check for ` (opening single quote)
+        if (p[0] == '`') {
+            result += "\xE2\x80\x98";  // U+2018 left single quotation mark
+            p += 1;
+            continue;
+        }
+        // Default: copy character as-is
+        result += *p++;
+    }
+    
+    return result;
+}
 
 // =============================================================================
 // Constructor
@@ -38,6 +105,10 @@ void HtmlGenerator::closeElement() {
     // Close the most recently opened tag
     // Note: HtmlWriter tracks this internally
     writer_->closeTag(nullptr);  // nullptr means close current tag
+}
+
+void HtmlGenerator::trimTrailingWhitespace() {
+    writer_->trimTrailingWhitespace();
 }
 
 void HtmlGenerator::h(int level, const char* attrs) {
@@ -90,9 +161,16 @@ void HtmlGenerator::text(const char* content) {
     // html-generator.ls text method
     if (!content) return;
     
-    // In verbatim mode, preserve all whitespace
-    // In normal mode, HtmlWriter handles entity escaping
-    writer_->writeText(content);
+    // In verbatim mode or monospace font, preserve all and don't process typography
+    // Monospace fonts (like \texttt) should not use ligatures or dash conversion
+    if (verbatim_mode_ || currentFont().family == FontFamily::Typewriter) {
+        writer_->writeText(content);
+        return;
+    }
+    
+    // In normal mode, apply typography transformations (dashes, ligatures, quotes)
+    std::string processed = processTypography(content);
+    writer_->writeText(processed.c_str());
 }
 
 void HtmlGenerator::textWithClass(const char* content, const char* css_class) {
@@ -291,12 +369,13 @@ void HtmlGenerator::addTocEntry(const std::string& level, const std::string& num
 // =============================================================================
 
 void HtmlGenerator::startItemize() {
-    // html-generator.ls startItemize method
+    // html-generator.ls startItemize method - match LaTeX.js output
     
     LatexGenerator::startList();  // Update list depth counter
     pushListState("itemize");
     
-    writer_->openTag("ul", "itemize");
+    // Use "list" class to match LaTeX.js (not "itemize")
+    writer_->openTag("ul", "list");
 }
 
 void HtmlGenerator::endItemize() {
@@ -342,7 +421,11 @@ void HtmlGenerator::endDescription() {
 }
 
 void HtmlGenerator::createItem(const char* label) {
-    // html-generator.ls createItem method
+    // html-generator.ls createItem method - match LaTeX.js output format
+    // Expected format for itemize:
+    //   <li><span class="itemlabel"><span class="hbox llap">•</span></span><p>content</p></li>
+    // Expected format for enumerate:
+    //   <li><span class="itemlabel"><span class="hbox llap">1.</span></span><p>content</p></li>
     
     if (list_stack_.empty()) {
         log_error("createItem: not in a list environment");
@@ -354,9 +437,27 @@ void HtmlGenerator::createItem(const char* label) {
     
     if (state.type == "itemize") {
         writer_->openTag("li", nullptr);
+        // Add item label span structure matching LaTeX.js
+        writer_->openTag("span", "itemlabel");
+        writer_->openTag("span", "hbox llap");
+        // Use bullet character (U+2022)
+        writer_->writeRawHtml("•");
+        writer_->closeTag("span");  // close hbox llap
+        writer_->closeTag("span");  // close itemlabel
+        // Open paragraph for content
+        writer_->openTag("p", nullptr);
     } else if (state.type == "enumerate") {
-        // For enumerate, we can let HTML handle numbering, or use custom labels
         writer_->openTag("li", nullptr);
+        // Add item label span structure matching LaTeX.js
+        writer_->openTag("span", "itemlabel");
+        writer_->openTag("span", "hbox llap");
+        // Generate enumerate label based on depth
+        std::string enumLabel = getEnumerateLabel(getListDepth());
+        writer_->writeRawHtml(enumLabel.c_str());
+        writer_->closeTag("span");  // close hbox llap
+        writer_->closeTag("span");  // close itemlabel
+        // Open paragraph for content
+        writer_->openTag("p", nullptr);
     } else if (state.type == "description") {
         if (label) {
             writer_->openTag("dt", nullptr);
@@ -364,6 +465,28 @@ void HtmlGenerator::createItem(const char* label) {
             writer_->closeTag("dt");
         }
         writer_->openTag("dd", nullptr);
+    }
+}
+
+void HtmlGenerator::endItem() {
+    // End list item - closes <p> and <li> for itemize/enumerate
+    // For description, just closes <dd>
+    
+    if (list_stack_.empty()) {
+        log_error("endItem: not in a list environment");
+        return;
+    }
+    
+    ListState& state = currentList();
+    
+    if (state.type == "itemize" || state.type == "enumerate") {
+        // Close <p> tag (content wrapper)
+        writer_->closeTag("p");
+        // Close <li> tag
+        writer_->closeTag("li");
+    } else if (state.type == "description") {
+        // Close <dd> tag
+        writer_->closeTag("dd");
     }
 }
 
