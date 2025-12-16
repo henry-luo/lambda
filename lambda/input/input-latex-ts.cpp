@@ -317,6 +317,13 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
         }
     }
     
+    // nbsp (~) -> Element with tag "nbsp" (not symbol)
+    // This creates an element that the V2 formatter can handle
+    if (strcmp(node_type, "nbsp") == 0) {
+        ElementBuilder elem_builder = builder.element("nbsp");
+        return elem_builder.final();
+    }
+    
     // Default: use node type as symbol name
     return {.item = y2it(builder.createSymbol(node_type))};
 }
@@ -721,6 +728,7 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
             
             // Normal case: unwrap curly group and add its contents directly
             uint32_t arg_child_count = ts_node_child_count(child);
+            bool has_content = false;
             for (uint32_t j = 0; j < arg_child_count; j++) {
                 TSNode arg_child = ts_node_child(child, j);
                 const char* arg_child_type = ts_node_type(arg_child);
@@ -733,7 +741,15 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
                 Item arg_item = convert_latex_node(ctx, arg_child, source);
                 if (arg_item.item != ITEM_NULL) {
                     cmd_elem_builder.child(arg_item);
+                    has_content = true;
                 }
+            }
+            
+            // If curly_group was empty, add an empty curly_group element as marker
+            // This helps distinguish \cmd from \cmd{} in the formatter
+            if (!has_content) {
+                ElementBuilder empty_marker = builder.element("curly_group");
+                cmd_elem_builder.child(empty_marker.final());
             }
         }
     }

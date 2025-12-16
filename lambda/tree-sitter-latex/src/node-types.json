@@ -540,6 +540,10 @@
           "named": true
         },
         {
+          "type": "nbsp",
+          "named": true
+        },
+        {
           "type": "paragraph_break",
           "named": true
         },

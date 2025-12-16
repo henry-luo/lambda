@@ -51,6 +51,7 @@ public:
 public:
     LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
         : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
+          next_paragraph_is_continue_(false),
           strip_next_leading_space_(false), styled_span_depth_(0), 
           recursion_depth_(0), depth_exceeded_(false) {}
     
@@ -89,6 +90,7 @@ public:
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
+    void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
     
     // Macro system functions (public so command handlers can access)
     void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
@@ -110,6 +112,10 @@ private:
     // Paragraph tracking for auto-wrapping text
     bool in_paragraph_;
     int inline_depth_;  // Track nesting depth of inline elements
+    
+    // When true, the next paragraph should have class="continue"
+    // Set when a block environment ends (itemize, enumerate, center, etc.)
+    bool next_paragraph_is_continue_;
     
     // Font declaration tracking - when true, the next text should strip leading space
     // This is set by font declaration commands like \bfseries, \em, etc.
@@ -1386,12 +1392,32 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_empty(LatexProcessor* proc, Item elem) {
-    // \empty - Empty macro (produces a zero-width space when followed by {} or \)
-    // Match LaTeX.js behavior: output U+200B (zero-width space)
+    // \empty - Empty command (produces nothing)
+    // \empty{} - Empty command with empty braces (produces ZWSP for space preservation)
+    // The presence of a curly_group child indicates {} was used
     HtmlGenerator* gen = proc->generator();
     
-    // Output zero-width space (Unicode U+200B)
-    gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+    // Check if command has an empty curly_group child (from \empty{})
+    ElementReader reader(elem);
+    bool has_curly_group = false;
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                has_curly_group = true;
+                break;
+            }
+        }
+    }
+    
+    // Only output ZWSP if {} was explicitly used
+    if (has_curly_group) {
+        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+    }
+    // Otherwise output nothing - \empty without {} is a null command
 }
 
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
@@ -1672,14 +1698,49 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         } else {
                             // Other element within paragraph
                             if (in_item) {
-                                proc->processNode(para_child.item());
+                                const char* elem_tag = para_child_elem.tagName();
+                                // Check if this is a block element (list, etc.)
+                                bool is_block = elem_tag && (
+                                    strcmp(elem_tag, "itemize") == 0 ||
+                                    strcmp(elem_tag, "enumerate") == 0 ||
+                                    strcmp(elem_tag, "description") == 0 ||
+                                    strcmp(elem_tag, "center") == 0 ||
+                                    strcmp(elem_tag, "quote") == 0 ||
+                                    strcmp(elem_tag, "quotation") == 0 ||
+                                    strcmp(elem_tag, "verse") == 0 ||
+                                    strcmp(elem_tag, "flushleft") == 0 ||
+                                    strcmp(elem_tag, "flushright") == 0
+                                );
+                                
+                                if (is_block) {
+                                    // Close <p> before block element
+                                    gen->trimTrailingWhitespace();
+                                    gen->closeElement();  // Close <p>
+                                    proc->processNode(para_child.item());
+                                    // Open new <p> for any following content
+                                    gen->writer()->openTag("p", nullptr);
+                                    at_item_start = true;  // Trim leading whitespace
+                                } else {
+                                    proc->processNode(para_child.item());
+                                    at_item_start = false;
+                                }
+                            }
+                        }
+                    } else if (para_child.isSymbol()) {
+                        // Symbol - check for parbreak
+                        String* sym = para_child.asSymbol();
+                        if (sym && strcmp(sym->chars, "parbreak") == 0) {
+                            // Paragraph break within list item - close </p> and open <p>
+                            if (in_item) {
+                                gen->itemParagraphBreak();
+                                at_item_start = true;  // Trim leading whitespace in new paragraph
                             }
                         }
                     } else if (para_child.isString()) {
                         // Text content
                         const char* text = para_child.cstring();
                         if (in_item && text && text[0] != '\0') {
-                            // Trim leading whitespace at start of item
+                            // Trim leading whitespace at start of item or after paragraph break
                             if (at_item_start) {
                                 while (*text && isspace((unsigned char)*text)) {
                                     text++;
@@ -1755,6 +1816,9 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
     gen->startItemize();
     processListItems(proc, elem, "itemize");
     gen->endItemize();
+    
+    // Next paragraph should have class="continue"
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_enumerate(LatexProcessor* proc, Item elem) {
@@ -1764,6 +1828,9 @@ static void cmd_enumerate(LatexProcessor* proc, Item elem) {
     gen->startEnumerate();
     processListItems(proc, elem, "enumerate");
     gen->endEnumerate();
+    
+    // Next paragraph should have class="continue"
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_description(LatexProcessor* proc, Item elem) {
@@ -1945,6 +2012,40 @@ static void cmd_newpage(LatexProcessor* proc, Item elem) {
 // Spacing Commands
 // =============================================================================
 
+// Convert LaTeX length to pixels
+// Returns pixels for valid lengths, or -1 for invalid/unsupported
+static double convert_length_to_px(const char* length) {
+    double value;
+    char unit[16] = {0};
+    
+    if (sscanf(length, "%lf%15s", &value, unit) < 1) {
+        return -1;
+    }
+    
+    // Convert to pixels based on unit
+    // Standard conversions: 1in = 96px, 1cm = 37.795px, 1mm = 3.7795px
+    // 1pt = 1.333px, 1pc = 16px, 1em = 16px (assuming 16px base)
+    if (strlen(unit) == 0 || strcmp(unit, "px") == 0) {
+        return value;
+    } else if (strcmp(unit, "cm") == 0) {
+        return value * 37.795275591;  // 96 / 2.54
+    } else if (strcmp(unit, "mm") == 0) {
+        return value * 3.7795275591;
+    } else if (strcmp(unit, "in") == 0) {
+        return value * 96.0;
+    } else if (strcmp(unit, "pt") == 0) {
+        return value * 1.333333333;  // 96 / 72
+    } else if (strcmp(unit, "pc") == 0) {
+        return value * 16.0;  // 12pt * 1.333
+    } else if (strcmp(unit, "em") == 0) {
+        return value * 16.0;  // assuming 16px base font
+    } else if (strcmp(unit, "ex") == 0) {
+        return value * 8.0;  // roughly half of em
+    }
+    
+    return -1;  // unknown unit
+}
+
 static void cmd_hspace(LatexProcessor* proc, Item elem) {
     // \hspace{length} - horizontal space
     HtmlGenerator* gen = proc->generator();
@@ -1956,10 +2057,20 @@ static void cmd_hspace(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* length_str = stringbuf_to_string(sb);
     
-    // Create inline spacer using spanWithClassAndStyle for proper attribute handling
+    // Convert length to pixels
+    double px = convert_length_to_px(length_str->chars);
+    
+    // Create inline spacer with margin-right (matches LaTeX.js behavior)
     char style[256];
-    snprintf(style, sizeof(style), "display:inline-block;width:%s", length_str->chars);
-    gen->spanWithClassAndStyle("hspace", style);
+    if (px >= 0) {
+        // Use pixel value with margin-right
+        // Use 3 decimal places to match expected output
+        snprintf(style, sizeof(style), "margin-right:%.3fpx", px);
+    } else {
+        // Fallback to original unit if conversion failed
+        snprintf(style, sizeof(style), "margin-right:%s", length_str->chars);
+    }
+    gen->spanWithStyle(style);
     gen->closeElement();
 }
 
@@ -3808,7 +3919,12 @@ bool LatexProcessor::isInlineCommand(const char* cmd_name) {
 void LatexProcessor::ensureParagraph() {
     // Only open paragraph if we're not inside an inline element
     if (!in_paragraph_ && inline_depth_ == 0) {
-        gen_->p();
+        if (next_paragraph_is_continue_) {
+            gen_->p("continue");
+            next_paragraph_is_continue_ = false;  // Reset the flag
+        } else {
+            gen_->p();
+        }
         in_paragraph_ = true;
     }
 }
@@ -3868,6 +3984,8 @@ void LatexProcessor::processNode(Item node) {
             if (strcmp(sym_name, "parbreak") == 0) {
                 // Paragraph break: close current paragraph and prepare for next
                 closeParagraphIfOpen();
+                // Clear continue flag - parbreak means new paragraph, not continuation
+                next_paragraph_is_continue_ = false;
                 // Don't open new paragraph yet - ensureParagraph() will handle it when next content arrives
             } else if (strcmp(sym_name, "TeX") == 0) {
                 // TeX logo
@@ -4008,9 +4126,14 @@ void LatexProcessor::processSpacingCommand(Item elem) {
             } else if (strcmp(cmd, "\\space") == 0) {
                 // Normal space
                 gen_->text(" ");
-            } else if (strcmp(cmd, "\\ ") == 0 || strcmp(cmd, "~") == 0) {
-                // Backslash-space or ~ (non-breaking space) produces a regular space
-                gen_->text(" ");
+            } else if (strcmp(cmd, "\\ ") == 0) {
+                // Backslash-space (control space) - produces zero-width space followed by regular space
+                // This allows a line break at this point unlike ~
+                gen_->text("\u200B ");  // ZWSP + space
+            } else if (strcmp(cmd, "~") == 0) {
+                // Tilde (non-breaking space) - this path shouldn't be reached since
+                // ~ is handled as nbsp element, but keep for completeness
+                gen_->writer()->writeRawHtml("&nbsp;");
             } else if (strcmp(cmd, "\\/") == 0 || strcmp(cmd, "\\@") == 0) {
                 // Italic correction or inter-sentence space marker - output nothing
                 // These are zero-width commands
@@ -4042,6 +4165,11 @@ void LatexProcessor::processText(const char* text) {
             in_whitespace = false;
         }
     }
+    
+    // Note: We do NOT convert ASCII hyphen-minus (U+002D) to Unicode hyphen (U+2010)
+    // because standard LaTeX behavior keeps single hyphens as-is in compound words
+    // like "daughter-in-law". Only -- (en-dash) and --- (em-dash) are converted,
+    // which is handled by the ligature parser in tree-sitter-latex.
     
     // Check if result is pure whitespace (multiple spaces/newlines)
     // Don't skip single spaces - they're significant in inline content

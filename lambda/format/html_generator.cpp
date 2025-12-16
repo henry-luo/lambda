@@ -440,8 +440,22 @@ void HtmlGenerator::createItem(const char* label) {
         // Add item label span structure matching LaTeX.js
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
-        // Use bullet character (U+2022)
-        writer_->writeRawHtml("•");
+        
+        // Use different bullet markers based on nesting depth (matching LaTeX default)
+        int depth = getListDepth();
+        if (depth == 2) {
+            // Level 2: en-dash with rm bf up styling
+            writer_->openTag("span", "rm bf up");
+            writer_->writeRawHtml("–");  // U+2013 EN DASH
+            writer_->closeTag("span");  // close rm bf up
+        } else if (depth == 3) {
+            writer_->writeRawHtml("*");  // Level 3: asterisk
+        } else if (depth >= 4) {
+            writer_->writeRawHtml("·");  // Level 4+: middle dot (U+00B7)
+        } else {
+            writer_->writeRawHtml("•");  // Level 1: bullet (U+2022)
+        }
+        
         writer_->closeTag("span");  // close hbox llap
         writer_->closeTag("span");  // close itemlabel
         // Open paragraph for content
@@ -480,14 +494,41 @@ void HtmlGenerator::endItem() {
     ListState& state = currentList();
     
     if (state.type == "itemize" || state.type == "enumerate") {
-        // Close <p> tag (content wrapper)
-        writer_->closeTag("p");
+        // Check if there's an empty <p> tag at the end (from paragraph break before end of item)
+        // If so, remove it instead of closing it
+        if (!writer_->removeLastOpenedTagIfEmpty("p")) {
+            // Not empty, so trim whitespace and close properly
+            writer_->trimTrailingWhitespace();
+            writer_->closeTag("p");
+        }
         // Close <li> tag
         writer_->closeTag("li");
     } else if (state.type == "description") {
         // Close <dd> tag
         writer_->closeTag("dd");
     }
+}
+
+void HtmlGenerator::itemParagraphBreak() {
+    // Handle paragraph break within list item - closes </p> and opens <p>
+    // This is used when parbreak appears inside list item content
+    
+    if (list_stack_.empty()) {
+        log_error("itemParagraphBreak: not in a list environment");
+        return;
+    }
+    
+    ListState& state = currentList();
+    
+    if (state.type == "itemize" || state.type == "enumerate") {
+        // Trim trailing whitespace before closing paragraph
+        writer_->trimTrailingWhitespace();
+        // Close current <p>
+        writer_->closeTag("p");
+        // Open new <p>
+        writer_->openTag("p", nullptr);
+    }
+    // For description lists, we don't do paragraph breaks inside <dd>
 }
 
 std::string HtmlGenerator::getEnumerateLabel(int depth) const {
