@@ -1508,9 +1508,50 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
 
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
+    // If followed by {} (empty curly_group child), output ZWS for visual separation
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("\\");
+    
+    // Check for empty curly_group child (terminator)
+    ElementReader reader(elem);
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                // Check if group is empty
+                bool is_empty = true;
+                auto group_iter = child_elem.children();
+                ItemReader group_child;
+                while (group_iter.next(&group_child)) {
+                    if (group_child.isElement()) {
+                        is_empty = false;
+                        break;
+                    }
+                    if (group_child.isString()) {
+                        String* str = group_child.asString();
+                        if (str && str->len > 0) {
+                            for (int64_t i = 0; i < str->len; i++) {
+                                if (str->chars[i] != ' ' && str->chars[i] != '\t' && str->chars[i] != '\n') {
+                                    is_empty = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!is_empty) break;
+                }
+                
+                if (is_empty) {
+                    // Empty curly_group serves as terminator - output ZWS
+                    gen->text("\xe2\x80\x8b");  // U+200B zero-width space
+                }
+                break;  // Only handle first curly_group
+            }
+        }
+    }
 }
 
 static void cmd_textellipsis(LatexProcessor* proc, Item elem) {
@@ -4323,8 +4364,51 @@ void LatexProcessor::processNode(Item node) {
     if (type == LMD_TYPE_STRING) {
         // Text content
         String* str = reader.asString();
-        if (str) {
-            processText(str->chars);
+        if (str && str->len > 0) {
+            const char* text = str->chars;
+            
+            // Find the first backslash to check for embedded command
+            const char* backslash = strchr(text, '\\');
+            
+            if (backslash && backslash[1] != '\0') {
+                // There's a backslash with content after it
+                // Process text before backslash (if any)
+                if (backslash > text) {
+                    // Create temp buffer for the prefix text
+                    size_t prefix_len = backslash - text;
+                    char* prefix = (char*)alloca(prefix_len + 1);
+                    memcpy(prefix, text, prefix_len);
+                    prefix[prefix_len] = '\0';
+                    processText(prefix);
+                }
+                
+                // Extract command name (everything after backslash until non-alpha or end)
+                const char* cmd_start = backslash + 1;
+                size_t cmd_len = 0;
+                while (cmd_start[cmd_len] && isalpha((unsigned char)cmd_start[cmd_len])) {
+                    cmd_len++;
+                }
+                
+                if (cmd_len > 0) {
+                    // It's an alphabetic command like \textbackslash
+                    char* cmd_name = (char*)alloca(cmd_len + 1);
+                    memcpy(cmd_name, cmd_start, cmd_len);
+                    cmd_name[cmd_len] = '\0';
+                    processCommand(cmd_name, node);
+                    
+                    // Process any remaining text after command
+                    const char* remainder = cmd_start + cmd_len;
+                    if (*remainder) {
+                        processText(remainder);
+                    }
+                } else {
+                    // Not an alpha command - just process as text
+                    processText(text);
+                }
+            } else {
+                // No backslash or backslash at end - normal text
+                processText(text);
+            }
         }
         return;
     }
@@ -4663,9 +4747,31 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         processChildren(elem);
         gen_->exitGroup();
         
-        // ZWS at exit for depth <= 2, but NOT for empty groups
-        // Note: We output ZWS at exit regardless of trailing whitespace for non-empty groups
-        if (gen_->groupDepth() <= 2 && !is_empty_group) {
+        // ZWS at exit for certain depths
+        // - depth 1 (document level): 
+        //   - non-empty groups: only output if trailing space (more content follows)
+        //   - empty groups: output ZWS (they serve as terminators, e.g., \^{})
+        // - depth 2 (inside one group): output ZWS for visual separation
+        // - depth 3+: deeply nested, no ZWS needed
+        int depth_after_exit = gen_->groupDepth();
+        bool should_output_zws = false;
+        
+        if (depth_after_exit == 1) {
+            // At document level
+            if (is_empty_group) {
+                // Empty groups at doc level serve as terminators (e.g., \^{}, \~{})
+                should_output_zws = true;
+            } else {
+                // Non-empty groups: only output if trailing space indicates more content
+                should_output_zws = has_trailing_space;
+            }
+        } else if (depth_after_exit == 2 && !is_empty_group) {
+            // At depth 2 (inside one group) - output ZWS for visual separation
+            should_output_zws = true;
+        }
+        // depth >= 3 or empty groups at depth 2+: no ZWS needed
+        
+        if (should_output_zws) {
             ensureParagraph();
             // Output ZWS with current font styling (if any)
             std::string font_class = gen_->getFontClass(gen_->currentFont());
