@@ -300,6 +300,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
+
+        // Always apply element default styles (handles HTML attributes like <font size="2">)
+        apply_element_default_style(lycon, dom_elem);
+
         if (dom_elem && dom_elem->specified_style) {
             // Check if styles already resolved in this layout pass
             // IMPORTANT: Skip this check during measurement mode (is_measuring=true)
@@ -320,9 +324,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             } else {
                 g_style_resolve_full++;
             }
-
-            // resolve element default styles
-            apply_element_default_style(lycon, dom_elem);
 
             // Lambda CSS: use the full implementation from resolve_css_style.cpp
             resolve_css_styles(dom_elem, lycon);
