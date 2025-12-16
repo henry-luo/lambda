@@ -66,7 +66,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 bool is_row = (flex_direction == CSS_VALUE_ROW || flex_direction == CSS_VALUE_ROW_REVERSE);
                 bool is_reverse = (flex_direction == CSS_VALUE_ROW_REVERSE || flex_direction == CSS_VALUE_COLUMN_REVERSE);
                 bool needs_reverse_adjustment = is_reverse;
-                
+
                 // Check for wrap-reverse which reverses the cross axis
                 int wrap_mode = CSS_VALUE_NOWRAP;
                 if (container->embed && container->embed->flex) {
@@ -80,7 +80,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 if (child_block->blk) {
                     lycon->block.given_width = child_block->blk->given_width;
                     lycon->block.given_height = child_block->blk->given_height;
-                    
+
                     // CRITICAL: Re-resolve percentage width/height relative to flex container
                     // CSS percentages were resolved during style resolution with wrong parent context.
                     // For absolute children in flex containers, percentages should be relative to
@@ -96,7 +96,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             container_content_height -= container->bound->border->width.top + container->bound->border->width.bottom;
                         }
                     }
-                    
+
                     if (!isnan(child_block->blk->given_width_percent) && container_content_width > 0) {
                         float new_width = container_content_width * child_block->blk->given_width_percent / 100.0f;
                         log_debug("Re-resolving abs child width: %.1f%% of %.1f = %.1f (was %.1f)",
@@ -183,13 +183,13 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 if (!needs_reverse_adjustment && child_block->position) {
                     bool adjust_x = !child_block->position->has_left && !child_block->position->has_right;
                     bool adjust_y = !child_block->position->has_top && !child_block->position->has_bottom;
-                    
+
                     if (adjust_x || adjust_y) {
                         // Get container's content area for positioning
                         float container_content_width = container->width;
                         float container_content_height = container->height;
                         float content_offset_x = 0, content_offset_y = 0;
-                        
+
                         if (container->bound) {
                             content_offset_x = container->bound->padding.left;
                             content_offset_y = container->bound->padding.top;
@@ -202,7 +202,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                                 container_content_height -= container->bound->border->width.top + container->bound->border->width.bottom;
                             }
                         }
-                        
+
                         // Get flex container properties
                         int justify_content = CSS_VALUE_FLEX_START;
                         int align_items = CSS_VALUE_STRETCH;
@@ -210,7 +210,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             justify_content = container->embed->flex->justify;
                             align_items = container->embed->flex->align_items;
                         }
-                        
+
                         // Determine main/cross axis dimensions
                         float main_axis_size, cross_axis_size, item_main, item_cross;
                         if (is_row) {
@@ -224,7 +224,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             item_main = child_block->height;
                             item_cross = child_block->width;
                         }
-                        
+
                         // Get margins
                         float margin_left = 0, margin_top = 0, margin_right = 0, margin_bottom = 0;
                         if (child_block->bound) {
@@ -233,7 +233,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             margin_right = child_block->bound->margin.right;
                             margin_bottom = child_block->bound->margin.bottom;
                         }
-                        
+
                         // Calculate main axis offset based on justify-content
                         if ((is_row && adjust_x) || (!is_row && adjust_y)) {
                             float main_offset = 0;
@@ -241,7 +241,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                             // margin_end is the margin at the end of main axis
                             float margin_start = is_row ? margin_left : margin_top;
                             float margin_end = is_row ? margin_right : margin_bottom;
-                            
+
                             switch (justify_content) {
                                 case CSS_VALUE_CENTER:
                                     main_offset = (main_axis_size - item_main) / 2;
@@ -261,19 +261,19 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                                     main_offset = margin_start;
                                     break;
                             }
-                            
+
                             if (is_row) {
                                 child_block->x = content_offset_x + main_offset;
                             } else {
                                 child_block->y = content_offset_y + main_offset;
                             }
                         }
-                        
+
                         // Calculate cross axis offset based on align-items
                         // For wrap-reverse, the cross axis is flipped so flex-start means end
                         if ((is_row && adjust_y) || (!is_row && adjust_x)) {
                             float cross_offset = 0;
-                            
+
                             // Check for align-self override on the item
                             int item_align = align_items;  // default to container's align-items
                             if (child_block->fi && child_block->fi->align_self != CSS_VALUE_AUTO &&
@@ -281,7 +281,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                                 item_align = child_block->fi->align_self;
                             }
                             int effective_align = item_align;
-                            
+
                             // For wrap-reverse, swap flex-start and flex-end meanings
                             if (is_wrap_reverse) {
                                 if (item_align == CSS_VALUE_FLEX_START) {
@@ -293,12 +293,12 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                                     effective_align = CSS_VALUE_FLEX_END;
                                 }
                             }
-                            
+
                             // margin_cross_start is the margin at the start of cross axis
                             // margin_cross_end is the margin at the end of cross axis
                             float margin_cross_start = is_row ? margin_top : margin_left;
                             float margin_cross_end = is_row ? margin_bottom : margin_right;
-                            
+
                             switch (effective_align) {
                                 case CSS_VALUE_CENTER:
                                     cross_offset = (cross_axis_size - item_cross) / 2;
@@ -316,14 +316,14 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                                     cross_offset = margin_cross_start;
                                     break;
                             }
-                            
+
                             if (is_row) {
                                 child_block->y = content_offset_y + cross_offset;
                             } else {
                                 child_block->x = content_offset_x + cross_offset;
                             }
                         }
-                        
+
                         log_debug("Abs child static position: justify=%d align=%d adjust_x=%d adjust_y=%d -> (%.1f, %.1f)",
                                   justify_content, align_items, adjust_x, adjust_y, child_block->x, child_block->y);
                     }
@@ -772,10 +772,11 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Save parent context
     LayoutContext saved_context = *lycon;
     // Calculate content area dimensions accounting for box model
-    int content_width = flex_item->width;
-    int content_height = flex_item->height;
-    int content_x_offset = 0;
-    int content_y_offset = 0;
+    // Use float to preserve fractional pixels and avoid truncation
+    float content_width = flex_item->width;
+    float content_height = flex_item->height;
+    float content_x_offset = 0.0f;
+    float content_y_offset = 0.0f;
 
     if (flex_item->bound) {
         // Account for padding and border in content area

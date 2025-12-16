@@ -35,7 +35,7 @@ void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
     int* min_width, int* max_width, int* height);
 void measure_block_intrinsic_sizes(LayoutContext* lycon, ViewBlock* block,
     int* min_width, int* max_width, int* min_height, int* max_height);
-int layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool constrain_width);
+float layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool constrain_width);
 void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
     int* min_width, int* max_width, int* height);
 
