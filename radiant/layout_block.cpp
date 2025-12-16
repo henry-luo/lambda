@@ -42,7 +42,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
  */
 static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
                                           const char* content, bool is_before) {
-    if (!lycon || !parent || !content || !*content) return nullptr;
+    // Allow empty content - pseudo-elements with display:block and clear:both still need to be created
+    if (!lycon || !parent) return nullptr;
 
     Pool* pool = lycon->doc->view_tree->pool;
     if (!pool) return nullptr;
@@ -68,40 +69,68 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->bound = parent->bound;
     pseudo_elem->in_line = parent->in_line;
 
-    // Set display to inline by default for pseudo-elements
+    // Get display value from pseudo-element's styles (before_styles or after_styles)
+    // Default to inline for pseudo-elements per CSS spec
     pseudo_elem->display.outer = CSS_VALUE_INLINE;
     pseudo_elem->display.inner = CSS_VALUE_FLOW;
 
-    // Create the text child
-    DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
-    if (!text_node) return nullptr;
+    // Check for explicit display in pseudo-element styles
+    StyleTree* pseudo_styles = is_before ? parent->before_styles : parent->after_styles;
+    if (pseudo_styles && pseudo_styles->tree) {
+        AvlNode* display_node = avl_tree_search(pseudo_styles->tree, CSS_PROPERTY_DISPLAY);
+        if (display_node) {
+            StyleNode* style_node = (StyleNode*)display_node->declaration;
+            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                CssValue* val = style_node->winning_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                    if (val->data.keyword == CSS_VALUE_BLOCK) {
+                        pseudo_elem->display.outer = CSS_VALUE_BLOCK;
+                        log_debug("[PSEUDO] Setting display: block for ::%s", is_before ? "before" : "after");
+                    } else if (val->data.keyword == CSS_VALUE_INLINE_BLOCK) {
+                        pseudo_elem->display.outer = CSS_VALUE_INLINE_BLOCK;
+                    }
+                }
+            }
+        }
 
-    // Initialize as text node
-    text_node->node_type = DOM_NODE_TEXT;
-    // Text node is child of pseudo-element
-    text_node->parent = pseudo_elem;
-    text_node->next_sibling = nullptr;
-    text_node->prev_sibling = nullptr;
-
-    // Copy the content string
-    size_t content_len = strlen(content);
-    char* text_content = (char*)pool_calloc(pool, content_len + 1);
-    if (text_content) {
-        memcpy(text_content, content, content_len);
-        text_content[content_len] = '\0';
+        // Copy pseudo-element styles to the pseudo element itself
+        pseudo_elem->specified_style = pseudo_styles;
     }
-    text_node->text = text_content;
-    text_node->length = content_len;
-    text_node->native_string = nullptr;  // Not backed by Lambda String
-    text_node->content_type = DOM_TEXT_STRING;
 
-    // Link text node as child of pseudo element
-    pseudo_elem->first_child = text_node;
+    // Create the text child only if there's content
+    // Empty content pseudo-elements still participate in layout (e.g., clearfix)
+    if (content && *content) {
+        DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
+        if (text_node) {
+            // Initialize as text node
+            text_node->node_type = DOM_NODE_TEXT;
+            // Text node is child of pseudo-element
+            text_node->parent = pseudo_elem;
+            text_node->next_sibling = nullptr;
+            text_node->prev_sibling = nullptr;
 
-    log_debug("[PSEUDO] Created ::%s element for <%s> with content \"%s\"",
+            // Copy the content string
+            size_t content_len = strlen(content);
+            char* text_content = (char*)pool_calloc(pool, content_len + 1);
+            if (text_content) {
+                memcpy(text_content, content, content_len);
+                text_content[content_len] = '\0';
+            }
+            text_node->text = text_content;
+            text_node->length = content_len;
+            text_node->native_string = nullptr;  // Not backed by Lambda String
+            text_node->content_type = DOM_TEXT_STRING;
+
+            // Link text node as child of pseudo element
+            pseudo_elem->first_child = text_node;
+        }
+    }
+
+    log_debug("[PSEUDO] Created ::%s element for <%s> with content \"%s\", display.outer=%d",
               is_before ? "before" : "after",
               parent->tag_name ? parent->tag_name : "unknown",
-              content);
+              content ? content : "(empty)",
+              pseudo_elem->display.outer);
 
     return pseudo_elem;
 }
@@ -132,6 +161,9 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     bool has_before = dom_element_has_before_content(elem);
     bool has_after = dom_element_has_after_content(elem);
 
+    log_debug("[PSEUDO] Checking <%s>: has_before=%d, has_after=%d, before_styles=%p",
+              elem->tag_name ? elem->tag_name : "?", has_before, has_after, (void*)elem->before_styles);
+
     if (!has_before && !has_after) return nullptr;
 
     // Allocate PseudoContentProp
@@ -142,19 +174,22 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     memset(pseudo, 0, sizeof(PseudoContentProp));
 
     // Create ::before pseudo-element if needed
+    // Note: Even empty content "" creates a pseudo-element for layout purposes (e.g., clearfix)
     if (has_before) {
         const char* before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
-        if (before_content && *before_content) {
-            pseudo->before = create_pseudo_element(lycon, elem, before_content, true);
-        }
+        // Create pseudo-element even for empty content if display/clear properties are set
+        pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true);
+        log_debug("[PSEUDO] Created ::before for <%s> with content='%s'",
+                  elem->tag_name ? elem->tag_name : "?", before_content ? before_content : "(empty)");
     }
 
     // Create ::after pseudo-element if needed
+    // Note: Even empty content "" creates a pseudo-element for layout purposes
     if (has_after) {
         const char* after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
-        if (after_content && *after_content) {
-            pseudo->after = create_pseudo_element(lycon, elem, after_content, false);
-        }
+        pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false);
+        log_debug("[PSEUDO] Created ::after for <%s> with content='%s'",
+                  elem->tag_name ? elem->tag_name : "?", after_content ? after_content : "(empty)");
     }
 
     return pseudo;
@@ -540,6 +575,10 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
         // Skip if already pre-laid
         if (elem->float_prelaid) continue;
 
+        // Check display:none first - hidden elements should not participate in float layout
+        DisplayValue display = resolve_display_value(child);
+        if (display.outer == CSS_VALUE_NONE) continue;
+
         CssEnum float_value = get_element_float_value(elem);
         if (float_value != CSS_VALUE_LEFT && float_value != CSS_VALUE_RIGHT) continue;
 
@@ -547,7 +586,6 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
                   child->node_name(), float_value);
 
         // Layout the float now
-        DisplayValue display = resolve_display_value(child);
         display.outer = CSS_VALUE_BLOCK;  // Floats become block per CSS 9.7
 
         // Mark as pre-laid to skip during normal flow
@@ -649,10 +687,18 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
-    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
+    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr
         uintptr_t elmt_name = block->tag();
         if (elmt_name == HTM_TAG_IFRAME) {
             layout_iframe(lycon, block, block->display);
+        }
+        else if (elmt_name == HTM_TAG_HR) {
+            // hr element: height is determined by border-top + border-bottom
+            // It has no content, so content height is 0
+            float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
+            float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
+            block->height = border_top + border_bottom;
+            log_debug("hr layout: border_top=%f, border_bottom=%f, height=%f", border_top, border_bottom, block->height);
         }
         // else HTM_TAG_IMG
     } else {  // layout block child content
@@ -1466,19 +1512,40 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
 
-                // Find first in-flow child (skip floats for margin collapsing purposes)
+                // Find first in-flow child that can participate in margin collapsing
+                // Skip floats AND empty zero-height blocks (CSS 2.2 Section 8.3.1)
+                // An empty block allows margins to collapse "through" it when:
+                // - It has zero height
+                // - It has no borders, padding, or line boxes
                 View* first_in_flow_child = block->parent_view()->first_placed_child();
                 while (first_in_flow_child) {
                     if (!first_in_flow_child->is_block()) break;
                     ViewBlock* vb = (ViewBlock*)first_in_flow_child;
+                    // Skip floats
                     if (vb->position && element_has_float(vb)) {
-                        // Skip to next placed sibling
                         View* next = (View*)first_in_flow_child->next_sibling;
                         while (next && !next->view_type) {
                             next = (View*)next->next_sibling;
                         }
                         first_in_flow_child = next;
                         continue;
+                    }
+                    // Skip empty zero-height blocks that have no borders/padding
+                    // These blocks allow margins to collapse through them (CSS 2.2 8.3.1)
+                    if (vb->height == 0) {
+                        float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
+                        float border_bottom = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
+                        float padding_top = vb->bound ? vb->bound->padding.top : 0;
+                        float padding_bottom = vb->bound ? vb->bound->padding.bottom : 0;
+                        if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0) {
+                            log_debug("skipping empty zero-height block for margin collapsing");
+                            View* next = (View*)first_in_flow_child->next_sibling;
+                            while (next && !next->view_type) {
+                                next = (View*)next->next_sibling;
+                            }
+                            first_in_flow_child = next;
+                            continue;
+                        }
                     }
                     break;
                 }
