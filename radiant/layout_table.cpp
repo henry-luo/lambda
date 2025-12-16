@@ -609,9 +609,19 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
     if (element->node_type == DOM_NODE_ELEMENT) {
         DomElement* dom_elem = element->as_element();
         if (dom_elem->tag() == HTM_TAG_TABLE) {
-            // Set HTML UA default (can be overridden by CSS below)
+            // Set HTML UA default (can be overridden by CSS or cellspacing attribute below)
             table->tb->border_spacing_h = 2.0f;
             table->tb->border_spacing_v = 2.0f;
+            
+            // Handle HTML cellspacing attribute (e.g., cellspacing="0")
+            // This overrides the UA default but can be overridden by CSS border-spacing
+            const char* cellspacing_attr = dom_elem->get_attribute("cellspacing");
+            if (cellspacing_attr) {
+                float spacing = (float)atof(cellspacing_attr);
+                table->tb->border_spacing_h = spacing;
+                table->tb->border_spacing_v = spacing;
+                log_debug("[HTML] TABLE cellspacing attribute: %.0fpx", spacing);
+            }
         }
     }
 
