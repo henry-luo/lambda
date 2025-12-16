@@ -339,19 +339,49 @@ static const char* peek_closing_tag_name(const char* html) {
 // Check if a closing tag for a parent element should implicitly close the current element
 // Returns true if closing_tag is a container of current_tag
 // E.g., </ul> closes open <li>, </dl> closes open <dt> or <dd>, </table> closes open <tr>/<td>/<th>
+// Also handles ancestor closing tags: </div> closes any open li, ul, ol, etc. inside
 static bool closing_tag_closes_element(const char* current_tag, const char* closing_tag) {
     if (!current_tag || !closing_tag) return false;
 
-    // li is closed by </ul> or </ol>
+    // li is closed by </ul>, </ol>, or any block container closing tag
     if (strcasecmp(current_tag, "li") == 0) {
-        if (strcasecmp(closing_tag, "ul") == 0 || strcasecmp(closing_tag, "ol") == 0) {
+        if (strcasecmp(closing_tag, "ul") == 0 || strcasecmp(closing_tag, "ol") == 0 ||
+            strcasecmp(closing_tag, "div") == 0 || strcasecmp(closing_tag, "body") == 0 ||
+            strcasecmp(closing_tag, "article") == 0 || strcasecmp(closing_tag, "section") == 0 ||
+            strcasecmp(closing_tag, "aside") == 0 || strcasecmp(closing_tag, "nav") == 0 ||
+            strcasecmp(closing_tag, "header") == 0 || strcasecmp(closing_tag, "footer") == 0 ||
+            strcasecmp(closing_tag, "main") == 0 || strcasecmp(closing_tag, "blockquote") == 0 ||
+            strcasecmp(closing_tag, "td") == 0 || strcasecmp(closing_tag, "th") == 0) {
             return true;
         }
     }
 
-    // dt and dd are closed by </dl>
+    // ul and ol are closed by ancestor block containers
+    if (strcasecmp(current_tag, "ul") == 0 || strcasecmp(current_tag, "ol") == 0) {
+        if (strcasecmp(closing_tag, "div") == 0 || strcasecmp(closing_tag, "body") == 0 ||
+            strcasecmp(closing_tag, "article") == 0 || strcasecmp(closing_tag, "section") == 0 ||
+            strcasecmp(closing_tag, "aside") == 0 || strcasecmp(closing_tag, "nav") == 0 ||
+            strcasecmp(closing_tag, "header") == 0 || strcasecmp(closing_tag, "footer") == 0 ||
+            strcasecmp(closing_tag, "main") == 0 || strcasecmp(closing_tag, "blockquote") == 0 ||
+            strcasecmp(closing_tag, "td") == 0 || strcasecmp(closing_tag, "th") == 0 ||
+            strcasecmp(closing_tag, "li") == 0) {
+            return true;
+        }
+    }
+
+    // dt and dd are closed by </dl> or ancestor block containers
     if (strcasecmp(current_tag, "dt") == 0 || strcasecmp(current_tag, "dd") == 0) {
-        if (strcasecmp(closing_tag, "dl") == 0) {
+        if (strcasecmp(closing_tag, "dl") == 0 ||
+            strcasecmp(closing_tag, "div") == 0 || strcasecmp(closing_tag, "body") == 0 ||
+            strcasecmp(closing_tag, "article") == 0 || strcasecmp(closing_tag, "section") == 0) {
+            return true;
+        }
+    }
+
+    // dl is closed by ancestor block containers
+    if (strcasecmp(current_tag, "dl") == 0) {
+        if (strcasecmp(closing_tag, "div") == 0 || strcasecmp(closing_tag, "body") == 0 ||
+            strcasecmp(closing_tag, "article") == 0 || strcasecmp(closing_tag, "section") == 0) {
             return true;
         }
     }
