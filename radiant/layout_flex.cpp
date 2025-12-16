@@ -3225,7 +3225,7 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
             bool has_definite = item_has_definite_cross_size(item, flex_layout);
             bool will_stretch = item_will_stretch(item, flex_layout);
 
-            // For MULTI-LINE containers with align-content: stretch, items with auto cross-size 
+            // For MULTI-LINE containers with align-content: stretch, items with auto cross-size
             // AND align-self: stretch should NOT contribute their content size to line cross-size
             // because the lines will be stretched to fill the container anyway.
             // However, they should still contribute their min-cross-size (e.g., min-height)!
