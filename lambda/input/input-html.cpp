@@ -312,6 +312,99 @@ static const char* peek_next_tag_name(const char* html) {
     return i > 0 ? tag_buffer : NULL;
 }
 
+// Peek at the next closing tag name without consuming input
+// Returns a temporary static buffer with the lowercase tag name, or NULL if not a closing tag
+static const char* peek_closing_tag_name(const char* html) {
+    static char tag_buffer[64];  // Static buffer for tag name
+
+    if (!html || *html != '<') return NULL;
+    html++; // Skip '<'
+
+    // Must be a closing tag
+    if (*html != '/') return NULL;
+    html++; // Skip '/'
+
+    // Extract tag name (up to space, >, or end of buffer)
+    int i = 0;
+    while (*html && i < 63 && *html != ' ' && *html != '\t' &&
+           *html != '\n' && *html != '\r' && *html != '>') {
+        tag_buffer[i++] = tolower(*html);
+        html++;
+    }
+    tag_buffer[i] = '\0';
+
+    return i > 0 ? tag_buffer : NULL;
+}
+
+// Check if a closing tag for a parent element should implicitly close the current element
+// Returns true if closing_tag is a container of current_tag
+// E.g., </ul> closes open <li>, </dl> closes open <dt> or <dd>, </table> closes open <tr>/<td>/<th>
+static bool closing_tag_closes_element(const char* current_tag, const char* closing_tag) {
+    if (!current_tag || !closing_tag) return false;
+
+    // li is closed by </ul> or </ol>
+    if (strcasecmp(current_tag, "li") == 0) {
+        if (strcasecmp(closing_tag, "ul") == 0 || strcasecmp(closing_tag, "ol") == 0) {
+            return true;
+        }
+    }
+
+    // dt and dd are closed by </dl>
+    if (strcasecmp(current_tag, "dt") == 0 || strcasecmp(current_tag, "dd") == 0) {
+        if (strcasecmp(closing_tag, "dl") == 0) {
+            return true;
+        }
+    }
+
+    // tr is closed by </table>, </thead>, </tbody>, </tfoot>
+    if (strcasecmp(current_tag, "tr") == 0) {
+        if (strcasecmp(closing_tag, "table") == 0 || strcasecmp(closing_tag, "thead") == 0 ||
+            strcasecmp(closing_tag, "tbody") == 0 || strcasecmp(closing_tag, "tfoot") == 0) {
+            return true;
+        }
+    }
+
+    // td and th are closed by </tr>, </table>, </thead>, </tbody>, </tfoot>
+    if (strcasecmp(current_tag, "td") == 0 || strcasecmp(current_tag, "th") == 0) {
+        if (strcasecmp(closing_tag, "tr") == 0 || strcasecmp(closing_tag, "table") == 0 ||
+            strcasecmp(closing_tag, "thead") == 0 || strcasecmp(closing_tag, "tbody") == 0 ||
+            strcasecmp(closing_tag, "tfoot") == 0) {
+            return true;
+        }
+    }
+
+    // p is closed by many block elements' closing tags
+    if (strcasecmp(current_tag, "p") == 0) {
+        // p can be implicitly closed by closing tags of block containers
+        if (strcasecmp(closing_tag, "body") == 0 || strcasecmp(closing_tag, "div") == 0 ||
+            strcasecmp(closing_tag, "article") == 0 || strcasecmp(closing_tag, "section") == 0 ||
+            strcasecmp(closing_tag, "aside") == 0 || strcasecmp(closing_tag, "nav") == 0 ||
+            strcasecmp(closing_tag, "header") == 0 || strcasecmp(closing_tag, "footer") == 0 ||
+            strcasecmp(closing_tag, "main") == 0 || strcasecmp(closing_tag, "blockquote") == 0 ||
+            strcasecmp(closing_tag, "li") == 0 || strcasecmp(closing_tag, "dd") == 0 ||
+            strcasecmp(closing_tag, "td") == 0 || strcasecmp(closing_tag, "th") == 0) {
+            return true;
+        }
+    }
+
+    // option is closed by </select>, </datalist>, </optgroup>
+    if (strcasecmp(current_tag, "option") == 0) {
+        if (strcasecmp(closing_tag, "select") == 0 || strcasecmp(closing_tag, "datalist") == 0 ||
+            strcasecmp(closing_tag, "optgroup") == 0) {
+            return true;
+        }
+    }
+
+    // optgroup is closed by </select>
+    if (strcasecmp(current_tag, "optgroup") == 0) {
+        if (strcasecmp(closing_tag, "select") == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Compatibility wrappers for custom element and attribute checks (now in input-html-tokens.cpp)
 static bool is_valid_custom_element_name(const char* name) {
     return html_is_valid_custom_element_name(name);
@@ -613,6 +706,16 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
                         log_debug("Auto-close: <%s> closes <%s>, breaking out of content loop",
                                   next_tag, tag_name->chars);
                         // Don't consume the tag - let the parent parse it as a sibling
+                        break;
+                    }
+
+                    // Check if a closing tag for a parent element should close this element
+                    // E.g., </ul> closes an open <li>, </dl> closes an open <dd>
+                    const char* closing_tag_name = peek_closing_tag_name(*html);
+                    if (closing_tag_name && closing_tag_closes_element(tag_name->chars, closing_tag_name)) {
+                        log_debug("Parent closing tag </%s> closes <%s>, breaking out of content loop",
+                                  closing_tag_name, tag_name->chars);
+                        // Don't consume the tag - let the parent handle it
                         break;
                     }
 
