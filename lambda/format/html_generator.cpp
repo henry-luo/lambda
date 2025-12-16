@@ -235,7 +235,8 @@ std::string HtmlGenerator::getFontClass(const FontContext& font) const {
         case FontShape::Italic: ss << "it "; break;
         case FontShape::Slanted: ss << "sl "; break;
         case FontShape::SmallCaps: ss << "sc "; break;
-        case FontShape::Upright: break;
+        case FontShape::ExplicitUpright: ss << "up "; break;  // Explicit upright toggle from italic
+        case FontShape::Upright: break;  // Default upright, no class
     }
     
     // Include font size as class (e.g., "small", "large") for LaTeX.js compatibility
@@ -311,18 +312,11 @@ void HtmlGenerator::startSection(const std::string& level, bool starred,
         number = macro(counter_name);  // e.g., "1.2.3"
     }
     
-    // Generate anchor ID
-    std::string anchor = generateAnchorId(level);
+    // Generate anchor ID - use "sec" prefix for all section-level elements
+    std::string anchor = generateAnchorId("sec");
     
     // Set label info for \label command
     std::string label_text = number;
-    if (!title.empty()) {
-        if (!number.empty()) {
-            label_text += " " + title;
-        } else {
-            label_text = title;
-        }
-    }
     setCurrentLabel(anchor, label_text);
     
     // Add to TOC (unless starred)
@@ -337,27 +331,26 @@ void HtmlGenerator::startSection(const std::string& level, bool starred,
 void HtmlGenerator::createSectionHeading(const std::string& level, const std::string& number,
                                          const std::string& title, const std::string& anchor) {
     // html-generator.ls createSectionHeading method
+    // Expected format: <h2 id="sec-1">1 Section Name</h2>
     
     int heading_level = getHeadingLevel(level);
     
-    // Create heading element with anchor
+    // Create heading element with anchor ID as raw attribute
+    char tag[4];
+    snprintf(tag, sizeof(tag), "h%d", heading_level);
+    
     std::stringstream attrs;
     attrs << "id=\"" << anchor << "\"";
+    writer_->openTagRaw(tag, attrs.str().c_str());
     
-    h(heading_level, attrs.str().c_str());
-    
-    // Section number
+    // Section number followed by em space (U+2003)
     if (!number.empty()) {
-        span("class=\"section-number\"");
         text(number.c_str());
-        closeElement();  // span
-        text(" ");
+        text("\xe2\x80\x83");  // UTF-8 encoding of U+2003 (em space)
     }
     
     // Section title
-    span("class=\"section-title\"");
     text(title.c_str());
-    closeElement();  // span
     
     closeElement();  // h*
 }
@@ -992,7 +985,7 @@ void HtmlGenerator::ref(const char* label_name) {
         std::stringstream attrs;
         attrs << "href=\"#" << info.id << "\"";
         
-        writer_->openTag("a", attrs.str().c_str());
+        writer_->openTagRaw("a", attrs.str().c_str());
         text(info.text.c_str());
         writer_->closeTag("a");
     } else {

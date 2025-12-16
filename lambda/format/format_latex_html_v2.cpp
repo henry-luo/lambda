@@ -52,7 +52,7 @@ public:
     LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
         : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
-          strip_next_leading_space_(false), styled_span_depth_(0), 
+          strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
           recursion_depth_(0), depth_exceeded_(false) {}
     
     // Process a LaTeX element tree
@@ -87,6 +87,11 @@ public:
     void enterStyledSpan() { styled_span_depth_++; }
     void exitStyledSpan() { if (styled_span_depth_ > 0) styled_span_depth_--; }
     bool inStyledSpan() const { return styled_span_depth_ > 0; }
+    
+    // Italic span tracking - to know if we're inside an italic styled span
+    void enterItalicStyledSpan() { italic_styled_span_depth_++; }
+    void exitItalicStyledSpan() { if (italic_styled_span_depth_ > 0) italic_styled_span_depth_--; }
+    bool inItalicStyledSpan() const { return italic_styled_span_depth_ > 0; }
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
@@ -131,6 +136,10 @@ private:
     // Styled span depth - when > 0, we're inside a text-styling command like \textbf{}
     // processText should not add font spans when inside a styled span
     int styled_span_depth_;
+    
+    // Italic styled span depth - when > 0, we're inside an italic styled span (\textit{}, \emph{})
+    // Used by \emph to decide whether to add outer <span class="it">
+    int italic_styled_span_depth_;
     
     // Recursion depth tracking for macro expansion (prevent infinite loops)
     int recursion_depth_;
@@ -445,17 +454,22 @@ static void cmd_textit(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
+    proc->enterItalicStyledSpan();  // Mark we're inside an italic styled span
+    gen->currentFont().shape = FontShape::Italic;  // Set italic state for nested \emph
     gen->span("it");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitItalicStyledSpan();
     proc->exitStyledSpan();
     gen->exitGroup();
 }
 
 static void cmd_emph(LatexProcessor* proc, Item elem) {
     // \emph{text} - emphasized text (toggles italic)
-    // When already in italic, toggle to upright; otherwise toggle to italic
-    // LaTeX.js wraps the outer state + inner toggled state
+    // When already in italic and inside an italic styled span, just output <span class="up">
+    // When already in italic but NOT inside an italic styled span (e.g., \em declaration), 
+    //   output <span class="it"><span class="up"> to show current state + toggle
+    // When not italic, just output <span class="it">
     HtmlGenerator* gen = proc->generator();
     
     gen->enterGroup();
@@ -463,20 +477,34 @@ static void cmd_emph(LatexProcessor* proc, Item elem) {
     
     // Toggle italic state
     bool was_italic = (gen->currentFont().shape == FontShape::Italic);
+    bool in_italic_span = proc->inItalicStyledSpan();
     
     if (was_italic) {
-        // Wrap in current state (italic), then inner upright
-        gen->span("it");  // Outer span reflects current state
-        gen->currentFont().shape = FontShape::Upright;
-        gen->span("up");  // Inner span for toggled state
-        proc->processChildren(elem);
-        gen->closeElement();  // Close "up"
-        gen->closeElement();  // Close "it"
+        if (in_italic_span) {
+            // Already inside an italic styled span (e.g., nested \emph or inside \textit)
+            // Just output the upright span
+            gen->currentFont().shape = FontShape::Upright;
+            gen->span("up");
+            proc->processChildren(elem);
+            gen->closeElement();  // Close "up"
+        } else {
+            // Italic from declaration (e.g., \em) - need outer span to show current state
+            gen->span("it");  // Outer span reflects current state
+            gen->currentFont().shape = FontShape::Upright;
+            gen->span("up");  // Inner span for toggled state
+            proc->enterItalicStyledSpan();  // Mark that we're now inside an italic span
+            proc->processChildren(elem);
+            proc->exitItalicStyledSpan();
+            gen->closeElement();  // Close "up"
+            gen->closeElement();  // Close "it"
+        }
     } else {
         // Not italic, just add italic span
         gen->currentFont().shape = FontShape::Italic;
         gen->span("it");
+        proc->enterItalicStyledSpan();  // Mark that we're now inside an italic span
         proc->processChildren(elem);
+        proc->exitItalicStyledSpan();
         gen->closeElement();  // Close "it"
     }
     
@@ -681,9 +709,22 @@ static void cmd_itshape(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_em(LatexProcessor* proc, Item elem) {
-    // \em - switch to italic shape (declaration, same as \itshape)
+    // \em - toggle italic/upright shape (like \emph but as declaration)
     HtmlGenerator* gen = proc->generator();
-    gen->currentFont().shape = FontShape::Italic;
+    
+    // Toggle italic state
+    FontShape current = gen->currentFont().shape;
+    if (current == FontShape::Italic) {
+        // Toggle from italic to explicit upright (will produce <span class="up">)
+        gen->currentFont().shape = FontShape::ExplicitUpright;
+    } else if (current == FontShape::ExplicitUpright) {
+        // Toggle from explicit upright back to italic
+        gen->currentFont().shape = FontShape::Italic;
+    } else {
+        // Toggle from default upright to italic
+        gen->currentFont().shape = FontShape::Italic;
+    }
+    
     proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
@@ -1495,53 +1536,49 @@ static void cmd_section(LatexProcessor* proc, Item elem) {
     
     ElementReader elem_reader(elem);
     
-    // Find the title argument
-    // New grammar stores it as "title" field, old grammar as first curly_group child
-    // Generic command parsing may store it as a string child
+    // Find the title - collect all text content from string children
+    // Labels are element children and should be registered separately
     std::string title;
+    Pool* pool = proc->pool();
+    StringBuf* title_sb = stringbuf_new(pool);
     
-    // First try to get title from "title" field (new grammar section node structure)
-    if (elem_reader.has_attr("title")) {
-        ItemReader title_reader = elem_reader.get_attr("title");
-        if (title_reader.isElement()) {
-            ElementReader title_elem(title_reader.item());
-            Pool* pool = proc->pool();
-            StringBuf* sb = stringbuf_new(pool);
-            title_elem.textContent(sb);
-            String* title_str = stringbuf_to_string(sb);
-            title = title_str->chars;
-        }
-    }
-    
-    // Fallback: try first curly_group child or string child (command parsing structure)
-    if (title.empty()) {
-        auto iter = elem_reader.children();
-        ItemReader child;
-        while (iter.next(&child)) {
-            if (child.isElement()) {
-                ElementReader child_elem(child.item());
-                if (strcmp(child_elem.tagName(), "curly_group") == 0) {
-                    // Extract title text from this group
-                    Pool* pool = proc->pool();
-                    StringBuf* sb = stringbuf_new(pool);
-                    child_elem.textContent(sb);
-                    String* title_str = stringbuf_to_string(sb);
-                    title = title_str->chars;
-                    break;
-                }
-            } else if (child.isString()) {
-                // Generic command parsing: title is first string child
-                String* str = child.asString();
-                title = str->chars;
-                break;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            stringbuf_append_str(title_sb, child.cstring());
+        } else if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            // Skip label elements from title, but remember them for later
+            if (strcmp(child_elem.tagName(), "label") != 0) {
+                // For other elements (formatting), get text content
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* text = stringbuf_to_string(sb);
+                stringbuf_append_str(title_sb, text->chars);
             }
         }
     }
+    String* title_str = stringbuf_to_string(title_sb);
+    title = title_str->chars;
     
     gen->startSection("section", false, title, title);
     
-    // Process remaining children (section content: label, text, refs, etc.)
-    proc->processChildren(elem);
+    // Now register any labels as children of section
+    auto label_iter = elem_reader.children();
+    while (label_iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "label") == 0) {
+                // Found a \label - register it with section's anchor
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* label_str = stringbuf_to_string(sb);
+                gen->setLabel(label_str->chars);
+            }
+        }
+    }
+    // NOTE: Do NOT call processChildren - section heading is complete
 }
 
 static void cmd_subsection(LatexProcessor* proc, Item elem) {
@@ -2564,7 +2601,9 @@ static void cmd_maketitle(LatexProcessor* proc, Item elem) {
 // =============================================================================
 
 static void cmd_label(LatexProcessor* proc, Item elem) {
-    // \label{name}
+    // \label{name} - register a label with current counter context
+    // latex.js: label associates the label name with the current counter context
+    // The anchor ID is already output by the section/counter command
     HtmlGenerator* gen = proc->generator();
     
     // Extract label name from children
@@ -2574,15 +2613,12 @@ static void cmd_label(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* label_str = stringbuf_to_string(sb);
     
-    // Set the label with current context
+    // Register the label with current context
     gen->setLabel(label_str->chars);
     
-    // Also create an anchor element for the label
-    // This allows \ref to link to it
-    std::stringstream attrs;
-    attrs << "id=\"" << label_str->chars << "\"";
-    gen->createWithChildren("a", attrs.str().c_str());
-    gen->closeElement();
+    // NOTE: Do NOT output an anchor here - the anchor is already in the
+    // section heading or counter element. The label just associates the
+    // label name with that anchor.
 }
 
 static void cmd_ref(LatexProcessor* proc, Item elem) {
@@ -3650,9 +3686,28 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
 
 static void cmd_documentclass(LatexProcessor* proc, Item elem) {
     // \documentclass[options]{class}
-    // In HTML output, just store the class name (article, book, report, etc.)
-    // The actual formatting is handled by CSS
-    // For now, just skip - no HTML output needed
+    // Configure generator based on document class
+    HtmlGenerator* gen = proc->generator();
+    
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* class_str = stringbuf_to_string(sb);
+    std::string doc_class = class_str->chars;
+    
+    // Configure counters based on document class
+    if (doc_class == "book" || doc_class == "report") {
+        // Book/Report class: sections have chapter as parent
+        gen->newCounter("section", "chapter");
+        gen->newCounter("subsection", "section");
+        gen->newCounter("subsubsection", "subsection");
+        gen->newCounter("figure", "chapter");
+        gen->newCounter("table", "chapter");
+        gen->newCounter("footnote", "chapter");
+        gen->newCounter("equation", "chapter");
+    }
+    // article uses default initialization (no chapter parent)
 }
 
 static void cmd_usepackage(LatexProcessor* proc, Item elem) {
@@ -3747,36 +3802,135 @@ static void cmd_tableofcontents_star(LatexProcessor* proc, Item elem) {
 static void cmd_newcounter(LatexProcessor* proc, Item elem) {
     // \newcounter{counter}[parent]
     // Defines a new counter
-    // In HTML, we just track this (no output)
-    // TODO: Actual counter management system
+    HtmlGenerator* gen = proc->generator();
+    
+    // Extract counter name from children
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    // Create the counter (initial value 0)
+    gen->newCounter(counter_str->chars);
 }
 
 static void cmd_setcounter(LatexProcessor* proc, Item elem) {
     // \setcounter{counter}{value}
     // Sets counter to a specific value
-    // In HTML, no visual output (counter state management)
-    // TODO: Implement counter state tracking
+    HtmlGenerator* gen = proc->generator();
+    
+    // Extract counter name and value from children
+    ElementReader elem_reader(elem);
+    int child_count = elem_reader.childCount();
+    
+    if (child_count >= 2) {
+        Pool* pool = proc->pool();
+        
+        // First child: counter name
+        ItemReader first = elem_reader.childAt(0);
+        StringBuf* sb1 = stringbuf_new(pool);
+        if (first.isElement()) {
+            first.asElement().textContent(sb1);
+        } else if (first.isString()) {
+            stringbuf_append_str(sb1, first.cstring());
+        }
+        String* counter_str = stringbuf_to_string(sb1);
+        
+        // Second child: value
+        ItemReader second = elem_reader.childAt(1);
+        StringBuf* sb2 = stringbuf_new(pool);
+        if (second.isElement()) {
+            second.asElement().textContent(sb2);
+        } else if (second.isString()) {
+            stringbuf_append_str(sb2, second.cstring());
+        }
+        String* value_str = stringbuf_to_string(sb2);
+        
+        int value = atoi(value_str->chars);
+        gen->setCounter(counter_str->chars, value);
+    }
 }
 
 static void cmd_addtocounter(LatexProcessor* proc, Item elem) {
     // \addtocounter{counter}{value}
     // Adds to counter value
-    // In HTML, no visual output
-    // TODO: Implement counter arithmetic
+    HtmlGenerator* gen = proc->generator();
+    
+    ElementReader elem_reader(elem);
+    int child_count = elem_reader.childCount();
+    
+    if (child_count >= 2) {
+        Pool* pool = proc->pool();
+        
+        // First child: counter name
+        ItemReader first = elem_reader.childAt(0);
+        StringBuf* sb1 = stringbuf_new(pool);
+        if (first.isElement()) {
+            first.asElement().textContent(sb1);
+        } else if (first.isString()) {
+            stringbuf_append_str(sb1, first.cstring());
+        }
+        String* counter_str = stringbuf_to_string(sb1);
+        
+        // Second child: value to add
+        ItemReader second = elem_reader.childAt(1);
+        StringBuf* sb2 = stringbuf_new(pool);
+        if (second.isElement()) {
+            second.asElement().textContent(sb2);
+        } else if (second.isString()) {
+            stringbuf_append_str(sb2, second.cstring());
+        }
+        String* value_str = stringbuf_to_string(sb2);
+        
+        int value = atoi(value_str->chars);
+        gen->addToCounter(counter_str->chars, value);
+    }
 }
 
 static void cmd_stepcounter(LatexProcessor* proc, Item elem) {
     // \stepcounter{counter}
     // Increments counter by 1
-    // In HTML, no visual output
-    // TODO: Implement counter increment
+    HtmlGenerator* gen = proc->generator();
+    
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    gen->stepCounter(counter_str->chars);
 }
 
 static void cmd_refstepcounter(LatexProcessor* proc, Item elem) {
     // \refstepcounter{counter}
-    // Steps counter and makes it referenceable
-    // In HTML, no visual output
-    // TODO: Implement with label support
+    // Steps counter, makes it referenceable, and outputs an anchor
+    HtmlGenerator* gen = proc->generator();
+    
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    // Step the counter
+    gen->stepCounter(counter_str->chars);
+    
+    // Get the new counter value
+    int value = gen->getCounter(counter_str->chars);
+    
+    // Generate anchor ID and set as current label
+    std::stringstream anchor;
+    anchor << counter_str->chars << "-" << value;
+    
+    std::string text_value = std::to_string(value);
+    gen->setCurrentLabel(anchor.str(), text_value);
+    
+    // Output an anchor element
+    std::stringstream attrs;
+    attrs << "id=\"" << anchor.str() << "\"";
+    gen->writer()->openTagRaw("a", attrs.str().c_str());
+    gen->writer()->closeTag("a");
 }
 
 static void cmd_value(LatexProcessor* proc, Item elem) {
@@ -4423,6 +4577,51 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Handle curly_group (TeX brace groups) - important for font scoping
+    // Groups in TeX (e.g., { \bfseries text }) limit the scope of declarations
+    // latex.js adds zero-width space (U+200B) at group boundaries for visual separation
+    if (strcmp(cmd_name, "curly_group") == 0) {
+        gen_->enterGroup();
+        
+        // Check if first child is a string starting with whitespace
+        // If so, output ZWS at group entry (latex.js behavior: { → ​ when followed by space)
+        ElementReader reader(elem);
+        bool has_leading_space = false;
+        
+        auto iter = reader.children();
+        ItemReader first_child;
+        if (iter.next(&first_child) && first_child.isString()) {
+            String* str = first_child.asString();
+            if (str && str->len > 0 && str->chars[0] == ' ') {
+                has_leading_space = true;
+            }
+        }
+        
+        // Output ZWS at entry if leading space
+        if (has_leading_space) {
+            ensureParagraph();
+            gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+        }
+        
+        processChildren(elem);
+        gen_->exitGroup();
+        
+        // ZWS at exit for depth <= 2
+        if (gen_->groupDepth() <= 2) {
+            ensureParagraph();
+            // Output ZWS with current font styling (if any)
+            std::string font_class = gen_->getFontClass(gen_->currentFont());
+            if (!font_class.empty() && !inStyledSpan()) {
+                gen_->span(font_class.c_str());
+                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                gen_->closeElement();
+            } else {
+                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+            }
+        }
+        return;
+    }
+    
     // Handle document wrapper (from \begin{document}...\end{document})
     if (strcmp(cmd_name, "document") == 0) {
         // Just process children - document is a transparent container
