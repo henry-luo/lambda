@@ -5107,7 +5107,91 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
                 return;
             }
-            log_debug("[Lambda CSS Shorthand] Complex background shorthand not yet implemented");
+            // Handle gradient functions (linear-gradient, radial-gradient, etc.)
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
+                const char* func_name = value->data.function->name;
+                log_debug("[Lambda CSS Shorthand] Processing background function: %s", func_name);
+                if (strcmp(func_name, "linear-gradient") == 0 ||
+                    strcmp(func_name, "repeating-linear-gradient") == 0) {
+                    // Parse linear-gradient(angle, color1, color2, ...)
+                    if (!span->bound) {
+                        span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                    }
+                    if (!span->bound->background) {
+                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                    }
+                    span->bound->background->gradient_type = GRADIENT_LINEAR;
+
+                    // Allocate LinearGradient
+                    LinearGradient* lg = (LinearGradient*)alloc_prop(lycon, sizeof(LinearGradient));
+                    span->bound->background->linear_gradient = lg;
+
+                    // Parse arguments
+                    CssFunction* func = value->data.function;
+                    int arg_idx = 0;
+                    float angle = 180.0f;  // default: to bottom
+
+                    // Check if first arg is angle or direction
+                    if (func->arg_count > 0 && func->args[0]) {
+                        CssValue* first_arg = func->args[0];
+                        log_debug("[CSS Gradient] first_arg type=%d (ANGLE=%d, KEYWORD=%d, NUMBER=%d)",
+                            first_arg->type, CSS_VALUE_TYPE_ANGLE, CSS_VALUE_TYPE_KEYWORD, CSS_VALUE_TYPE_NUMBER);
+                        if (first_arg->type == CSS_VALUE_TYPE_ANGLE) {
+                            angle = first_arg->data.length.value;
+                            arg_idx = 1;
+                            log_debug("[CSS Gradient] angle: %.1f deg", angle);
+                        } else if (first_arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            // Sometimes angles come as numbers with implicit deg unit
+                            angle = first_arg->data.number.value;
+                            arg_idx = 1;
+                            log_debug("[CSS Gradient] angle from number: %.1f deg", angle);
+                        } else if (first_arg->type == CSS_VALUE_TYPE_LENGTH) {
+                            // Angle might be stored as length with deg unit
+                            angle = first_arg->data.length.value;
+                            arg_idx = 1;
+                            log_debug("[CSS Gradient] angle from length: %.1f deg", angle);
+                        } else if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
+                            // Handle "to top", "to right", etc.
+                            // For now, use default angle
+                            arg_idx = 1;
+                        }
+                    }
+                    lg->angle = angle;
+
+                    // Count color stops
+                    int color_count = func->arg_count - arg_idx;
+                    lg->stop_count = color_count > 0 ? color_count : 2;
+                    lg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count);
+
+                    // Parse color stops
+                    int stop_idx = 0;
+                    for (int i = arg_idx; i < func->arg_count && stop_idx < lg->stop_count; i++) {
+                        CssValue* arg = func->args[i];
+                        if (arg && arg->type == CSS_VALUE_TYPE_COLOR) {
+                            lg->stops[stop_idx].color = resolve_color_value(arg);
+                            lg->stops[stop_idx].position = -1;  // auto position
+                            log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x", stop_idx,
+                                lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
+                            stop_idx++;
+                        }
+                    }
+                    lg->stop_count = stop_idx;
+
+                    // Auto-distribute positions if not specified
+                    if (lg->stop_count > 0) {
+                        for (int i = 0; i < lg->stop_count; i++) {
+                            if (lg->stops[i].position < 0) {
+                                lg->stops[i].position = (float)i / (float)(lg->stop_count - 1);
+                            }
+                        }
+                    }
+
+                    log_debug("[Lambda CSS Shorthand] Parsed linear-gradient with %d stops, angle=%.1f",
+                        lg->stop_count, lg->angle);
+                    return;
+                }
+            }
+            log_debug("[Lambda CSS Shorthand] Complex background shorthand not yet implemented (type=%d)", value->type);
             return;
         }
 
