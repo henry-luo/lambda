@@ -116,6 +116,22 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                                 return HTML4_01_FRAMESET;
                             }
 
+                            // Check for HTML 4.0 patterns
+                            if (strstr(content, "-//W3C//DTD HTML 4.0//EN")) {
+                                log_debug("Detected HTML 4.0 Strict DOCTYPE");
+                                return HTML4_01_STRICT;
+                            }
+
+                            if (strstr(content, "-//W3C//DTD HTML 4.0 Transitional//EN")) {
+                                log_debug("Detected HTML 4.0 Transitional DOCTYPE");
+                                return HTML4_01_TRANSITIONAL;
+                            }
+
+                            if (strstr(content, "-//W3C//DTD HTML 4.0 Frameset//EN")) {
+                                log_debug("Detected HTML 4.0 Frameset DOCTYPE");
+                                return HTML4_01_FRAMESET;
+                            }
+
                             // Check for XHTML patterns
                             if (strstr(content, "-//W3C//DTD XHTML 1.0")) {
                                 if (strstr(content, "Strict")) {
