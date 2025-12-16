@@ -63,7 +63,9 @@ struct Length {
 // =============================================================================
 
 enum class FontSeries { Normal, Bold };
-enum class FontShape { Upright, Italic, Slanted, SmallCaps };
+// Note: ExplicitUpright is used when toggling from italic to upright (e.g., \em in italic context)
+// It produces <span class="up"> unlike default Upright which produces no span
+enum class FontShape { Upright, Italic, Slanted, SmallCaps, ExplicitUpright };
 enum class FontFamily { Roman, SansSerif, Typewriter };
 enum class FontSize { 
     Tiny, ScriptSize, FootnoteSize, Small, 
@@ -234,6 +236,9 @@ public:
     // Exit current group scope
     // latex.js: exitGroup: !->
     void exitGroup();
+    
+    // Get current group nesting depth (1 = document level, 2+ = inside explicit groups)
+    size_t groupDepth() const { return group_stack_.size(); }
     
     // Get current font context
     FontContext& currentFont();
