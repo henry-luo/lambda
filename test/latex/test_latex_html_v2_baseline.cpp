@@ -188,24 +188,18 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         "spacing.tex",
         "symbols.tex",
         "macros.tex",
-        "fonts.tex"
+        "fonts.tex",
+        // Additional files - full test suite
+        "boxes.tex",
+        "groups.tex",
+        "label-ref.tex",
+        "layout-marginpar.tex"
     };
 
     // Tests to exclude from V2 baseline
-    // Start with same exclusions as V1, may need to adjust based on V2 behavior
+    // Full test suite - no exclusions
     std::map<std::string, std::set<int>> excluded_test_ids = {
-        {"counters.tex", {1}},                     // Expression evaluator
-        {"spacing.tex", {2, 3, 4}},                // Complex spacing commands
-        {"symbols.tex", {1, 2, 3, 4}},             // Special symbol commands
-        {"preamble.tex", {1}},                     // Preamble handling
-        {"formatting.tex", {6}},                   // Text alignment commands
-        {"sectioning.tex", {1, 2, 3}},             // Section content nesting
-        {"basic_text.tex", {4, 6}},                // Special chars, verbatim
-        {"text.tex", {3, 4, 5, 6, 7, 8, 9}},       // Various text processing
-        {"environments.tex", {3, 6, 7, 9, 14}},    // Environment edge cases
-        {"whitespace.tex", {2, 5, 6, 7, 8, 12, 13, 14, 17, 18, 19, 20, 21}},  
-        {"macros.tex", {2, 3, 4, 5, 6}},           // Macro tests (Phase 6 - work in progress)
-        {"fonts.tex", {3, 4, 5, 7, 8}},            // Font nesting/scoping
+        // No exclusions - running full test suite
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {

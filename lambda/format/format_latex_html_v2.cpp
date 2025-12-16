@@ -92,6 +92,7 @@ public:
     void endParagraph();  // Close current paragraph if open
     void closeParagraphIfOpen();  // Alias for endParagraph
     void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
+    void ensureParagraph();  // Start a paragraph if not already in one
     
     // Macro system functions (public so command handlers can access)
     void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
@@ -131,7 +132,6 @@ private:
     bool depth_exceeded_;  // Flag to halt processing when depth limit is exceeded
     
     // Helper methods for paragraph management
-    void ensureParagraph();
     bool isBlockCommand(const char* cmd_name);
     bool isInlineCommand(const char* cmd_name);
     
@@ -1371,6 +1371,7 @@ static void cmd_Huge(LatexProcessor* proc, Item elem) {
 static void cmd_TeX(LatexProcessor* proc, Item elem) {
     // \TeX - TeX logo
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     
     gen->span("tex");
     gen->text("T");
@@ -1384,6 +1385,7 @@ static void cmd_TeX(LatexProcessor* proc, Item elem) {
 static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
     // \LaTeX - LaTeX logo
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     
     gen->span("latex");
     gen->text("L");
@@ -1401,6 +1403,7 @@ static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
 static void cmd_today(LatexProcessor* proc, Item elem) {
     // \today - Current date
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     
     // Format: December 12, 2025 (example)
     time_t now = time(nullptr);
@@ -1455,6 +1458,13 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
     }
     
     // Case 1: No braces - output nothing (null command)
+}
+
+static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
+    // \textbackslash - Outputs a backslash character
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("\\");
 }
 
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
@@ -2246,6 +2256,7 @@ static void cmd_vfill(LatexProcessor* proc, Item elem) {
 static void cmd_hfill(LatexProcessor* proc, Item elem) {
     // \hfill - horizontal fill (flexible space)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("hfill", "flex-grow:1");
     gen->closeElement();
 }
@@ -2254,6 +2265,7 @@ static void cmd_nolinebreak(LatexProcessor* proc, Item elem) {
     // \nolinebreak[priority] - discourage line break
     // In HTML, use non-breaking space or CSS hint
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithStyle("white-space:nowrap");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2299,6 +2311,7 @@ static void cmd_enlargethispage(LatexProcessor* proc, Item elem) {
 static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
     // \negthinspace or \! - negative thin space
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->span("negthinspace");
     gen->closeElement();
 }
@@ -2306,24 +2319,28 @@ static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
 static void cmd_thinspace(LatexProcessor* proc, Item elem) {
     // \thinspace or \, - thin space (1/6 em)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->text("\u2009");  // U+2009 thin space
 }
 
 static void cmd_enspace(LatexProcessor* proc, Item elem) {
     // \enspace - en space (1/2 em)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->text("\u2002");  // U+2002 en space
 }
 
 static void cmd_quad(LatexProcessor* proc, Item elem) {
     // \quad - 1 em space
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->text("\u2003");  // U+2003 em space
 }
 
 static void cmd_qquad(LatexProcessor* proc, Item elem) {
     // \qquad - 2 em space
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->text("\u2003\u2003");  // two em spaces
 }
 
@@ -2334,6 +2351,7 @@ static void cmd_qquad(LatexProcessor* proc, Item elem) {
 static void cmd_mbox(LatexProcessor* proc, Item elem) {
     // \mbox{text} - make box (prevent line breaking)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithStyle("white-space:nowrap");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2342,6 +2360,7 @@ static void cmd_mbox(LatexProcessor* proc, Item elem) {
 static void cmd_fbox(LatexProcessor* proc, Item elem) {
     // \fbox{text} - framed box
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("fbox", "border:1px solid black;padding:3px");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2351,6 +2370,7 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
     // \framebox[width][pos]{text} - framed box with options
     // TODO: Parse width and position parameters
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("framebox", "border:1px solid black;padding:3px");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2359,6 +2379,7 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
 static void cmd_frame(LatexProcessor* proc, Item elem) {
     // \frame{text} - simple frame
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("frame", "border:1px solid black");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2377,6 +2398,7 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
     // \makebox[width][pos]{text} - make box with size
     // TODO: Parse width and position
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->span("makebox");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2385,6 +2407,7 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
 static void cmd_phantom(LatexProcessor* proc, Item elem) {
     // \phantom{text} - invisible box with dimensions
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("phantom", "visibility:hidden");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2393,6 +2416,7 @@ static void cmd_phantom(LatexProcessor* proc, Item elem) {
 static void cmd_hphantom(LatexProcessor* proc, Item elem) {
     // \hphantom{text} - horizontal phantom (width only)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("hphantom", "visibility:hidden");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2401,6 +2425,7 @@ static void cmd_hphantom(LatexProcessor* proc, Item elem) {
 static void cmd_vphantom(LatexProcessor* proc, Item elem) {
     // \vphantom{text} - vertical phantom (height/depth only)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("vphantom", "visibility:hidden;width:0");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2409,6 +2434,7 @@ static void cmd_vphantom(LatexProcessor* proc, Item elem) {
 static void cmd_smash(LatexProcessor* proc, Item elem) {
     // \smash[tb]{text} - smash height/depth
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("smash", "display:inline-block;height:0");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2417,6 +2443,7 @@ static void cmd_smash(LatexProcessor* proc, Item elem) {
 static void cmd_clap(LatexProcessor* proc, Item elem) {
     // \clap{text} - centered lap (zero width, centered)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("clap", "display:inline-block;width:0;text-align:center");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2425,6 +2452,7 @@ static void cmd_clap(LatexProcessor* proc, Item elem) {
 static void cmd_llap(LatexProcessor* proc, Item elem) {
     // \llap{text} - left lap (zero width, right-aligned)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("llap", "display:inline-block;width:0;text-align:right");
     proc->processChildren(elem);
     gen->closeElement();
@@ -2433,6 +2461,7 @@ static void cmd_llap(LatexProcessor* proc, Item elem) {
 static void cmd_rlap(LatexProcessor* proc, Item elem) {
     // \rlap{text} - right lap (zero width, left-aligned)
     HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
     gen->spanWithClassAndStyle("rlap", "display:inline-block;width:0;text-align:left");
     proc->processChildren(elem);
     gen->closeElement();
@@ -3853,6 +3882,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["LaTeX"] = cmd_LaTeX;
     command_table_["today"] = cmd_today;
     command_table_["empty"] = cmd_empty;
+    command_table_["textbackslash"] = cmd_textbackslash;
     command_table_["makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;
     
@@ -4266,6 +4296,9 @@ void LatexProcessor::processSpacingCommand(Item elem) {
             } else if (strcmp(cmd, "\\/") == 0 || strcmp(cmd, "\\@") == 0) {
                 // Italic correction or inter-sentence space marker - output nothing
                 // These are zero-width commands
+            } else if (strcmp(cmd, "\\-") == 0) {
+                // Discretionary hyphen - soft hyphen U+00AD
+                gen_->text("\xC2\xAD");  // UTF-8 encoding of U+00AD
             }
             break;
         }
