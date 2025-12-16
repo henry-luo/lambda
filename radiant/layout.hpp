@@ -174,6 +174,11 @@ typedef struct FlexContainerLayout : FlexProp {
     // and flex-grow should NOT distribute additional space
     bool main_axis_is_indefinite;
 
+    // CSS Flexbox §9.4: Whether container has a definite cross size
+    // True if container has explicit CSS height (row flex) or width (column flex)
+    // False for auto-size containers that derive cross size from content
+    bool has_definite_cross_size;
+
     // Layout context for intrinsic sizing (set during init_flex_container)
     struct LayoutContext* lycon;
 } FlexContainerLayout;

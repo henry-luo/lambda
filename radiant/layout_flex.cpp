@@ -291,8 +291,40 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->main_axis_is_indefinite = !has_definite_height;
     }
 
-    log_debug("init_flex_container: main_axis_is_indefinite=%s (is_absolute=%s, is_horizontal=%s, has_width=%s, has_height=%s, has_max_width=%s, has_max_height=%s)",
+    // Determine if cross axis has a definite size (CSS Flexbox §9.4)
+    // For row flex: cross axis is height
+    // For column flex: cross axis is width
+    if (is_horizontal) {
+        // Row flex: cross axis is height
+        // Height is definite if explicitly set or if container has top+bottom insets
+        bool has_definite_height_for_cross = has_explicit_height;
+        if (is_absolute && container->position) {
+            has_definite_height_for_cross = has_definite_height_for_cross ||
+                (container->position->has_top && container->position->has_bottom);
+        }
+        flex->has_definite_cross_size = has_definite_height_for_cross;
+    } else {
+        // Column flex: cross axis is width
+        // Width is definite if explicitly set, or if block-level with computed width, or if has left+right insets
+        bool has_definite_width_for_cross = has_explicit_width;
+        if (is_absolute && container->position) {
+            has_definite_width_for_cross = has_definite_width_for_cross ||
+                (container->position->has_left && container->position->has_right);
+        }
+        // Block-level elements have definite width from containing block
+        if (!has_definite_width_for_cross && !is_absolute && content_width > 0) {
+            bool is_inline_level = (container->display.outer == CSS_VALUE_INLINE_BLOCK ||
+                                    container->display.outer == CSS_VALUE_INLINE);
+            if (!is_inline_level) {
+                has_definite_width_for_cross = true;
+            }
+        }
+        flex->has_definite_cross_size = has_definite_width_for_cross;
+    }
+
+    log_debug("init_flex_container: main_axis_is_indefinite=%s, has_definite_cross_size=%s (is_absolute=%s, is_horizontal=%s, has_width=%s, has_height=%s, has_max_width=%s, has_max_height=%s)",
               flex->main_axis_is_indefinite ? "true" : "false",
+              flex->has_definite_cross_size ? "true" : "false",
               is_absolute ? "true" : "false",
               is_horizontal ? "true" : "false",
               has_explicit_width ? "true" : "false",
@@ -426,71 +458,22 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 }
                 log_debug("AXIS INIT - verify main now: %.1f", flex_layout->main_axis_size);
             }
-            log_debug("AXIS INIT - cross condition: %s (cross=%.1f)",
-                   (flex_layout->cross_axis_size == 0.0f) ? "true" : "false", flex_layout->cross_axis_size);
+            log_debug("AXIS INIT - cross condition: %s (cross=%.1f, has_definite=%s)",
+                   (flex_layout->cross_axis_size == 0.0f) ? "true" : "false", flex_layout->cross_axis_size,
+                   flex_layout->has_definite_cross_size ? "true" : "false");
             if (flex_layout->cross_axis_size == 0.0f) {
-                // ENHANCED: Calculate proper cross-axis size based on flex items
-                int calculated_cross_size = content_height;
-
-                // If container has no explicit height, calculate based on flex items
-                if (container->height <= 0 || content_height <= 0) {
-                    // Calculate max height from flex items
-                    int max_item_height = 0;
-                    View* child = container->first_child;
-                    while (child) {
-                        if (child->view_type == RDT_VIEW_BLOCK) {
-                            ViewElement* item = (ViewElement*)child->as_element();
-                            if (item) {
-                                int item_height = 0;
-                                // Check for explicit height
-                                if (item->blk && item->blk->given_height > 0) {
-                                    item_height = (int)item->blk->given_height;
-                                } else if (item->height > 0) {
-                                    item_height = item->height;
-                                } else if (item->fi) {
-                                    // Use flex-basis if it's a height value
-                                    if (item->fi->flex_basis >= 0 && !item->fi->flex_basis_is_percent) {
-                                        // For row flex, flex-basis is width, not height
-                                        // Empty flex items (no children) get 0 height
-                                        // Items with children get minimum height (may have content)
-                                        if (!is_empty_flex_container(item)) {
-                                            item_height = 20;  // Minimum for items with content
-                                        }
-                                        // else: empty flex items get 0
-                                    }
-                                }
-                                // Add padding and border to item height
-                                if (item->bound) {
-                                    item_height += item->bound->padding.top + item->bound->padding.bottom;
-                                    if (item->bound->border) {
-                                        item_height += item->bound->border->width.top + item->bound->border->width.bottom;
-                                    }
-                                }
-                                if (item_height > max_item_height) {
-                                    max_item_height = item_height;
-                                }
-                                log_debug("ROW FLEX: item height = %d, max = %d", item_height, max_item_height);
-                            }
-                        }
-                        child = child->next();
-                    }
-                    // Use calculated height, no minimum fallback for empty containers
-                    calculated_cross_size = max_item_height;
-                    log_debug("ROW FLEX: auto-height calculated as %d from items", calculated_cross_size);
-                } else {
-                    // Use existing content height if available
-                    calculated_cross_size = content_height;
+                // For auto-height (no definite cross size), DO NOT set cross_axis_size early
+                // Let calculate_line_cross_sizes compute it from item hypothetical cross sizes
+                // This ensures nested flex containers are laid out first
+                if (!flex_layout->has_definite_cross_size) {
+                    log_debug("ROW FLEX: auto-height container, deferring cross_axis_size calculation");
+                    // Leave cross_axis_size at 0 - it will be set in Phase 5 (calculate_line_cross_sizes)
+                } else if (content_height > 0) {
+                    // Container has definite height, use it
+                    flex_layout->cross_axis_size = (float)content_height;
+                    log_debug("ROW FLEX: using definite content_height=%.1f for cross_axis_size",
+                              (float)content_height);
                 }
-
-                flex_layout->cross_axis_size = (float)calculated_cross_size;
-                // Container height should be content + padding (not just content)
-                int padding_height = 0;
-                if (container->bound) {
-                    padding_height = (int)(container->bound->padding.top + container->bound->padding.bottom);
-                }
-                container->height = calculated_cross_size + padding_height;
-                log_debug("ROW FLEX: final cross_axis_size: %.1f, container->height=%d (content=%d + padding=%d)",
-                          (float)calculated_cross_size, (int)container->height, calculated_cross_size, padding_height);
             }
         } else {
             log_debug("AXIS INIT - vertical branch");
@@ -686,21 +669,53 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // This must happen BEFORE Phase 6 (main axis alignment) so justify-content
     // has the correct container size to distribute space
     if (container->blk) {
+        // Get padding values for content-box calculation
+        float padding_main = 0.0f;
+        float padding_cross = 0.0f;
+        if (container->bound) {
+            if (is_main_axis_horizontal(flex_layout)) {
+                padding_main = container->bound->padding.left + container->bound->padding.right;
+                padding_cross = container->bound->padding.top + container->bound->padding.bottom;
+            } else {
+                padding_main = container->bound->padding.top + container->bound->padding.bottom;
+                padding_cross = container->bound->padding.left + container->bound->padding.right;
+            }
+        }
+
         if (is_main_axis_horizontal(flex_layout)) {
+            // Row flex: min-width affects main_axis_size (for justify-content)
+            // CRITICAL: min-width is border-box, main_axis_size is content-box
+            float min_content_width = container->blk->given_min_width - padding_main;
+            if (container->blk->given_min_width > 0 && flex_layout->main_axis_size < min_content_width) {
+                log_debug("Phase 5b: Applying min-width to main axis: %.1f -> %.1f (min-width=%.1f, padding=%.1f)",
+                          flex_layout->main_axis_size, min_content_width, container->blk->given_min_width, padding_main);
+                flex_layout->main_axis_size = min_content_width;
+                container->width = (int)container->blk->given_min_width;  // Keep border-box width
+            }
             // Row flex: min-height affects cross_axis_size
+            float min_content_height = container->blk->given_min_height - padding_cross;
             if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
                 log_debug("Phase 5b: Applying min-height to cross axis: %.1f -> %.1f",
                           container->height, container->blk->given_min_height);
                 container->height = container->blk->given_min_height;
-                flex_layout->cross_axis_size = container->blk->given_min_height;
+                flex_layout->cross_axis_size = min_content_height > 0 ? min_content_height : container->blk->given_min_height;
             }
         } else {
             // Column flex: min-height affects main_axis_size (and justify-content)
+            float min_content_height = container->blk->given_min_height - padding_main;
             if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
                 log_debug("Phase 5b: Applying min-height to main axis: %.1f -> %.1f",
                           container->height, container->blk->given_min_height);
                 container->height = container->blk->given_min_height;
-                flex_layout->main_axis_size = container->blk->given_min_height;
+                flex_layout->main_axis_size = min_content_height > 0 ? min_content_height : container->blk->given_min_height;
+            }
+            // Column flex: min-width affects cross_axis_size
+            float min_content_width = container->blk->given_min_width - padding_cross;
+            if (container->blk->given_min_width > 0 && flex_layout->cross_axis_size < min_content_width) {
+                log_debug("Phase 5b: Applying min-width to cross axis: %.1f -> %.1f",
+                          flex_layout->cross_axis_size, container->blk->given_min_width);
+                flex_layout->cross_axis_size = min_content_width > 0 ? min_content_width : container->blk->given_min_width;
+                container->width = (int)container->blk->given_min_width;
             }
         }
     }
@@ -748,6 +763,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     padding_height = (int)(container->bound->padding.top + container->bound->padding.bottom);
                 }
                 container->height = total_line_cross + padding_height;
+                log_debug("Phase 7: UPDATED container=%p (%s) height to %.1f (total_line_cross=%d + padding=%d)",
+                         container, container->node_name(), container->height, total_line_cross, padding_height);
             } else {
                 log_debug("Phase 7: Container has explicit height, not updating");
             }
@@ -2964,7 +2981,13 @@ float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
             log_debug("Using CSS height for cross-axis: %.1f", item->blk->given_height);
             return item->blk->given_height;
         }
-        return item->height;
+        // Also check min-height constraint
+        float height = item->height;
+        if (item->blk && item->blk->given_min_height > 0 && height < item->blk->given_min_height) {
+            height = item->blk->given_min_height;
+            log_debug("Using CSS min-height for cross-axis: %.1f", height);
+        }
+        return height;
     } else {
         // Cross-axis is width for vertical flex containers
         // CRITICAL FIX: Check CSS width first
@@ -2972,7 +2995,13 @@ float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
             log_debug("Using CSS width for cross-axis: %.1f", item->blk->given_width);
             return item->blk->given_width;
         }
-        return item->width;
+        // Also check min-width constraint
+        float width = item->width;
+        if (item->blk && item->blk->given_min_width > 0 && width < item->blk->given_min_width) {
+            width = item->blk->given_min_width;
+            log_debug("Using CSS min-width for cross-axis: %.1f", width);
+        }
+        return width;
     }
 }
 
@@ -3209,7 +3238,9 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
     // Note: "single-line" refers to flex-wrap: nowrap, NOT to having only one line with wrap.
     // align-content can still apply to a wrapping container even if it happens to have one line.
     bool is_nowrap = (flex_layout->wrap == WRAP_NOWRAP);
-    bool has_definite_cross = (flex_layout->cross_axis_size > 0);
+    // FIXED: Use the explicit flag instead of checking cross_axis_size > 0
+    // The old check was wrong because cross_axis_size could be a guessed value (not CSS-specified)
+    bool has_definite_cross = flex_layout->has_definite_cross_size;
 
     if (is_nowrap && has_definite_cross) {
         // Single-line (nowrap) with definite cross size: line cross = container cross
@@ -3220,8 +3251,11 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
     }
 
     // Otherwise, calculate line cross sizes from item hypothetical cross sizes
-    // Check if align-content is stretch - affects how we calculate line sizes
-    bool align_content_stretch = (flex_layout->align_content == ALIGN_STRETCH);
+    // IMPORTANT: align-content: stretch only affects MULTI-LINE containers.
+    // For single-line (nowrap) containers, align-content has no effect per CSS spec.
+    // The optimization below only applies to multi-line containers.
+    bool is_wrapping = (flex_layout->wrap != WRAP_NOWRAP);
+    bool align_content_stretch = is_wrapping && (flex_layout->align_content == ALIGN_STRETCH);
 
     for (int i = 0; i < flex_layout->line_count; i++) {
         FlexLineInfo* line = &flex_layout->lines[i];
@@ -3235,9 +3269,11 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
             bool has_definite = item_has_definite_cross_size(item, flex_layout);
             bool will_stretch = item_will_stretch(item, flex_layout);
 
-            // For align-content: stretch, items with auto cross-size AND align-self: stretch
-            // should NOT contribute their content size to line cross-size.
+            // For MULTI-LINE containers with align-content: stretch, items with auto cross-size
+            // AND align-self: stretch should NOT contribute their content size to line cross-size
+            // because the lines will be stretched to fill the container anyway.
             // However, they should still contribute their min-cross-size (e.g., min-height)!
+            // NOTE: This does NOT apply to single-line (nowrap) containers!
             if (align_content_stretch &&
                 !has_definite &&
                 will_stretch) {
@@ -3421,11 +3457,13 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
             }
 
             // clamp to min/max constraints
-            if (hypothetical_cross < min_cross) {
-                hypothetical_cross = min_cross;
-            }
+            // CSS rule: min-height/min-width overrides max-height/max-width
+            // So we clamp to max first, then to min (min wins if conflict)
             if (hypothetical_cross > max_cross) {
                 hypothetical_cross = max_cross;
+            }
+            if (hypothetical_cross < min_cross) {
+                hypothetical_cross = min_cross;
             }
 
             // store the hypothetical cross size
