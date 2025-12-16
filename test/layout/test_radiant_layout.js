@@ -27,6 +27,7 @@ class RadiantLayoutTester {
         this.projectRoot = options.projectRoot || process.cwd();
         this.maxConcurrency = options.maxConcurrency || 5; // Max parallel tests
         this.testIdCounter = 0; // Counter for unique test IDs
+        this.singleTestMode = options.singleTestMode || false; // Single test mode for detailed failure reports
     }
 
     /**
@@ -907,10 +908,13 @@ class RadiantLayoutTester {
     /**
      * Generate hierarchical report of comparison results
      */
-    generateReport(results, textResults, testName) {
+    generateReport(results, textResults, testName, metadata = {}) {
         const report = {
             testName: testName,
             timestamp: new Date().toISOString(),
+            htmlFile: metadata.htmlFile || null,
+            resultFile: metadata.resultFile || null,
+            viewFile: metadata.viewFile || null,
             elementComparison: {
                 total: results.totalElements,
                 matched: results.matchedElements,
@@ -948,6 +952,18 @@ class RadiantLayoutTester {
      */
     printReport(report) {
         if (this.json) return; // Skip console output in JSON mode
+
+        // Overall result - include span information in summary
+        const overallSuccess = report.elementComparison.passRate >= this.elementThreshold &&
+                              report.textComparison.passRate >= this.textThreshold;
+        const status = overallSuccess ? '✅ PASS' : '❌ FAIL';
+
+        // For single test mode with failure, print detailed sectioned report
+        if (this.singleTestMode && !overallSuccess) {
+            this.printDetailedFailureReport(report);
+            return;
+        }
+
         console.log(`\n📊 Test Case: ${report.testName}`);
         // Only show detailed statistics in verbose mode
         if (this.verbose) {
@@ -980,11 +996,6 @@ class RadiantLayoutTester {
             console.log('');
         }
 
-        // Overall result - include span information in summary
-        const overallSuccess = report.elementComparison.passRate >= this.elementThreshold &&
-                              report.textComparison.passRate >= this.textThreshold;
-        const status = overallSuccess ? '✅ PASS' : '❌ FAIL';
-
         let summaryText = `${status} Overall: Elements ${report.elementComparison.passRate.toFixed(1)}%`;
         if (report.spanComparison.total > 0) {
             summaryText += `, Spans ${report.spanComparison.passRate.toFixed(1)}%`;
@@ -992,6 +1003,192 @@ class RadiantLayoutTester {
         summaryText += `, Text ${report.textComparison.passRate.toFixed(1)}%`;
 
         console.log(summaryText);
+    }
+
+    /**
+     * Print detailed sectioned failure report for single test mode
+     * Shows comprehensive debugging information when a test fails
+     */
+    printDetailedFailureReport(report) {
+        const line = (char = '=', len = 80) => char.repeat(len);
+        const c = {
+            reset: '\x1b[0m',
+            red: '\x1b[31m',
+            green: '\x1b[32m',
+            yellow: '\x1b[33m',
+            blue: '\x1b[34m',
+            cyan: '\x1b[36m',
+            bold: '\x1b[1m',
+            dim: '\x1b[2m',
+        };
+
+        console.log();
+        console.log(line('='));
+        console.log(`${c.bold}${c.red}LAYOUT TEST FAILED: ${report.testName}${c.reset}`);
+        console.log(line('='));
+        console.log();
+
+        // Section 1: Test Overview
+        console.log(`${c.bold}[TEST OVERVIEW]${c.reset}`);
+        console.log(line('-', 40));
+        console.log(`├─ Test: ${report.htmlFile || report.testName}`);
+        console.log(`├─ Result: ${report.resultFile || '/tmp/view_tree.json'}`);
+        console.log(`├─ View: ${report.viewFile || '/tmp/view_tree.txt'}`);
+        console.log(`├─ Tolerance: ${report.tolerance}px`);
+        console.log(`└─ Reference: test/layout/reference/${report.testName}.json`);
+        console.log();
+
+        // Section 2: Match Statistics
+        console.log(`${c.bold}[MATCH STATISTICS]${c.reset}`);
+        console.log(line('-', 40));
+
+        const elemStatus = report.elementComparison.passRate >= this.elementThreshold ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+        const textStatus = report.textComparison.passRate >= this.textThreshold ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+
+        console.log(`├─ ${elemStatus} Elements: ${report.elementComparison.matched}/${report.elementComparison.total} (${report.elementComparison.passRate.toFixed(1)}%)`);
+        if (report.spanComparison.total > 0) {
+            const spanStatus = report.spanComparison.passRate >= 80 ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+            console.log(`├─ ${spanStatus} Spans: ${report.spanComparison.matched}/${report.spanComparison.total} (${report.spanComparison.passRate.toFixed(1)}%)`);
+        }
+        console.log(`└─ ${textStatus} Text Nodes: ${report.textComparison.matched}/${report.textComparison.total} (${report.textComparison.passRate.toFixed(1)}%)`);
+        console.log();
+
+        // Section 3: Element Differences (the most important debugging info)
+        if (report.differences && report.differences.length > 0) {
+            console.log(`${c.bold}[ELEMENT DIFFERENCES]${c.reset}`);
+            console.log(line('-', 40));
+
+            // Group differences by type (handle both 'layout_mismatch' and 'layout_difference')
+            const layoutDiffs = report.differences.filter(d =>
+                d.type === 'layout_mismatch' || d.type === 'layout_difference');
+            const missingNodes = report.differences.filter(d => d.type === 'missing_node');
+            const structureDiffs = report.differences.filter(d => d.type === 'structure_mismatch');
+
+            // Show layout mismatches with detailed comparison
+            if (layoutDiffs.length > 0) {
+                console.log(`\n${c.yellow}Layout Mismatches (${layoutDiffs.length}):${c.reset}`);
+
+                // Sort by largest difference for priority debugging
+                const sortedDiffs = [...layoutDiffs].sort((a, b) => {
+                    // Use maxDifference if available, otherwise calculate from differences array
+                    const maxDiffA = a.maxDifference || Math.max(...(a.differences || []).map(d => Math.abs(d.diff || 0)), 0);
+                    const maxDiffB = b.maxDifference || Math.max(...(b.differences || []).map(d => Math.abs(d.diff || 0)), 0);
+                    return maxDiffB - maxDiffA;
+                });
+
+                // Show top 10 or fewer
+                const showCount = Math.min(sortedDiffs.length, 10);
+                for (let i = 0; i < showCount; i++) {
+                    const diff = sortedDiffs[i];
+                    const tag = diff.tag || diff.radiant?.tag || diff.browser?.tag || 'unknown';
+                    const selector = tag;
+
+                    console.log(`\n  ${c.red}✗${c.reset} ${c.bold}${selector}${c.reset} ${c.dim}(${diff.path})${c.reset}`);
+
+                    // Handle the differences array (which contains layout property diffs)
+                    // Layout diffs have: property, radiant, browser, difference, exceedsTolerance, tolerance
+                    const propDiffs = diff.differences || diff.layoutDiffs || [];
+                    for (const ld of propDiffs) {
+                        const propName = ld.property || ld.prop || 'unknown';
+                        const diffVal = ld.difference ?? ld.diff ?? 0;
+                        const exceedsTol = ld.exceedsTolerance !== undefined ? ld.exceedsTolerance :
+                            (Math.abs(diffVal) > (ld.tolerance || report.tolerance || 5));
+                        if (exceedsTol) {
+                            const diffStr = diffVal > 0 ? `+${diffVal.toFixed(1)}` : diffVal.toFixed(1);
+                            const radVal = ld.radiant ?? ld.lambda ?? 0;
+                            const browVal = ld.browser ?? 0;
+                            console.log(`      ${propName.padEnd(8)}: Lambda=${radVal.toFixed(1).padStart(8)}  Browser=${browVal.toFixed(1).padStart(8)}  ${c.red}Δ ${diffStr}${c.reset}`);
+                        }
+                    }
+                }
+
+                if (sortedDiffs.length > showCount) {
+                    console.log(`\n  ${c.dim}... and ${sortedDiffs.length - showCount} more layout mismatches${c.reset}`);
+                }
+            }
+
+            // Show missing nodes
+            if (missingNodes.length > 0) {
+                console.log(`\n${c.yellow}Missing/Extra Nodes (${missingNodes.length}):${c.reset}`);
+                const showCount = Math.min(missingNodes.length, 5);
+                for (let i = 0; i < showCount; i++) {
+                    const diff = missingNodes[i];
+                    if (diff.radiant && !diff.browser) {
+                        console.log(`  ${c.yellow}+${c.reset} Extra in Lambda: ${diff.radiant.tag || 'text'} at ${diff.path}`);
+                    } else if (!diff.radiant && diff.browser) {
+                        console.log(`  ${c.red}-${c.reset} Missing in Lambda: ${diff.browser.tag || 'text'} at ${diff.path}`);
+                    }
+                }
+                if (missingNodes.length > showCount) {
+                    console.log(`  ${c.dim}... and ${missingNodes.length - showCount} more${c.reset}`);
+                }
+            }
+
+            // Show structure mismatches
+            if (structureDiffs.length > 0) {
+                console.log(`\n${c.yellow}Structure Mismatches (${structureDiffs.length}):${c.reset}`);
+                const showCount = Math.min(structureDiffs.length, 5);
+                for (let i = 0; i < showCount; i++) {
+                    const diff = structureDiffs[i];
+                    console.log(`  ${c.red}✗${c.reset} ${diff.path}: ${diff.message || 'Structure differs'}`);
+                }
+            }
+            console.log();
+        }
+
+        // Section 4: Top Differences Summary (quick reference)
+        if (report.differences && report.differences.length > 0) {
+            const layoutDiffsForTop = report.differences.filter(d =>
+                (d.type === 'layout_mismatch' || d.type === 'layout_difference') &&
+                (d.differences || d.layoutDiffs));
+            if (layoutDiffsForTop.length > 0) {
+                console.log(`${c.bold}[TOP DIFFERENCES BY SIZE]${c.reset}`);
+                console.log(line('-', 40));
+
+                // Flatten all property differences with their element context
+                const allPropDiffs = [];
+                for (const diff of layoutDiffsForTop) {
+                    const tag = diff.tag || diff.radiant?.tag || diff.browser?.tag || 'unknown';
+                    const selector = tag;
+
+                    // Layout diffs have: property, radiant, browser, difference, exceedsTolerance, tolerance
+                    const propDiffs = diff.differences || diff.layoutDiffs || [];
+                    for (const ld of propDiffs) {
+                        const propName = ld.property || ld.prop || 'unknown';
+                        const diffVal = ld.difference ?? ld.diff ?? 0;
+                        const exceedsTol = ld.exceedsTolerance !== undefined ? ld.exceedsTolerance :
+                            (Math.abs(diffVal) > (ld.tolerance || report.tolerance || 5));
+                        if (exceedsTol && diffVal !== 0) {
+                            allPropDiffs.push({
+                                selector,
+                                prop: propName,
+                                diff: diffVal,
+                                radiant: ld.radiant ?? ld.lambda ?? 0,
+                                browser: ld.browser ?? 0
+                            });
+                        }
+                    }
+                }
+
+                // Sort by absolute difference
+                allPropDiffs.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+                // Show top 5
+                const topCount = Math.min(allPropDiffs.length, 5);
+                for (let i = 0; i < topCount; i++) {
+                    const d = allPropDiffs[i];
+                    const diffStr = d.diff > 0 ? `+${d.diff.toFixed(1)}` : d.diff.toFixed(1);
+                    console.log(`  ${i + 1}. ${d.selector}.${d.prop}: ${c.red}${diffStr}px${c.reset} (${d.radiant.toFixed(1)} vs ${d.browser.toFixed(1)})`);
+                }
+                console.log();
+            }
+        }
+
+        // Final summary line
+        console.log(line('='));
+        console.log(`${c.bold}${c.red}RESULT: FAILED${c.reset} - Elements ${report.elementComparison.passRate.toFixed(1)}%, Text ${report.textComparison.passRate.toFixed(1)}%`);
+        console.log(line('='));
+        console.log();
     }
 
     /**
@@ -1060,7 +1257,12 @@ class RadiantLayoutTester {
             }
 
             // Generate and print report (no separate text results needed)
-            const report = this.generateReport(results, null, testName);
+            const metadata = {
+                htmlFile: htmlFile,
+                resultFile: actualOutputFile,
+                viewFile: actualOutputFile.replace('.json', '.txt')
+            };
+            const report = this.generateReport(results, null, testName, metadata);
             this.printReport(report);
 
             return report;
@@ -1513,6 +1715,11 @@ Examples:
 Note: Run this script from the project root directory.
 `);
         process.exit(0);
+    }
+
+    // Enable single test mode when testing a specific file (for detailed failure reports)
+    if (testFile) {
+        options.singleTestMode = true;
     }
 
     const tester = new RadiantLayoutTester(options);
