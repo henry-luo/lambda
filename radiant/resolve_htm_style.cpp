@@ -181,14 +181,29 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_HR:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
-        // 1px top border
-        block->bound->border->width.top = 1 * lycon->ui_context->pixel_ratio;
-        block->bound->border->width.left = block->bound->border->width.right = block->bound->border->width.bottom = 0;
+        // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
+        // This matches browser UA stylesheet behavior
+        block->bound->border->width.top = block->bound->border->width.bottom = 1 * lycon->ui_context->pixel_ratio;
+        block->bound->border->width.left = block->bound->border->width.right = 1 * lycon->ui_context->pixel_ratio;
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
-        // 0.5em margin
-        block->bound->margin.top = block->bound->margin.bottom =
-            block->bound->margin.left = block->bound->margin.right = 0.5 * lycon->font.style->font_size;
+        // Default border style: inset (typical browser default for hr)
+        block->bound->border->top_style = block->bound->border->bottom_style = CSS_VALUE_INSET;
+        block->bound->border->left_style = block->bound->border->right_style = CSS_VALUE_INSET;
+        // Default border colors for inset style: darker gray on top/left, lighter on bottom/right
+        // Top/left: dark gray for 3D inset effect
+        block->bound->border->top_color.r = 128; block->bound->border->top_color.g = 128;
+        block->bound->border->top_color.b = 128; block->bound->border->top_color.a = 255;
+        block->bound->border->left_color.r = 128; block->bound->border->left_color.g = 128;
+        block->bound->border->left_color.b = 128; block->bound->border->left_color.a = 255;
+        // Bottom/right: lighter for 3D inset effect
+        block->bound->border->bottom_color.r = 192; block->bound->border->bottom_color.g = 192;
+        block->bound->border->bottom_color.b = 192; block->bound->border->bottom_color.a = 255;
+        block->bound->border->right_color.r = 192; block->bound->border->right_color.g = 192;
+        block->bound->border->right_color.b = 192; block->bound->border->right_color.a = 255;
+        // 8px margin top/bottom, 0 left/right (browser default)
+        block->bound->margin.top = block->bound->margin.bottom = 8 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.left = block->bound->margin.right = 0;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
