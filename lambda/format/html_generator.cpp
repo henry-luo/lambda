@@ -497,9 +497,14 @@ void HtmlGenerator::endItem() {
         // Check if there's an empty <p> tag at the end (from paragraph break before end of item)
         // If so, remove it instead of closing it
         if (!writer_->removeLastOpenedTagIfEmpty("p")) {
-            // Not empty, so trim whitespace and close properly
-            writer_->trimTrailingWhitespace();
-            writer_->closeTag("p");
+            // Check if a <p> is actually open before trying to close it
+            // After nested block elements (like nested lists), there may be no <p> to close
+            if (writer_->isTagOpen("p")) {
+                // <p> is open, trim whitespace and close it
+                writer_->trimTrailingWhitespace();
+                writer_->closeTag("p");
+            }
+            // If no <p> is open, just skip closing it
         }
         // Close <li> tag
         writer_->closeTag("li");
