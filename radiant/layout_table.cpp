@@ -2,6 +2,7 @@
 #include "layout.hpp"
 #include "intrinsic_sizing.hpp"
 #include "../lib/log.h"
+#include "../lib/strview.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include <vector>
@@ -2290,7 +2291,30 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                 }
             }
 
-            // If no explicit width, perform temporary layout to measure
+            // If no explicit CSS width, check for HTML width attribute (for tables)
+            if (child_width == 0) {
+                // Check HTML width attribute directly (don't call dom_node_resolve_style
+                // during measurement - it's not safe with the current context)
+                DomElement* child_elmt = child->as_element();
+                if (child_elmt) {
+                    const char* width_attr = child_elmt->get_attribute("width");
+                    if (width_attr) {
+                        size_t value_len = strlen(width_attr);
+                        if (value_len > 0 && width_attr[value_len - 1] != '%') {
+                            // Parse pixel value (skip percentages - they need parent context)
+                            StrView width_view = strview_init(width_attr, value_len);
+                            float width = strview_to_int(&width_view);
+                            if (width > 0) {
+                                child_width = width * lycon->ui_context->pixel_ratio;
+                                log_debug("PCW: using HTML width attribute: %.1fpx for %s",
+                                    child_width, child->node_name());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If still no explicit width, perform temporary layout to measure
             if (child_width == 0) {
                 float child_start_x = lycon->line.advance_x;
 
@@ -2298,6 +2322,9 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                 layout_flow_node(lycon, child);
 
                 // Measure the width consumed by this child
+                // Note: For block elements, this may return 0 since blocks don't advance line.advance_x
+                // This is intentional - cells with only block content rely on padding for width.
+                // For tables with explicit HTML width attribute, we already captured that above.
                 child_width = lycon->line.advance_x - child_start_x;
             }
 
@@ -2398,9 +2425,48 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
             }
         }
         else if (child->is_element()) {
-            // For nested elements, use conservative minimum
-            // TODO: Implement proper minimum width calculation for nested elements
-            float child_min = 20.0f; // Conservative minimum
+            // For nested elements, check for explicit width first
+            DomElement* child_elem = child->as_element();
+            float child_min = 0.0f;
+
+            // Check for CSS explicit width
+            if (child_elem->specified_style) {
+                CssDeclaration* width_decl = style_tree_get_declaration(
+                    child_elem->specified_style, CSS_PROPERTY_WIDTH);
+                if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    child_min = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+                    log_debug("MCW: using CSS width: %.1fpx for %s", child_min, child->node_name());
+                }
+            }
+
+            // Check for HTML width attribute (for tables like <table width="435">)
+            if (child_min == 0) {
+                // Check HTML width attribute directly (don't call dom_node_resolve_style
+                // during measurement - it's not safe with the current context)
+                DomElement* child_elmt = child->as_element();
+                if (child_elmt) {
+                    const char* width_attr = child_elmt->get_attribute("width");
+                    if (width_attr) {
+                        size_t value_len = strlen(width_attr);
+                        if (value_len > 0 && width_attr[value_len - 1] != '%') {
+                            // Parse pixel value (skip percentages - they need parent context)
+                            StrView width_view = strview_init(width_attr, value_len);
+                            float width = strview_to_int(&width_view);
+                            if (width > 0) {
+                                child_min = width * lycon->ui_context->pixel_ratio;
+                                log_debug("MCW: using HTML width attribute: %.1fpx for %s",
+                                    child_min, child->node_name());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fall back to conservative minimum
+            if (child_min == 0) {
+                child_min = 20.0f;
+            }
+
             if (child_min > min_width) min_width = child_min;
         }
     }
