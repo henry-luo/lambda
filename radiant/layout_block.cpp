@@ -1466,19 +1466,40 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
 
-                // Find first in-flow child (skip floats for margin collapsing purposes)
+                // Find first in-flow child that can participate in margin collapsing
+                // Skip floats AND empty zero-height blocks (CSS 2.2 Section 8.3.1)
+                // An empty block allows margins to collapse "through" it when:
+                // - It has zero height
+                // - It has no borders, padding, or line boxes
                 View* first_in_flow_child = block->parent_view()->first_placed_child();
                 while (first_in_flow_child) {
                     if (!first_in_flow_child->is_block()) break;
                     ViewBlock* vb = (ViewBlock*)first_in_flow_child;
+                    // Skip floats
                     if (vb->position && element_has_float(vb)) {
-                        // Skip to next placed sibling
                         View* next = (View*)first_in_flow_child->next_sibling;
                         while (next && !next->view_type) {
                             next = (View*)next->next_sibling;
                         }
                         first_in_flow_child = next;
                         continue;
+                    }
+                    // Skip empty zero-height blocks that have no borders/padding
+                    // These blocks allow margins to collapse through them (CSS 2.2 8.3.1)
+                    if (vb->height == 0) {
+                        float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
+                        float border_bottom = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
+                        float padding_top = vb->bound ? vb->bound->padding.top : 0;
+                        float padding_bottom = vb->bound ? vb->bound->padding.bottom : 0;
+                        if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0) {
+                            log_debug("skipping empty zero-height block for margin collapsing");
+                            View* next = (View*)first_in_flow_child->next_sibling;
+                            while (next && !next->view_type) {
+                                next = (View*)next->next_sibling;
+                            }
+                            first_in_flow_child = next;
+                            continue;
+                        }
                     }
                     break;
                 }
