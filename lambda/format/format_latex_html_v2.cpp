@@ -51,7 +51,7 @@ public:
 public:
     LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
         : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
-          next_paragraph_is_continue_(false),
+          next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           strip_next_leading_space_(false), styled_span_depth_(0), 
           recursion_depth_(0), depth_exceeded_(false) {}
     
@@ -92,6 +92,7 @@ public:
     void endParagraph();  // Close current paragraph if open
     void closeParagraphIfOpen();  // Alias for endParagraph
     void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
+    void setNextParagraphIsNoindent() { next_paragraph_is_noindent_ = true; }
     void ensureParagraph();  // Start a paragraph if not already in one
     
     // Macro system functions (public so command handlers can access)
@@ -118,6 +119,10 @@ private:
     // When true, the next paragraph should have class="continue"
     // Set when a block environment ends (itemize, enumerate, center, etc.)
     bool next_paragraph_is_continue_;
+    
+    // When true, the next paragraph should have class="noindent"
+    // Set by \noindent command
+    bool next_paragraph_is_noindent_;
     
     // Font declaration tracking - when true, the next text should strip leading space
     // This is set by font declaration commands like \bfseries, \em, etc.
@@ -582,7 +587,7 @@ static void cmd_textup(LatexProcessor* proc, Item elem) {
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().shape = FontShape::Upright;
-    gen->span("textup");
+    gen->span("up");  // latex-js uses 'up' not 'textup'
     proc->processChildren(elem);
     gen->closeElement();
     proc->exitStyledSpan();
@@ -2126,6 +2131,14 @@ static void cmd_par(LatexProcessor* proc, Item elem) {
     // \par - end current paragraph and start a new one
     // Simply close the paragraph if open - the next text will start a new one
     proc->endParagraph();
+    (void)elem;  // unused
+}
+
+static void cmd_noindent(LatexProcessor* proc, Item elem) {
+    // \noindent - the next paragraph should not be indented
+    // Close current paragraph if open, and set flag for next paragraph
+    proc->endParagraph();
+    proc->setNextParagraphIsNoindent();
     (void)elem;  // unused
 }
 
@@ -3876,6 +3889,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["linebreak"] = cmd_linebreak;
     command_table_["newpage"] = cmd_newpage;
     command_table_["par"] = cmd_par;
+    command_table_["noindent"] = cmd_noindent;
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
@@ -4078,7 +4092,10 @@ bool LatexProcessor::isInlineCommand(const char* cmd_name) {
 void LatexProcessor::ensureParagraph() {
     // Only open paragraph if we're not inside an inline element
     if (!in_paragraph_ && inline_depth_ == 0) {
-        if (next_paragraph_is_continue_) {
+        if (next_paragraph_is_noindent_) {
+            gen_->p("noindent");
+            next_paragraph_is_noindent_ = false;  // Reset the flag
+        } else if (next_paragraph_is_continue_) {
             gen_->p("continue");
             next_paragraph_is_continue_ = false;  // Reset the flag
         } else {
@@ -4143,8 +4160,9 @@ void LatexProcessor::processNode(Item node) {
             if (strcmp(sym_name, "parbreak") == 0) {
                 // Paragraph break: close current paragraph and prepare for next
                 closeParagraphIfOpen();
-                // Clear continue flag - parbreak means new paragraph, not continuation
+                // Clear continue and noindent flags - parbreak resets paragraph styling
                 next_paragraph_is_continue_ = false;
+                next_paragraph_is_noindent_ = false;
                 // Don't open new paragraph yet - ensureParagraph() will handle it when next content arrives
             } else if (strcmp(sym_name, "TeX") == 0) {
                 // TeX logo
