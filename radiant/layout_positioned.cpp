@@ -368,15 +368,27 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         block->width = flow_width + padding_right + border_right;
     }
     // Height is auto-sized when no explicit height AND neither top+bottom constraints
+    // CRITICAL: Skip auto-sizing for flex/grid containers - they calculate their own height
+    bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
+    bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);
+    bool has_flex_calculated_height = is_flex_container && block->height > 0;
+    bool has_grid_calculated_height = is_grid_container && block->height > 0;
+
     if (!(lycon->block.given_height >= 0 || (block->position->has_top && block->position->has_bottom))) {
-        float flow_height = lycon->block.advance_y;
-        // Note: advance_y already includes top border + top padding from setup_inline
-        // So we only need to add bottom padding and bottom border
-        float padding_bottom = block->bound ? block->bound->padding.bottom : 0;
-        float border_bottom = (block->bound && block->bound->border) ? block->bound->border->width.bottom : 0;
-        log_debug("auto-sizing height: flow_height=%f (includes top border+padding), adding padding_bottom=%f, border_bottom=%f",
-            flow_height, padding_bottom, border_bottom);
-        block->height = flow_height + padding_bottom + border_bottom;
+        // Don't override flex/grid calculated height with flow-based auto-sizing
+        if (has_flex_calculated_height || has_grid_calculated_height) {
+            log_debug("auto-sizing height: SKIPPED - %s container already has calculated height %.1f",
+                      is_flex_container ? "flex" : "grid", block->height);
+        } else {
+            float flow_height = lycon->block.advance_y;
+            // Note: advance_y already includes top border + top padding from setup_inline
+            // So we only need to add bottom padding and bottom border
+            float padding_bottom = block->bound ? block->bound->padding.bottom : 0;
+            float border_bottom = (block->bound && block->bound->border) ? block->bound->border->width.bottom : 0;
+            log_debug("auto-sizing height: flow_height=%f (includes top border+padding), adding padding_bottom=%f, border_bottom=%f",
+                flow_height, padding_bottom, border_bottom);
+            block->height = flow_height + padding_bottom + border_bottom;
+        }
 
         // BFC height expansion: if floats extend beyond flow content, expand height
         if (max_float_bottom > block->height) {
