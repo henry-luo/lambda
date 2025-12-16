@@ -231,10 +231,60 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool has_inline_content = false;
 
     // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
+    // Also check if it's a ROW flex container (children laid out horizontally -> SUM widths)
     bool is_flex_container = false;
+    bool is_row_flex = false;
+    float flex_gap = 0;
+    int flex_child_count = 0;  // Count of flex children for gap calculation
     ViewBlock* view_block = (ViewBlock*)element;
+
+    // First check resolved display.inner
     if (view_block->display.inner == CSS_VALUE_FLEX) {
         is_flex_container = true;
+    }
+    // Also check specified_style for unresolved display
+    if (!is_flex_container && element->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum dv = display_decl->value->data.keyword;
+            if (dv == CSS_VALUE_FLEX || dv == CSS_VALUE_INLINE_FLEX) {
+                is_flex_container = true;
+                log_debug("measure_element_intrinsic_widths: detected flex via specified_style");
+            }
+        }
+    }
+
+    // Check flex direction for row vs column
+    if (is_flex_container) {
+        // Default flex-direction is row
+        is_row_flex = true;  // Assume row by default
+        if (view_block->embed && view_block->embed->flex) {
+            int dir = view_block->embed->flex->direction;
+            is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE ||
+                          dir == DIR_ROW || dir == DIR_ROW_REVERSE);
+            flex_gap = view_block->embed->flex->column_gap;
+        } else if (element->specified_style) {
+            // Check specified_style for flex-direction
+            CssDeclaration* dir_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
+            if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum dir = dir_decl->value->data.keyword;
+                is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+            }
+            // Check for gap (try column-gap first, then gap shorthand)
+            CssDeclaration* gap_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_COLUMN_GAP);
+            if (!gap_decl) {
+                gap_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_GAP);
+            }
+            if (gap_decl && gap_decl->value && gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                flex_gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
+            }
+        }
+        log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f",
+                  element->node_name(), is_flex_container, is_row_flex, flex_gap);
     }
 
     // Measure children recursively
@@ -300,11 +350,25 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             has_inline_content = true;
             inline_max_sum += child_sizes.max_content;
             inline_min_sum = max(inline_min_sum, child_sizes.min_content);
+        } else if (is_row_flex) {
+            // Row flex container: children are laid out horizontally, SUM widths
+            sizes.min_content += child_sizes.min_content;
+            sizes.max_content += child_sizes.max_content;
+            flex_child_count++;
         } else {
-            // For block-level children: take max of each
+            // For block-level children (or column flex): take max of each
             sizes.min_content = max(sizes.min_content, child_sizes.min_content);
             sizes.max_content = max(sizes.max_content, child_sizes.max_content);
         }
+    }
+
+    // Add gaps for row flex containers
+    if (is_row_flex && flex_child_count > 1 && flex_gap > 0) {
+        int total_gap = (int)(flex_gap * (flex_child_count - 1));
+        sizes.min_content += total_gap;
+        sizes.max_content += total_gap;
+        log_debug("  row flex gap: %d items, %.1fpx gap = %dpx total",
+                  flex_child_count, flex_gap, total_gap);
     }
 
     // Merge inline content measurements
