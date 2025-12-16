@@ -52,6 +52,10 @@
         {
           "type": "SYMBOL",
           "name": "paragraph_break"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nbsp"
         }
       ]
     },

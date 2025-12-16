@@ -62,6 +62,57 @@ void TextHtmlWriter::trimTrailingWhitespace() {
     buf_->str[len] = '\0';
 }
 
+bool TextHtmlWriter::removeLastOpenedTagIfEmpty(const char* tag) {
+    // Check if the buffer ends with "<tag>" or "<tag" (still open, unclosed)
+    // If so, remove it and return true. Otherwise return false.
+    // This is used to clean up empty <p> tags created by paragraph breaks at end of list items.
+    
+    if (!tag || buf_->length == 0) return false;
+    
+    size_t tag_len = strlen(tag);
+    
+    // Case 1: Tag is still open (in_tag_ is true), buffer ends with "<tag"
+    if (in_tag_) {
+        size_t suffix_len = tag_len + 1;  // '<' + tag (no '>')
+        if (buf_->length >= suffix_len) {
+            const char* suffix_start = buf_->str + buf_->length - suffix_len;
+            if (suffix_start[0] == '<' && strncmp(suffix_start + 1, tag, tag_len) == 0) {
+                // It matches! Remove it
+                buf_->length -= suffix_len;
+                buf_->str[buf_->length] = '\0';
+                
+                // Reset in_tag state and pop from tag_stack_
+                in_tag_ = false;
+                if (!tag_stack_.empty() && tag_stack_.back() == tag) {
+                    tag_stack_.pop_back();
+                }
+                return true;
+            }
+        }
+    }
+    
+    // Case 2: Tag is fully closed, buffer ends with "<tag>"
+    size_t suffix_len = tag_len + 2;  // '<' + tag + '>'
+    if (buf_->length >= suffix_len) {
+        const char* suffix_start = buf_->str + buf_->length - suffix_len;
+        if (suffix_start[0] == '<' && 
+            suffix_start[suffix_len - 1] == '>' && 
+            strncmp(suffix_start + 1, tag, tag_len) == 0) {
+            // It matches! Remove it
+            buf_->length -= suffix_len;
+            buf_->str[buf_->length] = '\0';
+            
+            // Pop from tag_stack_ if the top matches
+            if (!tag_stack_.empty() && tag_stack_.back() == tag) {
+                tag_stack_.pop_back();
+            }
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 void TextHtmlWriter::openTag(const char* tag, const char* classes, 
                              const char* id, const char* style) {
     if (!tag) return;

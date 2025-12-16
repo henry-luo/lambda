@@ -51,6 +51,7 @@ module.exports = grammar({
       $.space,
       $.text,
       $.paragraph_break,  // Blank lines are allowed in preamble
+      $.nbsp,           // Non-breaking space ~
     ),
 
     document: $ => seq(
