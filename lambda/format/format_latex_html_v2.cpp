@@ -1392,14 +1392,18 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_empty(LatexProcessor* proc, Item elem) {
-    // \empty - Empty command (produces nothing)
-    // \empty{} - Empty command with empty braces (produces ZWSP for space preservation)
-    // The presence of a curly_group child indicates {} was used
-    HtmlGenerator* gen = proc->generator();
+    // Three cases for \empty:
+    // 1. \empty (no braces) - produces nothing (null command)
+    // 2. \empty{} (empty braces) - produces ZWSP for space preservation
+    // 3. \begin{empty}...\end{empty} (environment) - processes content + ZWSP
     
-    // Check if command has an empty curly_group child (from \empty{})
+    HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
+    
+    // Check what kind of children we have
     bool has_curly_group = false;
+    bool has_content = false;
+    
     auto iter = reader.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -1408,16 +1412,29 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
             const char* tag = child_elem.tagName();
             if (tag && strcmp(tag, "curly_group") == 0) {
                 has_curly_group = true;
-                break;
+            } else {
+                // Has other content (e.g., paragraph from environment)
+                has_content = true;
             }
+        } else if (child.isString()) {
+            has_content = true;
         }
     }
     
-    // Only output ZWSP if {} was explicitly used
+    // Case 3: Environment with content - process children + ZWSP
+    if (has_content) {
+        proc->processChildren(elem);
+        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+        return;
+    }
+    
+    // Case 2: Empty braces - output ZWSP only
     if (has_curly_group) {
         gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+        return;
     }
-    // Otherwise output nothing - \empty without {} is a null command
+    
+    // Case 1: No braces - output nothing (null command)
 }
 
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
@@ -1717,8 +1734,8 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     gen->trimTrailingWhitespace();
                                     gen->closeElement();  // Close <p>
                                     proc->processNode(para_child.item());
-                                    // Open new <p> for any following content
-                                    gen->writer()->openTag("p", nullptr);
+                                    // DON'T open new <p> here - let endItem handle it
+                                    // The <p> will be opened lazily when text content is encountered
                                     at_item_start = true;  // Trim leading whitespace
                                 } else {
                                     proc->processNode(para_child.item());
