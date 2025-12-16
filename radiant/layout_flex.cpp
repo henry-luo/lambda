@@ -3207,8 +3207,11 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
     }
 
     // Otherwise, calculate line cross sizes from item hypothetical cross sizes
-    // Check if align-content is stretch - affects how we calculate line sizes
-    bool align_content_stretch = (flex_layout->align_content == ALIGN_STRETCH);
+    // IMPORTANT: align-content: stretch only affects MULTI-LINE containers.
+    // For single-line (nowrap) containers, align-content has no effect per CSS spec.
+    // The optimization below only applies to multi-line containers.
+    bool is_wrapping = (flex_layout->wrap != WRAP_NOWRAP);
+    bool align_content_stretch = is_wrapping && (flex_layout->align_content == ALIGN_STRETCH);
 
     for (int i = 0; i < flex_layout->line_count; i++) {
         FlexLineInfo* line = &flex_layout->lines[i];
@@ -3222,9 +3225,11 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
             bool has_definite = item_has_definite_cross_size(item, flex_layout);
             bool will_stretch = item_will_stretch(item, flex_layout);
 
-            // For align-content: stretch, items with auto cross-size AND align-self: stretch
-            // should NOT contribute their content size to line cross-size.
+            // For MULTI-LINE containers with align-content: stretch, items with auto cross-size 
+            // AND align-self: stretch should NOT contribute their content size to line cross-size
+            // because the lines will be stretched to fill the container anyway.
             // However, they should still contribute their min-cross-size (e.g., min-height)!
+            // NOTE: This does NOT apply to single-line (nowrap) containers!
             if (align_content_stretch &&
                 !has_definite &&
                 will_stretch) {
@@ -3408,11 +3413,13 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
             }
 
             // clamp to min/max constraints
-            if (hypothetical_cross < min_cross) {
-                hypothetical_cross = min_cross;
-            }
+            // CSS rule: min-height/min-width overrides max-height/max-width
+            // So we clamp to max first, then to min (min wins if conflict)
             if (hypothetical_cross > max_cross) {
                 hypothetical_cross = max_cross;
+            }
+            if (hypothetical_cross < min_cross) {
+                hypothetical_cross = min_cross;
             }
 
             // store the hypothetical cross size
