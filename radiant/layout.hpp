@@ -429,6 +429,26 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span);
 
+// ============================================================================
+// CSS text-transform
+// ============================================================================
+
+/**
+ * Apply CSS text-transform to a single Unicode codepoint.
+ * @param codepoint Input Unicode codepoint
+ * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
+ * @param is_word_start True if this is the first character of a word (for capitalize)
+ * @return Transformed codepoint
+ */
+uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start);
+
+/**
+ * Get text-transform property from a BlockProp.
+ * @param blk BlockProp structure (can be NULL)
+ * @return CSS text-transform value or CSS_VALUE_NONE
+ */
+CssEnum get_text_transform_from_block(BlockProp* blk);
+
 // View tree printing functions
 void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio, const char* output_path = nullptr);
 void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio, const char* output_path = nullptr);
