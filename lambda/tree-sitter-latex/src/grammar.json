@@ -980,12 +980,7 @@
       "value": "&"
     }
   },
-  "extras": [
-    {
-      "type": "SYMBOL",
-      "name": "line_comment"
-    }
-  ],
+  "extras": [],
   "conflicts": [
     [
       "_block",
