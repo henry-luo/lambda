@@ -12,8 +12,8 @@ module.exports = grammar({
   name: 'latex',
 
   // Whitespace and comments are NOT extras - they're significant in LaTeX
-  // Only line comments are skipped
-  extras: $ => [$.line_comment],
+  // Comments must be visible in the tree so we can handle them properly (they eat newlines)
+  extras: $ => [],
 
   // External scanner for verbatim content that can't be parsed with regex
   // Also handles \begin{document} and \end{document} to take precedence over command
@@ -22,6 +22,7 @@ module.exports = grammar({
     $._comment_env_content,   // For comment environment
     $._begin_document,        // \begin{document} - higher priority than command
     $._end_document,          // \end{document} - higher priority than command
+    $._verb_command,          // \verb<delim>text<delim> - context-gated external token
   ],
 
   word: $ => $.command_name,
@@ -29,6 +30,8 @@ module.exports = grammar({
   conflicts: $ => [
     // Environment can appear in both _block and _inline contexts
     [$._block, $._inline],
+    // verb_command and command both start with backslash - need GLR to disambiguate
+    [$.verb_command, $.command],
   ],
 
   rules: {
@@ -81,14 +84,15 @@ module.exports = grammar({
 
     // ========================================================================
     // Sections (matches LaTeX.js section handling via macros)
+    // Sections are NOT containers - they just produce heading output.
+    // Content after a section is at the same level (siblings, not children).
     // ========================================================================
 
-    section: $ => prec.right(seq(
+    section: $ => seq(
       field('command', $.section_command),
       optional(field('toc', $.brack_group)),     // [short title]
       field('title', $.curly_group),             // {title}
-      repeat($._block),                          // content until next section
-    )),
+    ),
 
     section_command: $ => token(/\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?/),
 
@@ -102,6 +106,7 @@ module.exports = grammar({
       $.paragraph_break, // Paragraph break (double newline) - must be checked as inline too
       $.line_comment,   // Comments can appear inline
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
+      $.verb_command,   // \verb|text| - must be before command (context-gated)
       $.command,
       $.curly_group,
       $.brack_group,
@@ -133,6 +138,15 @@ module.exports = grammar({
     // Includes: escape chars ($%#&{}_-), spacing (\! \, \; \: \/ \@), 
     // punctuation (\. \' \` \^ \" \~ \=), control space (\ ), and line break (\\)
     control_symbol: $ => token(prec(2, seq('\\', /[$%#&{}_\-,\/@ !;:.'`^"~=\\]/))),
+
+    // ========================================================================
+    // Verb command - inline verbatim with arbitrary delimiter
+    // ========================================================================
+    
+    // Context-gated external token (Pattern 1)
+    // The external scanner will only emit this token when valid_symbols[VERB_COMMAND] is true
+    // This happens when the parser is in _inline context and hasn't yet committed to command
+    verb_command: $ => $._verb_command,
 
     // ========================================================================
     // Commands/Macros (matches LaTeX.js: macro, macro_args)
