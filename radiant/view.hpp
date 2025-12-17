@@ -512,8 +512,12 @@ typedef struct PseudoContentProp {
     DomElement* after;     // ::after pseudo-element (NULL if none)
 
     // Content value storage for generation
-    char* before_content;         // Parsed content string/template
+    char* before_content;         // Parsed content string/template (or counter name for counters)
     char* after_content;
+    char* before_separator;       // Separator for counters() function
+    char* after_separator;
+    uint32_t before_counter_style;  // CSS enum value for counter style
+    uint32_t after_counter_style;
     uint8_t before_content_type;  // ContentType enum
     uint8_t after_content_type;
     bool before_generated;         // True if before element created
