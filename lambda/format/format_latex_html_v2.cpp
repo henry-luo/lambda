@@ -222,19 +222,10 @@ static std::string convertApostrophes(const char* text) {
                 result += "\xE2\x80\x93";  // – (U+2013 = en-dash)
                 p++;  // Skip second hyphen
             } else {
-                // Single hyphen: check context to decide ASCII vs Unicode
-                // If surrounded by letters (compound word), keep ASCII hyphen-minus
-                // If not in a word context, use Unicode hyphen (U+2010)
-                bool prev_is_letter = (p > text) && isalpha((unsigned char)*(p-1));
-                bool next_is_letter = *(p+1) && isalpha((unsigned char)*(p+1));
-                
-                if (prev_is_letter && next_is_letter) {
-                    // Compound word like "daughter-in-law" - keep ASCII hyphen
-                    result += '-';
-                } else {
-                    // Isolated punctuation - use Unicode hyphen
-                    result += "\xE2\x80\x90";  // ‐ (U+2010)
-                }
+                // Single hyphen: keep as ASCII hyphen-minus (U+002D)
+                // LaTeX.js behavior: don't convert single hyphens to Unicode hyphen (U+2010)
+                // This preserves compatibility and avoids issues with technical content
+                result += '-';
             }
         } else if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
             // !´ (exclamation + acute accent U+00B4) → ¡ (inverted exclamation U+00A1)
