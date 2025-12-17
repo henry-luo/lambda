@@ -436,13 +436,11 @@ help:
 	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
 	@echo "  capture-layout   - Extract browser layout references using Puppeteer"
-	@echo "                             Supports both .html and .htm file extensions"
-	@echo "                             Usage: make capture-layout (all suites, skip existing)"
+	@echo "                             REQUIRES: test=<name> OR suite=<name>"
+	@echo "                             Usage: make capture-layout test=basic-text-align"
 	@echo "                             Usage: make capture-layout suite=baseline"
-	@echo "                             Usage: make capture-layout force=1 (regenerate all)"
-	@echo "                             Usage: make capture-layout file=path/to/test.html"
-	@echo "                             Usage: make capture-layout file=path/to/test.htm"
-	@echo "                             Note: Uppercase variants also work (SUITE=, FORCE=, FILE=)"
+	@echo "                             Usage: make capture-layout test=table_007 force=1"
+	@echo "                             Note: Uppercase variants also work (TEST=, SUITE=, FORCE=)"
 	@echo ""
 	@echo "Options:"
 	@echo "  JOBS=N        - Set number of parallel compilation jobs (default: $(JOBS))"
@@ -1418,14 +1416,33 @@ build-test: build-lambda-input
 
 # Capture browser layout references using Puppeteer
 # Usage:
-#   make capture-layout                           # captures all categories (skips existing files)
-#   make capture-layout suite=baseline        # captures only baseline category (or SUITE=baseline)
-#   make capture-layout file=path/to/test.html   # captures a single file (or FILE=path)
-#   make capture-layout force=1                  # force regenerate all existing references (or FORCE=1)
-#   make capture-layout suite=basic force=1   # force regenerate specific category
+#   make capture-layout test=test-name           # captures a specific test (auto-discovers suite)
+#   make capture-layout suite=baseline           # captures only baseline category
+#   make capture-layout test=test-name force=1   # force regenerate a specific test
+#   make capture-layout suite=basic force=1      # force regenerate specific category
+# Note: Either test= or suite= is REQUIRED (no longer allows capturing all tests)
 capture-layout:
 	@echo "🧭 Capturing browser layout references..."
-	@if [ -d "test/layout" ]; then \
+	@TEST_VAR="$(or $(test),$(TEST))"; \
+	SUITE_VAR="$(or $(suite),$(SUITE))"; \
+	if [ -z "$$TEST_VAR" ] && [ -z "$$SUITE_VAR" ]; then \
+		echo ""; \
+		echo "❌ Error: Either test= or suite= parameter is required"; \
+		echo ""; \
+		echo "Usage:"; \
+		echo "  make capture-layout test=<test-name>     # Capture a specific test"; \
+		echo "  make capture-layout suite=<suite-name>   # Capture entire suite"; \
+		echo ""; \
+		echo "Examples:"; \
+		echo "  make capture-layout test=basic-text-align"; \
+		echo "  make capture-layout suite=baseline"; \
+		echo "  make capture-layout test=table_007 force=1"; \
+		echo ""; \
+		echo "Available suites: basic, baseline, css2.1, flex, grid, yoga"; \
+		echo ""; \
+		exit 1; \
+	fi; \
+	if [ -d "test/layout" ]; then \
 	    cd test/layout && \
 	    if [ ! -d node_modules ]; then \
 	        echo "📦 Installing test layout dependencies..."; \
@@ -1437,19 +1454,36 @@ capture-layout:
 	        FORCE_FLAG="--force"; \
 	        echo "🔄 Force regeneration enabled"; \
 	    fi; \
-	    FILE_VAR="$(or $(file),$(FILE))"; \
-	    if [ -n "$$FILE_VAR" ]; then \
-	        echo "📄 Single file: $$FILE_VAR"; \
-	        node extract_browser_references.js $$FORCE_FLAG $$FILE_VAR; \
+	    if [ -n "$$TEST_VAR" ]; then \
+	        case "$$TEST_VAR" in \
+	            *.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
+	            *) \
+	                TEST_FILE=""; \
+	                FOUND_SUITE=""; \
+	                for dir in basic baseline css2.1 flex grid yoga; do \
+	                    if [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
+	                        TEST_FILE="data/$$dir/$${TEST_VAR}.htm"; \
+	                        FOUND_SUITE="$$dir"; \
+	                        break; \
+	                    elif [ -f "data/$$dir/$${TEST_VAR}.html" ]; then \
+	                        TEST_FILE="data/$$dir/$${TEST_VAR}.html"; \
+	                        FOUND_SUITE="$$dir"; \
+	                        break; \
+	                    fi; \
+	                done; \
+	                if [ -z "$$TEST_FILE" ]; then \
+	                    echo "❌ Error: Test file '$$TEST_VAR' not found in any suite directory"; \
+	                    echo "   Searched in: basic, baseline, css2.1, flex, grid, yoga"; \
+	                    exit 1; \
+	                fi; \
+	                echo "📄 Found test in suite: $$FOUND_SUITE" \
+	            ;; \
+	        esac; \
+	        echo "📄 Capturing single test: $$TEST_FILE"; \
+	        node extract_browser_references.js $$FORCE_FLAG $$TEST_FILE; \
 	    else \
-	        SUITE_VAR="$(or $(suite),$(SUITE))"; \
-	        if [ -n "$$SUITE_VAR" ]; then \
-	            echo "📂 Suite: $$SUITE_VAR"; \
-	            node extract_browser_references.js $$FORCE_FLAG --category $$SUITE_VAR; \
-	        else \
-	            echo "📚 All available categories (auto-discovered)"; \
-	            node extract_browser_references.js $$FORCE_FLAG; \
-	        fi; \
+	        echo "📂 Capturing suite: $$SUITE_VAR"; \
+	        node extract_browser_references.js $$FORCE_FLAG --category $$SUITE_VAR; \
 	    fi; \
 	else \
 	    echo "❌ Error: Layout directory not found at test/layout"; \
