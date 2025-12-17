@@ -211,6 +211,37 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
 - Clear separation of concerns
 - Testable individual handlers
 
+### Special Element Handling
+
+**curly_group (`{...}`) - Zero-Width Space Logic**:
+
+Curly groups require special handling for spacing. The formatter outputs a zero-width space (ZWS) to maintain proper text flow, but only under specific conditions:
+
+```cpp
+if (strcmp(cmd_name, "curly_group") == 0) {
+    gen_->enterGroup();
+    
+    // Detect if group is empty (no non-whitespace content)
+    bool is_empty_group = true;
+    // ... iterate children checking for content
+    
+    // Process children
+    processChildren(elem);
+    gen_->exitGroup();
+    
+    // ZWS at exit for depth <= 2, but NOT for empty groups
+    if (gen_->groupDepth() <= 2 && !is_empty_group) {
+        gen_->text("\xe2\x80\x8b");  // Unicode ZWS
+    }
+    return;
+}
+```
+
+**Rules**:
+1. **Empty groups** (e.g., `\^{}`, `\~{}`): No ZWS output - prevents spurious characters after diacritics
+2. **Non-empty groups at depth ≤ 2**: Output ZWS to maintain word boundaries
+3. **Deep nested groups** (depth > 2): No ZWS to avoid excessive spacing
+
 ---
 
 ## 4. Debug & Test Strategy
@@ -691,14 +722,22 @@ diff lambda_output.html latexjs_output.html
 - Length management: `\newlength`, `\setlength`
 - Note: State tracking not implemented (commands are placeholders/no-ops)
 
-### 🎉 Milestone: 100% Coverage Achieved
+### 📊 Baseline Test Suite Status
 
-**Status**: All 147 core LaTeX.js macros have been implemented!
+**Baseline Fixture Tests** (test/latex/fixtures_v2/*.tex):
+- 51/107 tests passing (47.7%)
+- These are end-to-end tests comparing formatted output against expected HTML
+
+**Known Limitations**:
+- **Empty curly groups**: `\^{}` and `\~{}` now correctly output no ZWS (fixed)
+- **Linebreak with dimension**: `\\[1cm]` - parser doesn't associate bracket group with linebreak
+- **Verbatim**: `\verb|...|` not implemented
+- **Smart quotes**: Single quotes not converted to typographic quotes
 
 **Next Steps** (Enhancement Phase):
+- Fix remaining baseline test failures
 - Advanced Math: `align`, `gather`, `cases`, matrices, operators
 - Custom Environments: `\newenvironment`, `\renewenvironment`
-- Counters/Lengths: `\setcounter`, `\addtocounter`, `\setlength`, etc. (15 commands)
 - Packages: `hyperref`, `geometry`, `fancyhdr`, `multicol`, `listings`
 - Document Classes: `article`, `book`, `report` CSS styles
 
@@ -1468,18 +1507,18 @@ The LaTeX to HTML V2 implementation successfully translates LaTeX.js formatting 
 
 **Current Status** (December 2025): 
 - **128 commands implemented** (87% of LaTeX.js target coverage)
-- **194/197 tests passing** across all test suites
-- Recent additions (December 2025):
-  - 56 new commands: fonts, spacing, boxes, alignment, metadata, special symbols
-  - 42 new comprehensive tests (100% passing)
-  - Symbol handling for `\TeX` and `\LaTeX` logos
-  - Code cleanup: removed 42 duplicate command registrations
+- **51/107 baseline fixture tests passing** (47.7%)
+- Recent fixes:
+  - Empty curly group handling: `\^{}` no longer outputs spurious ZWS
+  - Group depth tracking for ZWS insertion
 
 **Known Issues**:
-- 27 baseline tests require regeneration (expected due to new command implementations)
-- 10 macro expansion tests failing (pre-existing, not related to recent changes)
+- Parser limitations: linebreak dimension (`\\[1cm]`), verbatim (`\verb`)
+- Macro tests: 10 failing (pre-existing)
+- Smart quote conversion not implemented
 
 **Next Goals**: 
+- Improve baseline test pass rate
 - Complete Phase 6 (Macro system) to enable user-defined commands
 - Implement remaining 19 commands (counters/lengths, documentclass, usepackage, include/input)
 
