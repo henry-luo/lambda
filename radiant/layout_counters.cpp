@@ -443,7 +443,7 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
     if (!buffer || buffer_size == 0) return 0;
 
     switch (style) {
-        case 0x0065: // CSS_VALUE_NONE - return empty string
+        case 34: // CSS_VALUE_NONE - return empty string (enum value is 34, not 0x0065)
             buffer[0] = '\0';
             return 0;
 

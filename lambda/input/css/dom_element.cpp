@@ -1032,12 +1032,113 @@ const char* dom_element_get_pseudo_element_content_with_counters(
         }
     }
 
-    // Handle list of values (for content with multiple parts)
+    // Handle list of values (for content with multiple parts, e.g., counter(c) "text")
     if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        // For now, return the first string value
-        CssValue* first = value->data.list.values[0];
-        if (first && first->type == CSS_VALUE_TYPE_STRING) {
-            return first->data.string;
+        log_debug("[Counter] Processing content list with %d values", value->data.list.count);
+        
+        // Use a fixed-size buffer for concatenation
+        char result_buffer[512];
+        result_buffer[0] = '\0';
+        int result_len = 0;
+        
+        // Concatenate all values in the list
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item) continue;
+            
+            if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
+                // Append string content
+                int str_len = strlen(item->data.string);
+                if (result_len + str_len < (int)sizeof(result_buffer) - 1) {
+                    memcpy(result_buffer + result_len, item->data.string, str_len);
+                    result_len += str_len;
+                    result_buffer[result_len] = '\0';
+                    log_debug("[Counter] Appended string: '%s'", item->data.string);
+                }
+            } else if (item->type == CSS_VALUE_TYPE_FUNCTION) {
+                // Handle counter() or counters() in list
+                CssFunction* func = item->data.function;
+                log_debug("[Counter] Processing function in list: %s", func ? func->name : "NULL");
+                if (func && func->name && counter_context) {
+                    char temp_buffer[128];
+                    temp_buffer[0] = '\0';
+                    
+                    if (strcmp(func->name, "counter") == 0 && func->arg_count >= 1) {
+                        // Extract counter name
+                        const char* counter_name = nullptr;
+                        if (func->args[0]->type == CSS_VALUE_TYPE_STRING) {
+                            counter_name = func->args[0]->data.string;
+                        } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
+                            counter_name = info ? info->name : nullptr;
+                        } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
+                            counter_name = func->args[0]->data.custom_property.name;
+                        }
+                        
+                        uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
+                        if (func->arg_count >= 2 && func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
+                            style_type = func->args[1]->data.keyword;
+                            const CssEnumInfo* style_info = css_enum_info((CssEnum)style_type);
+                            log_debug("[Counter] counter style keyword: %u (%s)",
+                                    style_type, style_info ? style_info->name : "unknown");
+                        }
+                        
+                        if (counter_name) {
+                            counter_format((CounterContext*)counter_context, counter_name,
+                                         style_type, temp_buffer, sizeof(temp_buffer));
+                            int temp_len = strlen(temp_buffer);
+                            if (result_len + temp_len < (int)sizeof(result_buffer) - 1) {
+                                memcpy(result_buffer + result_len, temp_buffer, temp_len);
+                                result_len += temp_len;
+                                result_buffer[result_len] = '\0';
+                            }
+                            log_debug("[Counter] counter(%s, style=%u) = '%s'", counter_name, style_type, temp_buffer);
+                        }
+                    } else if (strcmp(func->name, "counters") == 0 && func->arg_count >= 2) {
+                        // Extract counter name
+                        const char* counter_name = nullptr;
+                        if (func->args[0]->type == CSS_VALUE_TYPE_STRING) {
+                            counter_name = func->args[0]->data.string;
+                        } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
+                            counter_name = info ? info->name : nullptr;
+                        } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
+                            counter_name = func->args[0]->data.custom_property.name;
+                        }
+                        
+                        const char* separator = func->args[1]->data.string;
+                        uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
+                        if (func->arg_count >= 3 && func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
+                            style_type = func->args[2]->data.keyword;
+                        }
+                        
+                        if (counter_name) {
+                            counters_format((CounterContext*)counter_context, counter_name,
+                                          separator ? separator : ".", style_type,
+                                          temp_buffer, sizeof(temp_buffer));
+                            int temp_len = strlen(temp_buffer);
+                            if (result_len + temp_len < (int)sizeof(result_buffer) - 1) {
+                                memcpy(result_buffer + result_len, temp_buffer, temp_len);
+                                result_len += temp_len;
+                                result_buffer[result_len] = '\0';
+                            }
+                            log_debug("[Counter] counters(%s, '%s', style=%u) = '%s'",
+                                    counter_name, separator ? separator : ".", style_type, temp_buffer);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Copy result to arena-allocated buffer
+        if (result_len > 0) {
+            char* result = (char*)arena_alloc(arena, result_len + 1);
+            if (result) {
+                memcpy(result, result_buffer, result_len);
+                result[result_len] = '\0';
+                log_debug("[Counter] Final content: '%s'", result);
+                return result;
+            }
         }
     }
 
