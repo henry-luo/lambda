@@ -27,6 +27,11 @@ void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue disp
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
+// Counter system functions (from layout_counters.cpp)
+typedef struct CounterContext CounterContext;
+int counter_format(CounterContext* ctx, const char* name, uint32_t style,
+                  char* buffer, size_t buffer_size);
+
 // ============================================================================
 // Pseudo-element (::before/::after) Layout Support
 // ============================================================================
@@ -1542,6 +1547,108 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (block->blk && block->blk->counter_increment) {
             log_debug("    [Block] Applying counter-increment: %s", block->blk->counter_increment);
             counter_increment(lycon->counter_context, block->blk->counter_increment);
+        }
+
+        // CSS 2.1 Section 12.5: List markers use implicit "list-item" counter
+        // For display:list-item, auto-increment list-item counter
+        if (display.outer == CSS_VALUE_LIST_ITEM) {
+            log_debug("    [List] Auto-incrementing list-item counter");
+            counter_increment(lycon->counter_context, "list-item 1");
+
+            // Set default list-style-position to outside if not specified
+            // CSS 2.1 Section 12.5.1: Initial value is 'outside'
+            bool is_outside_position = true;  // Default is outside
+            if (block->blk && block->blk->list_style_position != 0) {
+                // Check if position is explicitly set to "inside"
+                // Position values: 1=inside, 2=outside (from shorthand expansion)
+                if (block->blk->list_style_position == 1) {
+                    is_outside_position = false;
+                    log_debug("    [List] list-style-position=inside (is_outside=0)");
+                } else {
+                    is_outside_position = true;
+                    log_debug("    [List] list-style-position=outside (is_outside=1)");
+                }
+            } else {
+                log_debug("    [List] Using default list-style-position=outside");
+            }
+
+            // Generate list marker if list-style-type is not 'none'
+            // Only create ::marker pseudo-element for 'inside' positioned markers
+            // Outside markers are rendered directly in the margin area (not in DOM tree)
+            if (block->blk && block->blk->list_style_type && block->blk->list_style_type != CSS_VALUE_NONE) {
+                CssEnum marker_style = block->blk->list_style_type;
+                const CssEnumInfo* info = css_enum_info(marker_style);
+                log_debug("    [List] Generating marker with style: %s (0x%04X)", info ? info->name : "unknown", marker_style);
+
+                // Format the counter value using list-style-type
+                char marker_text[64];
+                int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
+
+                if (marker_len > 0 && !is_outside_position) {
+                    // Only create ::marker pseudo-element for 'inside' positioned markers
+                    // Add suffix for non-bullet markers (decimal, alpha, roman get periods)
+                    bool needs_period = (marker_style == CSS_VALUE_DECIMAL ||
+                                       marker_style == CSS_VALUE_LOWER_ALPHA || marker_style == CSS_VALUE_UPPER_ALPHA ||
+                                       marker_style == CSS_VALUE_LOWER_ROMAN || marker_style == CSS_VALUE_UPPER_ROMAN);
+
+                    if (needs_period && marker_len + 2 < (int)sizeof(marker_text)) {
+                        marker_text[marker_len] = '.';
+                        marker_text[marker_len + 1] = ' ';
+                        marker_text[marker_len + 2] = '\0';
+                        marker_len += 2;
+                    } else if (marker_len + 1 < (int)sizeof(marker_text)) {
+                        // For disc/circle/square, just add space
+                        marker_text[marker_len] = ' ';
+                        marker_text[marker_len + 1] = '\0';
+                        marker_len += 1;
+                    }
+
+                    log_debug("    [List] Created 'inside' marker: '%s' (length=%d)", marker_text, marker_len);
+
+                    // Create ::marker pseudo-element for 'inside' positioned markers
+                    // (using ::before infrastructure to add inline content)
+                    // Cast block to DomElement to access DOM fields
+                    DomElement* parent_elem = (DomElement*)elmt;
+
+                    if (!block->pseudo) {
+                        block->pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
+                        memset(block->pseudo, 0, sizeof(PseudoContentProp));
+                    }
+
+                    if (!block->pseudo->before_generated) {
+                        // Create DomElement for ::marker (as ::before)
+                        DomElement* marker_elem = dom_element_create(parent_elem->doc, "::marker", nullptr);
+                        if (marker_elem) {
+                            marker_elem->parent = parent_elem;
+
+                            // Create Lambda String for marker text
+                            String* text_string = (String*)arena_alloc(parent_elem->doc->arena,
+                                                                        sizeof(String) + marker_len + 1);
+                            if (text_string) {
+                                text_string->ref_cnt = 1;
+                                text_string->len = marker_len;
+                                memcpy(text_string->chars, marker_text, marker_len);
+                                text_string->chars[marker_len] = '\0';
+
+                                // Create text node with Lambda String
+                                DomText* text_node = dom_text_create(text_string, marker_elem);
+                                if (text_node) {
+                                    marker_elem->first_child = text_node;
+                                    log_debug("    [List] Created ::marker text content: \"%s\"", marker_text);
+                                }
+                            }
+
+                            block->pseudo->before = marker_elem;
+                            block->pseudo->before_generated = true;
+                            log_debug("    [List] Created ::marker pseudo-element");
+                        }
+                    }
+                } else if (marker_len > 0 && is_outside_position) {
+                    // Outside markers are not added to DOM tree
+                    // They should be rendered directly in the margin area during paint
+                    log_debug("    [List] Skipping 'outside' marker creation (should render in margin area)");
+                }
+            }
         }
     }
 
