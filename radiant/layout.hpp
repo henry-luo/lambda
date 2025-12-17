@@ -125,6 +125,7 @@ typedef struct Linebox {
     float max_descender;
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
+    bool last_space_is_hyphen;      // true if last_space is actually a hyphen (break after vs before)
     View* start_view;
     CssEnum vertical_align;
     bool is_line_start;
@@ -134,7 +135,7 @@ typedef struct Linebox {
     FT_UInt prev_glyph_index = 0;   // for kerning
 
     inline void reset_space() {
-        is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
+        is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;  last_space_is_hyphen = false;
     }
 } Linebox;
 
