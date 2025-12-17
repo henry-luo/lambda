@@ -3646,8 +3646,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
-                    // Note: Adding word_break field to BlockProp would be needed
-                    log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)",
+                    block->blk->word_break = val;
+                    log_debug("[CSS] word-break: %s -> 0x%04X",
                              css_enum_info(value->data.keyword)->name, val);
                 }
             }
