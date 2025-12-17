@@ -500,6 +500,7 @@ typedef struct PseudoContentProp {
 
 typedef struct BlockProp {
     CssEnum text_align;
+    CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
     const CssValue* line_height;
     float text_indent;  // can be negative
     float given_min_width, given_max_width;  // non-negative
