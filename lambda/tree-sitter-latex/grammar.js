@@ -12,8 +12,8 @@ module.exports = grammar({
   name: 'latex',
 
   // Whitespace and comments are NOT extras - they're significant in LaTeX
-  // Only line comments are skipped
-  extras: $ => [$.line_comment],
+  // Comments must be visible in the tree so we can handle them properly (they eat newlines)
+  extras: $ => [],
 
   // External scanner for verbatim content that can't be parsed with regex
   // Also handles \begin{document} and \end{document} to take precedence over command
