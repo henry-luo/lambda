@@ -257,7 +257,7 @@ void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
+    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_is_hyphen = false;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
@@ -687,7 +687,18 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str++;
             }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
+            lycon->line.last_space_is_hyphen = false;  // this is a space, not a hyphen
             lycon->line.has_space = true;
+        }
+        else if (*str == '-') {
+            // Hyphens are break opportunities (CSS allows breaking after hyphens)
+            // Track this as a potential break point, but include the hyphen in the current line
+            str = next_ch;
+            lycon->line.last_space = str - 1;  // position of the hyphen
+            lycon->line.last_space_pos = rect->width;  // width including the hyphen
+            lycon->line.last_space_is_hyphen = true;  // mark this as a hyphen break
+            lycon->line.is_line_start = false;
+            lycon->line.has_space = false;
         }
         else {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
