@@ -5128,6 +5128,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] counter-reset list with %d items", value->data.list.count);
                 StringBuf* sb = stringbuf_new(lycon->pool);
 
+                if (!sb) {
+                    log_error("[CSS] counter-reset: stringbuf_new failed!");
+                    break;
+                }
+
                 int count = value->data.list.count;
                 CssValue** values = value->data.list.values;
                 for (int i = 0; i < count; i++) {
@@ -5157,6 +5162,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_COUNTER_INCREMENT: {
             // CSS 2.1 Section 12.4: counter-increment property
             // Syntax: counter-increment: [ <identifier> <integer>? ]+ | none
+            log_debug("[CSS] counter-increment: entry, value type=%d", (int)value->type);
+
             if (!block->blk) {
                 block->blk = alloc_block_prop(lycon);
             }
@@ -5176,11 +5183,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Parse list of name-value pairs
-                StringBuf* sb = stringbuf_new(lycon->pool);
-
+                log_debug("[CSS] counter-increment: LIST case entered, value ptr=%p", (void*)value);
+                log_debug("[CSS] counter-increment: about to access list.count");
                 int count = value->data.list.count;
+                log_debug("[CSS] counter-increment: list.count=%d", count);
+                log_debug("[CSS] counter-increment: about to call stringbuf_new");
+                StringBuf* sb = stringbuf_new(lycon->pool);
+                log_debug("[CSS] counter-increment: stringbuf created at %p", (void*)sb);
+
+                if (!sb) {
+                    log_error("[CSS] counter-increment: stringbuf_new failed!");
+                    break;
+                }
+
                 CssValue** values = value->data.list.values;
+                log_debug("[CSS] counter-increment: about to iterate list");
                 for (int i = 0; i < count; i++) {
+                    log_debug("[CSS] counter-increment: processing item %d", i);
                     CssValue* item = values[i];
                     if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* info = css_enum_info(item->data.keyword);
