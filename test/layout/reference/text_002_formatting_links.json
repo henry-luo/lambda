@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Link and Text Formatting\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.6;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Typography */\n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        /* Links */\n        a {\n            color: #0066cc;\n            text-decoration: underline;\n        }\n        \n        a:hover {\n            color: #004499;\n        }\n        \n        a:visited {\n            color: #6611cc;\n        }\n        \n        /* Text formatting */\n        .strong {\n            font-weight: bold;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        .strikethrough {\n            text-decoration: line-through;\n        }\n        \n        /* Special formatting combinations */\n        .highlight {\n            background-color: #ffeb3b;\n            padding: 1px 2px;\n        }\n    \n\n\n    Text Formatting Examples\n    \n    This paragraph contains various inline formatting: bold text, italic text, and inline code.\n    \n    Links can be formatted too: bold link, italic link, and regular link.\n    \n    More advanced formatting includes strikethrough text and highlighted text.\n    \n    Complex combinations: bold italic, bold code link, and italic code.\n    \n    Reference links: See the documentation for more details, or check the API reference.\n    \n    \n    \n    {\n        \"test_id\": \"text_002_formatting_links\",\n        \"category\": \"text\",\n        \"features\": [\"links\", \"text-decoration\", \"bold\", \"italic\", \"inline-code\", \"strikethrough\", \"text-combinations\"],\n        \"description\": \"Text formatting with links, emphasis, code, and various combinations of inline styles\",\n        \"markdown_equivalent\": \"### Text Formatting Examples\\n\\nThis paragraph contains various inline formatting: **bold text**, *italic text*, and `inline code`.\\n\\nLinks can be formatted too: [**bold link**](#), [*italic link*](#), and [regular link](#).\\n\\nMore advanced formatting includes ~~strikethrough text~~ and highlighted text.\\n\\nComplex combinations: ***bold italic***, [**`bold code link`**](#), and *`italic code`*.\",\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Link and Text Formatting\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.6;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Typography */\n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        /* Links */\n        a {\n            color: #0066cc;\n            text-decoration: underline;\n        }\n        \n        a:hover {\n            color: #004499;\n        }\n        \n        a:visited {\n            color: #6611cc;\n        }\n        \n        /* Text formatting */\n        .strong {\n            font-weight: bold;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        .strikethrough {\n            text-decoration: line-through;\n        }\n        \n        /* Special formatting combinations */\n        .highlight {\n            background-color: #ffeb3b;\n            padding: 1px 2px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Link and Text Formatting",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Link and Text Formatting",
+                "length": 30,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.6;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Typography */\n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        /* Links */\n        a {\n            color: #0066cc;\n            text-decoration: underline;\n        }\n        \n        a:hover {\n            color: #004499;\n        }\n        \n        a:visited {\n            color: #6611cc;\n        }\n        \n        /* Text formatting */\n        .strong {\n            font-weight: bold;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        .strikethrough {\n            text-decoration: line-through;\n        }\n        \n        /* Special formatting combinations */\n        .highlight {\n            background-color: #ffeb3b;\n            padding: 1px 2px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.6;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Typography */\n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        /* Links */\n        a {\n            color: #0066cc;\n            text-decoration: underline;\n        }\n        \n        a:hover {\n            color: #004499;\n        }\n        \n        a:visited {\n            color: #6611cc;\n        }\n        \n        /* Text formatting */\n        .strong {\n            font-weight: bold;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        .strikethrough {\n            text-decoration: line-through;\n        }\n        \n        /* Special formatting combinations */\n        .highlight {\n            background-color: #ffeb3b;\n            padding: 1px 2px;\n        }\n    ",
+                "length": 1384,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Text Formatting Examples\n    \n    This paragraph contains various inline formatting: bold text, italic text, and inline code.\n    \n    Links can be formatted too: bold link, italic link, and regular link.\n    \n    More advanced formatting includes strikethrough text and highlighted text.\n    \n    Complex combinations: bold italic, bold code link, and italic code.\n    \n    Reference links: See the documentation for more details, or check the API reference.\n    \n    \n    \n    {\n        \"test_id\": \"text_002_formatting_links\",\n        \"category\": \"text\",\n        \"features\": [\"links\", \"text-decoration\", \"bold\", \"italic\", \"inline-code\", \"strikethrough\", \"text-combinations\"],\n        \"description\": \"Text formatting with links, emphasis, code, and various combinations of inline styles\",\n        \"markdown_equivalent\": \"### Text Formatting Examples\\n\\nThis paragraph contains various inline formatting: **bold text**, *italic text*, and `inline code`.\\n\\nLinks can be formatted too: [**bold link**](#), [*italic link*](#), and [regular link](#).\\n\\nMore advanced formatting includes ~~strikethrough text~~ and highlighted text.\\n\\nComplex combinations: ***bold italic***, [**`bold code link`**](#), and *`italic code`*.\",\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 7,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "h3",
             "tag": "h3",
             "id": null,
@@ -502,33 +603,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Text Formatting Examples",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Text Formatting Examples",
-                "parentElement": "h3",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 25,
-                    "width": 248.58,
-                    "height": 22,
-                    "right": 268.58,
-                    "bottom": 47
-                  }
-                ],
                 "length": 24,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 24
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 25,
+                      "width": 248.58,
+                      "height": 22,
+                      "right": 268.58,
+                      "bottom": 47,
+                      "text": "Text Formatting Examples",
+                      "startIndex": 0,
+                      "endIndex": 24
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(1)",
             "tag": "p",
             "id": null,
@@ -584,86 +693,39 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph contains various inline formatting: bold text, italic text, and inline code.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "This paragraph contains various inline formatting: ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 68,
-                    "width": 353.97,
-                    "height": 17,
-                    "right": 373.97,
-                    "bottom": 85
-                  }
-                ],
-                "length": 51,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 51
-              },
-              {
-                "text": ", ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 440.64,
-                    "y": 68,
-                    "width": 8.89,
-                    "height": 17,
-                    "right": 449.53,
-                    "bottom": 85
-                  }
-                ],
-                "length": 2,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 2
-              },
-              {
-                "text": ", and ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 511.78,
-                    "y": 68,
-                    "width": 40.03,
-                    "height": 17,
-                    "right": 551.81,
-                    "bottom": 85
-                  }
-                ],
-                "length": 6,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 6
-              },
-              {
-                "text": ".",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 652.23,
-                    "y": 68,
-                    "width": 4.45,
-                    "height": 17,
-                    "right": 656.69,
-                    "bottom": 85
-                  }
-                ],
-                "length": 1,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 1
-              }
-            ],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "text",
+                "text": "This paragraph contains various inline formatting: ",
+                "length": 51,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 68,
+                      "width": 353.97,
+                      "height": 17,
+                      "right": 373.97,
+                      "bottom": 85,
+                      "text": "This paragraph contains various inline formatting: ",
+                      "startIndex": 0,
+                      "endIndex": 51
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "span.strong:nth-of-type(1)",
                 "tag": "span",
                 "id": null,
@@ -721,33 +783,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "bold text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "bold text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 373.97,
-                        "y": 68,
-                        "width": 66.67,
-                        "height": 17,
-                        "right": 440.64,
-                        "bottom": 85
-                      }
-                    ],
                     "length": 9,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 9
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 373.97,
+                          "y": 68,
+                          "width": 66.67,
+                          "height": 17,
+                          "right": 440.64,
+                          "bottom": 85,
+                          "text": "bold text",
+                          "startIndex": 0,
+                          "endIndex": 9
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ", ",
+                "length": 2,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 440.64,
+                      "y": 68,
+                      "width": 8.89,
+                      "height": 17,
+                      "right": 449.53,
+                      "bottom": 85,
+                      "text": ", ",
+                      "startIndex": 0,
+                      "endIndex": 2
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.emphasis:nth-of-type(2)",
                 "tag": "span",
                 "id": null,
@@ -805,33 +903,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "italic text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "italic text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 449.53,
-                        "y": 68,
-                        "width": 62.25,
-                        "height": 17,
-                        "right": 511.78,
-                        "bottom": 85
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 449.53,
+                          "y": 68,
+                          "width": 62.25,
+                          "height": 17,
+                          "right": 511.78,
+                          "bottom": 85,
+                          "text": "italic text",
+                          "startIndex": 0,
+                          "endIndex": 11
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ", and ",
+                "length": 6,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 511.78,
+                      "y": 68,
+                      "width": 40.03,
+                      "height": 17,
+                      "right": 551.81,
+                      "bottom": 85,
+                      "text": ", and ",
+                      "startIndex": 0,
+                      "endIndex": 6
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "code.code",
                 "tag": "code",
                 "id": null,
@@ -889,35 +1023,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "inline code",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "inline code",
-                    "parentElement": "code",
-                    "rects": [
-                      {
-                        "x": 555.81,
-                        "y": 70,
-                        "width": 92.42,
-                        "height": 16,
-                        "right": 648.23,
-                        "bottom": 86
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 555.81,
+                          "y": 70,
+                          "width": 92.42,
+                          "height": 16,
+                          "right": 648.23,
+                          "bottom": 86,
+                          "text": "inline code",
+                          "startIndex": 0,
+                          "endIndex": 11
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ".",
+                "length": 1,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 652.23,
+                      "y": 68,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 656.69,
+                      "bottom": 85,
+                      "text": ".",
+                      "startIndex": 0,
+                      "endIndex": 1
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 6,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(2)",
             "tag": "p",
             "id": null,
@@ -973,86 +1143,39 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Links can be formatted too: bold link, italic link, and regular link.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "Links can be formatted too: ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 109.59,
-                    "width": 197.45,
-                    "height": 17,
-                    "right": 217.45,
-                    "bottom": 126.59
-                  }
-                ],
-                "length": 28,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 28
-              },
-              {
-                "text": ", ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 283.23,
-                    "y": 109.59,
-                    "width": 8.89,
-                    "height": 17,
-                    "right": 292.13,
-                    "bottom": 126.59
-                  }
-                ],
-                "length": 2,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 2
-              },
-              {
-                "text": ", and ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 352.59,
-                    "y": 109.59,
-                    "width": 40.03,
-                    "height": 17,
-                    "right": 392.63,
-                    "bottom": 126.59
-                  }
-                ],
-                "length": 6,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 6
-              },
-              {
-                "text": ".",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 470.89,
-                    "y": 109.59,
-                    "width": 4.45,
-                    "height": 17,
-                    "right": 475.34,
-                    "bottom": 126.59
-                  }
-                ],
-                "length": 1,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 1
-              }
-            ],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
+                "nodeType": "text",
+                "text": "Links can be formatted too: ",
+                "length": 28,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 109.59,
+                      "width": 197.45,
+                      "height": 17,
+                      "right": 217.45,
+                      "bottom": 126.59,
+                      "text": "Links can be formatted too: ",
+                      "startIndex": 0,
+                      "endIndex": 28
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "a.strong:nth-of-type(1)",
                 "tag": "a",
                 "id": null,
@@ -1110,33 +1233,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "bold link",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "bold link",
-                    "parentElement": "a",
-                    "rects": [
-                      {
-                        "x": 217.45,
-                        "y": 109.59,
-                        "width": 65.78,
-                        "height": 17,
-                        "right": 283.23,
-                        "bottom": 126.59
-                      }
-                    ],
                     "length": 9,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 9
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 217.45,
+                          "y": 109.59,
+                          "width": 65.78,
+                          "height": 17,
+                          "right": 283.23,
+                          "bottom": 126.59,
+                          "text": "bold link",
+                          "startIndex": 0,
+                          "endIndex": 9
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ", ",
+                "length": 2,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 283.23,
+                      "y": 109.59,
+                      "width": 8.89,
+                      "height": 17,
+                      "right": 292.13,
+                      "bottom": 126.59,
+                      "text": ", ",
+                      "startIndex": 0,
+                      "endIndex": 2
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "a.emphasis:nth-of-type(2)",
                 "tag": "a",
                 "id": null,
@@ -1194,33 +1353,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "italic link",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "italic link",
-                    "parentElement": "a",
-                    "rects": [
-                      {
-                        "x": 292.13,
-                        "y": 109.59,
-                        "width": 60.47,
-                        "height": 17,
-                        "right": 352.59,
-                        "bottom": 126.59
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 292.13,
+                          "y": 109.59,
+                          "width": 60.47,
+                          "height": 17,
+                          "right": 352.59,
+                          "bottom": 126.59,
+                          "text": "italic link",
+                          "startIndex": 0,
+                          "endIndex": 11
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ", and ",
+                "length": 6,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 352.59,
+                      "y": 109.59,
+                      "width": 40.03,
+                      "height": 17,
+                      "right": 392.63,
+                      "bottom": 126.59,
+                      "text": ", and ",
+                      "startIndex": 0,
+                      "endIndex": 6
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "a:nth-of-type(3)",
                 "tag": "a",
                 "id": null,
@@ -1276,35 +1471,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "regular link",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "regular link",
-                    "parentElement": "a",
-                    "rects": [
-                      {
-                        "x": 392.63,
-                        "y": 109.59,
-                        "width": 78.27,
-                        "height": 17,
-                        "right": 470.89,
-                        "bottom": 126.59
-                      }
-                    ],
                     "length": 12,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 12
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 392.63,
+                          "y": 109.59,
+                          "width": 78.27,
+                          "height": 17,
+                          "right": 470.89,
+                          "bottom": 126.59,
+                          "text": "regular link",
+                          "startIndex": 0,
+                          "endIndex": 12
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ".",
+                "length": 1,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 470.89,
+                      "y": 109.59,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 475.34,
+                      "bottom": 126.59,
+                      "text": ".",
+                      "startIndex": 0,
+                      "endIndex": 1
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 6,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(3)",
             "tag": "p",
             "id": null,
@@ -1360,68 +1591,39 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "More advanced formatting includes strikethrough text and highlighted text.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "More advanced formatting includes ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 151.19,
-                    "width": 253.47,
-                    "height": 17,
-                    "right": 273.47,
-                    "bottom": 168.19
-                  }
-                ],
-                "length": 34,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 34
-              },
-              {
-                "text": " and ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 396.2,
-                    "y": 151.19,
-                    "width": 35.59,
-                    "height": 17,
-                    "right": 431.8,
-                    "bottom": 168.19
-                  }
-                ],
-                "length": 5,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 5
-              },
-              {
-                "text": ".",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 543.44,
-                    "y": 151.19,
-                    "width": 4.45,
-                    "height": 17,
-                    "right": 547.89,
-                    "bottom": 168.19
-                  }
-                ],
-                "length": 1,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 1
-              }
-            ],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 7,
             "children": [
               {
+                "nodeType": "text",
+                "text": "More advanced formatting includes ",
+                "length": 34,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 151.19,
+                      "width": 253.47,
+                      "height": 17,
+                      "right": 273.47,
+                      "bottom": 168.19,
+                      "text": "More advanced formatting includes ",
+                      "startIndex": 0,
+                      "endIndex": 34
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "span.strikethrough:nth-of-type(1)",
                 "tag": "span",
                 "id": null,
@@ -1479,33 +1681,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "strikethrough text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "strikethrough text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 273.47,
-                        "y": 151.19,
-                        "width": 122.73,
-                        "height": 17,
-                        "right": 396.2,
-                        "bottom": 168.19
-                      }
-                    ],
                     "length": 18,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 18
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 273.47,
+                          "y": 151.19,
+                          "width": 122.73,
+                          "height": 17,
+                          "right": 396.2,
+                          "bottom": 168.19,
+                          "text": "strikethrough text",
+                          "startIndex": 0,
+                          "endIndex": 18
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": " and ",
+                "length": 5,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 396.2,
+                      "y": 151.19,
+                      "width": 35.59,
+                      "height": 17,
+                      "right": 431.8,
+                      "bottom": 168.19,
+                      "text": " and ",
+                      "startIndex": 0,
+                      "endIndex": 5
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.highlight:nth-of-type(2)",
                 "tag": "span",
                 "id": null,
@@ -1563,35 +1801,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "highlighted text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "highlighted text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 433.8,
-                        "y": 151.19,
-                        "width": 107.64,
-                        "height": 17,
-                        "right": 541.44,
-                        "bottom": 168.19
-                      }
-                    ],
                     "length": 16,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 16
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 433.8,
+                          "y": 151.19,
+                          "width": 107.64,
+                          "height": 17,
+                          "right": 541.44,
+                          "bottom": 168.19,
+                          "text": "highlighted text",
+                          "startIndex": 0,
+                          "endIndex": 16
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ".",
+                "length": 1,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 543.44,
+                      "y": 151.19,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 547.89,
+                      "bottom": 168.19,
+                      "text": ".",
+                      "startIndex": 0,
+                      "endIndex": 1
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(4)",
             "tag": "p",
             "id": null,
@@ -1647,86 +1921,39 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Complex combinations: bold italic, bold code link, and italic code.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "Complex combinations: ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 192.78,
-                    "width": 170.75,
-                    "height": 17,
-                    "right": 190.75,
-                    "bottom": 209.78
-                  }
-                ],
-                "length": 22,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 22
-              },
-              {
-                "text": ", ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 265.42,
-                    "y": 192.78,
-                    "width": 8.89,
-                    "height": 17,
-                    "right": 274.31,
-                    "bottom": 209.78
-                  }
-                ],
-                "length": 2,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 2
-              },
-              {
-                "text": ", and ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 399.94,
-                    "y": 192.78,
-                    "width": 40.03,
-                    "height": 17,
-                    "right": 439.97,
-                    "bottom": 209.78
-                  }
-                ],
-                "length": 6,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 6
-              },
-              {
-                "text": ".",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 540.39,
-                    "y": 192.78,
-                    "width": 4.45,
-                    "height": 17,
-                    "right": 544.84,
-                    "bottom": 209.78
-                  }
-                ],
-                "length": 1,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 1
-              }
-            ],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 9,
             "children": [
               {
+                "nodeType": "text",
+                "text": "Complex combinations: ",
+                "length": 22,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 192.78,
+                      "width": 170.75,
+                      "height": 17,
+                      "right": 190.75,
+                      "bottom": 209.78,
+                      "text": "Complex combinations: ",
+                      "startIndex": 0,
+                      "endIndex": 22
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "span.strong.emphasis:nth-of-type(1)",
                 "tag": "span",
                 "id": null,
@@ -1785,33 +2012,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "bold italic",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "bold italic",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 190.75,
-                        "y": 192.78,
-                        "width": 74.67,
-                        "height": 17,
-                        "right": 265.42,
-                        "bottom": 209.78
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 190.75,
+                          "y": 192.78,
+                          "width": 74.67,
+                          "height": 17,
+                          "right": 265.42,
+                          "bottom": 209.78,
+                          "text": "bold italic",
+                          "startIndex": 0,
+                          "endIndex": 11
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ", ",
+                "length": 2,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 265.42,
+                      "y": 192.78,
+                      "width": 8.89,
+                      "height": 17,
+                      "right": 274.31,
+                      "bottom": 209.78,
+                      "text": ", ",
+                      "startIndex": 0,
+                      "endIndex": 2
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "a.strong.code",
                 "tag": "a",
                 "id": null,
@@ -1870,33 +2133,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "bold code link",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "bold code link",
-                    "parentElement": "a",
-                    "rects": [
-                      {
-                        "x": 278.31,
-                        "y": 194.78,
-                        "width": 117.63,
-                        "height": 16,
-                        "right": 395.94,
-                        "bottom": 210.78
-                      }
-                    ],
                     "length": 14,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 14
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 278.31,
+                          "y": 194.78,
+                          "width": 117.63,
+                          "height": 16,
+                          "right": 395.94,
+                          "bottom": 210.78,
+                          "text": "bold code link",
+                          "startIndex": 0,
+                          "endIndex": 14
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ", and ",
+                "length": 6,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 399.94,
+                      "y": 192.78,
+                      "width": 40.03,
+                      "height": 17,
+                      "right": 439.97,
+                      "bottom": 209.78,
+                      "text": ", and ",
+                      "startIndex": 0,
+                      "endIndex": 6
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.emphasis:nth-of-type(2)",
                 "tag": "span",
                 "id": null,
@@ -1954,13 +2253,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "italic code",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "code.code",
                     "tag": "code",
                     "id": null,
@@ -2018,37 +2315,73 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "italic code",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 0,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "italic code",
-                        "parentElement": "code",
-                        "rects": [
-                          {
-                            "x": 443.97,
-                            "y": 194.78,
-                            "width": 92.42,
-                            "height": 16,
-                            "right": 536.39,
-                            "bottom": 210.78
-                          }
-                        ],
                         "length": 11,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 11
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 443.97,
+                              "y": 194.78,
+                              "width": 92.42,
+                              "height": 16,
+                              "right": 536.39,
+                              "bottom": 210.78,
+                              "text": "italic code",
+                              "startIndex": 0,
+                              "endIndex": 11
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
+              },
+              {
+                "nodeType": "text",
+                "text": ".",
+                "length": 1,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 540.39,
+                      "y": 192.78,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 544.84,
+                      "bottom": 209.78,
+                      "text": ".",
+                      "startIndex": 0,
+                      "endIndex": 1
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 6,
+                "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(5)",
             "tag": "p",
             "id": null,
@@ -2104,68 +2437,39 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Reference links: See the documentation for more details, or check the API reference.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "Reference links: See the ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 234.38,
-                    "width": 178.77,
-                    "height": 17,
-                    "right": 198.77,
-                    "bottom": 251.38
-                  }
-                ],
-                "length": 25,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 25
-              },
-              {
-                "text": " for more details, or check the ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 303.73,
-                    "y": 234.38,
-                    "width": 214.33,
-                    "height": 17,
-                    "right": 518.06,
-                    "bottom": 251.38
-                  }
-                ],
-                "length": 32,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 32
-              },
-              {
-                "text": ".",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 615.89,
-                    "y": 234.38,
-                    "width": 4.45,
-                    "height": 17,
-                    "right": 620.34,
-                    "bottom": 251.38
-                  }
-                ],
-                "length": 1,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 1
-              }
-            ],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 11,
             "children": [
               {
+                "nodeType": "text",
+                "text": "Reference links: See the ",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 234.38,
+                      "width": 178.77,
+                      "height": 17,
+                      "right": 198.77,
+                      "bottom": 251.38,
+                      "text": "Reference links: See the ",
+                      "startIndex": 0,
+                      "endIndex": 25
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "a:nth-of-type(1)",
                 "tag": "a",
                 "id": null,
@@ -2221,33 +2525,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "documentation",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "documentation",
-                    "parentElement": "a",
-                    "rects": [
-                      {
-                        "x": 198.77,
-                        "y": 234.38,
-                        "width": 104.97,
-                        "height": 17,
-                        "right": 303.73,
-                        "bottom": 251.38
-                      }
-                    ],
                     "length": 13,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 13
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 198.77,
+                          "y": 234.38,
+                          "width": 104.97,
+                          "height": 17,
+                          "right": 303.73,
+                          "bottom": 251.38,
+                          "text": "documentation",
+                          "startIndex": 0,
+                          "endIndex": 13
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": " for more details, or check the ",
+                "length": 32,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 303.73,
+                      "y": 234.38,
+                      "width": 214.33,
+                      "height": 17,
+                      "right": 518.06,
+                      "bottom": 251.38,
+                      "text": " for more details, or check the ",
+                      "startIndex": 0,
+                      "endIndex": 32
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "a:nth-of-type(2)",
                 "tag": "a",
                 "id": null,
@@ -2303,35 +2643,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "API reference",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "API reference",
-                    "parentElement": "a",
-                    "rects": [
-                      {
-                        "x": 518.06,
-                        "y": 234.38,
-                        "width": 97.83,
-                        "height": 17,
-                        "right": 615.89,
-                        "bottom": 251.38
-                      }
-                    ],
                     "length": 13,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 13
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 518.06,
+                          "y": 234.38,
+                          "width": 97.83,
+                          "height": 17,
+                          "right": 615.89,
+                          "bottom": 251.38,
+                          "text": "API reference",
+                          "startIndex": 0,
+                          "endIndex": 13
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ".",
+                "length": 1,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 615.89,
+                      "y": 234.38,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 620.34,
+                      "bottom": 251.38,
+                      "text": ".",
+                      "startIndex": 0,
+                      "endIndex": 1
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -2387,12 +2763,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"text_002_formatting_links\",\n        \"category\": \"text\",\n        \"features\": [\"links\", \"text-decoration\", \"bold\", \"italic\", \"inline-code\", \"strikethrough\", \"text-combinations\"],\n        \"description\": \"Text formatting with links, emphasis, code, and various combinations of inline styles\",\n        \"markdown_equivalent\": \"### Text Formatting Examples\\n\\nThis paragraph contains various inline formatting: **bold text**, *italic text*, and `inline code`.\\n\\nLinks can be formatted too: [**bold link**](#), [*italic link*](#), and [regular link](#).\\n\\nMore advanced formatting includes ~~strikethrough text~~ and highlighted text.\\n\\nComplex combinations: ***bold italic***, [**`bold code link`**](#), and *`italic code`*.\",\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 15,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"text_002_formatting_links\",\n        \"category\": \"text\",\n        \"features\": [\"links\", \"text-decoration\", \"bold\", \"italic\", \"inline-code\", \"strikethrough\", \"text-combinations\"],\n        \"description\": \"Text formatting with links, emphasis, code, and various combinations of inline styles\",\n        \"markdown_equivalent\": \"### Text Formatting Examples\\n\\nThis paragraph contains various inline formatting: **bold text**, *italic text*, and `inline code`.\\n\\nLinks can be formatted too: [**bold link**](#), [*italic link*](#), and [regular link](#).\\n\\nMore advanced formatting includes ~~strikethrough text~~ and highlighted text.\\n\\nComplex combinations: ***bold italic***, [**`bold code link`**](#), and *`italic code`*.\",\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 797,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }
