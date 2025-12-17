@@ -2061,38 +2061,55 @@ static void cmd_makeatother(LatexProcessor* proc, Item elem) {
 static void cmd_section(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
+    // End any open paragraph before section heading
+    proc->endParagraph();
+    
     ElementReader elem_reader(elem);
-    
-    // Find the title - collect all text content from string children
-    // Labels are element children and should be registered separately
-    std::string title;
     Pool* pool = proc->pool();
-    StringBuf* title_sb = stringbuf_new(pool);
     
-    auto iter = elem_reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isString()) {
-            stringbuf_append_str(title_sb, child.cstring());
-        } else if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            // Skip label elements from title, but remember them for later
-            if (strcmp(child_elem.tagName(), "label") != 0) {
-                // For other elements (formatting), get text content
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* text = stringbuf_to_string(sb);
-                stringbuf_append_str(title_sb, text->chars);
-            }
+    // Find the title argument (from "title" field or children/textContent)
+    std::string title;
+    
+    // First try to get title from "title" field (new grammar structure)
+    if (elem_reader.has_attr("title")) {
+        ItemReader title_reader = elem_reader.get_attr("title");
+        if (title_reader.isElement()) {
+            ElementReader title_elem(title_reader.item());
+            StringBuf* sb = stringbuf_new(pool);
+            title_elem.textContent(sb);
+            String* title_str = stringbuf_to_string(sb);
+            title = title_str->chars;
         }
     }
-    String* title_str = stringbuf_to_string(title_sb);
-    title = title_str->chars;
+    
+    // Fallback: collect text content from children (old parser structure)
+    if (title.empty()) {
+        StringBuf* title_sb = stringbuf_new(pool);
+        auto iter = elem_reader.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                stringbuf_append_str(title_sb, child.cstring());
+            } else if (child.isElement()) {
+                ElementReader child_elem(child.item());
+                // Skip label elements from title
+                if (strcmp(child_elem.tagName(), "label") != 0) {
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* text = stringbuf_to_string(sb);
+                    stringbuf_append_str(title_sb, text->chars);
+                }
+            }
+        }
+        String* title_str = stringbuf_to_string(title_sb);
+        title = title_str->chars;
+    }
     
     gen->startSection("section", false, title, title);
     
     // Now register any labels as children of section
     auto label_iter = elem_reader.children();
+    ItemReader child;
     while (label_iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem(child.item());
@@ -2110,6 +2127,9 @@ static void cmd_section(LatexProcessor* proc, Item elem) {
 
 static void cmd_subsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     
@@ -2153,11 +2173,15 @@ static void cmd_subsection(LatexProcessor* proc, Item elem) {
     }
     
     gen->startSection("subsection", false, title, title);
-    proc->processChildren(elem);
+    // NOTE: Do NOT call processChildren - section heading is complete
+    //       Sections are flat in new grammar, not containers
 }
 
 static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     
@@ -2201,11 +2225,14 @@ static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
     }
     
     gen->startSection("subsubsection", false, title, title);
-    proc->processChildren(elem);
+    // NOTE: Do NOT call processChildren - section heading is complete
 }
 
 static void cmd_chapter(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     
@@ -2237,6 +2264,9 @@ static void cmd_chapter(LatexProcessor* proc, Item elem) {
 
 static void cmd_part(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     

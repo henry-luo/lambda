@@ -331,7 +331,8 @@ void HtmlGenerator::startSection(const std::string& level, bool starred,
 void HtmlGenerator::createSectionHeading(const std::string& level, const std::string& number,
                                          const std::string& title, const std::string& anchor) {
     // html-generator.ls createSectionHeading method
-    // Expected format: <h2 id="sec-1">1 Section Name</h2>
+    // Expected format for chapter: <h1 id="sec-1"><div>Chapter 1</div>Title</h1>
+    // Expected format for others: <h2 id="sec-1">1 Section Name</h2>
     
     int heading_level = getHeadingLevel(level);
     
@@ -343,10 +344,20 @@ void HtmlGenerator::createSectionHeading(const std::string& level, const std::st
     attrs << "id=\"" << anchor << "\"";
     writer_->openTagRaw(tag, attrs.str().c_str());
     
-    // Section number followed by em space (U+2003)
+    // Section number followed by title
     if (!number.empty()) {
-        text(number.c_str());
-        text("\xe2\x80\x83");  // UTF-8 encoding of U+2003 (em space)
+        if (level == "chapter") {
+            // latex.js: chaphead = @create @block, @macro(\chaptername) ++ (@createText @symbol \space) ++ @macro(\the + sec)
+            // Creates: <div>Chapter X</div>Title
+            writer_->openTag("div");
+            text("Chapter ");
+            text(number.c_str());
+            closeElement();  // div
+        } else {
+            // Other sections: number + quad + title
+            text(number.c_str());
+            text("\xe2\x80\x83");  // UTF-8 encoding of U+2003 (em space / quad)
+        }
     }
     
     // Section title
