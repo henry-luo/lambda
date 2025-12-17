@@ -986,6 +986,9 @@ const char* dom_element_get_pseudo_element_content_with_counters(
 
                     if (func->arg_count >= 2 && func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
                         style_type = func->args[1]->data.keyword;
+                        const CssEnumInfo* style_info = css_enum_info((CssEnum)style_type);
+                        log_debug("[Counter] counter style keyword: %u (%s)",
+                                style_type, style_info ? style_info->name : "unknown");
                     }
 
                     // Format counter value
@@ -993,7 +996,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                     if (buffer && counter_name) {
                         counter_format((CounterContext*)counter_context, counter_name,
                                      style_type, buffer, 64);
-                        log_debug("[Counter] counter(%s) = %s", counter_name, buffer);
+                        log_debug("[Counter] counter(%s, style=%u) = '%s'", counter_name, style_type, buffer);
                         return buffer;
                     }
                 }
