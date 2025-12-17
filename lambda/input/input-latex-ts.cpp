@@ -520,6 +520,17 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                         return elem_builder.final();
                     }
                     
+                    // Diacritic commands: \^ \' \` \" \~ \= \. - create elements for formatting
+                    // These need special handling to combine with the following character/group
+                    if (escaped_char == '\'' || escaped_char == '`' || escaped_char == '^' ||
+                        escaped_char == '"' || escaped_char == '~' || escaped_char == '=' ||
+                        escaped_char == '.') {
+                        // Create element with diacritic character as tag
+                        char tag[2] = {escaped_char, '\0'};
+                        ElementBuilder elem_builder = builder.element(tag);
+                        return elem_builder.final();
+                    }
+                    
                     // For other control symbols, return the escaped character as string
                     return {.item = s2it(builder.createString(source + start + 1, end - start - 1))};
                 }
