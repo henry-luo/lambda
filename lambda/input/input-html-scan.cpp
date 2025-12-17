@@ -120,6 +120,14 @@ String* html_parse_string_content(StringBuf* sb, const char **html, char end_cha
                         // ASCII escapes: decode inline
                         stringbuf_append_str(sb, result.decoded);
                         *html = entity_end + 1;
+                    } else if (result.type == ENTITY_UNICODE_SPACE) {
+                        // Unicode space entities: decode inline as UTF-8
+                        char utf8_buf[8];
+                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
+                        if (utf8_len > 0) {
+                            stringbuf_append_str(sb, utf8_buf);
+                        }
+                        *html = entity_end + 1;
                     } else if (result.type == ENTITY_NAMED) {
                         // Named entities: for attribute values, still decode to UTF-8
                         // (Symbol handling is only for text content in elements)
@@ -317,6 +325,14 @@ void html_parse_mixed_content(
                     if (result.type == ENTITY_ASCII_ESCAPE) {
                         // ASCII escapes: decode inline to text buffer
                         stringbuf_append_str(sb, result.decoded);
+                        *html = entity_end + 1;
+                    } else if (result.type == ENTITY_UNICODE_SPACE) {
+                        // Unicode space entities: decode inline as UTF-8
+                        char utf8_buf[8];
+                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
+                        if (utf8_len > 0) {
+                            stringbuf_append_str(sb, utf8_buf);
+                        }
                         *html = entity_end + 1;
                     } else if (result.type == ENTITY_NAMED) {
                         // Named entities: flush text buffer, emit Symbol

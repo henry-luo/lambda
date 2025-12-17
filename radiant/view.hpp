@@ -312,6 +312,7 @@ struct FontProp {
     CssEnum font_style;
     CssEnum font_weight;
     CssEnum text_deco; // CSS text decoration
+    float letter_spacing;  // letter spacing in pixels (default 0)
     // derived font properties
     float space_width;  // width of a space character of the current font
     float ascender;    // font ascender in pixels
@@ -500,6 +501,7 @@ typedef struct PseudoContentProp {
 
 typedef struct BlockProp {
     CssEnum text_align;
+    CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
     const CssValue* line_height;
     float text_indent;  // can be negative
     float given_min_width, given_max_width;  // non-negative
@@ -511,6 +513,7 @@ typedef struct BlockProp {
     char* counter_increment;        // counter names and values
     CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
+    CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)

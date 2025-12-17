@@ -7,6 +7,8 @@
 
 #include "../lib/log.h"
 #include <chrono>
+#include <cctype>
+#include <cwctype>
 using namespace std::chrono;
 
 // External timing accumulators from layout.cpp
@@ -14,8 +16,113 @@ extern double g_text_layout_time;
 extern int64_t g_text_layout_count;
 
 // ============================================================================
+// CSS text-transform Helpers
+// ============================================================================
+
+/**
+ * Apply CSS text-transform to a single Unicode codepoint.
+ * @param codepoint Input Unicode codepoint
+ * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
+ * @param is_word_start True if this is the first character of a word (for capitalize)
+ * @return Transformed codepoint
+ */
+uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
+    if (text_transform == CSS_VALUE_UPPERCASE) {
+        // Convert to uppercase
+        if (codepoint < 128) {
+            return std::toupper(codepoint);
+        } else {
+            return std::towupper(codepoint);
+        }
+    } else if (text_transform == CSS_VALUE_LOWERCASE) {
+        // Convert to lowercase
+        if (codepoint < 128) {
+            return std::tolower(codepoint);
+        } else {
+            return std::towlower(codepoint);
+        }
+    } else if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
+        // Capitalize first letter of each word
+        if (codepoint < 128) {
+            return std::toupper(codepoint);
+        } else {
+            return std::towupper(codepoint);
+        }
+    }
+    return codepoint;
+}
+
+/**
+ * Get text-transform property from block.
+ * @param blk BlockProp structure (can be NULL)
+ * @return CSS text-transform value or CSS_VALUE_NONE
+ */
+CssEnum get_text_transform_from_block(BlockProp* blk) {
+    if (blk && blk->text_transform != 0 && blk->text_transform != CSS_VALUE_INHERIT) {
+        return blk->text_transform;
+    }
+    return CSS_VALUE_NONE;
+}
+
+/**
+ * Get text-transform property from the layout context.
+ * Checks block property for the current element or parent elements.
+ */
+static inline CssEnum get_text_transform(LayoutContext* lycon) {
+    // Check parent chain for text-transform property (it's inherited)
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            CssEnum transform = get_text_transform_from_block(elem->blk);
+            if (transform != CSS_VALUE_NONE) {
+                return transform;
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NONE;
+}
+
+/**
+ * Get word-break property from the layout context.
+ * Checks block property for the current element or parent elements.
+ */
+static inline CssEnum get_word_break(LayoutContext* lycon) {
+    // Check parent chain for word-break property (it's inherited)
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->blk && elem->blk->word_break != 0) {
+                return elem->blk->word_break;
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NORMAL;  // Default to normal
+}
+
+// ============================================================================
 // CSS white-space Property Helpers
 // ============================================================================
+
+/**
+ * Check if a codepoint is a CJK character that allows line breaks.
+ * CJK text can break between any two characters.
+ * Covers: Chinese (Hanzi), Japanese (Kanji/Hiragana/Katakana), Korean (Hangul)
+ */
+static inline bool is_cjk_character(uint32_t codepoint) {
+    return (codepoint >= 0x4E00 && codepoint <= 0x9FFF) ||  // CJK Unified Ideographs
+           (codepoint >= 0x3400 && codepoint <= 0x4DBF) ||  // CJK Extension A
+           (codepoint >= 0x20000 && codepoint <= 0x2A6DF) || // CJK Extension B
+           (codepoint >= 0x2A700 && codepoint <= 0x2B73F) || // CJK Extension C
+           (codepoint >= 0x2B740 && codepoint <= 0x2B81F) || // CJK Extension D
+           (codepoint >= 0x2B820 && codepoint <= 0x2CEAF) || // CJK Extension E
+           (codepoint >= 0x3040 && codepoint <= 0x309F) ||  // Hiragana
+           (codepoint >= 0x30A0 && codepoint <= 0x30FF) ||  // Katakana
+           (codepoint >= 0xAC00 && codepoint <= 0xD7AF);    // Hangul Syllables
+}
 
 /**
  * Check if whitespace should be collapsed according to white-space property.
@@ -257,7 +364,7 @@ void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
+    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_is_hyphen = false;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
@@ -354,24 +461,41 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
     unsigned char* str = (unsigned char*)text;
     float text_width = 0.0f;
+    CssEnum text_transform = get_text_transform(lycon);
+    bool is_word_start = true;  // First character is always word start
+
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
+
+        // Get the codepoint and apply text-transform
+        uint32_t codepoint = *str;
+        if (codepoint >= 128) {
+            int bytes = utf8_to_codepoint(str, &codepoint);
+            if (bytes <= 0) codepoint = *str;
+        }
+        codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+        is_word_start = false;  // Only first char is word start in this context
+
         // Use sub-pixel rendering flags for better quality
         FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-        if (FT_Load_Char(lycon->font.ft_face, *str, load_flags)) {
-            fprintf(stderr, "Could not load character '%c'\n", *str);
+        if (FT_Load_Char(lycon->font.ft_face, codepoint, load_flags)) {
+            fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
             return RDT_LINE_NOT_FILLED;
         }
         FT_GlyphSlot slot = lycon->font.ft_face->glyph;
         // Use precise float calculation for advance
         text_width += (float)(slot->advance.x) / 64.0f;
+        // Apply letter-spacing (but not after the last character)
+        str++;
+        if (*str) {  // Not the last character
+            text_width += lycon->font.style->letter_spacing;
+        }
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         if (lycon->line.advance_x + text_width > line_right) { // line filled up
             return RDT_LINE_FILLED;
         }
-        str++;
     } while (*str);  // end of text
     lycon->line.advance_x += text_width;
     return RDT_NOT_SURE;
@@ -499,8 +623,17 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool collapse_newlines = ws_collapse_newlines(white_space);
     bool wrap_lines = ws_wrap_lines(white_space);
 
-    log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d",
-              white_space, collapse_spaces, collapse_newlines, wrap_lines);
+    // Get word-break property for CJK line breaking
+    CssEnum word_break = get_word_break(lycon);
+    bool break_all = (word_break == CSS_VALUE_BREAK_ALL);  // Can break between any characters
+    bool keep_all = (word_break == CSS_VALUE_KEEP_ALL);    // Don't break CJK between letters
+
+    // Get text-transform property
+    CssEnum text_transform = get_text_transform(lycon);
+    bool is_word_start = true;  // Track word boundaries for capitalize
+
+    log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d, text-transform=%d",
+              white_space, collapse_spaces, collapse_newlines, wrap_lines, text_transform);
 
     // skip space at start of line (only if collapsing spaces)
     if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
@@ -600,12 +733,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str++;
             }
             line_break(lycon);
-            if (*str) { goto LAYOUT_TEXT; }
+            if (*str) {
+                is_word_start = true;  // Reset word boundary after line break
+                goto LAYOUT_TEXT;
+            }
             else return;
         }
 
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
+            // Apply letter-spacing to spaces as well (but not if it's the last character)
+            if (str[1]) {  // Check if there's a next character
+                wd += lycon->font.style->letter_spacing;
+            }
+            is_word_start = true;  // Next non-space char is word start
         }
         else {
             if (codepoint >= 128) { // unicode char
@@ -616,9 +757,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 else { next_ch = str + bytes; }
             }
             else { next_ch = str + 1; }
+
+            // Apply text-transform before loading glyph
+            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            is_word_start = false;  // No longer at word start
+
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
             wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
-            // log_debug("char width: '%c', width %f", *str, wd);
+            // Apply letter-spacing (add to character width)
+            // Note: letter-spacing is NOT applied after the last character (CSS spec)
+            // We'll check if next character exists before adding letter-spacing
+            if (next_ch && *next_ch) {
+                wd += lycon->font.style->letter_spacing;
+            }
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
@@ -687,7 +838,29 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str++;
             }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
+            lycon->line.last_space_is_hyphen = false;  // this is a space, not a hyphen
             lycon->line.has_space = true;
+        }
+        else if (*str == '-') {
+            // Hyphens are break opportunities (CSS allows breaking after hyphens)
+            // Track this as a potential break point, but include the hyphen in the current line
+            str = next_ch;
+            lycon->line.last_space = str - 1;  // position of the hyphen
+            lycon->line.last_space_pos = rect->width;  // width including the hyphen
+            lycon->line.last_space_is_hyphen = true;  // mark this as a hyphen break
+            lycon->line.is_line_start = false;
+            lycon->line.has_space = false;
+        }
+        else if ((break_all || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
+            // CJK or break-all: can break after this character
+            // Note: Don't track as last_space since CJK breaks don't consume characters
+            // Instead, allow breaking at current position when line fills
+            str = next_ch;
+            lycon->line.is_line_start = false;
+            lycon->line.has_space = false;
+
+            // Track position for potential break (but don't set last_space)
+            // CJK breaks happen before the next character, not after a separator
         }
         else {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;

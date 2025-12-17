@@ -82,6 +82,13 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
                     if (result.type == ENTITY_ASCII_ESCAPE) {
                         // ASCII escapes: decode inline
                         stringbuf_append_str(sb, result.decoded);
+                    } else if (result.type == ENTITY_UNICODE_SPACE) {
+                        // Unicode space entities: decode inline as UTF-8
+                        char utf8_buf[8];
+                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
+                        if (utf8_len > 0) {
+                            stringbuf_append_str(sb, utf8_buf);
+                        }
                     } else if (result.type == ENTITY_NAMED) {
                         // Named entities: decode to UTF-8 for attribute values
                         char utf8_buf[8];
@@ -620,6 +627,13 @@ static Item parse_element(InputContext& ctx, const char **xml) {
                                     if (result.type == ENTITY_ASCII_ESCAPE) {
                                         // ASCII escapes: decode inline
                                         stringbuf_append_str(sb, result.decoded);
+                                    } else if (result.type == ENTITY_UNICODE_SPACE) {
+                                        // Unicode space entities: decode inline as UTF-8
+                                        char utf8_buf[8];
+                                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
+                                        if (utf8_len > 0) {
+                                            stringbuf_append_str(sb, utf8_buf);
+                                        }
                                     } else if (result.type == ENTITY_NAMED) {
                                         // Named entities: decode to UTF-8
                                         char utf8_buf[8];

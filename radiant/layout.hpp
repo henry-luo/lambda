@@ -125,6 +125,7 @@ typedef struct Linebox {
     float max_descender;
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
+    bool last_space_is_hyphen;      // true if last_space is actually a hyphen (break after vs before)
     View* start_view;
     CssEnum vertical_align;
     bool is_line_start;
@@ -134,7 +135,7 @@ typedef struct Linebox {
     FT_UInt prev_glyph_index = 0;   // for kerning
 
     inline void reset_space() {
-        is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
+        is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;  last_space_is_hyphen = false;
     }
 } Linebox;
 
@@ -427,6 +428,26 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span);
+
+// ============================================================================
+// CSS text-transform
+// ============================================================================
+
+/**
+ * Apply CSS text-transform to a single Unicode codepoint.
+ * @param codepoint Input Unicode codepoint
+ * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
+ * @param is_word_start True if this is the first character of a word (for capitalize)
+ * @return Transformed codepoint
+ */
+uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start);
+
+/**
+ * Get text-transform property from a BlockProp.
+ * @param blk BlockProp structure (can be NULL)
+ * @return CSS text-transform value or CSS_VALUE_NONE
+ */
+CssEnum get_text_transform_from_block(BlockProp* blk);
 
 // View tree printing functions
 void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio, const char* output_path = nullptr);

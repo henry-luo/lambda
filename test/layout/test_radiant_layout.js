@@ -1413,12 +1413,24 @@ class RadiantLayoutTester {
             }
 
             // Summary - properly count passed/failed tests based on pass rates
+            const failedTests = [];
             const successful = results.filter(r => {
-                if (r.error) return false; // Tests with errors are failures
+                if (r.error) {
+                    failedTests.push({ name: r.testName || r.testFile, reason: `Error: ${r.error}` });
+                    return false; // Tests with errors are failures
+                }
                 // Use same criteria as printReport: configurable element/text thresholds
                 const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
                 const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
-                return elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
+                const passed = elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
+                if (!passed) {
+                    failedTests.push({
+                        name: r.testName || r.testFile,
+                        reason: `Elements ${elementPassRate.toFixed(1)}%` +
+                               (textPassRate < this.textThreshold ? `, Text ${textPassRate.toFixed(1)}%` : '')
+                    });
+                }
+                return passed;
             }).length;
             const failed = results.length - successful;
 
@@ -1446,6 +1458,14 @@ class RadiantLayoutTester {
                     console.log(`   💥 Errors: ${errorCount}`);
                     console.log(`   📄 Files with errors:`);
                     errorFiles.forEach(file => console.log(`      - ${file}`));
+                }
+
+                // List failed tests at the end
+                if (failedTests.length > 0) {
+                    console.log(`\n❌ Failed Tests:`);
+                    failedTests.forEach(test => {
+                        console.log(`   - ${test.name}: ${test.reason}`);
+                    });
                 }
             }
 
@@ -1526,11 +1546,23 @@ class RadiantLayoutTester {
         }
 
         // Summary
+        const failedTests = [];
         const successful = allResults.filter(r => {
-            if (r.error) return false;
+            if (r.error) {
+                failedTests.push({ name: r.testName || r.testFile, reason: `Error: ${r.error}` });
+                return false;
+            }
             const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
             const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
-            return elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
+            const passed = elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
+            if (!passed) {
+                failedTests.push({
+                    name: r.testName || r.testFile,
+                    reason: `Elements ${elementPassRate.toFixed(1)}%` +
+                           (textPassRate < this.textThreshold ? `, Text ${textPassRate.toFixed(1)}%` : '')
+                });
+            }
+            return passed;
         }).length;
         const failed = allResults.length - successful;
 
@@ -1541,6 +1573,13 @@ class RadiantLayoutTester {
         if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
         console.log(`   Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
 
+        // List failed tests at the end
+        if (failedTests.length > 0) {
+            console.log(`\n❌ Failed Tests:`);
+            failedTests.forEach(test => {
+                console.log(`   - ${test.name}: ${test.reason}`);
+            });
+        }
         return allResults;
     }
 
@@ -1562,12 +1601,24 @@ class RadiantLayoutTester {
         }
 
         // Overall summary - properly count passed/failed tests based on pass rates
+        const failedTests = [];
         const successful = allResults.filter(r => {
-            if (r.error) return false; // Tests with errors are failures
+            if (r.error) {
+                failedTests.push({ name: r.testName || r.testFile, reason: `Error: ${r.error}` });
+                return false; // Tests with errors are failures
+            }
             // Use same criteria as printReport: configurable element/text thresholds
             const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
             const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
-            return elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
+            const passed = elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
+            if (!passed) {
+                failedTests.push({
+                    name: r.testName || r.testFile,
+                    reason: `Elements ${elementPassRate.toFixed(1)}%` +
+                           (textPassRate < this.textThreshold ? `, Text ${textPassRate.toFixed(1)}%` : '')
+                });
+            }
+            return passed;
         }).length;
         const failed = allResults.length - successful;
 
@@ -1592,6 +1643,14 @@ class RadiantLayoutTester {
             console.log(`✅ Successful: ${successful}`);
             console.log(`❌ Failed: ${failed}`);
             console.log(`Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
+
+            // List failed tests at the end
+            if (failedTests.length > 0) {
+                console.log(`\n❌ Failed Tests:`);
+                failedTests.forEach(test => {
+                    console.log(`   - ${test.name}: ${test.reason}`);
+                });
+            }
         }
 
         return allResults;
