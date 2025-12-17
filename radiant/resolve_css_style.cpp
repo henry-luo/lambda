@@ -374,6 +374,11 @@ DisplayValue resolve_display_value(void* child) {
                                 display.outer = CSS_VALUE_INLINE_BLOCK;
                                 display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
                                 return display;
+                            } else if (keyword == CSS_VALUE_LIST_ITEM) {
+                                display.outer = CSS_VALUE_LIST_ITEM;
+                                display.inner = CSS_VALUE_FLOW;
+                                log_debug("[CSS] ✅ MATCHED LIST_ITEM! Setting display to LIST_ITEM+FLOW");
+                                return display;
                             } else if (keyword == CSS_VALUE_NONE) {
                                 display.outer = CSS_VALUE_NONE;
                                 display.inner = CSS_VALUE_NONE;
@@ -5049,13 +5054,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_LIST_STYLE_TYPE: {
             log_debug("[CSS] Processing list-style-type property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (!block->blk) {
+                    block->blk = alloc_block_prop(lycon);
+                }
                 CssEnum type = value->data.keyword;
+                block->blk->list_style_type = type;
                 if (type > 0) {
                     const CssEnumInfo* info = css_enum_info(type);
-                    log_debug("[CSS] list-style-type: %s -> 0x%04X", info ? info->name : "unknown", type);
+                    log_debug("[CSS] list-style-type: %s -> 0x%04X (stored)", info ? info->name : "unknown", type);
                 } else {
                     const CssEnumInfo* info = css_enum_info(type);
-                    log_debug("[CSS] list-style-type: %s", info ? info->name : "unknown");
+                    log_debug("[CSS] list-style-type: %s (stored)", info ? info->name : "unknown");
                 }
             }
             break;
@@ -5064,13 +5073,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_LIST_STYLE_POSITION: {
             log_debug("[CSS] Processing list-style-position property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (!block->blk) {
+                    block->blk = alloc_block_prop(lycon);
+                }
                 CssEnum position = value->data.keyword;
+                block->blk->list_style_position = position;
                 if (position > 0) {
                     const CssEnumInfo* info = css_enum_info(position);
-                    log_debug("[CSS] list-style-position: %s -> 0x%04X", info ? info->name : "unknown", position);
+                    log_debug("[CSS] list-style-position: %s -> 0x%04X (stored)", info ? info->name : "unknown", position);
                 } else {
                     const CssEnumInfo* info = css_enum_info(position);
-                    log_debug("[CSS] list-style-position: %s", info ? info->name : "unknown");
+                    log_debug("[CSS] list-style-position: %s (stored)", info ? info->name : "unknown");
                 }
             }
             break;
@@ -5078,11 +5091,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LIST_STYLE_IMAGE: {
             log_debug("[CSS] Processing list-style-image property");
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
             if (value->type == CSS_VALUE_TYPE_URL) {
-                log_debug("[CSS] list-style-image: %s", value->data.url);
+                const char* url = value->data.url;
+                if (url) {
+                    size_t len = strlen(url);
+                    block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(block->blk->list_style_image, url);
+                    log_debug("[CSS] list-style-image: %s (stored)", url);
+                }
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_NONE) {
-                    log_debug("[CSS] list-style-image: none");
+                    block->blk->list_style_image = (char*)alloc_prop(lycon, 5);
+                    strcpy(block->blk->list_style_image, "none");
+                    log_debug("[CSS] list-style-image: none (stored)");
                 } else {
                     const CssEnumInfo* info = css_enum_info(value->data.keyword);
                     log_debug("[CSS] list-style-image: %s", info ? info->name : "unknown");
@@ -5092,39 +5116,344 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_LIST_STYLE: {
-            log_debug("[CSS] Processing list-style shorthand property");
+            // CSS 2.1 Section 12.5.1: list-style shorthand
+            // Syntax: list-style: [ <list-style-type> || <list-style-position> || <list-style-image> ] | inherit
+            log_debug("[CSS] Processing list-style shorthand property, value_type=%d", (int)value->type);
+
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
+
+            // Handle single keyword value (most common case)
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                const CssEnumInfo* info = css_enum_info(value->data.keyword);
-                log_debug("[CSS] list-style: %s", info ? info->name : "unknown");
-                // Note: Shorthand parsing would need more complex implementation
+                CssEnum keyword = value->data.keyword;
+                const CssEnumInfo* info = css_enum_info(keyword);
+                log_debug("[CSS] list-style keyword: %s (0x%04X)", info ? info->name : "unknown", keyword);
+
+                // Check if it's a list-style-position value (inside or outside)
+                // Use string comparison since these are hash-based enums
+                bool is_position = false;
+                if (info && info->name) {
+                    if (strcmp(info->name, "inside") == 0 || strcmp(info->name, "outside") == 0) {
+                        block->blk->list_style_position = keyword;
+                        log_debug("[CSS] list-style: expanded to list-style-position=%s", info->name);
+                        is_position = true;
+                    }
+                }
+
+                // Check if it's a list-style-type value (disc, circle, square, decimal, etc.)
+                // These are in the 0x017D-0x0190 range approximately
+                if (!is_position && keyword >= CSS_VALUE_DISC && keyword <= 0x0190) {
+                    block->blk->list_style_type = keyword;
+                    log_debug("[CSS] list-style: expanded to list-style-type=%s", info ? info->name : "unknown");
+                }
+                // Check if it's none (could be list-style-type: none or list-style-image: none)
+                else if (!is_position && keyword == CSS_VALUE_NONE) {
+                    block->blk->list_style_type = CSS_VALUE_NONE;
+                    block->blk->list_style_image = (char*)alloc_prop(lycon, 5);
+                    strcpy(block->blk->list_style_image, "none");
+                    log_debug("[CSS] list-style: expanded to list-style-type=none, list-style-image=none");
+                }
+                // Otherwise might be other keyword
+                else if (!is_position) {
+                    log_debug("[CSS] list-style: keyword 0x%04X not recognized", keyword);
+                }
+            }
+            // Handle custom property reference (which might be misidentified keywords like "inside")
+            else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                // Check if it's actually a keyword like "inside" or "outside"
+                const char* name = value->data.custom_property.name;
+                log_debug("[CSS] list-style: checking custom value '%s'", name);
+
+                if (strcmp(name, "inside") == 0) {
+                    // "inside" keyword - set position to inside
+                    block->blk->list_style_position = (CssEnum)1;  // 1 = inside
+                    // CSS 2.1: Initial value for list-style-type is 'disc'
+                    // If only position is specified, use default disc marker
+                    if (block->blk->list_style_type == 0) {
+                        block->blk->list_style_type = CSS_VALUE_DISC;
+                        log_debug("[CSS] list-style: using default list-style-type=disc");
+                    }
+                    log_debug("[CSS] list-style: expanded to list-style-position=inside");
+                } else if (strcmp(name, "outside") == 0) {
+                    // "outside" is default, but set explicitly
+                    block->blk->list_style_position = (CssEnum)2;  // 2 = outside
+                    // Use default disc marker if type not set
+                    if (block->blk->list_style_type == 0) {
+                        block->blk->list_style_type = CSS_VALUE_DISC;
+                        log_debug("[CSS] list-style: using default list-style-type=disc");
+                    }
+                    log_debug("[CSS] list-style: expanded to list-style-position=outside");
+                } else {
+                    log_debug("[CSS] list-style: unrecognized custom value '%s'", name);
+                }
+            }
+            // Handle URL for list-style-image
+            else if (value->type == CSS_VALUE_TYPE_URL) {
+                const char* url = value->data.url;
+                if (url) {
+                    size_t len = strlen(url);
+                    block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(block->blk->list_style_image, url);
+                    log_debug("[CSS] list-style: expanded to list-style-image=%s", url);
+                }
+            }
+            // Handle multiple values (e.g., "square inside", "disc outside")
+            else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                log_debug("[CSS] list-style: processing %d values", value->data.list.count);
+
+                // Iterate through all values in the list
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (!item) continue;
+
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum keyword = item->data.keyword;
+                        const CssEnumInfo* info = css_enum_info(keyword);
+
+                        // Check if it's a position keyword
+                        bool is_position = false;
+                        if (info && info->name) {
+                            if (strcmp(info->name, "inside") == 0 || strcmp(info->name, "outside") == 0) {
+                                block->blk->list_style_position = keyword;
+                                log_debug("[CSS] list-style: expanded to list-style-position=%s", info->name);
+                                is_position = true;
+                            }
+                        }
+
+                        // Check if it's a list-style-type keyword
+                        if (!is_position && keyword >= CSS_VALUE_DISC && keyword <= 0x0190) {
+                            block->blk->list_style_type = keyword;
+                            log_debug("[CSS] list-style: expanded to list-style-type=%s", info ? info->name : "unknown");
+                        }
+                        else if (!is_position && keyword == CSS_VALUE_NONE) {
+                            block->blk->list_style_type = CSS_VALUE_NONE;
+                            log_debug("[CSS] list-style: set list-style-type=none");
+                        }
+                    }
+                    else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                        // Handle "inside"/"outside" that might be parsed as custom
+                        const char* name = item->data.custom_property.name;
+                        if (strcmp(name, "inside") == 0) {
+                            block->blk->list_style_position = (CssEnum)1;
+                            log_debug("[CSS] list-style: expanded to list-style-position=inside");
+                        } else if (strcmp(name, "outside") == 0) {
+                            block->blk->list_style_position = (CssEnum)2;
+                            log_debug("[CSS] list-style: expanded to list-style-position=outside");
+                        }
+                    }
+                    else if (item->type == CSS_VALUE_TYPE_URL) {
+                        const char* url = item->data.url;
+                        if (url) {
+                            size_t len = strlen(url);
+                            block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
+                            strcpy(block->blk->list_style_image, url);
+                            log_debug("[CSS] list-style: expanded to list-style-image=%s", url);
+                        }
+                    }
+                }
             }
             break;
         }
 
         case CSS_PROPERTY_COUNTER_RESET: {
-            log_debug("[CSS] Processing counter-reset property");
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum reset = value->data.keyword;
-                if (reset == CSS_VALUE_NONE) {
-                    log_debug("[CSS] counter-reset: none");
-                } else {
-                    const CssEnumInfo* info = css_enum_info(reset);
-                    log_debug("[CSS] counter-reset: %s", info ? info->name : "unknown");
+            // CSS 2.1 Section 12.4: counter-reset property
+            // Syntax: counter-reset: [ <identifier> <integer>? ]+ | none
+            log_debug("[CSS] counter-reset value type=%d", (int)value->type);
+
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->counter_reset = (char*)alloc_prop(lycon, 5);
+                strcpy(block->blk->counter_reset, "none");
+                log_debug("[CSS] counter-reset: none");
+            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
+                // Direct string value (parsed by CSS parser) or custom property name (identifier)
+                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
+                if (str) {
+                    size_t len = strlen(str);
+                    block->blk->counter_reset = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(block->blk->counter_reset, str);
+                    log_debug("[CSS] counter-reset: %s", str);
                 }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Parse list of name-value pairs
+                log_debug("[CSS] counter-reset list with %d items", value->data.list.count);
+                StringBuf* sb = stringbuf_new(lycon->pool);
+
+                if (!sb) {
+                    log_error("[CSS] counter-reset: stringbuf_new failed!");
+                    break;
+                }
+
+                int count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (int i = 0; i < count; i++) {
+                    CssValue* item = values[i];
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
+                        if (info) {
+                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                            stringbuf_append_str(sb, info->name);
+                        }
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_int(sb, (int)item->data.number.value);
+                    }
+                }
+
+                if (sb->length > 0) {
+                    block->blk->counter_reset = (char*)alloc_prop(lycon, sb->length + 1);
+                    strcpy(block->blk->counter_reset, sb->str->chars);
+                    log_debug("[CSS] counter-reset: %s", sb->str->chars);
+                }
+                stringbuf_free(sb);
             }
             break;
         }
 
         case CSS_PROPERTY_COUNTER_INCREMENT: {
-            log_debug("[CSS] Processing counter-increment property");
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum increment = value->data.keyword;
-                if (increment == CSS_VALUE_NONE) {
-                    log_debug("[CSS] counter-increment: none");
-                } else {
-                    const CssEnumInfo* info = css_enum_info(increment);
-                    log_debug("[CSS] counter-increment: %s", info ? info->name : "unknown");
+            // CSS 2.1 Section 12.4: counter-increment property
+            // Syntax: counter-increment: [ <identifier> <integer>? ]+ | none
+            log_debug("[CSS] counter-increment: entry, value type=%d", (int)value->type);
+
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->counter_increment = (char*)alloc_prop(lycon, 5);
+                strcpy(block->blk->counter_increment, "none");
+                log_debug("[CSS] counter-increment: none");
+            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
+                // Direct string value (parsed by CSS parser) or custom property name (identifier)
+                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
+                if (str) {
+                    size_t len = strlen(str);
+                    block->blk->counter_increment = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(block->blk->counter_increment, str);
+                    log_debug("[CSS] counter-increment: %s", str);
                 }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Parse list of name-value pairs
+                log_debug("[CSS] counter-increment: LIST case entered, value ptr=%p", (void*)value);
+                log_debug("[CSS] counter-increment: about to access list.count");
+                int count = value->data.list.count;
+                log_debug("[CSS] counter-increment: list.count=%d", count);
+                log_debug("[CSS] counter-increment: about to call stringbuf_new");
+                StringBuf* sb = stringbuf_new(lycon->pool);
+                log_debug("[CSS] counter-increment: stringbuf created at %p", (void*)sb);
+
+                if (!sb) {
+                    log_error("[CSS] counter-increment: stringbuf_new failed!");
+                    break;
+                }
+
+                CssValue** values = value->data.list.values;
+                log_debug("[CSS] counter-increment: about to iterate list");
+                for (int i = 0; i < count; i++) {
+                    log_debug("[CSS] counter-increment: processing item %d", i);
+                    CssValue* item = values[i];
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
+                        if (info) {
+                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                            stringbuf_append_str(sb, info->name);
+                        }
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_int(sb, (int)item->data.number.value);
+                    }
+                }
+
+                if (sb->length > 0) {
+                    block->blk->counter_increment = (char*)alloc_prop(lycon, sb->length + 1);
+                    strcpy(block->blk->counter_increment, sb->str->chars);
+                    log_debug("[CSS] counter-increment: %s", sb->str->chars);
+                }
+                stringbuf_free(sb);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CONTENT: {
+            // CSS 2.1 Section 12.2: content property for ::before and ::after
+            log_debug("[CSS] Processing content property for pseudo-elements");
+
+            if (!block->pseudo) {
+                block->pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
+                memset(block->pseudo, 0, sizeof(PseudoContentProp));
+            }
+
+            // Determine if this is ::before or ::after based on decl context
+            // For now, we'll check the selector context (TODO: improve this)
+            bool is_before = false;  // Will be determined by selector parsing
+            bool is_after = false;
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (value->data.keyword == CSS_VALUE_NONE ||
+                    value->data.keyword == CSS_VALUE_NORMAL) {
+                    // No content generated
+                    log_debug("[CSS] content: none/normal");
+                    if (is_before) {
+                        block->pseudo->before_content_type = CONTENT_TYPE_NONE;
+                    } else if (is_after) {
+                        block->pseudo->after_content_type = CONTENT_TYPE_NONE;
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_STRING) {
+                // String literal content
+                const char* str = value->data.string;
+                log_debug("[CSS] content: \"%s\"", str ? str : "");
+
+                if (str) {
+                    // Allocate and store content string
+                    size_t len = strlen(str);
+                    char* content_copy = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(content_copy, str);
+
+                    if (is_before) {
+                        block->pseudo->before_content = content_copy;
+                        block->pseudo->before_content_type = CONTENT_TYPE_STRING;
+                    } else if (is_after) {
+                        block->pseudo->after_content = content_copy;
+                        block->pseudo->after_content_type = CONTENT_TYPE_STRING;
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                // Handle counter(), counters(), attr(), url()
+                CssFunction* func = value->data.function;
+                if (func && func->name) {
+                    log_debug("[CSS] content function: %s", func->name);
+
+                    if (strcmp(func->name, "counter") == 0) {
+                        // counter(name) or counter(name, style)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_COUNTER : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_COUNTER : block->pseudo->after_content_type;
+                        // TODO: Parse counter name and style
+                    } else if (strcmp(func->name, "counters") == 0) {
+                        // counters(name, separator) or counters(name, separator, style)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_COUNTERS : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_COUNTERS : block->pseudo->after_content_type;
+                        // TODO: Parse counter name, separator, and style
+                    } else if (strcmp(func->name, "attr") == 0) {
+                        // attr(attribute-name)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_ATTR : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_ATTR : block->pseudo->after_content_type;
+                        // TODO: Parse attribute name
+                    } else if (strcmp(func->name, "url") == 0) {
+                        // url(image)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_URI : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_URI : block->pseudo->after_content_type;
+                        // TODO: Parse URL
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Multiple content values (concatenated)
+                log_debug("[CSS] content: list with %d values", value->data.list.count);
+                // TODO: Handle concatenated content values
             }
             break;
         }
