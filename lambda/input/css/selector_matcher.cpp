@@ -181,6 +181,10 @@ bool selector_matcher_matches(SelectorMatcher* matcher,
     // Check for pseudo-element in the selector
     local_result.pseudo_element = selector_get_pseudo_element(selector);
 
+    if (local_result.pseudo_element != PSEUDO_ELEMENT_NONE) {
+        log_debug("selector_matcher: detected pseudo_element=%d for selector", local_result.pseudo_element);
+    }
+
     // Check if selector is complex (has combinators)
     if (selector->compound_selector_count == 0) {
         if (result) *result = local_result;
