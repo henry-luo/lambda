@@ -84,9 +84,45 @@ static inline CssEnum get_text_transform(LayoutContext* lycon) {
     return CSS_VALUE_NONE;
 }
 
+/**
+ * Get word-break property from the layout context.
+ * Checks block property for the current element or parent elements.
+ */
+static inline CssEnum get_word_break(LayoutContext* lycon) {
+    // Check parent chain for word-break property (it's inherited)
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->blk && elem->blk->word_break != 0) {
+                return elem->blk->word_break;
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NORMAL;  // Default to normal
+}
+
 // ============================================================================
 // CSS white-space Property Helpers
 // ============================================================================
+
+/**
+ * Check if a codepoint is a CJK character that allows line breaks.
+ * CJK text can break between any two characters.
+ * Covers: Chinese (Hanzi), Japanese (Kanji/Hiragana/Katakana), Korean (Hangul)
+ */
+static inline bool is_cjk_character(uint32_t codepoint) {
+    return (codepoint >= 0x4E00 && codepoint <= 0x9FFF) ||  // CJK Unified Ideographs
+           (codepoint >= 0x3400 && codepoint <= 0x4DBF) ||  // CJK Extension A
+           (codepoint >= 0x20000 && codepoint <= 0x2A6DF) || // CJK Extension B
+           (codepoint >= 0x2A700 && codepoint <= 0x2B73F) || // CJK Extension C
+           (codepoint >= 0x2B740 && codepoint <= 0x2B81F) || // CJK Extension D
+           (codepoint >= 0x2B820 && codepoint <= 0x2CEAF) || // CJK Extension E
+           (codepoint >= 0x3040 && codepoint <= 0x309F) ||  // Hiragana
+           (codepoint >= 0x30A0 && codepoint <= 0x30FF) ||  // Katakana
+           (codepoint >= 0xAC00 && codepoint <= 0xD7AF);    // Hangul Syllables
+}
 
 /**
  * Check if whitespace should be collapsed according to white-space property.
@@ -587,6 +623,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool collapse_newlines = ws_collapse_newlines(white_space);
     bool wrap_lines = ws_wrap_lines(white_space);
 
+    // Get word-break property for CJK line breaking
+    CssEnum word_break = get_word_break(lycon);
+    bool break_all = (word_break == CSS_VALUE_BREAK_ALL);  // Can break between any characters
+    bool keep_all = (word_break == CSS_VALUE_KEEP_ALL);    // Don't break CJK between letters
+
     // Get text-transform property
     CssEnum text_transform = get_text_transform(lycon);
     bool is_word_start = true;  // Track word boundaries for capitalize
@@ -809,6 +850,17 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space_is_hyphen = true;  // mark this as a hyphen break
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
+        }
+        else if ((break_all || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
+            // CJK or break-all: can break after this character
+            // Note: Don't track as last_space since CJK breaks don't consume characters
+            // Instead, allow breaking at current position when line fills
+            str = next_ch;
+            lycon->line.is_line_start = false;
+            lycon->line.has_space = false;
+
+            // Track position for potential break (but don't set last_space)
+            // CJK breaks happen before the next character, not after a separator
         }
         else {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
