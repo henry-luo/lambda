@@ -5102,29 +5102,184 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COUNTER_RESET: {
-            log_debug("[CSS] Processing counter-reset property");
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum reset = value->data.keyword;
-                if (reset == CSS_VALUE_NONE) {
-                    log_debug("[CSS] counter-reset: none");
-                } else {
-                    const CssEnumInfo* info = css_enum_info(reset);
-                    log_debug("[CSS] counter-reset: %s", info ? info->name : "unknown");
+            // CSS 2.1 Section 12.4: counter-reset property
+            // Syntax: counter-reset: [ <identifier> <integer>? ]+ | none
+            log_debug("[CSS] counter-reset value type=%d", (int)value->type);
+
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->counter_reset = (char*)alloc_prop(lycon, 5);
+                strcpy(block->blk->counter_reset, "none");
+                log_debug("[CSS] counter-reset: none");
+            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
+                // Direct string value (parsed by CSS parser) or custom property name (identifier)
+                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
+                if (str) {
+                    size_t len = strlen(str);
+                    block->blk->counter_reset = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(block->blk->counter_reset, str);
+                    log_debug("[CSS] counter-reset: %s", str);
                 }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Parse list of name-value pairs
+                log_debug("[CSS] counter-reset list with %d items", value->data.list.count);
+                StringBuf* sb = stringbuf_new(lycon->pool);
+
+                int count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (int i = 0; i < count; i++) {
+                    CssValue* item = values[i];
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
+                        if (info) {
+                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                            stringbuf_append_str(sb, info->name);
+                        }
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_int(sb, (int)item->data.number.value);
+                    }
+                }
+
+                if (sb->length > 0) {
+                    block->blk->counter_reset = (char*)alloc_prop(lycon, sb->length + 1);
+                    strcpy(block->blk->counter_reset, sb->str->chars);
+                    log_debug("[CSS] counter-reset: %s", sb->str->chars);
+                }
+                stringbuf_free(sb);
             }
             break;
         }
 
         case CSS_PROPERTY_COUNTER_INCREMENT: {
-            log_debug("[CSS] Processing counter-increment property");
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum increment = value->data.keyword;
-                if (increment == CSS_VALUE_NONE) {
-                    log_debug("[CSS] counter-increment: none");
-                } else {
-                    const CssEnumInfo* info = css_enum_info(increment);
-                    log_debug("[CSS] counter-increment: %s", info ? info->name : "unknown");
+            // CSS 2.1 Section 12.4: counter-increment property
+            // Syntax: counter-increment: [ <identifier> <integer>? ]+ | none
+            if (!block->blk) {
+                block->blk = alloc_block_prop(lycon);
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->blk->counter_increment = (char*)alloc_prop(lycon, 5);
+                strcpy(block->blk->counter_increment, "none");
+                log_debug("[CSS] counter-increment: none");
+            } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
+                // Direct string value (parsed by CSS parser) or custom property name (identifier)
+                const char* str = (value->type == CSS_VALUE_TYPE_STRING) ? value->data.string : value->data.custom_property.name;
+                if (str) {
+                    size_t len = strlen(str);
+                    block->blk->counter_increment = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(block->blk->counter_increment, str);
+                    log_debug("[CSS] counter-increment: %s", str);
                 }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Parse list of name-value pairs
+                StringBuf* sb = stringbuf_new(lycon->pool);
+
+                int count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (int i = 0; i < count; i++) {
+                    CssValue* item = values[i];
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(item->data.keyword);
+                        if (info) {
+                            if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                            stringbuf_append_str(sb, info->name);
+                        }
+                    } else if (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.is_integer) {
+                        if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                        stringbuf_append_int(sb, (int)item->data.number.value);
+                    }
+                }
+
+                if (sb->length > 0) {
+                    block->blk->counter_increment = (char*)alloc_prop(lycon, sb->length + 1);
+                    strcpy(block->blk->counter_increment, sb->str->chars);
+                    log_debug("[CSS] counter-increment: %s", sb->str->chars);
+                }
+                stringbuf_free(sb);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CONTENT: {
+            // CSS 2.1 Section 12.2: content property for ::before and ::after
+            log_debug("[CSS] Processing content property for pseudo-elements");
+
+            if (!block->pseudo) {
+                block->pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
+                memset(block->pseudo, 0, sizeof(PseudoContentProp));
+            }
+
+            // Determine if this is ::before or ::after based on decl context
+            // For now, we'll check the selector context (TODO: improve this)
+            bool is_before = false;  // Will be determined by selector parsing
+            bool is_after = false;
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (value->data.keyword == CSS_VALUE_NONE ||
+                    value->data.keyword == CSS_VALUE_NORMAL) {
+                    // No content generated
+                    log_debug("[CSS] content: none/normal");
+                    if (is_before) {
+                        block->pseudo->before_content_type = CONTENT_TYPE_NONE;
+                    } else if (is_after) {
+                        block->pseudo->after_content_type = CONTENT_TYPE_NONE;
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_STRING) {
+                // String literal content
+                const char* str = value->data.string;
+                log_debug("[CSS] content: \"%s\"", str ? str : "");
+
+                if (str) {
+                    // Allocate and store content string
+                    size_t len = strlen(str);
+                    char* content_copy = (char*)alloc_prop(lycon, len + 1);
+                    strcpy(content_copy, str);
+
+                    if (is_before) {
+                        block->pseudo->before_content = content_copy;
+                        block->pseudo->before_content_type = CONTENT_TYPE_STRING;
+                    } else if (is_after) {
+                        block->pseudo->after_content = content_copy;
+                        block->pseudo->after_content_type = CONTENT_TYPE_STRING;
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                // Handle counter(), counters(), attr(), url()
+                CssFunction* func = value->data.function;
+                if (func && func->name) {
+                    log_debug("[CSS] content function: %s", func->name);
+
+                    if (strcmp(func->name, "counter") == 0) {
+                        // counter(name) or counter(name, style)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_COUNTER : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_COUNTER : block->pseudo->after_content_type;
+                        // TODO: Parse counter name and style
+                    } else if (strcmp(func->name, "counters") == 0) {
+                        // counters(name, separator) or counters(name, separator, style)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_COUNTERS : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_COUNTERS : block->pseudo->after_content_type;
+                        // TODO: Parse counter name, separator, and style
+                    } else if (strcmp(func->name, "attr") == 0) {
+                        // attr(attribute-name)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_ATTR : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_ATTR : block->pseudo->after_content_type;
+                        // TODO: Parse attribute name
+                    } else if (strcmp(func->name, "url") == 0) {
+                        // url(image)
+                        block->pseudo->before_content_type = is_before ? CONTENT_TYPE_URI : block->pseudo->before_content_type;
+                        block->pseudo->after_content_type = is_after ? CONTENT_TYPE_URI : block->pseudo->after_content_type;
+                        // TODO: Parse URL
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Multiple content values (concatenated)
+                log_debug("[CSS] content: list with %d values", value->data.list.count);
+                // TODO: Handle concatenated content values
             }
             break;
         }
