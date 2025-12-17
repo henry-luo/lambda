@@ -163,6 +163,24 @@ int find_break_opportunities(TextWrapContext* ctx) {
 
             ctx->break_count++;
         }
+
+        // Check for hyphen - CSS allows breaking after hyphens
+        // Break position is AFTER the hyphen (i+1), so next line doesn't include it
+        if (codepoint == 0x2D && i + 1 < ctx->codepoint_count) {  // 0x2D = '-'
+            if (ctx->break_count >= ctx->break_capacity) {
+                ctx->break_capacity *= 2;
+                ctx->break_opportunities = (BreakInfo*)realloc(ctx->break_opportunities,
+                    ctx->break_capacity * sizeof(BreakInfo));
+            }
+
+            BreakInfo* break_info = &ctx->break_opportunities[ctx->break_count];
+            break_info->position = i + 1;  // Break AFTER the hyphen
+            break_info->type = BREAK_HYPHEN;
+            break_info->penalty = calculate_break_penalty(ctx, i + 1, BREAK_HYPHEN);
+            break_info->is_hyphen_break = true;
+
+            ctx->break_count++;
+        }
     }
 
     log_debug("Found %d break opportunities", ctx->break_count);

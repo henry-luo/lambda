@@ -600,6 +600,7 @@ View tree JSON output shows:
 - Container queries
 - Multi-column layout
 - Writing modes (vertical text)
+- Ligatures, and text shaping (HarfBuzz integration)
 
 ---
 

@@ -565,28 +565,69 @@ void line_align(LayoutContext* lycon) {
     if (lycon->block.text_align != CSS_VALUE_LEFT) {
         View* view = lycon->line.start_view;
 
-        // For justify with wrapped text, we need to handle NULL start_view
-        // For center/right, only align if we have an explicit start_view
-        if (!view && lycon->block.text_align != CSS_VALUE_JUSTIFY) {
-            return;  // Don't align if no start_view for center/right
+        // Special handling for wrapped text continuation lines:
+        // When text wraps within the same text node, start_view is NULL but we need to align
+        // Check if we have a text view with multiple TextRects (= wrapped text)
+        bool is_wrapped_continuation = false;
+        if (!view && lycon->view && lycon->view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)lycon->view;
+            TextRect* rect = text->rect;
+            int rect_count = 0;
+            while (rect && rect_count < 2) {  // Only need to count up to 2
+                rect_count++;
+                rect = rect->next;
+            }
+            if (rect_count > 1) {
+                is_wrapped_continuation = true;
+                view = lycon->view;
+            }
         }
 
-        // If start_view is NULL for justify, use current view (wrapped text case)
-        if (!view) {
+        // For justify, always use current view if start_view is NULL
+        if (!view && lycon->block.text_align == CSS_VALUE_JUSTIFY) {
             view = lycon->view;
         }
 
-        if (view) {
-            float line_width = lycon->line.advance_x - lycon->line.left;
-            float offset = 0;
+        // For center/right without wrapped text, return if no start_view
+        // (table cells and other blocks handle alignment themselves)
+        if (!view) {
+            return;
+        }
 
-            if (lycon->block.text_align == CSS_VALUE_CENTER) {
-                offset = (lycon->block.content_width - line_width) / 2;
+        float line_width = lycon->line.advance_x - lycon->line.left;
+        float offset = 0;
+
+        if (lycon->block.text_align == CSS_VALUE_CENTER) {
+            offset = (lycon->block.content_width - line_width) / 2;
+        }
+        else if (lycon->block.text_align == CSS_VALUE_RIGHT) {
+            offset = lycon->block.content_width - line_width;
+        }
+
+        // For center/right alignment
+        if (offset > 0 && (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT)) {
+            // For wrapped text continuation lines, only align the current line's TextRect
+            if (is_wrapped_continuation) {
+                ViewText* text = (ViewText*)view;
+                TextRect* rect = text->rect;
+                TextRect* last_rect = rect;
+                while (rect) {
+                    last_rect = rect;
+                    rect = rect->next;
+                }
+
+                if (last_rect) {
+                    // Shift only this rect
+                    last_rect->x += offset;
+                }
+            } else {
+                // Normal case: align all views in the line
+                view_line_align(lycon, offset, view);
             }
-            else if (lycon->block.text_align == CSS_VALUE_RIGHT) {
-                offset = lycon->block.content_width - line_width;
-            }
-            else if (lycon->block.text_align == CSS_VALUE_JUSTIFY) {
+            return;
+        }
+
+        if (lycon->block.text_align == CSS_VALUE_JUSTIFY) {
                 // For text nodes that wrap across multiple lines, we need to find the
                 // TextRect that corresponds to this line and justify it
                 if (view->view_type == RDT_VIEW_TEXT) {
@@ -650,11 +691,6 @@ void line_align(LayoutContext* lycon) {
                 }
                 return;
             }
-
-            if (offset > 0) {
-                view_line_align(lycon, offset, view);
-            }
-        }
     }
 }
 
