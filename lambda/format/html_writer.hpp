@@ -25,6 +25,9 @@ public:
     // Trim trailing whitespace from the output buffer (for paragraph handling)
     virtual void trimTrailingWhitespace() = 0;
     
+    // Check if output buffer has trailing whitespace
+    virtual bool hasTrailingWhitespace() const = 0;
+    
     // Remove last opened tag if it's empty (e.g., removes "<p>" if nothing written after it)
     // Returns true if tag was removed, false otherwise
     virtual bool removeLastOpenedTagIfEmpty(const char* tag) = 0;
@@ -72,6 +75,7 @@ public:
     void writeText(const char* text, size_t len = 0) override;
     void writeRawHtml(const char* html) override;
     void trimTrailingWhitespace() override;
+    bool hasTrailingWhitespace() const override;
     bool removeLastOpenedTagIfEmpty(const char* tag) override;
     bool isTagOpen(const char* tag) const override;
     void openTag(const char* tag, const char* classes = nullptr, 
@@ -113,6 +117,7 @@ public:
     void writeText(const char* text, size_t len = 0) override;
     void writeRawHtml(const char* html) override;  // Parse HTML → Elements (not implemented yet)
     void trimTrailingWhitespace() override { /* no-op for node mode */ }
+    bool hasTrailingWhitespace() const override { return false; /* TODO: implement for node mode */ }
     bool removeLastOpenedTagIfEmpty(const char* tag) override { return false; /* TODO: implement for node mode */ }
     bool isTagOpen(const char* tag) const override { return false; /* TODO: implement for node mode */ }
     void openTag(const char* tag, const char* classes = nullptr,
