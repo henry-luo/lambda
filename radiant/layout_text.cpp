@@ -7,11 +7,82 @@
 
 #include "../lib/log.h"
 #include <chrono>
+#include <cctype>
+#include <cwctype>
 using namespace std::chrono;
 
 // External timing accumulators from layout.cpp
 extern double g_text_layout_time;
 extern int64_t g_text_layout_count;
+
+// ============================================================================
+// CSS text-transform Helpers
+// ============================================================================
+
+/**
+ * Apply CSS text-transform to a single Unicode codepoint.
+ * @param codepoint Input Unicode codepoint
+ * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
+ * @param is_word_start True if this is the first character of a word (for capitalize)
+ * @return Transformed codepoint
+ */
+uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
+    if (text_transform == CSS_VALUE_UPPERCASE) {
+        // Convert to uppercase
+        if (codepoint < 128) {
+            return std::toupper(codepoint);
+        } else {
+            return std::towupper(codepoint);
+        }
+    } else if (text_transform == CSS_VALUE_LOWERCASE) {
+        // Convert to lowercase
+        if (codepoint < 128) {
+            return std::tolower(codepoint);
+        } else {
+            return std::towlower(codepoint);
+        }
+    } else if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
+        // Capitalize first letter of each word
+        if (codepoint < 128) {
+            return std::toupper(codepoint);
+        } else {
+            return std::towupper(codepoint);
+        }
+    }
+    return codepoint;
+}
+
+/**
+ * Get text-transform property from a BlockProp.
+ * @param blk BlockProp structure (can be NULL)
+ * @return CSS text-transform value or CSS_VALUE_NONE
+ */
+CssEnum get_text_transform_from_block(BlockProp* blk) {
+    if (blk && blk->text_transform != 0) {
+        return blk->text_transform;
+    }
+    return CSS_VALUE_NONE;
+}
+
+/**
+ * Get text-transform property from the layout context.
+ * Checks block property for the current element or parent elements.
+ */
+static inline CssEnum get_text_transform(LayoutContext* lycon) {
+    // Check parent chain for text-transform property (it's inherited)
+    DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            CssEnum transform = get_text_transform_from_block(elem->blk);
+            if (transform != CSS_VALUE_NONE) {
+                return transform;
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NONE;
+}
 
 // ============================================================================
 // CSS white-space Property Helpers
@@ -354,12 +425,25 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
     unsigned char* str = (unsigned char*)text;
     float text_width = 0.0f;
+    CssEnum text_transform = get_text_transform(lycon);
+    bool is_word_start = true;  // First character is always word start
+
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
+
+        // Get the codepoint and apply text-transform
+        uint32_t codepoint = *str;
+        if (codepoint >= 128) {
+            int bytes = utf8_to_codepoint(str, &codepoint);
+            if (bytes <= 0) codepoint = *str;
+        }
+        codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+        is_word_start = false;  // Only first char is word start in this context
+
         // Use sub-pixel rendering flags for better quality
         FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-        if (FT_Load_Char(lycon->font.ft_face, *str, load_flags)) {
-            fprintf(stderr, "Could not load character '%c'\n", *str);
+        if (FT_Load_Char(lycon->font.ft_face, codepoint, load_flags)) {
+            fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
             return RDT_LINE_NOT_FILLED;
         }
         FT_GlyphSlot slot = lycon->font.ft_face->glyph;
@@ -499,8 +583,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool collapse_newlines = ws_collapse_newlines(white_space);
     bool wrap_lines = ws_wrap_lines(white_space);
 
-    log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d",
-              white_space, collapse_spaces, collapse_newlines, wrap_lines);
+    // Get text-transform property
+    CssEnum text_transform = get_text_transform(lycon);
+    bool is_word_start = true;  // Track word boundaries for capitalize
+
+    log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d, text-transform=%d",
+              white_space, collapse_spaces, collapse_newlines, wrap_lines, text_transform);
 
     // skip space at start of line (only if collapsing spaces)
     if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
@@ -600,12 +688,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str++;
             }
             line_break(lycon);
-            if (*str) { goto LAYOUT_TEXT; }
+            if (*str) {
+                is_word_start = true;  // Reset word boundary after line break
+                goto LAYOUT_TEXT;
+            }
             else return;
         }
 
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
+            is_word_start = true;  // Next non-space char is word start
         }
         else {
             if (codepoint >= 128) { // unicode char
@@ -616,6 +708,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 else { next_ch = str + bytes; }
             }
             else { next_ch = str + 1; }
+
+            // Apply text-transform before loading glyph
+            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            is_word_start = false;  // No longer at word start
+
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
             wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
             // log_debug("char width: '%c', width %f", *str, wd);

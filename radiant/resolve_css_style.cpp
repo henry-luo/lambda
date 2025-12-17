@@ -3603,9 +3603,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
-                    // Note: Adding text_transform field to BlockProp would be needed
-                    // For now, log the value that would be set
-                    log_debug("[CSS] text-transform: %s -> 0x%04X (field not yet added to BlockProp)",
+                    block->blk->text_transform = val;
+                    log_debug("[CSS] text-transform: %s -> 0x%04X",
                              css_enum_info(value->data.keyword)->name, val);
                 }
             }
