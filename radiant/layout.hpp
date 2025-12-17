@@ -3,6 +3,7 @@
 #pragma once
 #include "view.hpp"
 #include "available_space.hpp"
+#include "layout_counters.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 
@@ -209,10 +210,12 @@ typedef struct LayoutContext {
     // - Normal layout (definite width/height)
     // - Intrinsic sizing (min-content/max-content measurement)
     AvailableSpace available_space;
-
     // Measurement mode flag - when true, layout is for measuring intrinsic sizes
     // and should not create permanent view structures or modify the main layout tree
     bool is_measuring;
+
+    // Counter tracking for CSS counters (counter-reset, counter-increment, counter(), counters())
+    CounterContext* counter_context;
 } LayoutContext;
 
 // ============================================================================

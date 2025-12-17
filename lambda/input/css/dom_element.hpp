@@ -430,6 +430,15 @@ bool dom_element_has_after_content(DomElement* element);
 const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element);
 
 /**
+ * Get pseudo-element content with counter resolution
+ * Extended version that handles counter() and counters() functions
+ * @param counter_context Pointer to CounterContext (from radiant/layout_counters.hpp)
+ * @param arena Arena for allocating result string
+ */
+const char* dom_element_get_pseudo_element_content_with_counters(
+    DomElement* element, int pseudo_element, void* counter_context, Arena* arena);
+
+/**
  * Remove a CSS property from an element
  * @param element Target element
  * @param property_id Property to remove

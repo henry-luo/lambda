@@ -486,7 +486,7 @@ typedef struct PositionProp {
 
 /**
  * PseudoContentProp - Stores dynamically created ::before and ::after pseudo-elements
- *
+/*
  * Instead of storing content strings and layout bounds, we create actual DomElement
  * and DomText nodes for pseudo-elements. This allows reusing the existing layout
  * infrastructure for text and inline content.
@@ -494,9 +494,30 @@ typedef struct PositionProp {
  * The pseudo DomElements are created during style cascade when 'content' property
  * is resolved, and laid out as part of normal block layout flow.
  */
+
+// Content value types for pseudo-elements (CSS 2.1 Section 12.2)
+enum ContentType {
+    CONTENT_TYPE_NONE = 0,      // no content
+    CONTENT_TYPE_STRING = 1,     // string literal
+    CONTENT_TYPE_URI = 2,        // url()
+    CONTENT_TYPE_COUNTER = 3,    // counter()
+    CONTENT_TYPE_COUNTERS = 4,   // counters()
+    CONTENT_TYPE_ATTR = 5,       // attr()
+    CONTENT_TYPE_OPEN_QUOTE = 6,
+    CONTENT_TYPE_CLOSE_QUOTE = 7
+};
+
 typedef struct PseudoContentProp {
     DomElement* before;    // ::before pseudo-element (NULL if none)
     DomElement* after;     // ::after pseudo-element (NULL if none)
+
+    // Content value storage for generation
+    char* before_content;         // Parsed content string/template
+    char* after_content;
+    uint8_t before_content_type;  // ContentType enum
+    uint8_t after_content_type;
+    bool before_generated;         // True if before element created
+    bool after_generated;          // True if after element created
 } PseudoContentProp;
 
 typedef struct BlockProp {

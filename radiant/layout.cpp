@@ -1001,11 +1001,21 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     FontProp* default_font = doc->view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     setup_font(uicon, &lycon->font, default_font);
 
+    // Initialize CSS counter context for counter-reset/counter-increment/counter()/counters()
+    lycon->counter_context = counter_context_create(doc->arena);
+    log_debug("Initialized counter context");
+
     // BlockContext floats are already initialized to NULL in memset
     log_debug("DEBUG: Layout context initialized");
 }
 
 void layout_cleanup(LayoutContext* lycon) {
+    // Clean up counter context
+    if (lycon->counter_context) {
+        counter_context_destroy(lycon->counter_context);
+        lycon->counter_context = nullptr;
+    }
+
     // BlockContext cleanup - floats are pool-allocated, no explicit cleanup needed
     (void)lycon;
 }
