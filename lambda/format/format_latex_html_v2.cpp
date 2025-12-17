@@ -14,8 +14,233 @@
 #include <sstream>
 #include <cstring>
 #include <map>
+#include <unordered_map>
 
 namespace lambda {
+
+// =============================================================================
+// Diacritic Support - Maps LaTeX diacritic commands + base char to Unicode
+// =============================================================================
+
+// Map from (diacritic_command, base_char) -> precomposed Unicode character
+// This uses Unicode combining characters as fallback when precomposed not available
+struct DiacriticKey {
+    char cmd;
+    uint32_t base_char;  // UTF-32 codepoint
+    
+    bool operator==(const DiacriticKey& other) const {
+        return cmd == other.cmd && base_char == other.base_char;
+    }
+};
+
+struct DiacriticKeyHash {
+    size_t operator()(const DiacriticKey& k) const {
+        return std::hash<char>()(k.cmd) ^ (std::hash<uint32_t>()(k.base_char) << 8);
+    }
+};
+
+// Diacritic command -> Unicode combining character mapping
+static const std::unordered_map<char, uint32_t> diacritic_combining_map = {
+    {'\'', 0x0301},  // combining acute accent
+    {'`', 0x0300},   // combining grave accent
+    {'^', 0x0302},   // combining circumflex
+    {'"', 0x0308},   // combining diaeresis (umlaut)
+    {'~', 0x0303},   // combining tilde
+    {'=', 0x0304},   // combining macron
+    {'.', 0x0307},   // combining dot above
+    {'u', 0x0306},   // combining breve
+    {'v', 0x030C},   // combining caron (háček)
+    {'H', 0x030B},   // combining double acute
+    {'c', 0x0327},   // combining cedilla
+    {'d', 0x0323},   // combining dot below
+    {'b', 0x0331},   // combining macron below
+    {'r', 0x030A},   // combining ring above
+    {'k', 0x0328},   // combining ogonek
+};
+
+// Common precomposed diacritic characters for better rendering
+static const std::unordered_map<DiacriticKey, const char*, DiacriticKeyHash> diacritic_precomposed = {
+    // Acute accent (')
+    {{'\'',' '}, "'"}, // handle space as combining char only
+    {{'\'','a'}, "á"}, {{'\'','e'}, "é"}, {{'\'','i'}, "í"}, {{'\'','o'}, "ó"}, {{'\'','u'}, "ú"},
+    {{'\'','A'}, "Á"}, {{'\'','E'}, "É"}, {{'\'','I'}, "Í"}, {{'\'','O'}, "Ó"}, {{'\'','U'}, "Ú"},
+    {{'\'','y'}, "ý"}, {{'\'','Y'}, "Ý"}, {{'\'','c'}, "ć"}, {{'\'','C'}, "Ć"},
+    {{'\'','n'}, "ń"}, {{'\'','N'}, "Ń"}, {{'\'','s'}, "ś"}, {{'\'','S'}, "Ś"},
+    {{'\'','z'}, "ź"}, {{'\'','Z'}, "Ź"}, {{'\'','l'}, "ĺ"}, {{'\'','L'}, "Ĺ"},
+    {{'\'','r'}, "ŕ"}, {{'\'','R'}, "Ŕ"},
+    
+    // Grave accent (`)
+    {{'`','a'}, "à"}, {{'`','e'}, "è"}, {{'`','i'}, "ì"}, {{'`','o'}, "ò"}, {{'`','u'}, "ù"},
+    {{'`','A'}, "À"}, {{'`','E'}, "È"}, {{'`','I'}, "Ì"}, {{'`','O'}, "Ò"}, {{'`','U'}, "Ù"},
+    
+    // Circumflex (^)
+    {{'^','a'}, "â"}, {{'^','e'}, "ê"}, {{'^','i'}, "î"}, {{'^','o'}, "ô"}, {{'^','u'}, "û"},
+    {{'^','A'}, "Â"}, {{'^','E'}, "Ê"}, {{'^','I'}, "Î"}, {{'^','O'}, "Ô"}, {{'^','U'}, "Û"},
+    {{'^','c'}, "ĉ"}, {{'^','C'}, "Ĉ"}, {{'^','g'}, "ĝ"}, {{'^','G'}, "Ĝ"},
+    {{'^','h'}, "ĥ"}, {{'^','H'}, "Ĥ"}, {{'^','j'}, "ĵ"}, {{'^','J'}, "Ĵ"},
+    {{'^','s'}, "ŝ"}, {{'^','S'}, "Ŝ"}, {{'^','w'}, "ŵ"}, {{'^','W'}, "Ŵ"},
+    {{'^','y'}, "ŷ"}, {{'^','Y'}, "Ŷ"},
+    
+    // Diaeresis/umlaut (")
+    {{'"','a'}, "ä"}, {{'"','e'}, "ë"}, {{'"','i'}, "ï"}, {{'"','o'}, "ö"}, {{'"','u'}, "ü"},
+    {{'"','A'}, "Ä"}, {{'"','E'}, "Ë"}, {{'"','I'}, "Ï"}, {{'"','O'}, "Ö"}, {{'"','U'}, "Ü"},
+    {{'"','y'}, "ÿ"}, {{'"','Y'}, "Ÿ"},
+    
+    // Tilde (~)
+    {{'~','a'}, "ã"}, {{'~','o'}, "õ"}, {{'~','n'}, "ñ"},
+    {{'~','A'}, "Ã"}, {{'~','O'}, "Õ"}, {{'~','N'}, "Ñ"},
+    {{'~','i'}, "ĩ"}, {{'~','I'}, "Ĩ"}, {{'~','u'}, "ũ"}, {{'~','U'}, "Ũ"},
+    
+    // Macron (=)
+    {{'=','a'}, "ā"}, {{'=','e'}, "ē"}, {{'=','i'}, "ī"}, {{'=','o'}, "ō"}, {{'=','u'}, "ū"},
+    {{'=','A'}, "Ā"}, {{'=','E'}, "Ē"}, {{'=','I'}, "Ī"}, {{'=','O'}, "Ō"}, {{'=','U'}, "Ū"},
+    
+    // Dot above (.)
+    {{'.','c'}, "ċ"}, {{'.','C'}, "Ċ"}, {{'.','e'}, "ė"}, {{'.','E'}, "Ė"},
+    {{'.','g'}, "ġ"}, {{'.','G'}, "Ġ"}, {{'.','z'}, "ż"}, {{'.','Z'}, "Ż"},
+    {{'.','I'}, "İ"},
+    
+    // Breve (u)
+    {{'u','a'}, "ă"}, {{'u','A'}, "Ă"}, {{'u','e'}, "ĕ"}, {{'u','E'}, "Ĕ"},
+    {{'u','g'}, "ğ"}, {{'u','G'}, "Ğ"}, {{'u','i'}, "ĭ"}, {{'u','I'}, "Ĭ"},
+    {{'u','o'}, "ŏ"}, {{'u','O'}, "Ŏ"}, {{'u','u'}, "ŭ"}, {{'u','U'}, "Ŭ"},
+    
+    // Caron/háček (v)
+    {{'v','c'}, "č"}, {{'v','C'}, "Č"}, {{'v','d'}, "ď"}, {{'v','D'}, "Ď"},
+    {{'v','e'}, "ě"}, {{'v','E'}, "Ě"}, {{'v','n'}, "ň"}, {{'v','N'}, "Ň"},
+    {{'v','r'}, "ř"}, {{'v','R'}, "Ř"}, {{'v','s'}, "š"}, {{'v','S'}, "Š"},
+    {{'v','t'}, "ť"}, {{'v','T'}, "Ť"}, {{'v','z'}, "ž"}, {{'v','Z'}, "Ž"},
+    
+    // Cedilla (c)
+    {{'c','c'}, "ç"}, {{'c','C'}, "Ç"}, {{'c','s'}, "ş"}, {{'c','S'}, "Ş"},
+    {{'c','t'}, "ţ"}, {{'c','T'}, "Ţ"},
+    
+    // Ring above (r)
+    {{'r','a'}, "å"}, {{'r','A'}, "Å"}, {{'r','u'}, "ů"}, {{'r','U'}, "Ů"},
+    
+    // Ogonek (k)
+    {{'k','a'}, "ą"}, {{'k','A'}, "Ą"}, {{'k','e'}, "ę"}, {{'k','E'}, "Ę"},
+    {{'k','i'}, "į"}, {{'k','I'}, "Į"}, {{'k','o'}, "ǫ"}, {{'k','O'}, "Ǫ"},
+    {{'k','u'}, "ų"}, {{'k','U'}, "Ų"},
+};
+
+// Check if a command name is a diacritic command
+static bool isDiacriticCommand(const char* cmd_name) {
+    if (!cmd_name || strlen(cmd_name) != 1) return false;
+    char c = cmd_name[0];
+    return diacritic_combining_map.find(c) != diacritic_combining_map.end();
+}
+
+// Apply diacritic to a single UTF-8 character, returning the result
+// Always uses combining characters (NFD form) to match latex.js output
+static std::string applyDiacritic(char diacritic_cmd, const char* base_char) {
+    if (!base_char || base_char[0] == '\0') {
+        return "";
+    }
+    
+    // Decode UTF-8 to get the character length
+    const unsigned char* p = (const unsigned char*)base_char;
+    int char_len = 1;
+    
+    if ((p[0] & 0x80) == 0) {
+        // ASCII
+        char_len = 1;
+    } else if ((p[0] & 0xE0) == 0xC0) {
+        // 2-byte UTF-8
+        char_len = 2;
+    } else if ((p[0] & 0xF0) == 0xE0) {
+        // 3-byte UTF-8
+        char_len = 3;
+    } else if ((p[0] & 0xF8) == 0xF0) {
+        // 4-byte UTF-8
+        char_len = 4;
+    }
+    
+    // Look up the combining character for this diacritic
+    auto comb_it = diacritic_combining_map.find(diacritic_cmd);
+    if (comb_it != diacritic_combining_map.end()) {
+        std::string result(base_char, char_len);  // Base character
+        uint32_t combining = comb_it->second;
+        
+        // Encode combining character to UTF-8
+        if (combining < 0x80) {
+            result += (char)combining;
+        } else if (combining < 0x800) {
+            result += (char)(0xC0 | (combining >> 6));
+            result += (char)(0x80 | (combining & 0x3F));
+        } else if (combining < 0x10000) {
+            result += (char)(0xE0 | (combining >> 12));
+            result += (char)(0x80 | ((combining >> 6) & 0x3F));
+            result += (char)(0x80 | (combining & 0x3F));
+        }
+        return result;
+    }
+    
+    // Fallback: just return the base character
+    return std::string(base_char, char_len);
+}
+
+// Get UTF-8 character length from first byte
+static int getUtf8CharLen(unsigned char first_byte) {
+    if ((first_byte & 0x80) == 0) return 1;
+    if ((first_byte & 0xE0) == 0xC0) return 2;
+    if ((first_byte & 0xF0) == 0xE0) return 3;
+    if ((first_byte & 0xF8) == 0xF0) return 4;
+    return 1;  // Invalid, treat as single byte
+}
+
+// Convert ASCII apostrophe (') to right single quotation mark (')
+// Returns a new string with apostrophes converted to U+2019
+static std::string convertApostrophes(const char* text) {
+    std::string result;
+    result.reserve(strlen(text) * 3);  // Reserve space for potential UTF-8 expansion
+    for (const char* p = text; *p; p++) {
+        if (*p == '\'') {
+            // Check for '' (two apostrophes) → " (closing double quote)
+            if (*(p+1) == '\'') {
+                result += "\xE2\x80\x9D";  // " (U+201D = E2 80 9D)
+                p++;  // Skip second apostrophe
+            } else {
+                // Single apostrophe → ' (U+2019 = E2 80 99 in UTF-8)
+                result += "\xE2\x80\x99";
+            }
+        } else if (*p == '`') {
+            // Check for `` (two backticks) → " (opening double quote)
+            if (*(p+1) == '`') {
+                result += "\xE2\x80\x9C";  // " (U+201C = E2 80 9C)
+                p++;  // Skip second backtick
+            } else {
+                // Single backtick → ' (U+2018 = E2 80 98 in UTF-8)
+                result += "\xE2\x80\x98";
+            }
+        } else if (*p == '-') {
+            // Check for --- (em-dash) or -- (en-dash)
+            if (*(p+1) == '-' && *(p+2) == '-') {
+                result += "\xE2\x80\x94";  // — (U+2014 = em-dash)
+                p += 2;  // Skip two more hyphens
+            } else if (*(p+1) == '-') {
+                result += "\xE2\x80\x93";  // – (U+2013 = en-dash)
+                p++;  // Skip second hyphen
+            } else {
+                // Single hyphen: keep as ASCII hyphen-minus (U+002D)
+                // LaTeX.js behavior: don't convert single hyphens to Unicode hyphen (U+2010)
+                // This preserves compatibility and avoids issues with technical content
+                result += '-';
+            }
+        } else if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
+            // !´ (exclamation + acute accent U+00B4) → ¡ (inverted exclamation U+00A1)
+            result += "\xC2\xA1";  // ¡ (U+00A1 = C2 A1)
+            p += 2;  // Skip the ´ (2 bytes)
+        } else if (*p == '?' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
+            // ?´ (question + acute accent U+00B4) → ¿ (inverted question U+00BF)
+            result += "\xC2\xBF";  // ¿ (U+00BF = C2 BF)
+            p += 2;  // Skip the ´ (2 bytes)
+        } else {
+            result += *p;
+        }
+    }
+    return result;
+}
 
 // Maximum macro expansion depth to prevent infinite recursion
 // Real LaTeX documents rarely nest beyond 10 levels, but 100 allows complex templates
@@ -53,7 +278,7 @@ public:
         : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false) {}
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -92,6 +317,12 @@ public:
     void enterItalicStyledSpan() { italic_styled_span_depth_++; }
     void exitItalicStyledSpan() { if (italic_styled_span_depth_ > 0) italic_styled_span_depth_--; }
     bool inItalicStyledSpan() const { return italic_styled_span_depth_ > 0; }
+    
+    // Restricted horizontal mode (inside \mbox, \fbox, etc.)
+    // In this mode: \\ and \newline are ignored, \par becomes a space
+    void enterRestrictedHMode() { restricted_h_mode_ = true; }
+    void exitRestrictedHMode() { restricted_h_mode_ = false; }
+    bool inRestrictedHMode() const { return restricted_h_mode_; }
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
@@ -144,6 +375,10 @@ private:
     // Recursion depth tracking for macro expansion (prevent infinite loops)
     int recursion_depth_;
     bool depth_exceeded_;  // Flag to halt processing when depth limit is exceeded
+    
+    // Restricted horizontal mode flag - set when inside \mbox, \fbox, etc.
+    // In this mode, linebreaks (\\, \newline) are ignored and \par becomes a space
+    bool restricted_h_mode_;
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -430,6 +665,241 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
 // Command Implementations
 // =============================================================================
 
+// =============================================================================
+// Diacritic Commands - Handle accent marks like \^{o}, \'{e}, etc.
+// =============================================================================
+
+// Generic diacritic handler - extracts base character from children and applies diacritic
+static void processDiacritic(LatexProcessor* proc, Item elem, char diacritic_cmd) {
+    HtmlGenerator* gen = proc->generator();
+    ElementReader reader(elem);
+    
+    // Look for the base character in children
+    std::string base_char;
+    bool found_base = false;
+    
+    // Check all children
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && strcmp(child_tag, "curly_group") == 0) {
+                // Extract text from curly_group
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                if (str && str->len > 0) {
+                    base_char = std::string(str->chars, str->len);
+                    found_base = true;
+                }
+                break;
+            }
+        } else if (child.isString()) {
+            // Direct string child (like \^o where 'o' is direct child)
+            const char* text = child.asString()->chars;
+            if (text && text[0] != '\0') {
+                // Take only the first character (UTF-8 aware)
+                int char_len = getUtf8CharLen((unsigned char)text[0]);
+                base_char = std::string(text, char_len);
+                found_base = true;
+                
+                // If there's more text after the first char, we need to output it too
+                if (strlen(text) > (size_t)char_len) {
+                    std::string result = applyDiacritic(diacritic_cmd, base_char.c_str());
+                    proc->ensureParagraph();
+                    gen->text(result.c_str());
+                    gen->text(text + char_len);
+                    return;
+                }
+            }
+            break;
+        }
+    }
+    
+    if (found_base && !base_char.empty()) {
+        std::string result = applyDiacritic(diacritic_cmd, base_char.c_str());
+        proc->ensureParagraph();
+        gen->text(result.c_str());
+    } else {
+        // No base character - output the diacritic mark itself
+        proc->ensureParagraph();
+        char diacritic_str[2] = {diacritic_cmd, '\0'};
+        gen->text(diacritic_str);
+    }
+}
+
+// Individual diacritic command handlers
+static void cmd_acute(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, '\''); }
+static void cmd_grave(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, '`'); }
+static void cmd_circumflex(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, '^'); }
+static void cmd_tilde_accent(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, '~'); }
+static void cmd_diaeresis(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, '"'); }
+static void cmd_macron(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, '='); }
+static void cmd_dot_above(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, '.'); }
+static void cmd_breve(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'u'); }
+static void cmd_caron(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'v'); }
+static void cmd_double_acute(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'H'); }
+static void cmd_cedilla(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'c'); }
+static void cmd_dot_below(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'd'); }
+static void cmd_macron_below(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'b'); }
+static void cmd_ring_above(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'r'); }
+static void cmd_ogonek(LatexProcessor* proc, Item elem) { processDiacritic(proc, elem, 'k'); }
+
+// =============================================================================
+// Special Character Commands - Non-combining special letters
+// =============================================================================
+
+// Helper to check if a command element has an empty curly_group child (terminator like \ss{})
+// If so, the {} consumes the command, so we shouldn't strip trailing space
+static bool hasEmptyCurlyGroupChild(Item elem) {
+    ElementReader reader(elem);
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* child_tag = child_elem.tagName();
+            if (child_tag && strcmp(child_tag, "curly_group") == 0) {
+                // Check if empty (no children or only whitespace)
+                // A curly_group with 0 children is definitely empty
+                if (child_elem.childCount() == 0) {
+                    return true;
+                }
+                // Has children but check if they're all empty/whitespace
+                // For simplicity, if it has any children, treat as non-empty
+                // The terminator {} should have exactly 0 children
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+static void cmd_i(LatexProcessor* proc, Item elem) {
+    // \i - Dotless i (ı) for use with diacritics
+    proc->ensureParagraph();
+    proc->generator()->text("ı");
+    // Only strip trailing space if no terminator {} present
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_j(LatexProcessor* proc, Item elem) {
+    // \j - Dotless j (ȷ) for use with diacritics
+    proc->ensureParagraph();
+    proc->generator()->text("ȷ");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_l(LatexProcessor* proc, Item elem) {
+    // \l - Polish L-with-stroke (ł)
+    proc->ensureParagraph();
+    proc->generator()->text("ł");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_L(LatexProcessor* proc, Item elem) {
+    // \L - Polish L-with-stroke uppercase (Ł)
+    proc->ensureParagraph();
+    proc->generator()->text("Ł");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_o_special(LatexProcessor* proc, Item elem) {
+    // \o - Scandinavian slashed o (ø)
+    proc->ensureParagraph();
+    proc->generator()->text("ø");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_O_special(LatexProcessor* proc, Item elem) {
+    // \O - Scandinavian slashed O uppercase (Ø)
+    proc->ensureParagraph();
+    proc->generator()->text("Ø");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_ss(LatexProcessor* proc, Item elem) {
+    // \ss - German sharp s (ß) - eszett
+    proc->ensureParagraph();
+    proc->generator()->text("ß");
+    if (hasEmptyCurlyGroupChild(elem)) {
+        // Terminator {} produces ZWS for visual separation
+        proc->generator()->text("\xe2\x80\x8b");  // U+200B
+    } else {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_ae(LatexProcessor* proc, Item elem) {
+    // \ae - Latin small letter ae (æ)
+    proc->ensureParagraph();
+    proc->generator()->text("æ");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_AE(LatexProcessor* proc, Item elem) {
+    // \AE - Latin capital letter AE (Æ)
+    proc->ensureParagraph();
+    proc->generator()->text("Æ");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_oe(LatexProcessor* proc, Item elem) {
+    // \oe - Latin small ligature oe (œ)
+    proc->ensureParagraph();
+    proc->generator()->text("œ");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_OE(LatexProcessor* proc, Item elem) {
+    // \OE - Latin capital ligature OE (Œ)
+    proc->ensureParagraph();
+    proc->generator()->text("Œ");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+static void cmd_aa(LatexProcessor* proc, Item elem) {
+    // \aa - Latin small letter a with ring above (å)
+    proc->ensureParagraph();
+    proc->generator()->text("å");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+static void cmd_AA(LatexProcessor* proc, Item elem) {
+    // \AA - Latin capital letter A with ring above (Å)
+    proc->ensureParagraph();
+    proc->generator()->text("Å");
+    if (!hasEmptyCurlyGroupChild(elem)) {
+        proc->setStripNextLeadingSpace(true);
+    }
+}
+
+// =============================================================================
 // Text formatting commands
 // Note: These commands create spans directly and do NOT modify font state,
 // so processText won't double-wrap the content in another span.
@@ -1506,52 +1976,41 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Case 1: No braces - output nothing (null command)
 }
 
+static void cmd_unskip(LatexProcessor* proc, Item elem) {
+    // \unskip - removes preceding whitespace from output
+    // Unlike most LaTeX commands, this "breaks out" of groups - it affects output
+    // even when inside {...} groups
+    (void)elem;
+    HtmlGenerator* gen = proc->generator();
+    gen->trimTrailingWhitespace();
+}
+
+static void cmd_ignorespaces(LatexProcessor* proc, Item elem) {
+    // \ignorespaces - skips following whitespace
+    // Unlike \unskip, this does NOT break out of groups - it only affects whitespace
+    // that follows it within the current group
+    (void)elem;
+    LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
+    mutable_proc->setStripNextLeadingSpace(true);
+}
+
+static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
+    // \/ - ligature break (zero-width non-joiner)
+    // Prevents ligatures from forming, e.g., shelf\/ful prevents "shelfful" from becoming "shelﬀul"
+    // Inserts U+200C zero-width non-joiner
+    (void)elem;
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("\xE2\x80\x8C");  // U+200C zero-width non-joiner
+}
+
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
-    // If followed by {} (empty curly_group child), output ZWS for visual separation
+    // The {} serves as word terminator but produces no output
+    (void)elem;
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("\\");
-    
-    // Check for empty curly_group child (terminator)
-    ElementReader reader(elem);
-    auto iter = reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
-                // Check if group is empty
-                bool is_empty = true;
-                auto group_iter = child_elem.children();
-                ItemReader group_child;
-                while (group_iter.next(&group_child)) {
-                    if (group_child.isElement()) {
-                        is_empty = false;
-                        break;
-                    }
-                    if (group_child.isString()) {
-                        String* str = group_child.asString();
-                        if (str && str->len > 0) {
-                            for (int64_t i = 0; i < str->len; i++) {
-                                if (str->chars[i] != ' ' && str->chars[i] != '\t' && str->chars[i] != '\n') {
-                                    is_empty = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (!is_empty) break;
-                }
-                
-                if (is_empty) {
-                    // Empty curly_group serves as terminator - output ZWS
-                    gen->text("\xe2\x80\x8b");  // U+200B zero-width space
-                }
-                break;  // Only handle first curly_group
-            }
-        }
-    }
 }
 
 static void cmd_textellipsis(LatexProcessor* proc, Item elem) {
@@ -1575,6 +2034,75 @@ static void cmd_dots(LatexProcessor* proc, Item elem) {
     gen->text("…");
 }
 
+// Helper to convert char code to UTF-8 string
+static std::string codepoint_to_utf8(uint32_t codepoint) {
+    std::string result;
+    if (codepoint < 0x80) {
+        result += static_cast<char>(codepoint);
+    } else if (codepoint < 0x800) {
+        result += static_cast<char>(0xC0 | (codepoint >> 6));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else if (codepoint < 0x10000) {
+        result += static_cast<char>(0xE0 | (codepoint >> 12));
+        result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else if (codepoint < 0x110000) {
+        result += static_cast<char>(0xF0 | (codepoint >> 18));
+        result += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+        result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    }
+    return result;
+}
+
+static void cmd_char(LatexProcessor* proc, Item elem) {
+    // \char<number> or \char"<hex> - output character by code
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    
+    // Get the argument text using ElementReader
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* arg_str = stringbuf_to_string(sb);
+    
+    if (!arg_str || arg_str->len == 0) {
+        return;
+    }
+    
+    // Skip leading whitespace
+    const char* arg = arg_str->chars;
+    while (*arg && (*arg == ' ' || *arg == '\t' || *arg == '\n' || *arg == '\r')) {
+        arg++;
+    }
+    
+    if (!*arg) {
+        return;
+    }
+    
+    uint32_t charcode = 0;
+    // Check if hex notation (starts with " or 0x)
+    if (arg[0] == '"') {
+        charcode = std::strtoul(arg + 1, nullptr, 16);
+    } else if (strlen(arg) > 2 && arg[0] == '0' && (arg[1] == 'x' || arg[1] == 'X')) {
+        charcode = std::strtoul(arg + 2, nullptr, 16);
+    } else {
+        charcode = std::strtoul(arg, nullptr, 10);
+    }
+    
+    if (charcode > 0) {
+        std::string utf8 = codepoint_to_utf8(charcode);
+        gen->text(utf8.c_str());
+    }
+}
+
+static void cmd_symbol(LatexProcessor* proc, Item elem) {
+    // \symbol{number} or \symbol{"hex} - output character by code
+    // Same as \char but with braced argument
+    cmd_char(proc, elem);
+}
+
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
     // \makeatletter - Make @ a letter (category code change)
     // In HTML output, this doesn't affect anything
@@ -1596,38 +2124,55 @@ static void cmd_makeatother(LatexProcessor* proc, Item elem) {
 static void cmd_section(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
+    // End any open paragraph before section heading
+    proc->endParagraph();
+    
     ElementReader elem_reader(elem);
-    
-    // Find the title - collect all text content from string children
-    // Labels are element children and should be registered separately
-    std::string title;
     Pool* pool = proc->pool();
-    StringBuf* title_sb = stringbuf_new(pool);
     
-    auto iter = elem_reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isString()) {
-            stringbuf_append_str(title_sb, child.cstring());
-        } else if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            // Skip label elements from title, but remember them for later
-            if (strcmp(child_elem.tagName(), "label") != 0) {
-                // For other elements (formatting), get text content
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* text = stringbuf_to_string(sb);
-                stringbuf_append_str(title_sb, text->chars);
-            }
+    // Find the title argument (from "title" field or children/textContent)
+    std::string title;
+    
+    // First try to get title from "title" field (new grammar structure)
+    if (elem_reader.has_attr("title")) {
+        ItemReader title_reader = elem_reader.get_attr("title");
+        if (title_reader.isElement()) {
+            ElementReader title_elem(title_reader.item());
+            StringBuf* sb = stringbuf_new(pool);
+            title_elem.textContent(sb);
+            String* title_str = stringbuf_to_string(sb);
+            title = title_str->chars;
         }
     }
-    String* title_str = stringbuf_to_string(title_sb);
-    title = title_str->chars;
+    
+    // Fallback: collect text content from children (old parser structure)
+    if (title.empty()) {
+        StringBuf* title_sb = stringbuf_new(pool);
+        auto iter = elem_reader.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                stringbuf_append_str(title_sb, child.cstring());
+            } else if (child.isElement()) {
+                ElementReader child_elem(child.item());
+                // Skip label elements from title
+                if (strcmp(child_elem.tagName(), "label") != 0) {
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* text = stringbuf_to_string(sb);
+                    stringbuf_append_str(title_sb, text->chars);
+                }
+            }
+        }
+        String* title_str = stringbuf_to_string(title_sb);
+        title = title_str->chars;
+    }
     
     gen->startSection("section", false, title, title);
     
     // Now register any labels as children of section
     auto label_iter = elem_reader.children();
+    ItemReader child;
     while (label_iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem(child.item());
@@ -1645,6 +2190,9 @@ static void cmd_section(LatexProcessor* proc, Item elem) {
 
 static void cmd_subsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     
@@ -1688,11 +2236,15 @@ static void cmd_subsection(LatexProcessor* proc, Item elem) {
     }
     
     gen->startSection("subsection", false, title, title);
-    proc->processChildren(elem);
+    // NOTE: Do NOT call processChildren - section heading is complete
+    //       Sections are flat in new grammar, not containers
 }
 
 static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     
@@ -1736,11 +2288,14 @@ static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
     }
     
     gen->startSection("subsubsection", false, title, title);
-    proc->processChildren(elem);
+    // NOTE: Do NOT call processChildren - section heading is complete
 }
 
 static void cmd_chapter(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     
@@ -1772,6 +2327,9 @@ static void cmd_chapter(LatexProcessor* proc, Item elem) {
 
 static void cmd_part(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
+    
+    // End any open paragraph before section heading
+    proc->endParagraph();
     
     ElementReader elem_reader(elem);
     
@@ -1955,7 +2513,9 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             
                             // Skip if now empty after trimming
                             if (text[0] != '\0') {
-                                gen->text(text);
+                                // Convert apostrophes and output text
+                                std::string converted = convertApostrophes(text);
+                                gen->text(converted.c_str());
                             }
                         }
                     }
@@ -2014,7 +2574,9 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                 
                 // Skip if now empty after trimming
                 if (text[0] != '\0') {
-                    gen->text(text);
+                    // Convert apostrophes and output text
+                    std::string converted = convertApostrophes(text);
+                    gen->text(converted.c_str());
                 }
             }
         }
@@ -2150,6 +2712,63 @@ static void cmd_flushright(LatexProcessor* proc, Item elem) {
     proc->setNextParagraphIsContinue();
 }
 
+static void cmd_verb_command(LatexProcessor* proc, Item elem) {
+    // \verb|text| inline verbatim with delimiter
+    // The external scanner matched the full \verb<delim>text<delim> pattern
+    // The AST builder stored it as a string child
+    HtmlGenerator* gen = proc->generator();
+    
+    ElementReader elem_reader(elem);
+    
+    // Get the token string from the first child
+    if (elem_reader.childCount() < 1) {
+        log_warn("verb_command: no children found");
+        return;
+    }
+    
+    ItemReader first_child = elem_reader.childAt(0);
+    if (!first_child.isString()) {
+        log_warn("verb_command: first child is not a string");
+        return;
+    }
+    
+    const char* text = first_child.cstring();
+    if (!text) {
+        log_warn("verb_command: first child string is null");
+        return;
+    }
+    
+    // Parse: "\verb<delim>content<delim>"
+    // Skip "\verb" (5 chars)
+    if (strlen(text) < 7) {  // Minimum: \verb||
+        log_warn("verb_command: token too short: %s", text);
+        return;
+    }
+    
+    const char* delimiter_start = text + 5;  // After "\verb"
+    char delim = *delimiter_start;
+    
+    // Find content between delimiters
+    const char* content_start = delimiter_start + 1;
+    const char* content_end = strchr(content_start, delim);
+    
+    if (!content_end) {
+        log_warn("verb_command: missing closing delimiter '%c' in: %s", delim, text);
+        return;
+    }
+    
+    size_t content_len = content_end - content_start;
+    
+    // Open <code class="latex-verbatim"> tag
+    gen->writer()->openTagRaw("code", "class=\"latex-verbatim\"");
+    
+    // Output verbatim content (extract substring)
+    std::string content(content_start, content_len);
+    gen->writer()->writeText(content.c_str());
+    
+    gen->writer()->closeTag("code");
+}
+
 static void cmd_verbatim(LatexProcessor* proc, Item elem) {
     // \begin{verbatim} ... \end{verbatim}
     HtmlGenerator* gen = proc->generator();
@@ -2215,22 +2834,49 @@ static void cmd_equation_star(LatexProcessor* proc, Item elem) {
 // Line break commands
 
 static void cmd_newline(LatexProcessor* proc, Item elem) {
-    // \\ or \newline
+    // \\ or \newline - create a line break
+    // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
+    // We only strip leading whitespace on next token (skip), not trailing (no unskip).
+    // This allows: "one \\ space" -> "one space" (trailing space preserved)
+    if (proc->inRestrictedHMode()) {
+        proc->setStripNextLeadingSpace(true);  // skip after
+        return;
+    }
     HtmlGenerator* gen = proc->generator();
     gen->lineBreak(false);
 }
 
 static void cmd_linebreak(LatexProcessor* proc, Item elem) {
-    // \linebreak
+    // \linebreak - optional line break hint
+    // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
+    // We only strip leading whitespace on next token (skip), not trailing (no unskip).
+    if (proc->inRestrictedHMode()) {
+        proc->setStripNextLeadingSpace(true);  // skip after
+        return;
+    }
     HtmlGenerator* gen = proc->generator();
     gen->lineBreak(false);
 }
 
 static void cmd_par(LatexProcessor* proc, Item elem) {
     // \par - end current paragraph and start a new one
+    // In restricted horizontal mode (inside \mbox, etc.), \par is ignored with unskip
+    log_debug("cmd_par: inRestrictedHMode=%d", proc->inRestrictedHMode());
+    if (proc->inRestrictedHMode()) {
+        HtmlGenerator* gen = proc->generator();
+        // Remove trailing whitespace (unskip) and skip following whitespace
+        gen->trimTrailingWhitespace();
+        proc->setStripNextLeadingSpace(true);
+        // \par takes no arguments in LaTeX, but parser may attach following curly groups
+        // Process any children as regular content
+        proc->processChildren(elem);
+        return;
+    }
     // Simply close the paragraph if open - the next text will start a new one
     proc->endParagraph();
-    (void)elem;  // unused
+    // \par takes no arguments in LaTeX, but parser may attach following curly groups
+    // Process any children as regular content
+    proc->processChildren(elem);
 }
 
 static void cmd_noindent(LatexProcessor* proc, Item elem) {
@@ -2239,6 +2885,83 @@ static void cmd_noindent(LatexProcessor* proc, Item elem) {
     proc->endParagraph();
     proc->setNextParagraphIsNoindent();
     (void)elem;  // unused
+}
+
+static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
+    // \gobbleO - gobble whitespace and optional argument (from echo package)
+    // latex.js: args.gobbleO = <[ H o? ]>, \gobbleO : -> []
+    // 'H' means: unskip before, add brsp (ZWS) after IF optional arg was consumed
+    // Returns empty array (no output), but adds ZWS if optional arg consumed
+    
+    HtmlGenerator* gen = proc->generator();
+    
+    // 'H' arg: unskip before
+    gen->trimTrailingWhitespace();
+    
+    ElementReader reader(elem);
+    bool has_optional_arg = false;
+    
+    // Check if optional argument was consumed (brack_group or curly_group child)
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "curly_group") == 0) {
+                has_optional_arg = true;
+                break;
+            }
+        }
+    }
+    
+    // Output ZWS only if optional argument was consumed
+    if (has_optional_arg) {
+        gen->text("\xE2\x80\x8B");  // Zero-width space (U+200B in UTF-8)
+    }
+    // Otherwise output nothing (just gobble the space)
+}
+
+static void cmd_echoO(LatexProcessor* proc, Item elem) {
+    // \echoO[optional] - from echo package for testing
+    // latex.js: args.echoO = <[ H o? ]>, \echoO : (o) -> [ "-", o, "-" ]
+    // Outputs "-optional-" if optional arg present, otherwise just "-"
+    
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    ElementReader reader(elem);
+    
+    gen->text("-");
+    
+    // Find and output optional argument content
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            if (strcmp(tag, "brack_group") == 0) {
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                break;
+            }
+        }
+    }
+    
+    gen->text("-");
+}
+
+static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
+    // \echoOGO[o1]{g}[o2] - from echo package for testing
+    // latex.js: args.echoOGO = <[ H o? g o? ]>
+    // \echoOGO : (o1, g, o2) -> [] with optional parts
+    // Returns empty (just gobbles), used for testing arg parsing
+    
+    // This command produces no output in latex.js
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_newpage(LatexProcessor* proc, Item elem) {
@@ -2460,121 +3183,148 @@ static void cmd_qquad(LatexProcessor* proc, Item elem) {
 // Box Commands
 // =============================================================================
 
+// Helper function for box commands - matches latex.js _box pattern
+// Creates structure: <span class="classes"><span>content</span></span>
+// Content is processed in restricted horizontal mode where:
+//   - \\ and \newline are ignored (no linebreak output)
+//   - \par and paragraph breaks become spaces
+static void _box(LatexProcessor* proc, Item elem, const char* classes,
+                 const char* width = nullptr, const char* pos = nullptr) {
+    HtmlGenerator* gen = proc->generator();
+    
+    // Build the class string based on position parameter
+    std::string box_classes = classes ? classes : "hbox";
+    
+    if (width && pos) {
+        // \makebox[width][pos]{text} handling
+        switch (pos[0]) {
+        case 's': box_classes += " stretch"; break;
+        case 'c': box_classes += " clap"; break;
+        case 'l': box_classes += " rlap"; break;
+        case 'r': box_classes += " llap"; break;
+        }
+    }
+    
+    // Outer span with hbox class
+    gen->span(box_classes.c_str());
+    // Inner span for content (pass nullptr to get <span> without class)
+    gen->span(nullptr);
+    
+    // Process content in restricted horizontal mode
+    proc->enterRestrictedHMode();
+    proc->processChildren(elem);
+    proc->exitRestrictedHMode();
+    
+    gen->closeElement(); // close inner span
+    gen->closeElement(); // close outer span
+}
+
 static void cmd_mbox(LatexProcessor* proc, Item elem) {
     // \mbox{text} - make box (prevent line breaking)
-    HtmlGenerator* gen = proc->generator();
+    // Matches: \mbox : (txt) -> @makebox undefined, undefined, undefined, txt
     proc->ensureParagraph();
-    gen->spanWithStyle("white-space:nowrap");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox");
 }
 
 static void cmd_fbox(LatexProcessor* proc, Item elem) {
-    // \fbox{text} - framed box
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->spanWithClassAndStyle("fbox", "border:1px solid black;padding:3px");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \fbox{text} - framed box (matches latex.js: calls framebox with "hbox frame")
+    _box(proc, elem, "hbox frame");
 }
 
 static void cmd_framebox(LatexProcessor* proc, Item elem) {
     // \framebox[width][pos]{text} - framed box with options
+    // latex.js: @_box width, pos, txt, "hbox frame"
     // TODO: Parse width and position parameters
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->spanWithClassAndStyle("framebox", "border:1px solid black;padding:3px");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox frame");
 }
 
 static void cmd_frame(LatexProcessor* proc, Item elem) {
     // \frame{text} - simple frame
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->spanWithClassAndStyle("frame", "border:1px solid black");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox frame");
 }
 
 static void cmd_parbox(LatexProcessor* proc, Item elem) {
     // \parbox[pos][height][inner-pos]{width}{text} - paragraph box
     // TODO: Parse all parameters
     HtmlGenerator* gen = proc->generator();
-    gen->divWithClassAndStyle("parbox", "display:inline-block");
+    gen->div("parbox");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_makebox(LatexProcessor* proc, Item elem) {
     // \makebox[width][pos]{text} - make box with size
+    // latex.js: @_box width, pos, txt, "hbox"
     // TODO: Parse width and position
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->span("makebox");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox");
 }
 
 static void cmd_phantom(LatexProcessor* proc, Item elem) {
-    // \phantom{text} - invisible box with dimensions
+    // \phantom{text} - invisible box
+    // latex.js: [ @g.create @g.inline, txt, "phantom hbox" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("phantom", "visibility:hidden");
+    gen->span("phantom hbox");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_hphantom(LatexProcessor* proc, Item elem) {
     // \hphantom{text} - horizontal phantom (width only)
+    // latex.js: [ @g.create @g.inline, txt, "phantom hbox smash" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("hphantom", "visibility:hidden");
+    gen->span("phantom hbox smash");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_vphantom(LatexProcessor* proc, Item elem) {
     // \vphantom{text} - vertical phantom (height/depth only)
+    // latex.js: [ @g.create @g.inline, txt, "phantom hbox rlap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("vphantom", "visibility:hidden;width:0");
+    gen->span("phantom hbox rlap");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_smash(LatexProcessor* proc, Item elem) {
     // \smash[tb]{text} - smash height/depth
+    // latex.js: [ @g.create @g.inline, txt, "hbox smash" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("smash", "display:inline-block;height:0");
+    gen->span("hbox smash");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_clap(LatexProcessor* proc, Item elem) {
     // \clap{text} - centered lap (zero width, centered)
+    // latex.js: [ @g.create @g.inline, txt, "hbox clap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("clap", "display:inline-block;width:0;text-align:center");
+    gen->span("hbox clap");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_llap(LatexProcessor* proc, Item elem) {
     // \llap{text} - left lap (zero width, right-aligned)
+    // latex.js: [ @g.create @g.inline, txt, "hbox llap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("llap", "display:inline-block;width:0;text-align:right");
+    gen->span("hbox llap");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_rlap(LatexProcessor* proc, Item elem) {
     // \rlap{text} - right lap (zero width, left-aligned)
+    // latex.js: [ @g.create @g.inline, txt, "hbox rlap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("rlap", "display:inline-block;width:0;text-align:left");
+    gen->span("hbox rlap");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -4028,6 +4778,38 @@ void LatexProcessor::initCommandTable() {
     command_table_["providecommand"] = cmd_providecommand;
     command_table_["def"] = cmd_def;
     
+    // Diacritic commands (accent marks)
+    command_table_["'"] = cmd_acute;       // \'e -> é
+    command_table_["`"] = cmd_grave;       // \`e -> è
+    command_table_["^"] = cmd_circumflex;  // \^o -> ô
+    command_table_["~"] = cmd_tilde_accent; // \~n -> ñ
+    command_table_["\""] = cmd_diaeresis;  // \"a -> ä
+    command_table_["="] = cmd_macron;      // \=a -> ā
+    command_table_["."] = cmd_dot_above;   // \.z -> ż
+    command_table_["u"] = cmd_breve;       // \u{a} -> ă  (NOTE: conflicts with letter u)
+    command_table_["v"] = cmd_caron;       // \v{c} -> č  (NOTE: conflicts with letter v)
+    command_table_["H"] = cmd_double_acute; // \H{o} -> ő
+    command_table_["c"] = cmd_cedilla;     // \c{c} -> ç  (NOTE: conflicts with letter c)
+    command_table_["d"] = cmd_dot_below;   // \d{a} -> ạ  (NOTE: conflicts with letter d)
+    command_table_["b"] = cmd_macron_below; // \b{a} -> a̲ (NOTE: conflicts with letter b)
+    command_table_["r"] = cmd_ring_above;  // \r{a} -> å  (NOTE: conflicts with letter r)
+    command_table_["k"] = cmd_ogonek;      // \k{a} -> ą  (NOTE: conflicts with letter k)
+    
+    // Special character commands (non-combining letters)
+    command_table_["i"] = cmd_i;           // \i -> ı (dotless i)
+    command_table_["j"] = cmd_j;           // \j -> ȷ (dotless j)
+    command_table_["l"] = cmd_l;           // \l -> ł (Polish l-stroke)
+    command_table_["L"] = cmd_L;           // \L -> Ł (Polish L-stroke)
+    command_table_["o"] = cmd_o_special;   // \o -> ø (Scandinavian slashed o)
+    command_table_["O"] = cmd_O_special;   // \O -> Ø (Scandinavian slashed O)
+    command_table_["ss"] = cmd_ss;         // \ss -> ß (German eszett)
+    command_table_["ae"] = cmd_ae;         // \ae -> æ
+    command_table_["AE"] = cmd_AE;         // \AE -> Æ
+    command_table_["oe"] = cmd_oe;         // \oe -> œ
+    command_table_["OE"] = cmd_OE;         // \OE -> Œ
+    command_table_["aa"] = cmd_aa;         // \aa -> å
+    command_table_["AA"] = cmd_AA;         // \AA -> Å
+    
     // Text formatting
     command_table_["textbf"] = cmd_textbf;
     command_table_["textit"] = cmd_textit;
@@ -4090,6 +4872,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["flushleft"] = cmd_flushleft;
     command_table_["flushright"] = cmd_flushright;
     command_table_["verbatim"] = cmd_verbatim;
+    command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim
     
     // Math environments
     command_table_["math"] = cmd_math;
@@ -4106,16 +4889,24 @@ void LatexProcessor::initCommandTable() {
     command_table_["newpage"] = cmd_newpage;
     command_table_["par"] = cmd_par;
     command_table_["noindent"] = cmd_noindent;
+    command_table_["gobbleO"] = cmd_gobbleO;
+    command_table_["echoO"] = cmd_echoO;
+    command_table_["echoOGO"] = cmd_echoOGO;
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
     command_table_["LaTeX"] = cmd_LaTeX;
     command_table_["today"] = cmd_today;
     command_table_["empty"] = cmd_empty;
+    command_table_["unskip"] = cmd_unskip;
+    command_table_["ignorespaces"] = cmd_ignorespaces;
+    command_table_["/"] = cmd_ligature_break;  // \/ ligature break
     command_table_["textbackslash"] = cmd_textbackslash;
     command_table_["textellipsis"] = cmd_textellipsis;
     command_table_["ldots"] = cmd_ldots;
     command_table_["dots"] = cmd_dots;
+    command_table_["char"] = cmd_char;
+    command_table_["symbol"] = cmd_symbol;
     command_table_["makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;
     
@@ -4311,6 +5102,7 @@ bool LatexProcessor::isInlineCommand(const char* cmd_name) {
 void LatexProcessor::ensureParagraph() {
     // Only open paragraph if we're not inside an inline element
     if (!in_paragraph_ && inline_depth_ == 0) {
+        log_debug("ensureParagraph: opening paragraph, restricted=%d", restricted_h_mode_);
         if (next_paragraph_is_noindent_) {
             gen_->p("noindent");
             next_paragraph_is_noindent_ = false;  // Reset the flag
@@ -4326,6 +5118,7 @@ void LatexProcessor::ensureParagraph() {
 
 void LatexProcessor::closeParagraphIfOpen() {
     if (in_paragraph_) {
+        log_debug("closeParagraphIfOpen: closing paragraph, restricted=%d", restricted_h_mode_);
         gen_->trimTrailingWhitespace();  // Trim trailing whitespace before closing paragraph
         gen_->closeElement();
         in_paragraph_ = false;
@@ -4420,6 +5213,11 @@ void LatexProcessor::processNode(Item node) {
             const char* sym_name = str->chars;
             
             if (strcmp(sym_name, "parbreak") == 0) {
+                // In restricted horizontal mode (inside \mbox), paragraph breaks become spaces
+                if (restricted_h_mode_) {
+                    gen_->text(" ");
+                    return;
+                }
                 // Paragraph break: close current paragraph and prepare for next
                 closeParagraphIfOpen();
                 // Clear continue and noindent flags - parbreak resets paragraph styling
@@ -4506,6 +5304,7 @@ void LatexProcessor::processNode(Item node) {
         }
         
         // Process command
+        log_debug("latex_html_v2: processNode calling processCommand with tag='%s'", tag);
         processCommand(tag, node);
         return;
     }
@@ -4521,11 +5320,316 @@ void LatexProcessor::processChildren(Item elem) {
         return;
     }
     
-    // Iterate through children
-    auto iter = elem_reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        processNode(child.item());
+    // Use index-based iteration for lookahead capability
+    int64_t count = elem_reader.childCount();
+    for (int64_t i = 0; i < count; i++) {
+        ItemReader child_reader = elem_reader.childAt(i);
+        
+        // Check if this is a linebreak element
+        if (child_reader.isElement()) {
+            ElementReader child_elem(child_reader.item());
+            const char* tag = child_elem.tagName();
+            
+            if (tag && (strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0 ||
+                        strcmp(tag, "newline") == 0)) {
+                // Check if next sibling is a brack_group (dimension argument)
+                bool has_dimension = false;
+                bool preserve_unit = false;
+                double dimension_px = 0;
+                const char* dimension_text = nullptr;
+                
+                if (i + 1 < count) {
+                    ItemReader next_reader = elem_reader.childAt(i + 1);
+                    
+                    if (next_reader.isElement()) {
+                        ElementReader next_elem(next_reader.item());
+                        const char* next_tag = next_elem.tagName();
+                        
+                        if (next_tag && strcmp(next_tag, "brack_group") == 0) {
+                            // Extract dimension text from brack_group
+                            Pool* pool = pool_;
+                            StringBuf* sb = stringbuf_new(pool);
+                            next_elem.textContent(sb);
+                            String* dim_str = stringbuf_to_string(sb);
+                            
+                            if (dim_str && dim_str->len > 0) {
+                                // Check if it's a relative unit (em, ex) - preserve as-is
+                                const char* dim_text = dim_str->chars;
+                                size_t dim_len = dim_str->len;
+                                bool is_relative = false;
+                                if (dim_len >= 2) {
+                                    const char* suffix = dim_text + dim_len - 2;
+                                    if (strcmp(suffix, "em") == 0 || strcmp(suffix, "ex") == 0) {
+                                        is_relative = true;
+                                    }
+                                }
+                                
+                                if (is_relative) {
+                                    // Keep relative units as-is
+                                    has_dimension = true;
+                                    preserve_unit = true;
+                                    dimension_text = dim_text;
+                                    i++;
+                                } else {
+                                    // Convert to pixels
+                                    dimension_px = convert_length_to_px(dim_text);
+                                    if (dimension_px > 0) {
+                                        has_dimension = true;
+                                        preserve_unit = false;
+                                        i++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // In restricted horizontal mode, linebreaks collapse surrounding whitespace.
+                //
+                // LaTeX behavior in restricted horizontal mode:
+                // - \\ and \newline are essentially no-ops (can't break lines in a box)
+                // - But they still do \unskip (remove preceding space)
+                // - Following spaces are also absorbed
+                //
+                // Special case for \\[dim]:
+                // - If \\[dim] has a dimension argument AND next text has leading space,
+                //   preserve exactly one space (the dimension indicates intentional spacing)
+                // - Otherwise, collapse all whitespace
+                //
+                // Summary:
+                // - \linebreak: outputs exactly one space
+                // - \\[dim] with next leading space: preserve one space  
+                // - \\ without dim, or next has no leading space: collapse all
+                // - \newline: collapse all
+                if (restricted_h_mode_) {
+                    bool is_linebreak_cmd = (child_elem.childCount() > 0) || (strcmp(tag, "linebreak_command") == 0);
+                    bool had_trailing_ws = gen_->hasTrailingWhitespace();
+                    gen_->trimTrailingWhitespace();
+                    
+                    if (is_linebreak_cmd) {
+                        // \linebreak: always output exactly one space
+                        gen_->text(" ");
+                        strip_next_leading_space_ = true;
+                        continue;
+                    }
+                    
+                    // Check for next text having leading whitespace
+                    bool next_has_leading_ws = false;
+                    for (int64_t j = i + 1; j < count; j++) {
+                        ItemReader lookahead = elem_reader.childAt(j);
+                        if (lookahead.isElement()) {
+                            ElementReader la_elem(lookahead.item());
+                            const char* la_tag = la_elem.tagName();
+                            if (la_tag && strcmp(la_tag, "brack_group") == 0) {
+                                continue; // Keep looking for next text
+                            }
+                            break; // Stop at any other element
+                        } else if (lookahead.isString()) {
+                            String* la_str = lookahead.asString();
+                            if (la_str && la_str->len > 0) {
+                                char first = la_str->chars[0];
+                                next_has_leading_ws = (first == ' ' || first == '\t' || first == '\n' || first == '\r');
+                            }
+                            break;
+                        }
+                    }
+                    
+                    // For \\[dim] with leading space after: preserve one space
+                    // This handles cases like "one \\[4cm] space" where the dimension
+                    // indicates intentional vertical space, and word separation should be preserved
+                    // Note: has_dimension is set earlier when brack_group is consumed and i is incremented
+                    if (strcmp(tag, "linebreak") == 0 && has_dimension && 
+                        had_trailing_ws && next_has_leading_ws) {
+                        gen_->text(" ");
+                    }
+                    strip_next_leading_space_ = true;
+                    continue;
+                }
+                
+                // Output the linebreak
+                ensureParagraph();;
+                if (has_dimension) {
+                    // Output span with class and style: <span class="breakspace" style="margin-bottom:X"></span>
+                    char style[256];
+                    if (preserve_unit) {
+                        snprintf(style, sizeof(style), "margin-bottom:%s", dimension_text);
+                    } else {
+                        snprintf(style, sizeof(style), "margin-bottom:%.3fpx", dimension_px);
+                    }
+                    gen_->spanWithClassAndStyle("breakspace", style);
+                    gen_->closeElement();
+                } else {
+                    gen_->lineBreak(false);
+                }
+                continue;
+            }
+            
+            // Check if this is a diacritic command (^, ', `, ", ~, =, ., u, v, H, c, d, b, r, k)
+            if (tag && isDiacriticCommand(tag)) {
+                char diacritic_cmd = tag[0];
+                
+                // First check if the diacritic element has a curly_group child
+                bool has_child_arg = false;
+                std::string base_char;
+                
+                if (child_elem.childCount() > 0) {
+                    // Diacritic has children - process first curly_group
+                    auto dia_iter = child_elem.children();
+                    ItemReader dia_child;
+                    while (dia_iter.next(&dia_child)) {
+                        if (dia_child.isElement()) {
+                            ElementReader dia_child_elem(dia_child.item());
+                            const char* dia_child_tag = dia_child_elem.tagName();
+                            if (dia_child_tag && strcmp(dia_child_tag, "curly_group") == 0) {
+                                // Extract text from curly_group
+                                Pool* pool = pool_;
+                                StringBuf* sb = stringbuf_new(pool);
+                                dia_child_elem.textContent(sb);
+                                String* str = stringbuf_to_string(sb);
+                                if (str && str->len > 0) {
+                                    base_char = std::string(str->chars, str->len);
+                                    has_child_arg = true;
+                                }
+                                break;
+                            }
+                        } else if (dia_child.isString()) {
+                            // Direct string child (like \^o where 'o' is direct child)
+                            const char* text = dia_child.asString()->chars;
+                            if (text && text[0] != '\0') {
+                                int char_len = getUtf8CharLen((unsigned char)text[0]);
+                                base_char = std::string(text, char_len);
+                                has_child_arg = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                if (has_child_arg) {
+                    // Apply diacritic to the extracted base character
+                    ensureParagraph();
+                    std::string result = applyDiacritic(diacritic_cmd, base_char.c_str());
+                    gen_->text(result.c_str());
+                    continue;
+                }
+                
+                // Check next sibling for the base character
+                if (i + 1 < count) {
+                    ItemReader next_reader = elem_reader.childAt(i + 1);
+                    
+                    if (next_reader.isElement()) {
+                        ElementReader next_elem(next_reader.item());
+                        const char* next_tag = next_elem.tagName();
+                        
+                        if (next_tag && strcmp(next_tag, "curly_group") == 0) {
+                            // Extract content from curly_group
+                            Pool* pool = pool_;
+                            StringBuf* sb = stringbuf_new(pool);
+                            next_elem.textContent(sb);
+                            String* str = stringbuf_to_string(sb);
+                            
+                            if (str && str->len > 0) {
+                                ensureParagraph();
+                                std::string result = applyDiacritic(diacritic_cmd, str->chars);
+                                gen_->text(result.c_str());
+                            } else {
+                                // Empty curly_group (like \^{}) - just output the diacritic char
+                                ensureParagraph();
+                                gen_->text(tag);
+                            }
+                            i++;  // Skip the curly_group (even if empty)
+                            continue;
+                        }
+                        
+                        // Check if next element is a command that resolves to a special character
+                        // This handles cases like \"\i (umlaut on dotless-i), \'\i, \^\j, etc.
+                        // The parser converts \i to an element with tag "i", not "command"
+                        if (next_tag) {
+                            // Check if it's a special character command element
+                            const char* base_char = nullptr;
+                            if (strcmp(next_tag, "i") == 0) {
+                                base_char = "ı";  // dotless-i
+                            } else if (strcmp(next_tag, "j") == 0) {
+                                base_char = "ȷ";  // dotless-j
+                            } else if (strcmp(next_tag, "l") == 0) {
+                                base_char = "ł";  // Polish L
+                            } else if (strcmp(next_tag, "L") == 0) {
+                                base_char = "Ł";  // Polish L uppercase
+                            } else if (strcmp(next_tag, "o") == 0) {
+                                base_char = "ø";  // Scandinavian o
+                            } else if (strcmp(next_tag, "O") == 0) {
+                                base_char = "Ø";  // Scandinavian O uppercase
+                            } else if (strcmp(next_tag, "ae") == 0) {
+                                base_char = "æ";  // ae ligature
+                            } else if (strcmp(next_tag, "AE") == 0) {
+                                base_char = "Æ";  // AE ligature
+                            } else if (strcmp(next_tag, "oe") == 0) {
+                                base_char = "œ";  // oe ligature  
+                            } else if (strcmp(next_tag, "OE") == 0) {
+                                base_char = "Œ";  // OE ligature
+                            } else if (strcmp(next_tag, "command") == 0) {
+                                // Also check if it's a command node with name extraction
+                                Pool* pool = pool_;
+                                StringBuf* sb = stringbuf_new(pool);
+                                next_elem.textContent(sb);
+                                String* str = stringbuf_to_string(sb);
+                                if (str && str->len > 0) {
+                                    const char* cmd = str->chars;
+                                    if (strcmp(cmd, "i") == 0) {
+                                        base_char = "ı";
+                                    } else if (strcmp(cmd, "j") == 0) {
+                                        base_char = "ȷ";
+                                    } else if (strcmp(cmd, "l") == 0) {
+                                        base_char = "ł";
+                                    } else if (strcmp(cmd, "L") == 0) {
+                                        base_char = "Ł";
+                                    } else if (strcmp(cmd, "o") == 0) {
+                                        base_char = "ø";
+                                    } else if (strcmp(cmd, "O") == 0) {
+                                        base_char = "Ø";
+                                    }
+                                }
+                            }
+                            
+                            if (base_char) {
+                                ensureParagraph();
+                                std::string result = applyDiacritic(diacritic_cmd, base_char);
+                                gen_->text(result.c_str());
+                                // Strip trailing space (LaTeX command consumes following space)
+                                setStripNextLeadingSpace(true);
+                                i++;  // Skip the command
+                                continue;
+                            }
+                        }
+                    } else if (next_reader.isString()) {
+                        // Next sibling is text - consume first character
+                        const char* text = next_reader.asString()->chars;
+                        if (text && text[0] != '\0') {
+                            ensureParagraph();
+                            int char_len = getUtf8CharLen((unsigned char)text[0]);
+                            std::string first_char(text, char_len);
+                            std::string result = applyDiacritic(diacritic_cmd, first_char.c_str());
+                            gen_->text(result.c_str());
+                            
+                            // Output remaining text
+                            if (strlen(text) > (size_t)char_len) {
+                                gen_->text(text + char_len);
+                            }
+                            i++;  // Skip the text node (we already processed it)
+                            continue;
+                        }
+                    }
+                }
+                
+                // No base character found - just output the diacritic as-is (e.g., \^{})
+                ensureParagraph();
+                gen_->text(tag);
+                continue;
+            }
+        }
+        
+        // Normal processing for other nodes
+        processNode(child_reader.item());
     }
 }
 
@@ -4573,9 +5677,12 @@ void LatexProcessor::processSpacingCommand(Item elem) {
                 // Tilde (non-breaking space) - this path shouldn't be reached since
                 // ~ is handled as nbsp element, but keep for completeness
                 gen_->writer()->writeRawHtml("&nbsp;");
-            } else if (strcmp(cmd, "\\/") == 0 || strcmp(cmd, "\\@") == 0) {
-                // Italic correction or inter-sentence space marker - output nothing
-                // These are zero-width commands
+            } else if (strcmp(cmd, "\\/") == 0) {
+                // Ligature break - insert zero-width non-joiner U+200C
+                // Prevents ligatures from forming, e.g., shelf\/ful prevents "shelfful" from becoming "shelﬀul"
+                gen_->text("\xE2\x80\x8C");  // U+200C zero-width non-joiner
+            } else if (strcmp(cmd, "\\@") == 0) {
+                // Inter-sentence space marker - output nothing (it's just a marker for TeX)
             } else if (strcmp(cmd, "\\-") == 0) {
                 // Discretionary hyphen - soft hyphen U+00AD
                 gen_->text("\xC2\xAD");  // UTF-8 encoding of U+00AD
@@ -4607,6 +5714,11 @@ void LatexProcessor::processText(const char* text) {
             in_whitespace = false;
         }
     }
+    
+    // Convert ASCII apostrophe (') to right single quotation mark (')
+    // LaTeX uses ' for typographic apostrophes in running text
+    // Note: '' (two single quotes) is handled by the ligature parser as closing double quote
+    normalized = convertApostrophes(normalized.c_str());
     
     // Note: We do NOT convert ASCII hyphen-minus (U+002D) to Unicode hyphen (U+2010)
     // because standard LaTeX behavior keeps single hyphens as-is in compound words
@@ -4644,9 +5756,31 @@ void LatexProcessor::processText(const char* text) {
     
     // Check if we should strip leading space (set by font declaration commands)
     // LaTeX commands consume their trailing space, so text after a declaration
-    // should have its leading space stripped
+    // or special character command should have its leading space stripped
     bool should_strip_leading = strip_next_leading_space_;
     strip_next_leading_space_ = false;  // Reset flag after checking
+    
+    // Strip leading space if flagged (applies to all text, not just font-styled)
+    if (should_strip_leading && !normalized.empty() && normalized[0] == ' ') {
+        size_t start = 0;
+        while (start < normalized.length() && normalized[start] == ' ') {
+            start++;
+        }
+        if (start > 0) {
+            normalized = normalized.substr(start);
+            // Recalculate all_whitespace after trimming
+            if (normalized.empty()) {
+                return;
+            }
+            all_whitespace = true;
+            for (char c : normalized) {
+                if (c != ' ') {
+                    all_whitespace = false;
+                    break;
+                }
+            }
+        }
+    }
     
     // Check if current font differs from default - if so, wrap text in a span
     // BUT skip this if we're inside a styled span (like \textbf{}) to prevent double-wrapping
@@ -4658,23 +5792,10 @@ void LatexProcessor::processText(const char* text) {
             return;
         }
         
-        std::string content = normalized;
-        
-        // Strip leading whitespace only if flagged (after a font declaration command)
-        if (should_strip_leading) {
-            size_t start = 0;
-            while (start < content.length() && content[start] == ' ') {
-                start++;
-            }
-            if (start > 0) {
-                content = content.substr(start);
-            }
-        }
-        
         // Wrap content in span with font class
-        if (!content.empty()) {
+        if (!normalized.empty()) {
             gen_->span(font_class.c_str());
-            gen_->text(content.c_str());
+            gen_->text(normalized.c_str());
             gen_->closeElement();
         }
     } else if (!all_whitespace || normalized.length() == 1) {
@@ -4685,11 +5806,26 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Handle brack_group at top level - this is literal [] text, not an optional argument
+    // When [] appears outside a command context, it's just literal text
+    if (strcmp(cmd_name, "brack_group") == 0) {
+        ensureParagraph();
+        gen_->text("[");
+        processChildren(elem);
+        gen_->text("]");
+        return;
+    }
+    
     // Handle curly_group (TeX brace groups) - important for font scoping
     // Groups in TeX (e.g., { \bfseries text }) limit the scope of declarations
     // latex.js adds zero-width space (U+200B) at group boundaries for visual separation
     if (strcmp(cmd_name, "curly_group") == 0) {
         gen_->enterGroup();
+        
+        // Save strip_next_leading_space_ flag - it should not persist beyond group scope
+        // Commands like \ignorespaces only affect whitespace in the current group
+        bool saved_strip_flag = strip_next_leading_space_;
+        strip_next_leading_space_ = false;  // Reset for group content
         
         // Check if group is empty (has no children or only whitespace)
         ElementReader reader(elem);
@@ -4746,6 +5882,9 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         
         processChildren(elem);
         gen_->exitGroup();
+        
+        // Restore strip_next_leading_space_ flag after group
+        strip_next_leading_space_ = saved_strip_flag;
         
         // ZWS at exit for certain depths
         // - depth 1 (document level): 
@@ -4846,6 +5985,10 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         if (c == '\'' || c == '`' || c == '^' || c == '~' || c == '"' || 
             c == '=' || c == '.' || c == 'u' || c == 'v' || c == 'H' ||
             c == 't' || c == 'c' || c == 'd' || c == 'b' || c == 'r' || c == 'k') {
+            // Fall through to command processing
+        } else if (c == 'i' || c == 'j' || c == 'l' || c == 'L' || 
+                   c == 'o' || c == 'O') {
+            // Special characters: dotless i/j, Polish l/L, Scandinavian o/O
             // Fall through to command processing
         } else {
             // Literal escaped character - output as text
@@ -4955,7 +6098,8 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     }
     
     // Handle block vs inline commands differently
-    if (isBlockCommand(cmd_name)) {
+    // In restricted horizontal mode (inside \mbox), block commands should NOT close paragraph
+    if (isBlockCommand(cmd_name) && !restricted_h_mode_) {
         // Close paragraph before block commands
         closeParagraphIfOpen();
     } else if (isInlineCommand(cmd_name)) {

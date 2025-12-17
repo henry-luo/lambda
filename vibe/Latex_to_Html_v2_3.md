@@ -8,47 +8,79 @@
 
 ## 1. Executive Summary
 
-### Current State Analysis (Updated after Session Work)
+### Current State Analysis (Updated: Dec 18, 2025 - Session 3)
 
 | Metric | Value |
 |--------|-------|
-| **Total Tests** | 108 |
-| **Passing** | 45 (41.7%) |
-| **Failing** | 63 (58.3%) |
+| **Total Tests** | 104 |
+| **Passing** | 50 (48.1%) |
+| **Failing** | 54 (51.9%) |
 
-### Progress This Session
-- Started: 41 passing (38%)
-- Now: 45 passing (41.7%)
-- Gained: 4 tests
+### Progress History
+| Session | Start | End | Delta | Key Focus |
+|---------|-------|-----|-------|-----------|
+| Session 1 | 41 (38%) | 45 (41.7%) | +4 | ensureParagraph, basic commands |
+| Session 2 | 45 (41.7%) | 53 (49.1%) | +8 | ZWS handling, curly_group logic |
+| Session 3 | 50 | 50 | +0 (analysis) | Linebreak dimension handling implemented |
+| **Total** | 41 (38%) | 50 (48.1%) | **+9** | |
 
-### Key Fixes Made
+### Session 3 Fixes (Dec 18, 2025)
+1. **Linebreak with dimensions** (`\\[1cm]`): Implemented lookahead in `processChildren()` to detect linebreak followed by brack_group and output `<span class="breakspace" style="margin-bottom:...">` 
+2. **Relative unit preservation**: `em` and `ex` units are now preserved as-is instead of converting to pixels
+3. **spacing_tex_2 fixed**: Now passes with proper `margin-bottom:37.795px` output
+4. Note: Test count changed from 108 to 104 (fixture cleanup)
+
+### Session 2 Fixes (Dec 17, 2025)
+1. **fonts_tex_3 ZWS fix**: Added `has_trailing_space` check at depth 1 to prevent ZWS before `</p>`
+2. **groups_tex_1 ZWS fix**: Implemented depth-based ZWS logic (depth 1 = trailing space, depth 2 = always)
+3. **text_tex_5 empty group ZWS**: Modified `cmd_textbackslash()` to check for empty curly_group child and output ZWS
+4. **String command detection**: Added logic to detect embedded LaTeX commands like `\textbackslash` within text strings
+
+### Session 1 Fixes (Earlier)
 1. Added `ensureParagraph()` to inline commands (TeX, LaTeX, today, spacing, box commands)
 2. Made `ensureParagraph()` public so command handlers can access it
 3. Added `\textbackslash` command implementation
 4. Added discretionary hyphen (`\-`) handling
 5. Fixed fixture inconsistencies in alignment class names (latex-center → list center)
 
-### Failure Distribution by Category (Updated)
+### Failure Distribution by Category (Updated Dec 18, 2025)
 
 | Category | Failed | Passed | Total | Pass Rate | Priority |
 |----------|--------|--------|-------|-----------|----------|
-| whitespace | 22 | 10 | 32 | 31% | P1 |
-| text | 14 | 4 | 18 | 22% | P1 |
-| label-ref | 7 | 0 | 7 | 0% | P2 |
-| environments | 12 | 8 | 20 | 40% | P1 |
-| macros | 10 | 1 | 11 | 9% | P3 |
-| symbols | 8 | 0 | 8 | 0% | P2 |
-| fonts | 8 | 4 | 12 | 33% | P2 |
-| boxes | 4 | 1 | 5 | 20% | P3 |
-| spacing | 6 | 1 | 7 | 14% | P2 |
-| sectioning | 3 | 0 | 3 | 0% | P2 |
-| layout-marginpar | 3 | 0 | 3 | 0% | P3 |
-| groups | 6 | 0 | 6 | 0% | P2 |
-| counters | 4 | 0 | 4 | 0% | P2 |
-| basic_text | 2 | 6 | 8 | 75% | ✓ |
-| formatting | 0 | 6 | 6 | 100% | ✓ |
-| basic_test | 0 | 2 | 2 | 100% | ✓ |
-| preamble | 0 | 1 | 1 | 100% | ✓ |
+| whitespace | 22 | 10 | 32 | 31% | P1 - High volume |
+| environments | 12 | 8 | 20 | 40% | P1 - Many tests |
+| text | 10 | 5 | 15 | 33% | P1 - Quick wins |
+| macros | 10 | 1 | 11 | 9% | P3 - Needs macro system |
+| label_ref | 8 | 3 | 11 | 27% | P2 |
+| boxes | 8 | 0 | 8 | 0% | P3 |
+| layout_marginpar | 6 | 0 | 6 | 0% | P3 |
+| sectioning | 6 | 0 | 6 | 0% | P2 |
+| symbols | 6 | 1 | 7 | 14% | P2 |
+| fonts | 4 | 6 | 10 | 60% | P2 - Near complete |
+| groups | 4 | 1 | 5 | 20% | P2 |
+| basic_text | 4 | 4 | 8 | 50% | P2 |
+| counters | 4 | 0 | 4 | 0% | P3 - Needs counter system |
+| spacing | 2 | 2 | 4 | 50% | ✓ Improved |
+| formatting | 0 | 6 | 6 | 100% | ✓ Complete |
+| basic_test | 0 | 2 | 2 | 100% | ✓ Complete |
+| preamble | 0 | 1 | 1 | 100% | ✓ Complete |
+
+### Priority Tiers for Next Session
+
+**Tier 1 - High Impact / Quick Wins** (Target: +10-15 tests)
+1. **Whitespace fixes**: 22 failing with 10 passing - find patterns
+2. **Text fixes**: 10 failing with 5 passing
+3. **Environments**: 12 failing - likely enumerate/itemize edge cases
+
+**Tier 2 - Medium Effort** (Target: +5-10 tests)
+1. **Fonts**: 4 failing - fonts_tex_7, fonts_tex_8 need font span to wrap breakspace
+2. **Label/ref**: 8 failing with 3 passing
+3. **Groups**: 4 failing - scope handling
+
+**Tier 3 - Infrastructure Required** (Defer)
+1. **Macros**: Needs macro expansion system
+2. **Counters**: Needs counter registry
+3. **Layout/marginpar**: Needs CSS positioning
 
 ---
 
@@ -548,7 +580,42 @@ lambda/tree-sitter-latex/grammar.js     - Character codes (minor)
 
 ---
 
-## 9. Appendix: Detailed Failure Analysis
+## 9. Session 3 Implementation Summary
+
+### Key Change: Linebreak with Dimension Handling
+
+**File**: `lambda/format/format_latex_html_v2.cpp`
+
+**Change**: Modified `processChildren()` to use index-based iteration with lookahead to detect `linebreak` element followed by `brack_group` and output proper CSS-styled span.
+
+**Code Location**: Lines 4517-4600
+
+**Behavior**:
+- `\\[1cm]` → `<span class="breakspace" style="margin-bottom:37.795px"></span>`
+- `\\[1em]` → `<span class="breakspace" style="margin-bottom:1em"></span>` (relative units preserved)
+- `\\` alone → `<br>` (no change)
+
+**Tests Fixed**: spacing_tex_2 (+1)
+
+### Known Issues for Future Work
+
+1. **ZWS for empty curly groups** (basic_text_tex_4 failure)
+   - `\^{} \&` outputs `^​ &` instead of `^ &`
+   - Empty groups followed by whitespace should NOT output ZWS
+   - Requires context-aware lookahead
+
+2. **Font span wrapping breakspace** (fonts_tex_7, fonts_tex_8)
+   - Expected: `<span class="small"><span class="breakspace"...></span></span>`
+   - Actual: `<span class="small">...</span><span class="breakspace"...></span>`
+   - Requires font state tracking during linebreak output
+
+3. **Verb command** (basic_text_tex_6, text_tex_8)
+   - `\verb|...|` not parsed correctly by grammar
+   - Requires external scanner or grammar enhancement
+
+---
+
+## 10. Appendix: Detailed Failure Analysis
 
 ### A. Whitespace Failures (22)
 | Test | Issue | Category |
