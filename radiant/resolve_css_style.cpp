@@ -1828,7 +1828,37 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum align_value = value->data.keyword;
-                if (align_value != CSS_VALUE__UNDEF) {
+
+                // Handle explicit 'inherit' keyword
+                if (align_value == CSS_VALUE_INHERIT) {
+                    // Find parent's text-align value
+                    DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+
+                    while (parent) {
+                        if (parent->specified_style) {
+                            CssDeclaration* parent_decl = style_tree_get_declaration(
+                                parent->specified_style, CSS_PROPERTY_TEXT_ALIGN);
+                            if (parent_decl && parent_decl->value &&
+                                parent_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum parent_align = parent_decl->value->data.keyword;
+                                if (parent_align != CSS_VALUE_INHERIT && parent_align != CSS_VALUE__UNDEF) {
+                                    block->blk->text_align = parent_align;
+                                    log_debug("[CSS] Text-align: inherit resolved to parent value %d", parent_align);
+                                    break;
+                                }
+                            }
+                        }
+                        parent = parent->parent ? static_cast<DomElement*>(parent->parent) : nullptr;
+                    }
+
+                    // If no parent value found, use default (left)
+                    if (!parent) {
+                        block->blk->text_align = CSS_VALUE_LEFT;
+                        log_debug("[CSS] Text-align: inherit with no parent, using LEFT");
+                    }
+                }
+                else if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
                     const CssEnumInfo* info = css_enum_info(align_value);
                     log_debug("[CSS] Text-align: %s -> 0x%04X", info ? info->name : "unknown", align_value);
@@ -3573,9 +3603,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
-                    // Note: Adding text_transform field to BlockProp would be needed
-                    // For now, log the value that would be set
-                    log_debug("[CSS] text-transform: %s -> 0x%04X (field not yet added to BlockProp)",
+                    block->blk->text_transform = val;
+                    log_debug("[CSS] text-transform: %s -> 0x%04X",
                              css_enum_info(value->data.keyword)->name, val);
                 }
             }
@@ -3617,8 +3646,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
-                    // Note: Adding word_break field to BlockProp would be needed
-                    log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)",
+                    block->blk->word_break = val;
+                    log_debug("[CSS] word-break: %s -> 0x%04X",
                              css_enum_info(value->data.keyword)->name, val);
                 }
             }
@@ -3667,16 +3696,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LETTER_SPACING: {
             log_debug("[CSS] Processing letter-spacing property");
-            if (!span->font) {
-                log_debug("[CSS] letter-spacing: FontProp is NULL");
-                break;
-            }
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
+
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float spacing = resolve_length_value(lycon, prop_id, value);
-                // Note: Adding letter_spacing field to FontProp would be needed
-                log_debug("[CSS] letter-spacing: %.2fpx (field not yet added to FontProp)", spacing);
+                span->font->letter_spacing = spacing;
+                log_debug("[CSS] letter-spacing: %.2fpx", spacing);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
-                log_debug("[CSS] letter-spacing: normal -> 0px (field not yet added to FontProp)");
+                span->font->letter_spacing = 0.0f;
+                log_debug("[CSS] letter-spacing: normal -> 0px");
             }
             break;
         }

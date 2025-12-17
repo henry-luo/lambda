@@ -2290,6 +2290,26 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
         else if (child->is_element()) {
             // For nested block/inline elements, check for explicit CSS width first
             DomElement* child_elem = child->as_element();
+
+            // CSS 2.1: Floats are taken out of normal flow and don't contribute to intrinsic width
+            if (child_elem->specified_style && child_elem->specified_style->tree) {
+                AvlNode* float_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+                if (float_node) {
+                    StyleNode* style_node = (StyleNode*)float_node->declaration;
+                    if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                        CssValue* val = style_node->winning_decl->value;
+                        if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                            CssEnum float_val = val->data.keyword;
+                            if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
+                                log_debug("PCW: skipping floated element %s (float=%d)",
+                                         child->node_name(), float_val);
+                                continue; // Skip floats - they don't contribute to content width
+                            }
+                        }
+                    }
+                }
+            }
+
             float child_width = 0;
 
             if (child_elem->specified_style) {
@@ -2324,18 +2344,66 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                 }
             }
 
-            // If still no explicit width, perform temporary layout to measure
+            // If still no explicit width, check if it's a block or inline element
             if (child_width == 0) {
-                float child_start_x = lycon->line.advance_x;
+                DisplayValue child_display = resolve_display_value(child);
 
-                // Temporarily layout the child element in measurement mode
-                layout_flow_node(lycon, child);
+                if (child_display.outer == CSS_VALUE_BLOCK) {
+                    // Block elements: recursively measure their content width
+                    // Don't layout them (they'd fill 10000px container)
+                    // Instead, measure text children directly
+                    float block_content_width = 0.0f;
 
-                // Measure the width consumed by this child
-                // Note: For block elements, this may return 0 since blocks don't advance line.advance_x
-                // This is intentional - cells with only block content rely on padding for width.
-                // For tables with explicit HTML width attribute, we already captured that above.
-                child_width = lycon->line.advance_x - child_start_x;
+                    if (child_elem->first_child) {
+                        for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
+                            if (grandchild->is_text()) {
+                                const unsigned char* text = grandchild->text_data();
+                                if (text && *text) {
+                                    size_t text_len = strlen((const char*)text);
+                                    const char* measure_text = (const char*)text;
+                                    size_t measure_len = text_len;
+                                    std::string normalized;
+
+                                    if (collapse_ws) {
+                                        normalized = normalize_whitespace((const char*)text, text_len);
+                                        if (normalized.empty()) continue;
+                                        measure_text = normalized.c_str();
+                                        measure_len = normalized.length();
+                                    }
+
+                                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+                                        lycon, measure_text, measure_len);
+                                    float text_width = (float)widths.max_content;
+                                    if (text_width > block_content_width) block_content_width = text_width;
+                                }
+                            }
+                        }
+                    }
+
+                    child_width = block_content_width;
+                    log_debug("PCW: block %s content width=%.1f", child->node_name(), child_width);
+                } else {
+                    // Inline element: layout it to measure width
+                    float child_start_x = lycon->line.advance_x;
+                    float saved_max_width = lycon->block.max_width;
+                    lycon->block.max_width = 0; // Reset to track this child's width
+
+                    log_debug("PCW: before layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
+                             child->node_name(), child_start_x, lycon->block.max_width);
+
+                    // Temporarily layout the child element in measurement mode
+                    layout_flow_node(lycon, child);
+
+                    log_debug("PCW: after layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
+                             child->node_name(), lycon->line.advance_x, lycon->block.max_width);
+
+                    // For inline elements with block children, line_break() resets advance_x,
+                    // so we use block.max_width which tracks maximum line width reached
+                    child_width = max(lycon->block.max_width, lycon->line.advance_x - child_start_x);
+
+                    lycon->block.max_width = saved_max_width; // Restore
+                    log_debug("PCW: child %s measured width=%.1f", child->node_name(), child_width);
+                }
             }
 
             if (child_width > max_width) max_width = child_width;
@@ -2437,6 +2505,26 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
         else if (child->is_element()) {
             // For nested elements, check for explicit width first
             DomElement* child_elem = child->as_element();
+
+            // CSS 2.1: Floats are taken out of normal flow and don't contribute to intrinsic width
+            if (child_elem->specified_style && child_elem->specified_style->tree) {
+                AvlNode* float_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+                if (float_node) {
+                    StyleNode* style_node = (StyleNode*)float_node->declaration;
+                    if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                        CssValue* val = style_node->winning_decl->value;
+                        if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                            CssEnum float_val = val->data.keyword;
+                            if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
+                                log_debug("MCW: skipping floated element %s (float=%d)",
+                                         child->node_name(), float_val);
+                                continue; // Skip floats - they don't contribute to content width
+                            }
+                        }
+                    }
+                }
+            }
+
             float child_min = 0.0f;
 
             // Check for CSS explicit width

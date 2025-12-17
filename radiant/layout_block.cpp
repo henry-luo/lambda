@@ -693,12 +693,23 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             layout_iframe(lycon, block, block->display);
         }
         else if (elmt_name == HTM_TAG_HR) {
-            // hr element: height is determined by border-top + border-bottom
-            // It has no content, so content height is 0
-            float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
-            float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
-            block->height = border_top + border_bottom;
-            log_debug("hr layout: border_top=%f, border_bottom=%f, height=%f", border_top, border_bottom, block->height);
+            // hr element: Use explicit height if specified, otherwise use border height
+            if (lycon->block.given_height >= 0) {
+                // CSS height property is set - use it as content height
+                float content_height = lycon->block.given_height;
+                float padding_top = block->bound && block->bound->padding.top > 0 ? block->bound->padding.top : 0;
+                float padding_bottom = block->bound && block->bound->padding.bottom > 0 ? block->bound->padding.bottom : 0;
+                float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
+                float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
+                block->height = content_height + padding_top + padding_bottom + border_top + border_bottom;
+                log_debug("hr layout: explicit height=%f, total=%f", content_height, block->height);
+            } else {
+                // No explicit height - use border thickness (traditional hr behavior)
+                float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
+                float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
+                block->height = border_top + border_bottom;
+                log_debug("hr layout: border-only height=%f", block->height);
+            }
         }
         // else HTM_TAG_IMG
     } else {  // layout block child content
