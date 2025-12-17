@@ -1,6 +1,6 @@
 # LaTeX to HTML V2 - Design Document
 
-**Date**: December 12, 2025  
+**Date**: December 17, 2025  
 **Status**: Production Ready (Phases 1-8 Complete - **100% COVERAGE ACHIEVED**)  
 **Objective**: Translate LaTeX.js formatting logic to C++ for Lambda runtime
 
@@ -81,6 +81,251 @@ Symbol("newpage")  // Just a symbol
 - `command_name` tokens: Extract text as String (e.g., `\greet` → `"greet"`)
 - `color_reference`: Specialized handler for color commands
 - `graphics_include`: Structured option parsing for images
+- `verb_command`: External scanner for verbatim text (see below)
+
+### External Scanner: `\verb` Command Implementation
+
+The `\verb` command presents unique parsing challenges because it uses **arbitrary delimiters** and treats content as **literal text** (no interpretation of backslashes, braces, or other LaTeX syntax). This cannot be expressed in Tree-sitter's grammar alone and requires an **external scanner**.
+
+#### Pattern 1: Context-Gated External Token
+
+We use **Pattern 1** from Tree-sitter's external scanner design patterns:
+
+**Pattern Definition**: External scanner only emits token when `valid_symbols[TOKEN]` is true (i.e., parser makes it valid in current state). The scanner checks this immediately and returns false if not valid.
+
+**Why Pattern 1?**
+- Tree-sitter's lexer would normally tokenize `\verb` as `command_name` before considering the external scanner
+- By declaring `verb_command` as a specific alternative in the grammar (not just an external token), the parser makes `VERB_COMMAND` valid in `_inline` contexts
+- When valid, scanner takes precedence and matches the full `\verb<delim>content<delim>` pattern
+
+#### Grammar Setup
+
+**File**: `lambda/tree-sitter-latex/grammar.js`
+
+```javascript
+externals: $ => [
+  // ... other externals
+  $._verb_command,  // Line 25: Declare external token
+],
+
+conflicts: $ => [
+  // ... other conflicts
+  [$.verb_command, $.command],  // Lines 32-33: GLR disambiguation
+],
+
+// Lines 140-147: Rule using external token
+verb_command: $ => $._verb_command,  // Pattern 1: context-gated
+
+_inline: $ => choice(
+  $.verb_command,    // Line 107: Place BEFORE $.command
+  $.command,         // Regular commands come after
+  // ... other inline elements
+),
+```
+
+**Key Points**:
+1. **External declaration**: `$._verb_command` in externals array
+2. **Conflict resolution**: Tell Tree-sitter `verb_command` and `command` can conflict (enables GLR)
+3. **Context placement**: Put `verb_command` in `_inline` choice **before** `command`
+4. **Simple rule**: `verb_command: $ => $._verb_command` (just references external token)
+
+#### External Scanner Implementation
+
+**File**: `lambda/tree-sitter-latex/src/scanner.c`
+
+```c
+// Line 12: Token type enum
+enum TokenType {
+  // ... other tokens
+  VERB_COMMAND,
+};
+
+// Lines 190-238: Scanner function
+static bool scan_verb_command(TSLexer *lexer) {
+  // Must start with backslash
+  if (lexer->lookahead != '\\') return false;
+  lexer->advance(lexer, false);
+  
+  // Must have "verb"
+  if (!try_match_string(lexer, "verb")) return false;
+  
+  // Optional star: \verb*
+  if (lexer->lookahead == '*') {
+    lexer->advance(lexer, false);
+  }
+  
+  // Capture delimiter (next character)
+  unsigned char delimiter = lexer->lookahead;
+  if (delimiter == '\n' || delimiter == '\r') return false;  // No newline delimiters
+  lexer->advance(lexer, false);
+  
+  // Scan until matching delimiter
+  while (!lexer->eof(lexer)) {
+    if (lexer->lookahead == delimiter) {
+      lexer->advance(lexer, false);
+      lexer->mark_end(lexer);  // Success!
+      return true;
+    }
+    
+    // Verbatim content cannot span lines
+    if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
+      return false;
+    }
+    
+    lexer->advance(lexer, false);
+  }
+  
+  return false;  // EOF before closing delimiter
+}
+
+// Lines 260-267: Pattern 1 gate
+bool tree_sitter_latex_external_scanner_scan(
+    void *payload, TSLexer *lexer, const bool *valid_symbols
+) {
+  // Pattern 1: Check if parser wants this token
+  if (valid_symbols[VERB_COMMAND] && lexer->lookahead == '\\') {
+    if (scan_verb_command(lexer)) {
+      lexer->result_symbol = VERB_COMMAND;
+      return true;
+    }
+  }
+  
+  // ... other token types
+  return false;
+}
+```
+
+**Pattern 1 Gate**: `if (valid_symbols[VERB_COMMAND])` - only try scanning if parser makes token valid
+
+#### AST Builder Integration
+
+**File**: `lambda/input/input-latex-ts.cpp`
+
+```cpp
+// Line 50: Node type classification
+{"verb_command", NODE_CONTAINER},
+
+// Lines 394-406: Special handling
+if (strcmp(node_type, "verb_command") == 0) {
+  // Extract full token text (e.g., "\verb|text|")
+  uint32_t start = ts_node_start_byte(node);
+  uint32_t end = ts_node_end_byte(node);
+  const char* text = source + start;
+  size_t len = end - start;
+  
+  // Create element with tag "verb_command"
+  ElementBuilder elem = builder.element("verb_command");
+  
+  // Store token as string child (not attribute - more reliable)
+  Item token_string = builder.createStringItem(text, len);
+  elem.child(token_string);
+  
+  return elem.final();
+}
+```
+
+**Design Decision**: Store full token text (`\verb|text|`) as a **string child** rather than attribute, because:
+- Attributes had type issues (stored as null type)
+- Child extraction via `childAt(0)` is more reliable
+- Allows formatter to parse delimiter and content
+
+#### Formatter Implementation
+
+**File**: `lambda/format/format_latex_html_v2.cpp`
+
+```cpp
+// Lines 2715-2760: Handler function
+static void cmd_verb_command(LatexProcessor* proc, Item elem) {
+  HtmlGenerator* gen = proc->generator();
+  ElementReader elem_reader(elem);
+  
+  // Get token text from first child
+  ItemReader first_child = elem_reader.childAt(0);
+  const char* text = first_child.cstring();  // "\verb|text|" or "\verb+text+"
+  
+  // Parse token structure
+  // Skip "\verb" prefix (5 characters)
+  const char* delimiter_start = text + 5;
+  
+  // Skip optional star (if present)
+  if (*delimiter_start == '*') {
+    delimiter_start++;
+  }
+  
+  // Extract delimiter character
+  char delim = *delimiter_start;
+  
+  // Find content between delimiters
+  const char* content_start = delimiter_start + 1;
+  const char* content_end = strchr(content_start, delim);
+  
+  if (!content_end) {
+    // Malformed - missing closing delimiter
+    gen->text(text);
+    return;
+  }
+  
+  size_t content_len = content_end - content_start;
+  
+  // Output: <code class="latex-verbatim">content</code>
+  gen->writer()->openTagRaw("code", "class=\"latex-verbatim\"");
+  std::string content(content_start, content_len);
+  gen->writer()->writeText(content.c_str());
+  gen->writer()->closeTag("code");
+}
+
+// Line 4867: Registration
+command_table_["verb_command"] = cmd_verb_command;
+```
+
+**Output**: `\verb|text|` → `<code class="latex-verbatim">text</code>`
+
+#### Testing
+
+**Multiple Delimiters**:
+```latex
+\verb|pipe delimiter|     → <code class="latex-verbatim">pipe delimiter</code>
+\verb+plus delimiter+     → <code class="latex-verbatim">plus delimiter</code>
+\verb/slash delimiter/    → <code class="latex-verbatim">slash delimiter</code>
+\verb*|visible spaces|    → <code class="latex-verbatim">visible spaces</code>
+```
+
+**Test Results**: All delimiter types work correctly ✅
+
+#### Why This Approach Works
+
+**Previous Failure**: Without Pattern 1 setup, `valid_symbols[VERB_COMMAND]` was always 0 because:
+- Lexer tokenized `\verb` as `command_name` immediately
+- Parser never considered `verb_command` as alternative
+- External scanner never called
+
+**Pattern 1 Solution**:
+1. Grammar declares `verb_command` as alternative in `_inline` (line 107)
+2. Parser tries both `verb_command` and `command` paths (GLR)
+3. When trying `verb_command`, sets `valid_symbols[VERB_COMMAND] = true`
+4. Scanner sees valid flag, matches full pattern `\verb<delim>content<delim>`
+5. Returns `VERB_COMMAND` token to parser
+6. Parser selects `verb_command` path (GLR resolution)
+
+**Key Insight**: External scanners work through **parser context**, not by overriding the lexer globally.
+
+#### Limitations & Future Work
+
+**Current Implementation**:
+- ✅ Arbitrary delimiters (any character except newline)
+- ✅ Star variant: `\verb*` (parsed but not differently formatted)
+- ✅ Multi-word content
+- ✅ Special characters in content
+
+**Not Yet Implemented**:
+- ❌ Visible spaces for `\verb*` (currently treated same as `\verb`)
+- ❌ `verbatim` environment (different parser challenge)
+- ❌ Error recovery for missing closing delimiter (currently fails silently)
+
+**Alternative Approaches Considered**:
+- **Lexer precedence**: Can't work - Tree-sitter lexer scans before parser context
+- **Grammar-only solution**: Can't work - need to match arbitrary delimiters dynamically
+- **Pattern 2 (Lexer Context)**: Overkill - Pattern 1 sufficient for this use case
 
 ### Viewing the Lambda Tree
 
@@ -678,7 +923,7 @@ diff lambda_output.html latexjs_output.html
 - Hyperlinks: `\url`, `\href`
 - Line breaking: `\\`, `\newline`, `\newpage`
 - Footnotes: `\footnote`
-- Verbatim: `\verb`, `verbatim` environment
+- Verbatim: `\verb` (via external scanner - see section 2.3), `verbatim` environment
 
 **Phase 2: Tables & Floats** (25/25 tests)
 - Tables: `tabular` environment with `\hline`, `\multicolumn`
@@ -761,7 +1006,8 @@ diff lambda_output.html latexjs_output.html
 
 **Known Limitations**:
 - **Empty curly groups**: `\^{}` and `\~{}` now correctly output no ZWS (fixed)
-- **Verbatim**: `\verb|...|` not implemented
+- **Verbatim command**: `\verb|...|` now implemented via external scanner (fixed) ✅
+- **Verbatim environment**: `verbatim` environment not yet implemented
 - **Smart quotes**: Single quotes not converted to typographic quotes
 
 **Recent Fixes** (December 17, 2025):

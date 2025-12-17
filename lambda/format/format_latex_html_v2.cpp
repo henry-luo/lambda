@@ -330,6 +330,7 @@ public:
     void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
     void setNextParagraphIsNoindent() { next_paragraph_is_noindent_ = true; }
     void ensureParagraph();  // Start a paragraph if not already in one
+    bool inParagraph() const { return in_paragraph_; }  // Check if currently in a paragraph
     
     // Macro system functions (public so command handlers can access)
     void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
@@ -2057,6 +2058,10 @@ static std::string codepoint_to_utf8(uint32_t codepoint) {
 
 static void cmd_char(LatexProcessor* proc, Item elem) {
     // \char<number> or \char"<hex> - output character by code
+    // NOTE: \char is a TeX primitive that consumes the following number token.
+    // The parser creates <char/> followed by "98" as siblings, not parent-child.
+    // This command currently doesn't work correctly due to this parser limitation.
+    // TODO: Fix parser to consume following number, or implement lookahead in formatter.
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     
@@ -3061,24 +3066,76 @@ static void cmd_addvspace(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_smallbreak(LatexProcessor* proc, Item elem) {
-    // \smallbreak - small vertical break
+    // \smallbreak - small vertical break with paragraph break
+    // Ends current paragraph and outputs span between paragraphs
+    log_debug("cmd_smallbreak: calling endParagraph");
+    proc->endParagraph();
     HtmlGenerator* gen = proc->generator();
-    gen->div("vspace smallskip");
+    log_debug("cmd_smallbreak: outputting span");
+    gen->span("vspace smallskip");
     gen->closeElement();
+    log_debug("cmd_smallbreak: done");
 }
 
 static void cmd_medbreak(LatexProcessor* proc, Item elem) {
-    // \medbreak - medium vertical break
+    // \medbreak - medium vertical break with paragraph break
+    proc->endParagraph();
     HtmlGenerator* gen = proc->generator();
-    gen->div("vspace medskip");
+    gen->span("vspace medskip");
     gen->closeElement();
 }
 
 static void cmd_bigbreak(LatexProcessor* proc, Item elem) {
-    // \bigbreak - big vertical break
+    // \bigbreak - big vertical break with paragraph break
+    proc->endParagraph();
     HtmlGenerator* gen = proc->generator();
-    gen->div("vspace bigskip");
+    gen->span("vspace bigskip");
     gen->closeElement();
+}
+
+static void cmd_smallskip(LatexProcessor* proc, Item elem) {
+    // \smallskip - small vertical space
+    // In LaTeX, skip commands have different behavior based on mode:
+    // - Horizontal mode (inline): stays inline with text → <span class="vspace-inline smallskip"></span>
+    // - Vertical mode (block): creates space between paragraphs → <span class="vspace smallskip"></span>
+    HtmlGenerator* gen = proc->generator();
+    log_debug("cmd_smallskip: inParagraph=%d", proc->inParagraph());
+    
+    if (proc->inParagraph()) {
+        // Inline context: output inline span within paragraph
+        gen->span("vspace-inline smallskip");
+        gen->closeElement();
+    } else {
+        // Block context: output span between paragraphs
+        gen->span("vspace smallskip");
+        gen->closeElement();
+    }
+}
+
+static void cmd_medskip(LatexProcessor* proc, Item elem) {
+    // \medskip - medium vertical space
+    HtmlGenerator* gen = proc->generator();
+    
+    if (proc->inParagraph()) {
+        gen->span("vspace-inline medskip");
+        gen->closeElement();
+    } else {
+        gen->span("vspace medskip");
+        gen->closeElement();
+    }
+}
+
+static void cmd_bigskip(LatexProcessor* proc, Item elem) {
+    // \bigskip - large vertical space
+    HtmlGenerator* gen = proc->generator();
+    
+    if (proc->inParagraph()) {
+        gen->span("vspace-inline bigskip");
+        gen->closeElement();
+    } else {
+        gen->span("vspace bigskip");
+        gen->closeElement();
+    }
 }
 
 static void cmd_vfill(LatexProcessor* proc, Item elem) {
@@ -4914,6 +4971,9 @@ void LatexProcessor::initCommandTable() {
     command_table_["hspace"] = cmd_hspace;
     command_table_["vspace"] = cmd_vspace;
     command_table_["addvspace"] = cmd_addvspace;
+    command_table_["smallskip"] = cmd_smallskip;
+    command_table_["medskip"] = cmd_medskip;
+    command_table_["bigskip"] = cmd_bigskip;
     command_table_["smallbreak"] = cmd_smallbreak;
     command_table_["medbreak"] = cmd_medbreak;
     command_table_["bigbreak"] = cmd_bigbreak;
@@ -5269,6 +5329,7 @@ void LatexProcessor::processNode(Item node) {
         // Command or environment - use ElementReader
         ElementReader elem_reader(node);
         const char* tag = elem_reader.tagName();
+        log_debug("processNode: ELEMENT tag='%s'", tag);
         
         // Special handling for root element
         if (strcmp(tag, "latex_document") == 0) {
@@ -5304,7 +5365,6 @@ void LatexProcessor::processNode(Item node) {
         }
         
         // Process command
-        log_debug("latex_html_v2: processNode calling processCommand with tag='%s'", tag);
         processCommand(tag, node);
         return;
     }
@@ -6118,6 +6178,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     auto it = command_table_.find(cmd_name);
     if (it != command_table_.end()) {
         // Call command handler
+        log_debug("processCommand: calling handler for '%s'", cmd_name);
         it->second(this, elem);
         
         // Exit inline element tracking
