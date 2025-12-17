@@ -715,7 +715,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
             wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
-            // log_debug("char width: '%c', width %f", *str, wd);
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
