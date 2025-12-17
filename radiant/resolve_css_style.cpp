@@ -3696,16 +3696,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LETTER_SPACING: {
             log_debug("[CSS] Processing letter-spacing property");
-            if (!span->font) {
-                log_debug("[CSS] letter-spacing: FontProp is NULL");
-                break;
-            }
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
+            
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float spacing = resolve_length_value(lycon, prop_id, value);
-                // Note: Adding letter_spacing field to FontProp would be needed
-                log_debug("[CSS] letter-spacing: %.2fpx (field not yet added to FontProp)", spacing);
+                span->font->letter_spacing = spacing;
+                log_debug("[CSS] letter-spacing: %.2fpx", spacing);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
-                log_debug("[CSS] letter-spacing: normal -> 0px (field not yet added to FontProp)");
+                span->font->letter_spacing = 0.0f;
+                log_debug("[CSS] letter-spacing: normal -> 0px");
             }
             break;
         }
