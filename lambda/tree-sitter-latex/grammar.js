@@ -81,14 +81,15 @@ module.exports = grammar({
 
     // ========================================================================
     // Sections (matches LaTeX.js section handling via macros)
+    // Sections are NOT containers - they just produce heading output.
+    // Content after a section is at the same level (siblings, not children).
     // ========================================================================
 
-    section: $ => prec.right(seq(
+    section: $ => seq(
       field('command', $.section_command),
       optional(field('toc', $.brack_group)),     // [short title]
       field('title', $.curly_group),             // {title}
-      repeat($._block),                          // content until next section
-    )),
+    ),
 
     section_command: $ => token(/\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?/),
 
