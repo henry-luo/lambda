@@ -213,6 +213,37 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
 
 ### Special Element Handling
 
+**Linebreak in Restricted Mode (`\\` in `\mbox{}`)** (Fixed December 17, 2025):
+
+In LaTeX restricted horizontal mode (inside `\mbox`, `\fbox`), linebreaks cannot actually break lines but still perform whitespace manipulation:
+
+```cpp
+if (restricted_h_mode_) {
+    bool had_trailing_ws = gen_->hasTrailingWhitespace();
+    gen_->trimTrailingWhitespace();  // LaTeX \unskip behavior
+    
+    // Special case: \\[dim] with surrounding whitespace preserves one space
+    // Dimension indicates intentional vertical spacing request
+    if (strcmp(tag, "linebreak") == 0 && has_dimension && 
+        had_trailing_ws && next_has_leading_ws) {
+        gen_->text(" ");  // Preserve word separation
+    }
+    strip_next_leading_space_ = true;  // LaTeX skip behavior
+}
+```
+
+**Rules**:
+1. `\linebreak[N]` (with argument): Always outputs exactly one space
+2. `\\[dim]` with whitespace both sides: Preserve one space (dimension = intentional spacing)
+3. `\\` without dimension OR no surrounding whitespace: Collapse all whitespace
+4. `\newline`: Always collapse all whitespace
+
+**Why Fixture Expectations Appear Conflicting**:
+- `sp \\ ace` → `space` (no dimension, collapse all)
+- `one \\[4cm] space` → `one space` (has dimension + whitespace, preserve one)
+
+Both are correct! The dimension argument changes the semantic intent from "just break line" to "intentional spacing", so one space is preserved to maintain word separation. This matches LaTeX.js behavior where `unskip_macro` in the parser consumes preceding spaces, but `\\[dim]` is treated specially.
+
 **curly_group (`{...}`) - Zero-Width Space Logic**:
 
 Curly groups require special handling for spacing. The formatter outputs a zero-width space (ZWS) to maintain proper text flow, but only under specific conditions:
@@ -730,9 +761,16 @@ diff lambda_output.html latexjs_output.html
 
 **Known Limitations**:
 - **Empty curly groups**: `\^{}` and `\~{}` now correctly output no ZWS (fixed)
-- **Linebreak with dimension**: `\\[1cm]` - parser doesn't associate bracket group with linebreak
 - **Verbatim**: `\verb|...|` not implemented
 - **Smart quotes**: Single quotes not converted to typographic quotes
+
+**Recent Fixes** (December 17, 2025):
+- **Linebreak in mbox (`\\[dim]`)**: Fixed whitespace handling in restricted horizontal mode
+  - `\\[dim]` with surrounding whitespace now preserves one space (indicates intentional spacing)
+  - `\\` without dimension collapses all whitespace (standard LaTeX behavior)
+  - Root cause: Was looking for `brack_group` at wrong index after it was already consumed
+  - Solution: Use `has_dimension` flag (set when brack_group parsed) instead of re-searching
+  - Fixture note: `sp \\ ace` → `space` vs `one \\[4cm] space` → `one space` appear conflicting but both are correct per LaTeX.js unskip behavior
 
 **Next Steps** (Enhancement Phase):
 - Fix remaining baseline test failures

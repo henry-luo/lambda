@@ -2712,6 +2712,63 @@ static void cmd_flushright(LatexProcessor* proc, Item elem) {
     proc->setNextParagraphIsContinue();
 }
 
+static void cmd_verb_command(LatexProcessor* proc, Item elem) {
+    // \verb|text| inline verbatim with delimiter
+    // The external scanner matched the full \verb<delim>text<delim> pattern
+    // The AST builder stored it as a string child
+    HtmlGenerator* gen = proc->generator();
+    
+    ElementReader elem_reader(elem);
+    
+    // Get the token string from the first child
+    if (elem_reader.childCount() < 1) {
+        log_warn("verb_command: no children found");
+        return;
+    }
+    
+    ItemReader first_child = elem_reader.childAt(0);
+    if (!first_child.isString()) {
+        log_warn("verb_command: first child is not a string");
+        return;
+    }
+    
+    const char* text = first_child.cstring();
+    if (!text) {
+        log_warn("verb_command: first child string is null");
+        return;
+    }
+    
+    // Parse: "\verb<delim>content<delim>"
+    // Skip "\verb" (5 chars)
+    if (strlen(text) < 7) {  // Minimum: \verb||
+        log_warn("verb_command: token too short: %s", text);
+        return;
+    }
+    
+    const char* delimiter_start = text + 5;  // After "\verb"
+    char delim = *delimiter_start;
+    
+    // Find content between delimiters
+    const char* content_start = delimiter_start + 1;
+    const char* content_end = strchr(content_start, delim);
+    
+    if (!content_end) {
+        log_warn("verb_command: missing closing delimiter '%c' in: %s", delim, text);
+        return;
+    }
+    
+    size_t content_len = content_end - content_start;
+    
+    // Open <code class="latex-verbatim"> tag
+    gen->writer()->openTagRaw("code", "class=\"latex-verbatim\"");
+    
+    // Output verbatim content (extract substring)
+    std::string content(content_start, content_len);
+    gen->writer()->writeText(content.c_str());
+    
+    gen->writer()->closeTag("code");
+}
+
 static void cmd_verbatim(LatexProcessor* proc, Item elem) {
     // \begin{verbatim} ... \end{verbatim}
     HtmlGenerator* gen = proc->generator();
@@ -4815,6 +4872,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["flushleft"] = cmd_flushleft;
     command_table_["flushright"] = cmd_flushright;
     command_table_["verbatim"] = cmd_verbatim;
+    command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim
     
     // Math environments
     command_table_["math"] = cmd_math;
@@ -5246,6 +5304,7 @@ void LatexProcessor::processNode(Item node) {
         }
         
         // Process command
+        log_debug("latex_html_v2: processNode calling processCommand with tag='%s'", tag);
         processCommand(tag, node);
         return;
     }
