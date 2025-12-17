@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 11,
                   "y": 53,
-                  "width": 87.55,
-                  "height": 16,
-                  "contentWidth": 88,
-                  "contentHeight": 16,
-                  "scrollWidth": 88,
-                  "scrollHeight": 16
+                  "width": 15,
+                  "height": 15,
+                  "contentWidth": 15,
+                  "contentHeight": 15,
+                  "scrollWidth": 15,
+                  "scrollHeight": 15
                 },
                 "computed": {
                   "display": "inline-block",
@@ -919,7 +919,7 @@
                 "classes": [],
                 "layout": {
                   "x": 11,
-                  "y": 69,
+                  "y": 68,
                   "width": 15,
                   "height": 15,
                   "contentWidth": 15,

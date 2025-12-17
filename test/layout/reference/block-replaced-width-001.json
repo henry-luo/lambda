@@ -857,22 +857,22 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 11,
+                  "x": 99.5,
                   "y": 53,
-                  "width": 192,
-                  "height": 18,
-                  "contentWidth": 192,
-                  "contentHeight": 18,
-                  "scrollWidth": 192,
-                  "scrollHeight": 18
+                  "width": 15,
+                  "height": 15,
+                  "contentWidth": 15,
+                  "contentHeight": 15,
+                  "scrollWidth": 15,
+                  "scrollHeight": 15
                 },
                 "computed": {
                   "display": "block",
                   "position": "static",
                   "marginTop": 0,
-                  "marginRight": 0,
+                  "marginRight": 88.5,
                   "marginBottom": 0,
-                  "marginLeft": 0,
+                  "marginLeft": 88.5,
                   "paddingTop": 0,
                   "paddingRight": 0,
                   "paddingBottom": 0,
@@ -919,13 +919,13 @@
                 "classes": [],
                 "layout": {
                   "x": 11,
-                  "y": 71,
+                  "y": 68,
                   "width": 192,
                   "height": 15,
                   "contentWidth": 192,
                   "contentHeight": 15,
                   "scrollWidth": 192,
-                  "scrollHeight": 16
+                  "scrollHeight": 15
                 },
                 "computed": {
                   "display": "block",
@@ -979,12 +979,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 101.58,
-                          "y": 70,
-                          "width": 10.84,
-                          "height": 17,
-                          "right": 112.42,
-                          "bottom": 87,
+                          "x": 99.5,
+                          "y": 68,
+                          "width": 15,
+                          "height": 15,
+                          "right": 114.5,
+                          "bottom": 83,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1
