@@ -76,6 +76,7 @@
         "radiant/ui_context.cpp",
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
+        "radiant/layout_counters.cpp",
         "radiant/block_context.cpp",
         "radiant/layout_inline.cpp",
         "radiant/layout_text.cpp",
@@ -92,6 +93,7 @@
         "radiant/grid_advanced.cpp",
         "radiant/intrinsic_sizing.cpp",
         "radiant/symbol_resolver.cpp",
+        "radiant/layout_counters.cpp",
         "radiant/resolve_htm_style.cpp",
         "radiant/resolve_css_style.cpp",
         "radiant/scroller.cpp",
@@ -1321,7 +1323,9 @@
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp",
-                            "radiant/symbol_resolver.cpp"
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp",
+                            "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_lambda_domnode_gtest.exe",
                         "icon": "🔗"
@@ -1589,7 +1593,8 @@
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp",
-                            "radiant/symbol_resolver.cpp"
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_dom_integration.exe",
                         "icon": "🌐"
@@ -1616,7 +1621,8 @@
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp",
-                            "radiant/symbol_resolver.cpp"
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_dom_crud.exe",
                         "icon": "✏️"
@@ -1643,7 +1649,8 @@
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp",
-                            "radiant/symbol_resolver.cpp"
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_style_application_gtest.exe",
                         "icon": "🎨"
@@ -1663,7 +1670,8 @@
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp",
-                            "radiant/symbol_resolver.cpp"
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_html_css_gtest.exe",
                         "icon": "🌐"
@@ -1755,7 +1763,8 @@
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lambda/input/css/css_formatter.cpp",
-                            "radiant/symbol_resolver.cpp"
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp"
                         ],
                         "libraries": [
                             "gtest",

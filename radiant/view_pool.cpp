@@ -890,6 +890,14 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, float
             continue;
         }
 
+        // Skip pseudo-elements (::before, ::after, ::marker) - these are rendering artifacts not part of DOM
+        const char* tag = child->node_name();
+        if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0 || strcmp(tag, "::marker") == 0)) {
+            log_debug("JSON: Skipping pseudo-element %s from serialized tree", tag);
+            child = child->next();
+            continue;
+        }
+
         // For anonymous elements, skip the wrapper but process its children
         if (child->is_block() && is_anonymous_element((ViewBlock*)child)) {
             log_debug("JSON: Skipping anonymous element %s, processing its children", child->node_name());
@@ -1689,6 +1697,15 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             child = child->next_sibling;
             continue;  // skip the view
         }
+
+        // Skip pseudo-elements (::before, ::after) - these are rendering artifacts not part of DOM
+        const char* tag = child->node_name();
+        if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0)) {
+            log_debug("JSON: Skipping pseudo-element %s from inline children", tag);
+            child = child->next();
+            continue;
+        }
+
         if (!first_child) {
             strbuf_append_str(buf, ",\n");
         }
