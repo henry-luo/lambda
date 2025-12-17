@@ -3697,7 +3697,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_LETTER_SPACING: {
             log_debug("[CSS] Processing letter-spacing property");
             if (!span->font) { span->font = alloc_font_prop(lycon); }
-            
+
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float spacing = resolve_length_value(lycon, prop_id, value);
                 span->font->letter_spacing = spacing;

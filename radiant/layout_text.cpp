@@ -53,12 +53,12 @@ uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool i
 }
 
 /**
- * Get text-transform property from a BlockProp.
+ * Get text-transform property from block.
  * @param blk BlockProp structure (can be NULL)
  * @return CSS text-transform value or CSS_VALUE_NONE
  */
 CssEnum get_text_transform_from_block(BlockProp* blk) {
-    if (blk && blk->text_transform != 0) {
+    if (blk && blk->text_transform != 0 && blk->text_transform != CSS_VALUE_INHERIT) {
         return blk->text_transform;
     }
     return CSS_VALUE_NONE;
@@ -449,15 +449,17 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         FT_GlyphSlot slot = lycon->font.ft_face->glyph;
         // Use precise float calculation for advance
         text_width += (float)(slot->advance.x) / 64.0f;
-        // Apply letter-spacing
-        text_width += lycon->font.style->letter_spacing;
+        // Apply letter-spacing (but not after the last character)
+        str++;
+        if (*str) {  // Not the last character
+            text_width += lycon->font.style->letter_spacing;
+        }
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         if (lycon->line.advance_x + text_width > line_right) { // line filled up
             return RDT_LINE_FILLED;
         }
-        str++;
     } while (*str);  // end of text
     lycon->line.advance_x += text_width;
     return RDT_NOT_SURE;
@@ -699,8 +701,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
-            // Apply letter-spacing to spaces as well
-            wd += lycon->font.style->letter_spacing;
+            // Apply letter-spacing to spaces as well (but not if it's the last character)
+            if (str[1]) {  // Check if there's a next character
+                wd += lycon->font.style->letter_spacing;
+            }
             is_word_start = true;  // Next non-space char is word start
         }
         else {
@@ -720,7 +724,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
             wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
             // Apply letter-spacing (add to character width)
-            wd += lycon->font.style->letter_spacing;
+            // Note: letter-spacing is NOT applied after the last character (CSS spec)
+            // We'll check if next character exists before adding letter-spacing
+            if (next_ch && *next_ch) {
+                wd += lycon->font.style->letter_spacing;
+            }
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
