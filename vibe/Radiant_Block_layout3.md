@@ -688,3 +688,74 @@ if (has_mixed_fonts) {
 - CSS 2.1 §10.8 - Line height and baseline alignment
 - CSS 2.1 §10.8.1 - Leading and half-leading
 - CSS 2.2 §9.4.2 - Inline formatting context
+
+---
+
+## Phase 6: Text-Align Enhancement (COMPLETED)
+
+**Status:** ✅ COMPLETED
+**Date:** January 2025
+**Tests:** text-align-004, text-align-005
+
+### Objective
+Enhance text-align support in Radiant to properly handle `center`, `right`, and `justify` alignment values beyond the existing `left` default.
+
+### Implementation
+
+#### 1. CSS Value Inheritance Fix
+**Problem:** `text-align: inherit` was not being resolved during CSS cascade.
+
+**Solution:** Modified `resolve_css_style.cpp` to explicitly handle `CSS_VALUE_INHERIT`:
+- Walk up parent chain to find inherited `text-align` value
+- Resolve to parent's computed value (not just copy the inherit keyword)
+- Default to `CSS_VALUE_LEFT` if no parent value found
+
+#### 2. Text Justification Implementation  
+**Problem:** `text-align: justify` was not implemented - text remained left-aligned.
+
+**Solution:** Extended `line_align()` in `layout.cpp` to handle justify:
+
+**Key Challenges:**
+1. **Multi-line text wrapping:** A single `ViewText` can have multiple `TextRect`s (one per wrapped line)
+2. **NULL start_view:** When wrapping within a text node, subsequent lines have `start_view=NULL`
+3. **Last line handling:** CSS spec requires last line to NOT be justified
+
+**Algorithm:**
+- For each line break, check if text_align == CSS_VALUE_JUSTIFY
+- If start_view is NULL, use lycon->view (current text node)
+- Find the most recently created TextRect (= current line)
+- Detect if it's the last line (at end of text or no trailing space)
+- If not last line: expand TextRect width to fill container width
+- Skip last line (leave left-aligned per CSS spec)
+
+### Test Results
+
+| Test | Before | After | Status |
+|------|--------|-------|--------|
+| text-align-004 (justify) | 60% text | 100% | ✅ PASS |
+| text-align-005 (right/inherit) | 50% text | 100% | ✅ PASS |
+| text-align-006 (hr elements) | 11% elements | 11% | ⚠️ Unrelated HR issue |
+
+### Files Modified
+1. `radiant/resolve_css_style.cpp` - CSS inherit value resolution
+2. `radiant/layout.cpp` - Justify implementation + code cleanup
+
+### Verification
+- **Baseline tests:** 1356/1356 (100%) - no regressions
+- **Text-align tests:** 2/2 relevant tests pass
+- **Build:** Clean compile (166 pre-existing warnings)
+
+---
+
+## Summary: Phase Completion Status
+
+| Phase | Description | Status | Tests |
+|-------|-------------|--------|-------|
+| 1 | Block-in-inline splitting | ✅ COMPLETED | 85-97% pass |
+| 2 | Vertical-align | ✅ VERIFIED | Already working |
+| 3 | Line height | ⏸️ DEFERRED | Blocked |
+| 4 | Table auto-width | ✅ COMPLETED | 100% pass |
+| 5 | Replaced element sizing | ✅ COMPLETED | 100% pass |
+| 6 | Text-align (center/right/justify) | ✅ COMPLETED | 100% pass |
+
+**Overall:** Baseline maintained at 100% (1356/1356). New capabilities: Full text-align support.

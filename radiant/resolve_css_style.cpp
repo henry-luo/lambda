@@ -1828,7 +1828,37 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum align_value = value->data.keyword;
-                if (align_value != CSS_VALUE__UNDEF) {
+
+                // Handle explicit 'inherit' keyword
+                if (align_value == CSS_VALUE_INHERIT) {
+                    // Find parent's text-align value
+                    DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+
+                    while (parent) {
+                        if (parent->specified_style) {
+                            CssDeclaration* parent_decl = style_tree_get_declaration(
+                                parent->specified_style, CSS_PROPERTY_TEXT_ALIGN);
+                            if (parent_decl && parent_decl->value &&
+                                parent_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum parent_align = parent_decl->value->data.keyword;
+                                if (parent_align != CSS_VALUE_INHERIT && parent_align != CSS_VALUE__UNDEF) {
+                                    block->blk->text_align = parent_align;
+                                    log_debug("[CSS] Text-align: inherit resolved to parent value %d", parent_align);
+                                    break;
+                                }
+                            }
+                        }
+                        parent = parent->parent ? static_cast<DomElement*>(parent->parent) : nullptr;
+                    }
+
+                    // If no parent value found, use default (left)
+                    if (!parent) {
+                        block->blk->text_align = CSS_VALUE_LEFT;
+                        log_debug("[CSS] Text-align: inherit with no parent, using LEFT");
+                    }
+                }
+                else if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
                     const CssEnumInfo* info = css_enum_info(align_value);
                     log_debug("[CSS] Text-align: %s -> 0x%04X", info ? info->name : "unknown", align_value);

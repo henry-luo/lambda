@@ -123,10 +123,10 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     NEXT_RECT:
-    float x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
+    float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
     char* text_content = (char*)malloc(text_rect->length + 1);
     strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
-    text_content[text_rect->length] = '\0';  // Fix: Use single backslash for null terminator
+    text_content[text_rect->length] = '\0';
 
     if (strlen(text_content) == 0) {
         free(text_content);
@@ -134,13 +134,88 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     }
 
     // Set font if available
+    float font_size = 16.0f;
     if (ctx->current_font) {
-        float font_size = ctx->font.style->font_size ? ctx->font.style->font_size : 16.0f;
+        font_size = ctx->font.style->font_size ? ctx->font.style->font_size : 16.0f;
         HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, font_size);
     }
 
-    // Render the text using absolute coordinates
-    pdf_render_text(ctx, text_content, x, y, ctx->color);
+    // Check if text is justified by comparing TextRect width with natural width
+    // Use FreeType to measure text width (similar to canvas renderer)
+    float space_width = ctx->font.style ? ctx->font.style->space_width : 4.0f;
+    float adjusted_space_width = space_width;
+    
+    // Calculate natural width using glyph metrics (excluding trailing spaces)
+    float natural_width = 0.0f;
+    int space_count = 0;
+    size_t content_len = strlen(text_content);
+    // Find end of non-whitespace content
+    while (content_len > 0 && text_content[content_len - 1] == ' ') {
+        content_len--;
+    }
+    
+    if (ctx->font.ft_face) {
+        for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
+            if (text_content[i] == ' ') {
+                natural_width += space_width;
+                space_count++;
+            } else {
+                FT_UInt glyph_index = FT_Get_Char_Index(ctx->font.ft_face, text_content[i]);
+                if (FT_Load_Glyph(ctx->font.ft_face, glyph_index, FT_LOAD_DEFAULT) == 0) {
+                    natural_width += ctx->font.ft_face->glyph->advance.x / 64.0f;
+                }
+            }
+        }
+    }
+    
+    // If text_rect width is larger than natural width and there are spaces, apply justify
+    if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width + 0.5f) {
+        float extra_space = text_rect->width - natural_width;
+        adjusted_space_width = space_width + (extra_space / space_count);
+    }
+
+    // Render text word by word with adjusted spacing
+    pdf_set_color(ctx, ctx->color);
+    float baseline_offset = font_size * 0.8f;
+    float baseline_y = y + baseline_offset;
+    float pdf_y = ctx->page_height - baseline_y;
+    
+    float x = base_x;
+    size_t word_start = 0;
+    for (size_t i = 0; i <= strlen(text_content); i++) {
+        if (i == strlen(text_content) || text_content[i] == ' ') {
+            if (i > word_start) {
+                // Render word
+                char word[256];
+                size_t word_len = i - word_start;
+                if (word_len < sizeof(word)) {
+                    strncpy(word, text_content + word_start, word_len);
+                    word[word_len] = '\0';
+                    
+                    HPDF_Page_BeginText(ctx->current_page);
+                    HPDF_Page_TextOut(ctx->current_page, x, pdf_y, word);
+                    HPDF_Page_EndText(ctx->current_page);
+                    
+                    // Calculate word width using FreeType
+                    if (ctx->font.ft_face) {
+                        for (size_t j = 0; j < word_len; j++) {
+                            FT_UInt glyph_index = FT_Get_Char_Index(ctx->font.ft_face, word[j]);
+                            if (FT_Load_Glyph(ctx->font.ft_face, glyph_index, FT_LOAD_DEFAULT) == 0) {
+                                x += ctx->font.ft_face->glyph->advance.x / 64.0f;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Add space (adjusted if justified)
+            if (i < strlen(text_content)) {
+                x += adjusted_space_width;
+            }
+            word_start = i + 1;
+        }
+    }
+
     free(text_content);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
