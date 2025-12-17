@@ -201,6 +201,22 @@ static int getUtf8CharLen(unsigned char first_byte) {
     return 1;  // Invalid, treat as single byte
 }
 
+// Convert ASCII apostrophe (') to right single quotation mark (')
+// Returns a new string with apostrophes converted to U+2019
+static std::string convertApostrophes(const char* text) {
+    std::string result;
+    result.reserve(strlen(text) * 3);  // Reserve space for potential UTF-8 expansion
+    for (const char* p = text; *p; p++) {
+        if (*p == '\'') {
+            // Single apostrophe → ' (U+2019 = E2 80 99 in UTF-8)
+            result += "\xE2\x80\x99";
+        } else {
+            result += *p;
+        }
+    }
+    return result;
+}
+
 // Maximum macro expansion depth to prevent infinite recursion
 // Real LaTeX documents rarely nest beyond 10 levels, but 100 allows complex templates
 const int MAX_MACRO_DEPTH = 100;
@@ -2335,7 +2351,9 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             
                             // Skip if now empty after trimming
                             if (text[0] != '\0') {
-                                gen->text(text);
+                                // Convert apostrophes and output text
+                                std::string converted = convertApostrophes(text);
+                                gen->text(converted.c_str());
                             }
                         }
                     }
@@ -2394,7 +2412,9 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                 
                 // Skip if now empty after trimming
                 if (text[0] != '\0') {
-                    gen->text(text);
+                    // Convert apostrophes and output text
+                    std::string converted = convertApostrophes(text);
+                    gen->text(converted.c_str());
                 }
             }
         }
@@ -5200,6 +5220,11 @@ void LatexProcessor::processText(const char* text) {
             in_whitespace = false;
         }
     }
+    
+    // Convert ASCII apostrophe (') to right single quotation mark (')
+    // LaTeX uses ' for typographic apostrophes in running text
+    // Note: '' (two single quotes) is handled by the ligature parser as closing double quote
+    normalized = convertApostrophes(normalized.c_str());
     
     // Note: We do NOT convert ASCII hyphen-minus (U+002D) to Unicode hyphen (U+2010)
     // because standard LaTeX behavior keeps single hyphens as-is in compound words
