@@ -199,6 +199,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "verb_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "command"
         },
         {
@@ -295,6 +299,10 @@
           ]
         }
       }
+    },
+    "verb_command": {
+      "type": "SYMBOL",
+      "name": "_verb_command"
     },
     "command": {
       "type": "PREC_RIGHT",
@@ -985,6 +993,10 @@
     [
       "_block",
       "_inline"
+    ],
+    [
+      "verb_command",
+      "command"
     ]
   ],
   "precedences": [],
@@ -1004,6 +1016,10 @@
     {
       "type": "SYMBOL",
       "name": "_end_document"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_verb_command"
     }
   ],
   "inline": [],
