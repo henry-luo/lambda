@@ -440,6 +440,10 @@
         {
           "type": "text",
           "named": true
+        },
+        {
+          "type": "verb_command",
+          "named": true
         }
       ]
     }
@@ -478,28 +482,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "environment",
-          "named": true
-        },
-        {
-          "type": "paragraph",
-          "named": true
-        },
-        {
-          "type": "paragraph_break",
-          "named": true
-        },
-        {
-          "type": "section",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -587,6 +569,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "verb_command",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "$",
