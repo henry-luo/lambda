@@ -513,6 +513,7 @@ typedef struct BlockProp {
     char* counter_increment;        // counter names and values
     CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
+    CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
