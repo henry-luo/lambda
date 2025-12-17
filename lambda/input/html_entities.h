@@ -29,6 +29,7 @@ extern "C" {
 typedef enum {
     ENTITY_NOT_FOUND = 0,       // Unknown entity
     ENTITY_ASCII_ESCAPE,         // lt, gt, amp, quot, apos - decode inline
+    ENTITY_UNICODE_SPACE,        // nbsp, ensp, emsp, thinsp, hairsp - decode inline as Unicode
     ENTITY_NAMED                 // Other named entities - return as Symbol
 } EntityType;
 

@@ -30,6 +30,19 @@ static const struct {
     {nullptr, nullptr}
 };
 
+// Unicode space entities - decoded inline as UTF-8
+static const struct {
+    const char* name;
+    uint32_t codepoint;
+} unicode_spaces[] = {
+    {"nbsp", 0x00A0},    // Non-breaking space
+    {"ensp", 0x2002},    // En space
+    {"emsp", 0x2003},    // Em space
+    {"thinsp", 0x2009}, // Thin space
+    {"hairsp", 0x200A}, // Hair space
+    {nullptr, 0}
+};
+
 // Named HTML entities with their Unicode codepoints
 // These are stored as Lambda Symbol and resolved at render time
 static const EntityEntry html_entity_table[] = {
@@ -165,6 +178,16 @@ EntityResult html_entity_resolve(const char* name, size_t len) {
             strncmp(ascii_escapes[i].name, name, len) == 0) {
             result.type = ENTITY_ASCII_ESCAPE;
             result.decoded = ascii_escapes[i].decoded;
+            return result;
+        }
+    }
+
+    // Then check Unicode space entities
+    for (int i = 0; unicode_spaces[i].name; i++) {
+        if (strlen(unicode_spaces[i].name) == len &&
+            strncmp(unicode_spaces[i].name, name, len) == 0) {
+            result.type = ENTITY_UNICODE_SPACE;
+            result.named.codepoint = unicode_spaces[i].codepoint;
             return result;
         }
     }

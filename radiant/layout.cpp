@@ -465,25 +465,233 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
     }
 }
 
-void line_align(LayoutContext* lycon) {
-    // align the views in the line
-    log_debug("line align");
-    if (lycon->block.text_align != CSS_VALUE_LEFT) {
-        View* view = lycon->line.start_view;
-        if (view) {
-            float line_width = lycon->line.advance_x -lycon->line.left;
-            float offset = 0;
-            if (lycon->block.text_align == CSS_VALUE_CENTER) {
-                offset = (lycon->block.content_width - line_width) / 2;
+// Count spaces in a text view for justify alignment
+static int count_spaces_in_view(View* view) {
+    int count = 0;
+    while (view) {
+        if (view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)view;
+            const char* text_data = (const char*)text->text_data();
+            if (text_data) {
+                TextRect* rect = text->rect;
+                while (rect) {
+                    const char* str = text_data + rect->start_index;
+                    for (int i = 0; i < rect->length; i++) {
+                        if (str[i] == ' ') count++;
+                    }
+                    rect = rect->next;
+                }
             }
-            else if (lycon->block.text_align == CSS_VALUE_RIGHT) {
-                offset = lycon->block.content_width - line_width;
+        }
+        else if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* sp = (ViewSpan*)view;
+            if (sp->first_child) {
+                count += count_spaces_in_view(sp->first_child);
             }
-            if (offset <= 0) return;  // no need to adjust the views
-            view_line_align(lycon, offset, view);
+        }
+        view = view->next();
+    }
+    return count;
+}
+
+// Apply justify alignment by distributing space between words
+static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* view) {
+    float cumulative_offset = 0;
+    View* last_view = nullptr;
+    TextRect* last_rect = nullptr;
+
+    while (view) {
+        view->x += cumulative_offset;
+        last_view = view;
+
+        if (view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)view;
+            text->x += cumulative_offset;
+
+            const char* text_data = (const char*)text->text_data();
+            TextRect* rect = text->rect;
+            while (rect) {
+                rect->x += cumulative_offset;
+                last_rect = rect;
+
+                // Add space after each space character
+                if (text_data) {
+                    const char* str = text_data + rect->start_index;
+                    int space_count = 0;
+                    for (int i = 0; i < rect->length; i++) {
+                        if (str[i] == ' ') {
+                            space_count++;
+                        }
+                    }
+                    // Expand this rect's width by the space added within it
+                    if (space_count > 0) {
+                        float added_space = space_count * space_per_gap;
+                        rect->width += added_space;
+                        cumulative_offset += added_space;
+                    }
+                }
+
+                rect = rect->next;
+            }
+        }
+        else if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* sp = (ViewSpan*)view;
+            if (sp->first_child) {
+                // Recursively justify inline children
+                // Note: This is simplified - a full implementation would need to track
+                // cumulative offset across the recursion
+                view_line_justify(lycon, space_per_gap, sp->first_child);
+            }
+        }
+
+        view = view->next();
+    }
+
+    // Extend the last text rect to fill any remaining space
+    // This handles rounding errors and ensures the line is fully justified
+    if (last_rect && last_view && last_view->view_type == RDT_VIEW_TEXT) {
+        float line_end = lycon->block.content_width;
+        float current_end = last_rect->x + last_rect->width;
+        if (current_end < line_end) {
+            last_rect->width += (line_end - current_end);
+            log_debug("view_line_justify: extended last rect width by %.2fpx to fill line",
+                      line_end - current_end);
         }
     }
-    log_debug("end of line align");
+}
+
+void line_align(LayoutContext* lycon) {
+    // horizontal text alignment: left, right, center, justify
+    if (lycon->block.text_align != CSS_VALUE_LEFT) {
+        View* view = lycon->line.start_view;
+
+        // Special handling for wrapped text continuation lines:
+        // When text wraps within the same text node, start_view is NULL but we need to align
+        // Check if we have a text view with multiple TextRects (= wrapped text)
+        bool is_wrapped_continuation = false;
+        if (!view && lycon->view && lycon->view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)lycon->view;
+            TextRect* rect = text->rect;
+            int rect_count = 0;
+            while (rect && rect_count < 2) {  // Only need to count up to 2
+                rect_count++;
+                rect = rect->next;
+            }
+            if (rect_count > 1) {
+                is_wrapped_continuation = true;
+                view = lycon->view;
+            }
+        }
+
+        // For justify, always use current view if start_view is NULL
+        if (!view && lycon->block.text_align == CSS_VALUE_JUSTIFY) {
+            view = lycon->view;
+        }
+
+        // For center/right without wrapped text, return if no start_view
+        // (table cells and other blocks handle alignment themselves)
+        if (!view) {
+            return;
+        }
+
+        float line_width = lycon->line.advance_x - lycon->line.left;
+        float offset = 0;
+
+        if (lycon->block.text_align == CSS_VALUE_CENTER) {
+            offset = (lycon->block.content_width - line_width) / 2;
+        }
+        else if (lycon->block.text_align == CSS_VALUE_RIGHT) {
+            offset = lycon->block.content_width - line_width;
+        }
+
+        // For center/right alignment
+        if (offset > 0 && (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT)) {
+            // For wrapped text continuation lines, only align the current line's TextRect
+            if (is_wrapped_continuation) {
+                ViewText* text = (ViewText*)view;
+                TextRect* rect = text->rect;
+                TextRect* last_rect = rect;
+                while (rect) {
+                    last_rect = rect;
+                    rect = rect->next;
+                }
+
+                if (last_rect) {
+                    // Shift only this rect
+                    last_rect->x += offset;
+                }
+            } else {
+                // Normal case: align all views in the line
+                view_line_align(lycon, offset, view);
+            }
+            return;
+        }
+
+        if (lycon->block.text_align == CSS_VALUE_JUSTIFY) {
+                // For text nodes that wrap across multiple lines, we need to find the
+                // TextRect that corresponds to this line and justify it
+                if (view->view_type == RDT_VIEW_TEXT) {
+                    ViewText* text = (ViewText*)view;
+                    // Find the last TextRect (most recently created = current line)
+                    TextRect* rect = text->rect;
+                    TextRect* last_rect = rect;
+                    while (rect) {
+                        last_rect = rect;
+                        rect = rect->next;
+                    }
+
+                    if (last_rect) {
+                        // Check if this is the last line: only true if we're at the end of the text node
+                        const char* text_data = (const char*)text->text_data();
+                        bool is_last_line = false;
+
+                        if (text_data) {
+                            size_t text_len = strlen(text_data);
+                            size_t rect_end = last_rect->start_index + last_rect->length;
+
+                            // Only consider it the last line if we're at the very end of the text
+                            // (rect_end == text_len means we've consumed all text)
+                            if (rect_end >= text_len) {
+                                is_last_line = true;
+                            }
+                        }
+
+                        // Don't justify the last line per CSS spec
+                        if (is_last_line) {
+                            return;
+                        }
+
+                        // Count spaces in this specific rect
+                        int num_spaces = 0;
+                        if (text_data) {
+                            const char* str = text_data + last_rect->start_index;
+                            for (int i = 0; i < last_rect->length; i++) {
+                                if (str[i] == ' ') num_spaces++;
+                            }
+                        }
+
+                        float extra_width = lycon->block.content_width - line_width;
+
+                        if (num_spaces > 0 && extra_width > 0) {
+                            // Expand the width of this specific TextRect to fill the line
+                            last_rect->width += extra_width;
+                            return;
+                        }
+                    }
+                }
+                else {
+                    // Multi-view line (has start_view), use the original logic
+                    int num_spaces = count_spaces_in_view(view);
+                    float extra_width = lycon->block.content_width - line_width;
+                    if (num_spaces > 0 && extra_width > 0) {
+                        float space_per_gap = extra_width / num_spaces;
+                        view_line_justify(lycon, space_per_gap, view);
+                        return;
+                    }
+                }
+                return;
+            }
+    }
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {

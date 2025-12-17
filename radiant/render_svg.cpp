@@ -9,6 +9,8 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <cctype>
+#include <cwctype>
 
 // Forward declarations for functions from other modules
 int ui_context_init(UiContext* uicon, bool headless);
@@ -57,16 +59,124 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     // Extract the text content
     unsigned char* str = text->text_data();
 
+    // Get text-transform from the text node's parent elements
+    CssEnum text_transform = CSS_VALUE_NONE;
+    DomNode* parent = text->parent;
+    while (parent) {
+        if (parent->is_element()) {
+            DomElement* elem = (DomElement*)parent;
+            text_transform = get_text_transform_from_block(elem->blk);
+            if (text_transform != CSS_VALUE_NONE) break;
+        }
+        parent = parent->parent;
+    }
+
     TextRect *text_rect = text->rect;
     NEXT_RECT:
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
-    char* text_content = (char*)malloc(text_rect->length + 1);
-    strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
-    text_content[text_rect->length] = '\0';
+
+    // Transform text if needed
+    char* text_content = (char*)malloc(text_rect->length * 4 + 1);  // Allocate extra for UTF-8
+    if (text_transform != CSS_VALUE_NONE) {
+        // Apply text-transform character by character
+        unsigned char* src = str + text_rect->start_index;
+        unsigned char* src_end = src + text_rect->length;
+        char* dst = text_content;
+        bool is_word_start = true;
+
+        while (src < src_end) {
+            uint32_t codepoint = *src;
+            int bytes = 1;
+
+            if (codepoint >= 128) {
+                bytes = utf8_to_codepoint(src, &codepoint);
+                if (bytes <= 0) bytes = 1;
+            }
+
+            // Track word boundaries
+            if (is_space(codepoint)) {
+                is_word_start = true;
+                *dst++ = *src;
+                src += bytes;
+                continue;
+            }
+
+            // Apply transformation
+            uint32_t transformed = apply_text_transform(codepoint, text_transform, is_word_start);
+            is_word_start = false;
+
+            // Encode back to UTF-8
+            if (transformed < 0x80) {
+                *dst++ = (char)transformed;
+            } else if (transformed < 0x800) {
+                *dst++ = (char)(0xC0 | (transformed >> 6));
+                *dst++ = (char)(0x80 | (transformed & 0x3F));
+            } else if (transformed < 0x10000) {
+                *dst++ = (char)(0xE0 | (transformed >> 12));
+                *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
+                *dst++ = (char)(0x80 | (transformed & 0x3F));
+            } else {
+                *dst++ = (char)(0xF0 | (transformed >> 18));
+                *dst++ = (char)(0x80 | ((transformed >> 12) & 0x3F));
+                *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
+                *dst++ = (char)(0x80 | (transformed & 0x3F));
+            }
+
+            src += bytes;
+        }
+        *dst = '\0';
+    } else {
+        // No transformation - direct copy
+        strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
+        text_content[text_rect->length] = '\0';
+    }
+
+    // Calculate natural text width for justify rendering (excluding trailing spaces)
+    float natural_width = 0.0f;
+    int space_count = 0;
+    if (ctx->font.ft_face) {
+        // Find end of non-whitespace content
+        size_t content_len = strlen(text_content);
+        while (content_len > 0 && text_content[content_len - 1] == ' ') {
+            content_len--;
+        }
+
+        unsigned char* scan = (unsigned char*)text_content;
+        unsigned char* content_end = scan + content_len;
+        while (scan < content_end) {  // Only scan up to content_end
+            if (is_space(*scan)) {
+                natural_width += ctx->font.style->space_width;
+                space_count++;
+                scan++;
+            }
+            else {
+                uint32_t codepoint;
+                int bytes = utf8_to_codepoint(scan, &codepoint);
+                if (bytes <= 0) { scan++; }
+                else { scan += bytes; }
+
+                FT_GlyphSlot glyph = load_glyph(ctx->ui_context, ctx->font.ft_face, ctx->font.style, codepoint, false);
+                if (glyph) {
+                    natural_width += glyph->advance.x / 64.0;
+                } else {
+                    natural_width += ctx->font.style->space_width;
+                }
+            }
+        }
+    }
+
+    // Calculate word-spacing for justified text
+    float word_spacing = 0.0f;
+    if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width) {
+        // This text is justified - calculate extra space per word
+        float extra_space = text_rect->width - natural_width;
+        word_spacing = extra_space / space_count;
+    }
 
     // Escape XML entities in text
-    StrBuf* escaped_text = strbuf_new_cap(text_rect->length * 2);
-    for (int i = 0; i < text_rect->length; i++) {
+    size_t transformed_len = strlen(text_content);
+    StrBuf* escaped_text = strbuf_new_cap(transformed_len * 2);
+    for (size_t i = 0; i < transformed_len; i++) {
         char c = text_content[i];
         switch (c) {
             case '<': strbuf_append_str(escaped_text, "&lt;"); break;
@@ -117,6 +227,11 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         } else if (ctx->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"line-through\"");
         }
+    }
+
+    // Add word-spacing for justified text
+    if (word_spacing > 0.01f) {
+        strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", word_spacing);
     }
 
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);

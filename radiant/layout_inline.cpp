@@ -53,6 +53,94 @@ void compute_span_bounding_box(ViewSpan* span) {
     span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
 }
 
+/**
+ * Handle inline elements containing block-level children per CSS 2.1 §9.2.1.1
+ *
+ * When a block box appears inside an inline box, the inline box is split into
+ * anonymous inline boxes before and after the block:
+ *
+ * <span>Text 1 <div>Block</div> Text 2</span>
+ *
+ * Creates:
+ * - Anonymous inline box: "Text 1"
+ * - Block box: <div>Block</div>
+ * - Anonymous inline box: "Text 2"
+ *
+ * The inline box's properties (font, color, etc.) apply to the anonymous boxes.
+ */
+void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_elem,
+                                        ViewSpan* span, DomNode* first_child) {
+    log_debug("block-in-inline: splitting inline box for %s", inline_elem->node_name());
+
+    // Save inline formatting context state
+    Linebox saved_line = lycon->line;
+    FontBox saved_font = lycon->font;
+    CssEnum saved_vertical_align = lycon->line.vertical_align;
+
+    DomNode* child = first_child;
+    bool in_inline_sequence = false;
+
+    while (child) {
+        DisplayValue child_display = child->is_element() ?
+            resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+
+        if (child->is_element() && child_display.outer == CSS_VALUE_BLOCK) {
+            // Found block child - end current inline sequence if active
+            if (in_inline_sequence) {
+                if (!lycon->line.is_line_start) {
+                    log_debug("block-in-inline: calling line_break before block, advance_x=%.1f, max_width=%.1f",
+                             lycon->line.advance_x, lycon->block.max_width);
+                    line_break(lycon);
+                    log_debug("block-in-inline: after line_break, advance_x=%.1f, max_width=%.1f",
+                             lycon->line.advance_x, lycon->block.max_width);
+                }
+                in_inline_sequence = false;
+            }
+
+            // Layout block child (it breaks out of inline context)
+            // The block will cause a line break and establish its own formatting context
+            // IMPORTANT: Save/restore max_width because block layout will set it to container width,
+            // overwriting the inline content width we just measured
+            float saved_max_width = lycon->block.max_width;
+            log_debug("block-in-inline: laying out block child %s", child->node_name());
+            layout_block(lycon, child, child_display);
+            lycon->block.max_width = saved_max_width; // Restore inline content width
+            log_debug("block-in-inline: after block layout, restored max_width=%.1f", lycon->block.max_width);
+
+        } else {
+            // Inline or text content - accumulate in anonymous inline box
+            if (!in_inline_sequence) {
+                // Start new anonymous inline box sequence
+                in_inline_sequence = true;
+
+                // Restore inline formatting context for this anonymous box
+                // This ensures the inline's font, colors, etc. apply
+                // IMPORTANT: Don't restore advance_x - let it continue from current position
+                // Only restore after a block break (where advance_x was already reset by line_break)
+                float current_advance_x = lycon->line.advance_x;
+                lycon->line = saved_line;
+                lycon->line.advance_x = current_advance_x; // Preserve current X position
+                lycon->line.is_line_start = (current_advance_x == lycon->line.left);
+                lycon->font = saved_font;
+                lycon->line.vertical_align = saved_vertical_align;
+
+                log_debug("block-in-inline: starting anonymous inline sequence at advance_y=%f, advance_x=%f",
+                         lycon->block.advance_y, lycon->line.advance_x);
+            }
+
+            log_debug("block-in-inline: laying out inline/text child %s at advance_y=%f",
+                     child->node_name(), lycon->block.advance_y);
+            layout_flow_node(lycon, child);
+        }
+
+        child = child->next_sibling;
+    }
+
+    // Note: Don't call line_break() here - the caller is responsible for line breaking.
+    // This function may be called for nested inlines, and the outer inline may have
+    // more siblings to process on the same line.
+}
+
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout inline %s", elmt->node_name());
     if (elmt->tag() == HTM_TAG_BR) {
@@ -90,6 +178,36 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->is_element()) {
         child = static_cast<DomElement*>(elmt)->first_child;
     }
+
+    // CSS 2.1 §9.2.1.1: Check if inline contains block-level children
+    // If so, split into anonymous boxes
+    bool has_block_children = false;
+    DomNode* scan = child;
+    while (scan) {
+        if (scan->is_element()) {
+            DisplayValue child_display = resolve_display_value(scan);
+            log_debug("block-in-inline scan: child=%s outer=%d inner=%d",
+                     scan->node_name(), child_display.outer, child_display.inner);
+            if (child_display.outer == CSS_VALUE_BLOCK) {
+                has_block_children = true;
+                log_debug("block-in-inline detected: %s contains block child %s",
+                         elmt->node_name(), scan->node_name());
+                break;
+            }
+        }
+        scan = scan->next_sibling;
+    }
+
+    if (has_block_children) {
+        // Handle block-in-inline splitting
+        layout_inline_with_block_children(lycon, static_cast<DomElement*>(elmt), span, child);
+        compute_span_bounding_box(span);
+        lycon->font = pa_font;
+        lycon->line.vertical_align = pa_line_align;
+        return;
+    }
+
+    // Normal inline-only content
     if (child) {
         log_debug("layout inline children: advance_y %f, line_height %f", lycon->block.advance_y, lycon->block.line_height);
         do {

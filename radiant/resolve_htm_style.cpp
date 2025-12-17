@@ -201,9 +201,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->border->bottom_color.b = 192; block->bound->border->bottom_color.a = 255;
         block->bound->border->right_color.r = 192; block->bound->border->right_color.g = 192;
         block->bound->border->right_color.b = 192; block->bound->border->right_color.a = 255;
-        // 8px margin top/bottom, 0 left/right (browser default)
+        // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
         block->bound->margin.top = block->bound->margin.bottom = 8 * lycon->ui_context->pixel_ratio;
         block->bound->margin.left = block->bound->margin.right = 0;
+        block->bound->margin.left_type = CSS_VALUE_AUTO;
+        block->bound->margin.right_type = CSS_VALUE_AUTO;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
