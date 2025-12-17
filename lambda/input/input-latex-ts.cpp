@@ -148,6 +148,37 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
 static String* extract_text(InputContext& ctx, TSNode node, const char* source);
 static String* normalize_latex_text(InputContext& ctx, const char* text, size_t len);
 
+// Helper: Check if current child is a comment that eats the following space
+// Returns true if current node is line_comment and next is space starting immediately after
+static bool should_skip_comment_and_space(TSNode parent, uint32_t child_index) {
+    uint32_t child_count = ts_node_child_count(parent);
+    if (child_index + 1 >= child_count) {
+        return false;  // No next child
+    }
+    
+    TSNode child = ts_node_child(parent, child_index);
+    const char* child_type = ts_node_type(child);
+    
+    if (strcmp(child_type, "line_comment") != 0) {
+        return false;  // Not a comment
+    }
+    
+    TSNode next_child = ts_node_child(parent, child_index + 1);
+    const char* next_type = ts_node_type(next_child);
+    uint32_t comment_end = ts_node_end_byte(child);
+    uint32_t next_start = ts_node_start_byte(next_child);
+    
+    // If next node is space and starts immediately after comment (no gap),
+    // it's the eaten newline - should skip both
+    bool should_skip = (strcmp(next_type, "space") == 0 && comment_end == next_start);
+    if (should_skip) {
+        log_debug("latex_ts: skipping comment at %u-%u and space at %u-%u in parent '%s'",
+                 ts_node_start_byte(child), comment_end, next_start, ts_node_end_byte(next_child),
+                 ts_node_type(parent));
+    }
+    return should_skip;
+}
+
 // Extract text from a tree-sitter node
 static String* extract_text(InputContext& ctx, TSNode node, const char* source) {
     uint32_t start = ts_node_start_byte(node);
@@ -270,6 +301,7 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
     
     // Line comment -> skip for now
     if (strcmp(node_type, "line_comment") == 0) {
+        log_debug("latex_ts: found line_comment node at pos %u-%u", start, end);
         return {.item = ITEM_NULL};
     }
     
@@ -376,6 +408,13 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 
                 uint32_t child_count = ts_node_child_count(node);
                 for (uint32_t i = 0; i < child_count; i++) {
+                    // LaTeX comment handling: comments eat their newline
+                    if (should_skip_comment_and_space(node, i)) {
+                        log_debug("latex_ts: skipping comment and eaten newline at child %u", i);
+                        i++;  // Skip both comment and following space
+                        continue;
+                    }
+                    
                     TSNode child = ts_node_child(node, i);
                     Item child_item = convert_latex_node(ctx, child, source);
                     if (child_item.item != ITEM_NULL) {
@@ -456,6 +495,12 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 // Add section content (remaining children)
                 uint32_t child_count = ts_node_child_count(node);
                 for (uint32_t i = 0; i < child_count; i++) {
+                    // LaTeX comment handling
+                    if (should_skip_comment_and_space(node, i)) {
+                        i++;  // Skip both comment and following space
+                        continue;
+                    }
+                    
                     TSNode child = ts_node_child(node, i);
                     const char* child_type = ts_node_type(child);
                     
@@ -578,6 +623,12 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 
                 uint32_t child_count = ts_node_child_count(node);
                 for (uint32_t i = 0; i < child_count; i++) {
+                    // LaTeX comment handling
+                    if (should_skip_comment_and_space(node, i)) {
+                        i++;  // Skip both comment and following space
+                        continue;
+                    }
+                    
                     TSNode child = ts_node_child(node, i);
                     Item child_item = convert_latex_node(ctx, child, source);
                     if (child_item.item != ITEM_NULL) {
@@ -671,6 +722,12 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
     uint32_t child_count = ts_node_child_count(node);
     int arg_index = 0;
     for (uint32_t i = 0; i < child_count; i++) {
+        // LaTeX comment handling
+        if (should_skip_comment_and_space(node, i)) {
+            i++;  // Skip both comment and following space
+            continue;
+        }
+        
         TSNode child = ts_node_child(node, i);
         const char* child_type = ts_node_type(child);
         
@@ -849,6 +906,12 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
     // Process environment content (between \begin and \end)
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; i++) {
+        // LaTeX comment handling
+        if (should_skip_comment_and_space(node, i)) {
+            i++;  // Skip both comment and following space
+            continue;
+        }
+        
         TSNode child = ts_node_child(node, i);
         const char* child_type = ts_node_type(child);
         
