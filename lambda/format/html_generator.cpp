@@ -111,6 +111,10 @@ void HtmlGenerator::trimTrailingWhitespace() {
     writer_->trimTrailingWhitespace();
 }
 
+bool HtmlGenerator::hasTrailingWhitespace() const {
+    return writer_->hasTrailingWhitespace();
+}
+
 void HtmlGenerator::h(int level, const char* attrs) {
     // html-generator.ls h method
     if (level < 1) level = 1;
