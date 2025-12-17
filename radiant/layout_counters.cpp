@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 
 // ============================================================================
 // Counter HashMap Helpers
@@ -182,10 +183,26 @@ static void parse_counter_spec(const char* spec,
         // Parse value (optional, defaults to 0 for reset, 1 for increment)
         int value = 0;
         if (*p && (isdigit(*p) || *p == '-' || *p == '+')) {
-            value = atoi(p);
-            // Skip number
-            if (*p == '-' || *p == '+') p++;
-            while (*p && isdigit(*p)) p++;
+            char* endptr = nullptr;
+            long long_value = strtol(p, &endptr, 10);
+
+            // Check for overflow/underflow
+            if (long_value > INT_MAX) {
+                value = INT_MAX;
+            } else if (long_value < INT_MIN) {
+                value = INT_MIN;
+            } else {
+                value = (int)long_value;
+            }
+
+            // Move pointer past the parsed number
+            if (endptr > p) {
+                p = endptr;
+            } else {
+                // Skip manually if strtol failed
+                if (*p == '-' || *p == '+') p++;
+                while (*p && isdigit(*p)) p++;
+            }
         }
 
         names[pair_count] = name;
@@ -245,7 +262,11 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
 
     parse_counter_spec(counter_spec, &names, &values, &count, ctx->arena);
 
+    log_debug("[Counters] counter-increment parsed: count=%d", count);
+
     for (int i = 0; i < count; i++) {
+        log_debug("[Counters]   Processing counter[%d]: name=%s, value=%d", i, names[i], values[i]);
+
         int increment = (values[i] != 0) ? values[i] : 1;  // Default increment is 1
 
         // Search for counter in current and parent scopes
@@ -422,6 +443,10 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
     if (!buffer || buffer_size == 0) return 0;
 
     switch (style) {
+        case 0x0065: // CSS_VALUE_NONE - return empty string
+            buffer[0] = '\0';
+            return 0;
+
         case 0x0134: // CSS_VALUE_LOWER_ROMAN
             return int_to_lower_roman(value, buffer, buffer_size);
 
