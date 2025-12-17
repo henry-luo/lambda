@@ -2641,6 +2641,15 @@ static void cmd_noindent(LatexProcessor* proc, Item elem) {
     (void)elem;  // unused
 }
 
+static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
+    // \gobbleO - gobble whitespace and optional argument (from echo package)
+    // latex.js: \gobbleO : -> []
+    // This command outputs a zero-width space (U+200B) to prevent whitespace collapse
+    HtmlGenerator* gen = proc->generator();
+    gen->text("\xE2\x80\x8B");  // Zero-width space (U+200B in UTF-8)
+    (void)elem;  // unused
+}
+
 static void cmd_newpage(LatexProcessor* proc, Item elem) {
     // \newpage
     HtmlGenerator* gen = proc->generator();
@@ -2860,121 +2869,140 @@ static void cmd_qquad(LatexProcessor* proc, Item elem) {
 // Box Commands
 // =============================================================================
 
+// Helper function for box commands - matches latex.js _box pattern
+// Creates structure: <span class="classes"><span>content</span></span>
+static void _box(LatexProcessor* proc, Item elem, const char* classes,
+                 const char* width = nullptr, const char* pos = nullptr) {
+    HtmlGenerator* gen = proc->generator();
+    
+    // Build the class string based on position parameter
+    std::string box_classes = classes ? classes : "hbox";
+    
+    if (width && pos) {
+        // \makebox[width][pos]{text} handling
+        switch (pos[0]) {
+        case 's': box_classes += " stretch"; break;
+        case 'c': box_classes += " clap"; break;
+        case 'l': box_classes += " rlap"; break;
+        case 'r': box_classes += " llap"; break;
+        }
+    }
+    
+    // Outer span with hbox class
+    gen->span(box_classes.c_str());
+    // Inner span for content (pass nullptr to get <span> without class)
+    gen->span(nullptr);
+    proc->processChildren(elem);
+    gen->closeElement(); // close inner span
+    gen->closeElement(); // close outer span
+}
+
 static void cmd_mbox(LatexProcessor* proc, Item elem) {
     // \mbox{text} - make box (prevent line breaking)
-    HtmlGenerator* gen = proc->generator();
+    // Matches: \mbox : (txt) -> @makebox undefined, undefined, undefined, txt
     proc->ensureParagraph();
-    gen->spanWithStyle("white-space:nowrap");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox");
 }
 
 static void cmd_fbox(LatexProcessor* proc, Item elem) {
-    // \fbox{text} - framed box
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->spanWithClassAndStyle("fbox", "border:1px solid black;padding:3px");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \fbox{text} - framed box (matches latex.js: calls framebox with "hbox frame")
+    _box(proc, elem, "hbox frame");
 }
 
 static void cmd_framebox(LatexProcessor* proc, Item elem) {
     // \framebox[width][pos]{text} - framed box with options
+    // latex.js: @_box width, pos, txt, "hbox frame"
     // TODO: Parse width and position parameters
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->spanWithClassAndStyle("framebox", "border:1px solid black;padding:3px");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox frame");
 }
 
 static void cmd_frame(LatexProcessor* proc, Item elem) {
     // \frame{text} - simple frame
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->spanWithClassAndStyle("frame", "border:1px solid black");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox frame");
 }
 
 static void cmd_parbox(LatexProcessor* proc, Item elem) {
     // \parbox[pos][height][inner-pos]{width}{text} - paragraph box
     // TODO: Parse all parameters
     HtmlGenerator* gen = proc->generator();
-    gen->divWithClassAndStyle("parbox", "display:inline-block");
+    gen->div("parbox");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_makebox(LatexProcessor* proc, Item elem) {
     // \makebox[width][pos]{text} - make box with size
+    // latex.js: @_box width, pos, txt, "hbox"
     // TODO: Parse width and position
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-    gen->span("makebox");
-    proc->processChildren(elem);
-    gen->closeElement();
+    _box(proc, elem, "hbox");
 }
 
 static void cmd_phantom(LatexProcessor* proc, Item elem) {
-    // \phantom{text} - invisible box with dimensions
+    // \phantom{text} - invisible box
+    // latex.js: [ @g.create @g.inline, txt, "phantom hbox" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("phantom", "visibility:hidden");
+    gen->span("phantom hbox");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_hphantom(LatexProcessor* proc, Item elem) {
     // \hphantom{text} - horizontal phantom (width only)
+    // latex.js: [ @g.create @g.inline, txt, "phantom hbox smash" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("hphantom", "visibility:hidden");
+    gen->span("phantom hbox smash");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_vphantom(LatexProcessor* proc, Item elem) {
     // \vphantom{text} - vertical phantom (height/depth only)
+    // latex.js: [ @g.create @g.inline, txt, "phantom hbox rlap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("vphantom", "visibility:hidden;width:0");
+    gen->span("phantom hbox rlap");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_smash(LatexProcessor* proc, Item elem) {
     // \smash[tb]{text} - smash height/depth
+    // latex.js: [ @g.create @g.inline, txt, "hbox smash" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("smash", "display:inline-block;height:0");
+    gen->span("hbox smash");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_clap(LatexProcessor* proc, Item elem) {
     // \clap{text} - centered lap (zero width, centered)
+    // latex.js: [ @g.create @g.inline, txt, "hbox clap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("clap", "display:inline-block;width:0;text-align:center");
+    gen->span("hbox clap");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_llap(LatexProcessor* proc, Item elem) {
     // \llap{text} - left lap (zero width, right-aligned)
+    // latex.js: [ @g.create @g.inline, txt, "hbox llap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("llap", "display:inline-block;width:0;text-align:right");
+    gen->span("hbox llap");
     proc->processChildren(elem);
     gen->closeElement();
 }
 
 static void cmd_rlap(LatexProcessor* proc, Item elem) {
     // \rlap{text} - right lap (zero width, left-aligned)
+    // latex.js: [ @g.create @g.inline, txt, "hbox rlap" ]
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    gen->spanWithClassAndStyle("rlap", "display:inline-block;width:0;text-align:left");
+    gen->span("hbox rlap");
     proc->processChildren(elem);
     gen->closeElement();
 }
@@ -4538,6 +4566,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["newpage"] = cmd_newpage;
     command_table_["par"] = cmd_par;
     command_table_["noindent"] = cmd_noindent;
+    command_table_["gobbleO"] = cmd_gobbleO;
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
