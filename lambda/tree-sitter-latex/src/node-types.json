@@ -440,6 +440,10 @@
         {
           "type": "text",
           "named": true
+        },
+        {
+          "type": "verb_command",
+          "named": true
         }
       ]
     }
@@ -565,6 +569,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "verb_command",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "$",

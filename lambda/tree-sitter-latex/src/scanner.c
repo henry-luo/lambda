@@ -9,6 +9,7 @@ enum TokenType {
   COMMENT_ENV_CONTENT,
   BEGIN_DOCUMENT,
   END_DOCUMENT,
+  VERB_COMMAND,
 };
 
 // Skip whitespace (space, tab, newline)
@@ -186,6 +187,58 @@ static bool scan_end_document(TSLexer *lexer) {
   return false;
 }
 
+// Scan \verb<delim>content<delim> - returns true if matched
+// Handles arbitrary delimiter characters (e.g., \verb|text|, \verb+text+)
+static bool scan_verb_command(TSLexer *lexer) {
+  // Must start with backslash
+  if (lexer->lookahead != '\\') {
+    return false;
+  }
+  lexer->advance(lexer, false);
+  
+  // Match "verb"
+  if (!try_match_string(lexer, "verb")) {
+    return false;
+  }
+  
+  // Optional asterisk for \verb* (visible spaces)
+  if (lexer->lookahead == '*') {
+    lexer->advance(lexer, false);
+  }
+  
+  // Next character is the delimiter (must not be whitespace or newline)
+  if (lexer->eof(lexer) || lexer->lookahead == ' ' || 
+      lexer->lookahead == '\t' || lexer->lookahead == '\n' || 
+      lexer->lookahead == '\r') {
+    return false;
+  }
+  
+  // Capture the delimiter
+  unsigned char delimiter = lexer->lookahead;
+  lexer->advance(lexer, false);
+  
+  // Scan until we find the matching delimiter or newline
+  // Note: \verb cannot span multiple lines in LaTeX
+  while (!lexer->eof(lexer)) {
+    if (lexer->lookahead == delimiter) {
+      // Found closing delimiter
+      lexer->advance(lexer, false);
+      lexer->mark_end(lexer);
+      return true;
+    } else if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
+      // \verb cannot span lines - this is an error, but we'll match what we have
+      lexer->mark_end(lexer);
+      return false;
+    } else {
+      lexer->advance(lexer, false);
+    }
+  }
+  
+  // EOF reached without closing delimiter - error, but we'll match what we have
+  lexer->mark_end(lexer);
+  return false;
+}
+
 // Tree-sitter external scanner interface
 void *tree_sitter_latex_external_scanner_create(void) {
   return NULL;
@@ -204,7 +257,15 @@ void tree_sitter_latex_external_scanner_deserialize(void *payload, const char *b
 }
 
 bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
-  // Check for \begin{document} and \end{document} FIRST - they take precedence
+  // Check for \verb command FIRST - must take precedence over regular command tokens
+  if (valid_symbols[VERB_COMMAND] && lexer->lookahead == '\\') {
+    if (scan_verb_command(lexer)) {
+      lexer->result_symbol = VERB_COMMAND;
+      return true;
+    }
+  }
+  
+  // Check for \begin{document} and \end{document} - they take precedence
   // Don't skip whitespace - we want to match from current position
   if (valid_symbols[BEGIN_DOCUMENT] && lexer->lookahead == '\\') {
     if (scan_begin_document(lexer)) {

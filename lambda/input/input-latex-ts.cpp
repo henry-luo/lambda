@@ -48,6 +48,7 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     
     // Commands (generic pattern)
     {"command", NODE_CONTAINER},
+    {"verb_command", NODE_CONTAINER},  // \verb|text| inline verbatim (handled specially)
     {"command_name", NODE_LEAF},
     {"star", NODE_LEAF},
     
@@ -388,6 +389,26 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
     if (strcmp(node_type, "ERROR") == 0) {
         log_error("Parse error at position %u", ts_node_start_byte(node));
         return {.item = ITEM_NULL};
+    }
+    
+    // Special handling for verb_command (single token but needs to be an element)
+    if (strcmp(node_type, "verb_command") == 0) {
+        MarkBuilder& builder = ctx.builder;
+        
+        // Extract the full token text
+        uint32_t start = ts_node_start_byte(node);
+        uint32_t end = ts_node_end_byte(node);
+        const char* text = source + start;
+        size_t len = end - start;
+        
+        ElementBuilder elem = builder.element("verb_command");
+        
+        // Store the full token text as a string child
+        // The formatter will parse it to extract delimiter and content
+        Item token_string = builder.createStringItem(text, len);
+        elem.child(token_string);
+        
+        return elem.final();
     }
     
     NodeCategory category = classify_node_type(node_type);
