@@ -132,43 +132,31 @@ static bool isDiacriticCommand(const char* cmd_name) {
 }
 
 // Apply diacritic to a single UTF-8 character, returning the result
-// Returns the precomposed character if available, otherwise base + combining character
+// Always uses combining characters (NFD form) to match latex.js output
 static std::string applyDiacritic(char diacritic_cmd, const char* base_char) {
     if (!base_char || base_char[0] == '\0') {
         return "";
     }
     
-    // Decode UTF-8 to get the first codepoint
-    uint32_t codepoint = 0;
+    // Decode UTF-8 to get the character length
     const unsigned char* p = (const unsigned char*)base_char;
     int char_len = 1;
     
     if ((p[0] & 0x80) == 0) {
         // ASCII
-        codepoint = p[0];
         char_len = 1;
     } else if ((p[0] & 0xE0) == 0xC0) {
         // 2-byte UTF-8
-        codepoint = ((p[0] & 0x1F) << 6) | (p[1] & 0x3F);
         char_len = 2;
     } else if ((p[0] & 0xF0) == 0xE0) {
         // 3-byte UTF-8
-        codepoint = ((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
         char_len = 3;
     } else if ((p[0] & 0xF8) == 0xF0) {
         // 4-byte UTF-8
-        codepoint = ((p[0] & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
         char_len = 4;
     }
     
-    // Try to find precomposed character
-    DiacriticKey key = {diacritic_cmd, codepoint};
-    auto it = diacritic_precomposed.find(key);
-    if (it != diacritic_precomposed.end()) {
-        return std::string(it->second);
-    }
-    
-    // Fallback: use combining character
+    // Look up the combining character for this diacritic
     auto comb_it = diacritic_combining_map.find(diacritic_cmd);
     if (comb_it != diacritic_combining_map.end()) {
         std::string result(base_char, char_len);  // Base character
@@ -208,8 +196,54 @@ static std::string convertApostrophes(const char* text) {
     result.reserve(strlen(text) * 3);  // Reserve space for potential UTF-8 expansion
     for (const char* p = text; *p; p++) {
         if (*p == '\'') {
-            // Single apostrophe → ' (U+2019 = E2 80 99 in UTF-8)
-            result += "\xE2\x80\x99";
+            // Check for '' (two apostrophes) → " (closing double quote)
+            if (*(p+1) == '\'') {
+                result += "\xE2\x80\x9D";  // " (U+201D = E2 80 9D)
+                p++;  // Skip second apostrophe
+            } else {
+                // Single apostrophe → ' (U+2019 = E2 80 99 in UTF-8)
+                result += "\xE2\x80\x99";
+            }
+        } else if (*p == '`') {
+            // Check for `` (two backticks) → " (opening double quote)
+            if (*(p+1) == '`') {
+                result += "\xE2\x80\x9C";  // " (U+201C = E2 80 9C)
+                p++;  // Skip second backtick
+            } else {
+                // Single backtick → ' (U+2018 = E2 80 98 in UTF-8)
+                result += "\xE2\x80\x98";
+            }
+        } else if (*p == '-') {
+            // Check for --- (em-dash) or -- (en-dash)
+            if (*(p+1) == '-' && *(p+2) == '-') {
+                result += "\xE2\x80\x94";  // — (U+2014 = em-dash)
+                p += 2;  // Skip two more hyphens
+            } else if (*(p+1) == '-') {
+                result += "\xE2\x80\x93";  // – (U+2013 = en-dash)
+                p++;  // Skip second hyphen
+            } else {
+                // Single hyphen: check context to decide ASCII vs Unicode
+                // If surrounded by letters (compound word), keep ASCII hyphen-minus
+                // If not in a word context, use Unicode hyphen (U+2010)
+                bool prev_is_letter = (p > text) && isalpha((unsigned char)*(p-1));
+                bool next_is_letter = *(p+1) && isalpha((unsigned char)*(p+1));
+                
+                if (prev_is_letter && next_is_letter) {
+                    // Compound word like "daughter-in-law" - keep ASCII hyphen
+                    result += '-';
+                } else {
+                    // Isolated punctuation - use Unicode hyphen
+                    result += "\xE2\x80\x90";  // ‐ (U+2010)
+                }
+            }
+        } else if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
+            // !´ (exclamation + acute accent U+00B4) → ¡ (inverted exclamation U+00A1)
+            result += "\xC2\xA1";  // ¡ (U+00A1 = C2 A1)
+            p += 2;  // Skip the ´ (2 bytes)
+        } else if (*p == '?' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
+            // ?´ (question + acute accent U+00B4) → ¿ (inverted question U+00BF)
+            result += "\xC2\xBF";  // ¿ (U+00BF = C2 BF)
+            p += 2;  // Skip the ´ (2 bytes)
         } else {
             result += *p;
         }
@@ -5306,6 +5340,67 @@ void LatexProcessor::processChildren(Item elem) {
                             i++;  // Skip the curly_group (even if empty)
                             continue;
                         }
+                        
+                        // Check if next element is a command that resolves to a special character
+                        // This handles cases like \"\i (umlaut on dotless-i), \'\i, \^\j, etc.
+                        // The parser converts \i to an element with tag "i", not "command"
+                        if (next_tag) {
+                            // Check if it's a special character command element
+                            const char* base_char = nullptr;
+                            if (strcmp(next_tag, "i") == 0) {
+                                base_char = "ı";  // dotless-i
+                            } else if (strcmp(next_tag, "j") == 0) {
+                                base_char = "ȷ";  // dotless-j
+                            } else if (strcmp(next_tag, "l") == 0) {
+                                base_char = "ł";  // Polish L
+                            } else if (strcmp(next_tag, "L") == 0) {
+                                base_char = "Ł";  // Polish L uppercase
+                            } else if (strcmp(next_tag, "o") == 0) {
+                                base_char = "ø";  // Scandinavian o
+                            } else if (strcmp(next_tag, "O") == 0) {
+                                base_char = "Ø";  // Scandinavian O uppercase
+                            } else if (strcmp(next_tag, "ae") == 0) {
+                                base_char = "æ";  // ae ligature
+                            } else if (strcmp(next_tag, "AE") == 0) {
+                                base_char = "Æ";  // AE ligature
+                            } else if (strcmp(next_tag, "oe") == 0) {
+                                base_char = "œ";  // oe ligature  
+                            } else if (strcmp(next_tag, "OE") == 0) {
+                                base_char = "Œ";  // OE ligature
+                            } else if (strcmp(next_tag, "command") == 0) {
+                                // Also check if it's a command node with name extraction
+                                Pool* pool = pool_;
+                                StringBuf* sb = stringbuf_new(pool);
+                                next_elem.textContent(sb);
+                                String* str = stringbuf_to_string(sb);
+                                if (str && str->len > 0) {
+                                    const char* cmd = str->chars;
+                                    if (strcmp(cmd, "i") == 0) {
+                                        base_char = "ı";
+                                    } else if (strcmp(cmd, "j") == 0) {
+                                        base_char = "ȷ";
+                                    } else if (strcmp(cmd, "l") == 0) {
+                                        base_char = "ł";
+                                    } else if (strcmp(cmd, "L") == 0) {
+                                        base_char = "Ł";
+                                    } else if (strcmp(cmd, "o") == 0) {
+                                        base_char = "ø";
+                                    } else if (strcmp(cmd, "O") == 0) {
+                                        base_char = "Ø";
+                                    }
+                                }
+                            }
+                            
+                            if (base_char) {
+                                ensureParagraph();
+                                std::string result = applyDiacritic(diacritic_cmd, base_char);
+                                gen_->text(result.c_str());
+                                // Strip trailing space (LaTeX command consumes following space)
+                                setStripNextLeadingSpace(true);
+                                i++;  // Skip the command
+                                continue;
+                            }
+                        }
                     } else if (next_reader.isString()) {
                         // Next sibling is text - consume first character
                         const char* text = next_reader.asString()->chars;
@@ -5508,6 +5603,16 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Handle brack_group at top level - this is literal [] text, not an optional argument
+    // When [] appears outside a command context, it's just literal text
+    if (strcmp(cmd_name, "brack_group") == 0) {
+        ensureParagraph();
+        gen_->text("[");
+        processChildren(elem);
+        gen_->text("]");
+        return;
+    }
+    
     // Handle curly_group (TeX brace groups) - important for font scoping
     // Groups in TeX (e.g., { \bfseries text }) limit the scope of declarations
     // latex.js adds zero-width space (U+200B) at group boundaries for visual separation
