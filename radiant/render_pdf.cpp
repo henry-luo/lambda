@@ -144,7 +144,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     // Use FreeType to measure text width (similar to canvas renderer)
     float space_width = ctx->font.style ? ctx->font.style->space_width : 4.0f;
     float adjusted_space_width = space_width;
-    
+
     // Calculate natural width using glyph metrics (excluding trailing spaces)
     float natural_width = 0.0f;
     int space_count = 0;
@@ -153,7 +153,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     while (content_len > 0 && text_content[content_len - 1] == ' ') {
         content_len--;
     }
-    
+
     if (ctx->font.ft_face) {
         for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
             if (text_content[i] == ' ') {
@@ -167,7 +167,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
             }
         }
     }
-    
+
     // If text_rect width is larger than natural width and there are spaces, apply justify
     if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width + 0.5f) {
         float extra_space = text_rect->width - natural_width;
@@ -179,7 +179,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     float baseline_offset = font_size * 0.8f;
     float baseline_y = y + baseline_offset;
     float pdf_y = ctx->page_height - baseline_y;
-    
+
     float x = base_x;
     size_t word_start = 0;
     for (size_t i = 0; i <= strlen(text_content); i++) {
@@ -191,11 +191,11 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                 if (word_len < sizeof(word)) {
                     strncpy(word, text_content + word_start, word_len);
                     word[word_len] = '\0';
-                    
+
                     HPDF_Page_BeginText(ctx->current_page);
                     HPDF_Page_TextOut(ctx->current_page, x, pdf_y, word);
                     HPDF_Page_EndText(ctx->current_page);
-                    
+
                     // Calculate word width using FreeType
                     if (ctx->font.ft_face) {
                         for (size_t j = 0; j < word_len; j++) {
@@ -207,7 +207,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                     }
                 }
             }
-            
+
             // Add space (adjusted if justified)
             if (i < strlen(text_content)) {
                 x += adjusted_space_width;

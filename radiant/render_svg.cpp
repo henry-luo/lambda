@@ -73,7 +73,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         while (content_len > 0 && text_content[content_len - 1] == ' ') {
             content_len--;
         }
-        
+
         unsigned char* scan = (unsigned char*)text_content;
         unsigned char* content_end = scan + content_len;
         while (scan < content_end) {  // Only scan up to content_end

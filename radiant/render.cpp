@@ -163,13 +163,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         int space_count = 0;
         unsigned char* scan = p;
         bool scan_has_space = false;
-        
+
         // First, find the end of non-whitespace content (exclude trailing spaces)
         unsigned char* content_end = end;
         while (content_end > p && is_space(*(content_end - 1))) {
             content_end--;
         }
-        
+
         while (scan < content_end) {  // Only scan up to content_end (excluding trailing spaces)
             if (is_space(*scan)) {
                 if (preserve_spaces || !scan_has_space) {
