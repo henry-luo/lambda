@@ -344,6 +344,7 @@ project "lambda"
         "radiant/grid_advanced.cpp",
         "radiant/intrinsic_sizing.cpp",
         "radiant/symbol_resolver.cpp",
+        "radiant/layout_counters.cpp",
         "radiant/resolve_htm_style.cpp",
         "radiant/resolve_css_style.cpp",
         "radiant/scroller.cpp",
@@ -3152,6 +3153,8 @@ project "test_lambda_domnode_gtest"
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
         "radiant/symbol_resolver.cpp",
+        "radiant/layout_counters.cpp",
+        "radiant/layout_counters.cpp",
     }
     
     includedirs {
@@ -4851,6 +4854,7 @@ project "test_css_dom_integration"
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
         "radiant/symbol_resolver.cpp",
+        "radiant/layout_counters.cpp",
     }
     
     includedirs {
@@ -4965,6 +4969,7 @@ project "test_css_dom_crud"
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
         "radiant/symbol_resolver.cpp",
+        "radiant/layout_counters.cpp",
     }
     
     includedirs {
@@ -5079,6 +5084,7 @@ project "test_css_style_application_gtest"
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
         "radiant/symbol_resolver.cpp",
+        "radiant/layout_counters.cpp",
     }
     
     includedirs {
@@ -5186,6 +5192,7 @@ project "test_html_css_gtest"
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
         "radiant/symbol_resolver.cpp",
+        "radiant/layout_counters.cpp",
     }
     
     includedirs {
