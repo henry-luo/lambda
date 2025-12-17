@@ -48,6 +48,7 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     
     // Commands (generic pattern)
     {"command", NODE_CONTAINER},
+    {"verb_command", NODE_CONTAINER},  // \verb|text| inline verbatim (handled specially)
     {"command_name", NODE_LEAF},
     {"star", NODE_LEAF},
     
@@ -147,6 +148,37 @@ static Item convert_text_node(InputContext& ctx, TSNode node, const char* source
 static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source);
 static String* extract_text(InputContext& ctx, TSNode node, const char* source);
 static String* normalize_latex_text(InputContext& ctx, const char* text, size_t len);
+
+// Helper: Check if current child is a comment that eats the following space
+// Returns true if current node is line_comment and next is space starting immediately after
+static bool should_skip_comment_and_space(TSNode parent, uint32_t child_index) {
+    uint32_t child_count = ts_node_child_count(parent);
+    if (child_index + 1 >= child_count) {
+        return false;  // No next child
+    }
+    
+    TSNode child = ts_node_child(parent, child_index);
+    const char* child_type = ts_node_type(child);
+    
+    if (strcmp(child_type, "line_comment") != 0) {
+        return false;  // Not a comment
+    }
+    
+    TSNode next_child = ts_node_child(parent, child_index + 1);
+    const char* next_type = ts_node_type(next_child);
+    uint32_t comment_end = ts_node_end_byte(child);
+    uint32_t next_start = ts_node_start_byte(next_child);
+    
+    // If next node is space and starts immediately after comment (no gap),
+    // it's the eaten newline - should skip both
+    bool should_skip = (strcmp(next_type, "space") == 0 && comment_end == next_start);
+    if (should_skip) {
+        log_debug("latex_ts: skipping comment at %u-%u and space at %u-%u in parent '%s'",
+                 ts_node_start_byte(child), comment_end, next_start, ts_node_end_byte(next_child),
+                 ts_node_type(parent));
+    }
+    return should_skip;
+}
 
 // Extract text from a tree-sitter node
 static String* extract_text(InputContext& ctx, TSNode node, const char* source) {
@@ -270,6 +302,7 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
     
     // Line comment -> skip for now
     if (strcmp(node_type, "line_comment") == 0) {
+        log_debug("latex_ts: found line_comment node at pos %u-%u", start, end);
         return {.item = ITEM_NULL};
     }
     
@@ -358,6 +391,26 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
         return {.item = ITEM_NULL};
     }
     
+    // Special handling for verb_command (single token but needs to be an element)
+    if (strcmp(node_type, "verb_command") == 0) {
+        MarkBuilder& builder = ctx.builder;
+        
+        // Extract the full token text
+        uint32_t start = ts_node_start_byte(node);
+        uint32_t end = ts_node_end_byte(node);
+        const char* text = source + start;
+        size_t len = end - start;
+        
+        ElementBuilder elem = builder.element("verb_command");
+        
+        // Store the full token text as a string child
+        // The formatter will parse it to extract delimiter and content
+        Item token_string = builder.createStringItem(text, len);
+        elem.child(token_string);
+        
+        return elem.final();
+    }
+    
     NodeCategory category = classify_node_type(node_type);
     
     switch (category) {
@@ -376,6 +429,13 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 
                 uint32_t child_count = ts_node_child_count(node);
                 for (uint32_t i = 0; i < child_count; i++) {
+                    // LaTeX comment handling: comments eat their newline
+                    if (should_skip_comment_and_space(node, i)) {
+                        log_debug("latex_ts: skipping comment and eaten newline at child %u", i);
+                        i++;  // Skip both comment and following space
+                        continue;
+                    }
+                    
                     TSNode child = ts_node_child(node, i);
                     Item child_item = convert_latex_node(ctx, child, source);
                     if (child_item.item != ITEM_NULL) {
@@ -456,6 +516,12 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 // Add section content (remaining children)
                 uint32_t child_count = ts_node_child_count(node);
                 for (uint32_t i = 0; i < child_count; i++) {
+                    // LaTeX comment handling
+                    if (should_skip_comment_and_space(node, i)) {
+                        i++;  // Skip both comment and following space
+                        continue;
+                    }
+                    
                     TSNode child = ts_node_child(node, i);
                     const char* child_type = ts_node_type(child);
                     
@@ -520,6 +586,17 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                         return elem_builder.final();
                     }
                     
+                    // Diacritic commands: \^ \' \` \" \~ \= \. - create elements for formatting
+                    // These need special handling to combine with the following character/group
+                    if (escaped_char == '\'' || escaped_char == '`' || escaped_char == '^' ||
+                        escaped_char == '"' || escaped_char == '~' || escaped_char == '=' ||
+                        escaped_char == '.') {
+                        // Create element with diacritic character as tag
+                        char tag[2] = {escaped_char, '\0'};
+                        ElementBuilder elem_builder = builder.element(tag);
+                        return elem_builder.final();
+                    }
+                    
                     // For other control symbols, return the escaped character as string
                     return {.item = s2it(builder.createString(source + start + 1, end - start - 1))};
                 }
@@ -567,6 +644,12 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 
                 uint32_t child_count = ts_node_child_count(node);
                 for (uint32_t i = 0; i < child_count; i++) {
+                    // LaTeX comment handling
+                    if (should_skip_comment_and_space(node, i)) {
+                        i++;  // Skip both comment and following space
+                        continue;
+                    }
+                    
                     TSNode child = ts_node_child(node, i);
                     Item child_item = convert_latex_node(ctx, child, source);
                     if (child_item.item != ITEM_NULL) {
@@ -660,6 +743,12 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
     uint32_t child_count = ts_node_child_count(node);
     int arg_index = 0;
     for (uint32_t i = 0; i < child_count; i++) {
+        // LaTeX comment handling
+        if (should_skip_comment_and_space(node, i)) {
+            i++;  // Skip both comment and following space
+            continue;
+        }
+        
         TSNode child = ts_node_child(node, i);
         const char* child_type = ts_node_type(child);
         
@@ -838,6 +927,12 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
     // Process environment content (between \begin and \end)
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; i++) {
+        // LaTeX comment handling
+        if (should_skip_comment_and_space(node, i)) {
+            i++;  // Skip both comment and following space
+            continue;
+        }
+        
         TSNode child = ts_node_child(node, i);
         const char* child_type = ts_node_type(child);
         

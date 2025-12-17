@@ -40,6 +40,9 @@ public:
     // Trim trailing whitespace from output (for paragraph handling)
     void trimTrailingWhitespace();
     
+    // Check if output has trailing whitespace
+    bool hasTrailingWhitespace() const;
+    
     // Create heading element (h1-h6)
     void h(int level, const char* attrs = nullptr);
     

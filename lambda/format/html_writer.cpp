@@ -62,6 +62,13 @@ void TextHtmlWriter::trimTrailingWhitespace() {
     buf_->str[len] = '\0';
 }
 
+bool TextHtmlWriter::hasTrailingWhitespace() const {
+    // Check if the buffer ends with whitespace (spaces or tabs)
+    if (buf_->length == 0) return false;
+    char c = buf_->str[buf_->length - 1];
+    return (c == ' ' || c == '\t');
+}
+
 bool TextHtmlWriter::removeLastOpenedTagIfEmpty(const char* tag) {
     // Check if the buffer ends with "<tag>" or "<tag" (still open, unclosed)
     // If so, remove it and return true. Otherwise return false.
