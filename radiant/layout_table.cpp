@@ -2290,7 +2290,7 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
         else if (child->is_element()) {
             // For nested block/inline elements, check for explicit CSS width first
             DomElement* child_elem = child->as_element();
-            
+
             // CSS 2.1: Floats are taken out of normal flow and don't contribute to intrinsic width
             if (child_elem->specified_style && child_elem->specified_style->tree) {
                 AvlNode* float_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_FLOAT);
@@ -2301,7 +2301,7 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                         if (val->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum float_val = val->data.keyword;
                             if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
-                                log_debug("PCW: skipping floated element %s (float=%d)", 
+                                log_debug("PCW: skipping floated element %s (float=%d)",
                                          child->node_name(), float_val);
                                 continue; // Skip floats - they don't contribute to content width
                             }
@@ -2309,7 +2309,7 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                     }
                 }
             }
-            
+
             float child_width = 0;
 
             if (child_elem->specified_style) {
@@ -2505,7 +2505,7 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
         else if (child->is_element()) {
             // For nested elements, check for explicit width first
             DomElement* child_elem = child->as_element();
-            
+
             // CSS 2.1: Floats are taken out of normal flow and don't contribute to intrinsic width
             if (child_elem->specified_style && child_elem->specified_style->tree) {
                 AvlNode* float_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_FLOAT);
@@ -2516,7 +2516,7 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
                         if (val->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum float_val = val->data.keyword;
                             if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
-                                log_debug("MCW: skipping floated element %s (float=%d)", 
+                                log_debug("MCW: skipping floated element %s (float=%d)",
                                          child->node_name(), float_val);
                                 continue; // Skip floats - they don't contribute to content width
                             }
@@ -2524,7 +2524,7 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
                     }
                 }
             }
-            
+
             float child_min = 0.0f;
 
             // Check for CSS explicit width
