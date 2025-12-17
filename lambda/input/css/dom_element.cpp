@@ -1035,17 +1035,17 @@ const char* dom_element_get_pseudo_element_content_with_counters(
     // Handle list of values (for content with multiple parts, e.g., counter(c) "text")
     if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
         log_debug("[Counter] Processing content list with %d values", value->data.list.count);
-        
+
         // Use a fixed-size buffer for concatenation
         char result_buffer[512];
         result_buffer[0] = '\0';
         int result_len = 0;
-        
+
         // Concatenate all values in the list
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
             if (!item) continue;
-            
+
             if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
                 // Append string content
                 int str_len = strlen(item->data.string);
@@ -1062,7 +1062,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 if (func && func->name && counter_context) {
                     char temp_buffer[128];
                     temp_buffer[0] = '\0';
-                    
+
                     if (strcmp(func->name, "counter") == 0 && func->arg_count >= 1) {
                         // Extract counter name
                         const char* counter_name = nullptr;
@@ -1074,7 +1074,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                         } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
                             counter_name = func->args[0]->data.custom_property.name;
                         }
-                        
+
                         uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
                         if (func->arg_count >= 2 && func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
                             style_type = func->args[1]->data.keyword;
@@ -1082,7 +1082,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                             log_debug("[Counter] counter style keyword: %u (%s)",
                                     style_type, style_info ? style_info->name : "unknown");
                         }
-                        
+
                         if (counter_name) {
                             counter_format((CounterContext*)counter_context, counter_name,
                                          style_type, temp_buffer, sizeof(temp_buffer));
@@ -1105,13 +1105,13 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                         } else if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM) {
                             counter_name = func->args[0]->data.custom_property.name;
                         }
-                        
+
                         const char* separator = func->args[1]->data.string;
                         uint32_t style_type = 0x00AA;  // CSS_VALUE_DECIMAL (default)
                         if (func->arg_count >= 3 && func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
                             style_type = func->args[2]->data.keyword;
                         }
-                        
+
                         if (counter_name) {
                             counters_format((CounterContext*)counter_context, counter_name,
                                           separator ? separator : ".", style_type,
@@ -1129,7 +1129,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 }
             }
         }
-        
+
         // Copy result to arena-allocated buffer
         if (result_len > 0) {
             char* result = (char*)arena_alloc(arena, result_len + 1);
