@@ -447,6 +447,36 @@ int counter_format_value(int value, uint32_t style, char* buffer, size_t buffer_
             buffer[0] = '\0';
             return 0;
 
+        case 0x17D: // CSS_VALUE_DISC (381) - bullet point "•"
+            if (buffer_size >= 4) {  // UTF-8 bullet is 3 bytes + null
+                buffer[0] = '\xE2';
+                buffer[1] = '\x80';
+                buffer[2] = '\xA2';
+                buffer[3] = '\0';
+                return 3;
+            }
+            return 0;
+
+        case 0x17E: // CSS_VALUE_CIRCLE (382) - white circle "◦"
+            if (buffer_size >= 4) {  // UTF-8 white circle is 3 bytes + null
+                buffer[0] = '\xE2';
+                buffer[1] = '\x97';
+                buffer[2] = '\xA6';
+                buffer[3] = '\0';
+                return 3;
+            }
+            return 0;
+
+        case 0x17F: // CSS_VALUE_SQUARE (383) - black square "▪"
+            if (buffer_size >= 4) {  // UTF-8 black square is 3 bytes + null
+                buffer[0] = '\xE2';
+                buffer[1] = '\x96';
+                buffer[2] = '\xAA';
+                buffer[3] = '\0';
+                return 3;
+            }
+            return 0;
+
         case 0x0134: // CSS_VALUE_LOWER_ROMAN
             return int_to_lower_roman(value, buffer, buffer_size);
 
