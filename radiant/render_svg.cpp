@@ -64,6 +64,48 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
     text_content[text_rect->length] = '\0';
 
+    // Calculate natural text width for justify rendering (excluding trailing spaces)
+    float natural_width = 0.0f;
+    int space_count = 0;
+    if (ctx->font.ft_face) {
+        // Find end of non-whitespace content
+        size_t content_len = text_rect->length;
+        while (content_len > 0 && text_content[content_len - 1] == ' ') {
+            content_len--;
+        }
+        
+        unsigned char* scan = (unsigned char*)text_content;
+        unsigned char* content_end = scan + content_len;
+        while (scan < content_end) {  // Only scan up to content_end
+            if (is_space(*scan)) {
+                natural_width += ctx->font.style->space_width;
+                space_count++;
+                scan++;
+            }
+            else {
+                uint32_t codepoint;
+                int bytes = utf8_to_codepoint(scan, &codepoint);
+                if (bytes <= 0) { scan++; }
+                else { scan += bytes; }
+
+                FT_GlyphSlot glyph = load_glyph(ctx->ui_context, ctx->font.ft_face, ctx->font.style, codepoint, false);
+                if (glyph) {
+                    natural_width += glyph->advance.x / 64.0;
+                } else {
+                    natural_width += ctx->font.style->space_width;
+                }
+            }
+        }
+    }
+
+    // Calculate word-spacing for justified text
+    float word_spacing = 0.0f;
+    if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width) {
+        // This text is justified - calculate extra space per word
+        float extra_space = text_rect->width - natural_width;
+        word_spacing = extra_space / space_count;
+    }
+
     // Escape XML entities in text
     StrBuf* escaped_text = strbuf_new_cap(text_rect->length * 2);
     for (int i = 0; i < text_rect->length; i++) {
@@ -117,6 +159,11 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         } else if (ctx->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"line-through\"");
         }
+    }
+
+    // Add word-spacing for justified text
+    if (word_spacing > 0.01f) {
+        strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", word_spacing);
     }
 
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);

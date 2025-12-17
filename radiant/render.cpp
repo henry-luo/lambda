@@ -157,14 +157,64 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d, color:0x%08x",
             str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y,
             white_space, preserve_spaces, rdcon->color.c);
+
+        // Calculate natural text width and space count for justify rendering
+        float natural_width = 0.0f;
+        int space_count = 0;
+        unsigned char* scan = p;
+        bool scan_has_space = false;
+        
+        // First, find the end of non-whitespace content (exclude trailing spaces)
+        unsigned char* content_end = end;
+        while (content_end > p && is_space(*(content_end - 1))) {
+            content_end--;
+        }
+        
+        while (scan < content_end) {  // Only scan up to content_end (excluding trailing spaces)
+            if (is_space(*scan)) {
+                if (preserve_spaces || !scan_has_space) {
+                    scan_has_space = true;
+                    natural_width += rdcon->font.style->space_width;
+                    space_count++;
+                }
+                scan++;
+            }
+            else {
+                scan_has_space = false;
+                uint32_t scan_codepoint;
+                int bytes = utf8_to_codepoint(scan, &scan_codepoint);
+                if (bytes <= 0) { scan++; }
+                else { scan += bytes; }
+
+                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, scan_codepoint, false);
+                if (glyph) {
+                    natural_width += glyph->advance.x / 64.0;
+                } else {
+                    natural_width += rdcon->font.style->space_width;  // fallback width
+                }
+            }
+        }
+
+        // Calculate adjusted space width for justified text
+        float space_width = rdcon->font.style->space_width;
+        if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width) {
+            // This text is justified - distribute extra space across spaces
+            float extra_space = text_rect->width - natural_width;
+            space_width += (extra_space / space_count);
+        }
+
+        // Render the text with adjusted spacing
         bool has_space = false;  uint32_t codepoint;
         while (p < end) {
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
                 if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
-                    // log_debug("draw_space: %c, x:%f, end:%f", *p, x, x + rdcon->font.space_width);
-                    x += rdcon->font.style->space_width;
+                    // For justified text, don't render trailing spaces (they're beyond content_end)
+                    if (p < content_end) {
+                        x += space_width;  // Use adjusted space width for justified text
+                    }
+                    // Trailing spaces are not rendered (collapsed)
                 }
                 // else  // skip consecutive spaces
                 p++;
