@@ -1596,11 +1596,28 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         marker_text[marker_len + 1] = ' ';
                         marker_text[marker_len + 2] = '\0';
                         marker_len += 2;
-                    } else if (marker_len + 1 < (int)sizeof(marker_text)) {
-                        // For disc/circle/square, just add space
-                        marker_text[marker_len] = ' ';
-                        marker_text[marker_len + 1] = '\0';
-                        marker_len += 1;
+                    } else if (marker_len + 7 < (int)sizeof(marker_text)) {
+                        // For disc/circle/square, add non-breaking spaces for proper spacing
+                        // Browsers typically render markers with ~0.5-1em spacing after the bullet
+                        // Using non-breaking spaces (0xC2 0xA0 in UTF-8) to prevent collapse
+                        // Square bullets are wider, so use no extra spaces - just regular space
+                        if (marker_style == CSS_VALUE_SQUARE) {
+                            marker_text[marker_len] = ' ';  // Just regular space for square
+                            marker_text[marker_len + 1] = '\0';
+                            marker_len += 1;
+                        } else {
+                            // Disc and circle need extra spacing (3 non-breaking spaces)
+                            marker_text[marker_len] = ' ';      // Regular space
+                            marker_len += 1;
+
+                            for (int sp = 0; sp < 3 && marker_len + 2 < (int)sizeof(marker_text); sp++) {
+                                marker_text[marker_len] = 0xC2;     // Non-breaking space (UTF-8)
+                                marker_text[marker_len + 1] = 0xA0;
+                                marker_len += 2;
+                            }
+                            marker_text[marker_len] = '\0';
+                        }
+                        marker_len += 7;
                     }
 
                     log_debug("    [List] Created 'inside' marker: '%s' (length=%d)", marker_text, marker_len);

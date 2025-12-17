@@ -5198,6 +5198,61 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] list-style: expanded to list-style-image=%s", url);
                 }
             }
+            // Handle multiple values (e.g., "square inside", "disc outside")
+            else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                log_debug("[CSS] list-style: processing %d values", value->data.list.count);
+
+                // Iterate through all values in the list
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (!item) continue;
+
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum keyword = item->data.keyword;
+                        const CssEnumInfo* info = css_enum_info(keyword);
+
+                        // Check if it's a position keyword
+                        bool is_position = false;
+                        if (info && info->name) {
+                            if (strcmp(info->name, "inside") == 0 || strcmp(info->name, "outside") == 0) {
+                                block->blk->list_style_position = keyword;
+                                log_debug("[CSS] list-style: expanded to list-style-position=%s", info->name);
+                                is_position = true;
+                            }
+                        }
+
+                        // Check if it's a list-style-type keyword
+                        if (!is_position && keyword >= CSS_VALUE_DISC && keyword <= 0x0190) {
+                            block->blk->list_style_type = keyword;
+                            log_debug("[CSS] list-style: expanded to list-style-type=%s", info ? info->name : "unknown");
+                        }
+                        else if (!is_position && keyword == CSS_VALUE_NONE) {
+                            block->blk->list_style_type = CSS_VALUE_NONE;
+                            log_debug("[CSS] list-style: set list-style-type=none");
+                        }
+                    }
+                    else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                        // Handle "inside"/"outside" that might be parsed as custom
+                        const char* name = item->data.custom_property.name;
+                        if (strcmp(name, "inside") == 0) {
+                            block->blk->list_style_position = (CssEnum)1;
+                            log_debug("[CSS] list-style: expanded to list-style-position=inside");
+                        } else if (strcmp(name, "outside") == 0) {
+                            block->blk->list_style_position = (CssEnum)2;
+                            log_debug("[CSS] list-style: expanded to list-style-position=outside");
+                        }
+                    }
+                    else if (item->type == CSS_VALUE_TYPE_URL) {
+                        const char* url = item->data.url;
+                        if (url) {
+                            size_t len = strlen(url);
+                            block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
+                            strcpy(block->blk->list_style_image, url);
+                            log_debug("[CSS] list-style: expanded to list-style-image=%s", url);
+                        }
+                    }
+                }
+            }
             break;
         }
 
