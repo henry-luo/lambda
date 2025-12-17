@@ -176,7 +176,14 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     // Create ::before pseudo-element if needed
     // Note: Even empty content "" creates a pseudo-element for layout purposes (e.g., clearfix)
     if (has_before) {
-        const char* before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
+        const char* before_content = nullptr;
+        if (lycon->counter_context) {
+            before_content = dom_element_get_pseudo_element_content_with_counters(
+                elem, PSEUDO_ELEMENT_BEFORE, lycon->counter_context, lycon->doc->arena);
+        }
+        if (!before_content) {
+            before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
+        }
         // Create pseudo-element even for empty content if display/clear properties are set
         pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true);
         log_debug("[PSEUDO] Created ::before for <%s> with content='%s'",
@@ -186,7 +193,14 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     // Create ::after pseudo-element if needed
     // Note: Even empty content "" creates a pseudo-element for layout purposes
     if (has_after) {
-        const char* after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
+        const char* after_content = nullptr;
+        if (lycon->counter_context) {
+            after_content = dom_element_get_pseudo_element_content_with_counters(
+                elem, PSEUDO_ELEMENT_AFTER, lycon->counter_context, lycon->doc->arena);
+        }
+        if (!after_content) {
+            after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
+        }
         pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false);
         log_debug("[PSEUDO] Created ::after for <%s> with content='%s'",
                   elem->tag_name ? elem->tag_name : "?", after_content ? after_content : "(empty)");
@@ -356,7 +370,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
  * Insert pseudo-element into DOM tree at appropriate position
  * ::before is inserted as first child, ::after as last child
  */
-static void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
+void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
     if (!parent || !pseudo) return;
 
     if (is_before) {
@@ -385,6 +399,109 @@ static void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool 
             pseudo->next_sibling = nullptr;
         }
     }
+}
+
+/**
+ * Generate pseudo-element content based on content property
+ * CSS 2.1 Section 12.2
+ */
+void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before) {
+    if (!block || !block->pseudo) return;
+
+    log_debug("[Pseudo-Generate] Called for %s, block=%p, pseudo=%p",
+              is_before ? "::before" : "::after", (void*)block, (void*)block->pseudo);
+
+    PseudoContentProp* pseudo = block->pseudo;
+
+    // Check if already generated
+    if ((is_before && pseudo->before_generated) || (!is_before && pseudo->after_generated)) {
+        return;
+    }
+
+    // Get content string and type
+    char* content = is_before ? pseudo->before_content : pseudo->after_content;
+    uint8_t content_type = is_before ? pseudo->before_content_type : pseudo->after_content_type;
+
+    // Skip if no content or content is none
+    if (content_type == CONTENT_TYPE_NONE || !content) {
+        return;
+    }
+
+    log_debug("[Pseudo-Element] Generating %s content, type=%d",
+              is_before ? "::before" : "::after", content_type);
+
+    // Cast block to DomElement to access DOM fields
+    DomElement* parent_elem = (DomElement*)block;
+
+    // Create pseudo-element DomElement
+    DomElement* pseudo_elem = dom_element_create(parent_elem->doc,
+                                                  is_before ? "::before" : "::after",
+                                                  nullptr);
+    if (!pseudo_elem) {
+        log_error("[Pseudo-Element] Failed to create DomElement");
+        return;
+    }
+
+    // Set pseudo-element properties - tag_name already set by dom_element_create
+    pseudo_elem->parent = parent_elem;
+
+    // Handle different content types
+    switch (content_type) {
+        case CONTENT_TYPE_STRING: {
+            // Create Lambda String for the content
+            size_t content_len = strlen(content);
+            String* text_string = (String*)arena_alloc(parent_elem->doc->arena,
+                                                        sizeof(String) + content_len + 1);
+            if (text_string) {
+                text_string->ref_cnt = 1;
+                text_string->len = content_len;
+                memcpy(text_string->chars, content, content_len);
+                text_string->chars[content_len] = '\0';
+
+                // Create text node with Lambda String
+                DomText* text_node = dom_text_create(text_string, pseudo_elem);
+                if (text_node) {
+                    pseudo_elem->first_child = text_node;
+                    log_debug("[Pseudo-Element] Created text content: \"%s\"", content);
+                }
+            }
+            break;
+        }
+
+        case CONTENT_TYPE_COUNTER:
+        case CONTENT_TYPE_COUNTERS:
+            // TODO: Implement counter resolution (Phase 2)
+            log_debug("[Pseudo-Element] Counter content not yet implemented");
+            break;
+
+        case CONTENT_TYPE_ATTR:
+            // TODO: Implement attribute reading (Phase 5)
+            log_debug("[Pseudo-Element] attr() content not yet implemented");
+            break;
+
+        case CONTENT_TYPE_URI:
+            // TODO: Implement image content (Phase 5)
+            log_debug("[Pseudo-Element] url() content not yet implemented");
+            break;
+
+        default:
+            log_debug("[Pseudo-Element] Unknown content type: %d", content_type);
+            break;
+    }
+
+    // Insert pseudo-element into DOM
+    insert_pseudo_into_dom(parent_elem, pseudo_elem, is_before);
+
+    // Store pseudo-element reference
+    if (is_before) {
+        pseudo->before = pseudo_elem;
+        pseudo->before_generated = true;
+    } else {
+        pseudo->after = pseudo_elem;
+        pseudo->after_generated = true;
+    }
+
+    log_debug("[Pseudo-Element] %s pseudo-element inserted", is_before ? "::before" : "::after");
 }
 
 // Forward declaration
@@ -675,6 +792,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     // Allocate pseudo-element content if ::before or ::after is present
     if (block->is_element()) {
         block->pseudo = alloc_pseudo_content_prop(lycon, block);
+
+        // Generate pseudo-element content from CSS content property (CSS 2.1 Section 12.2)
+        // Must be done AFTER alloc_pseudo_content_prop populates the content/type fields
+        generate_pseudo_element_content(lycon, block, true);   // ::before
+        generate_pseudo_element_content(lycon, block, false);  // ::after
 
         // Insert pseudo-elements into DOM tree for proper view tree linking
         if (block->pseudo) {
@@ -1405,6 +1527,24 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
 
+    // CSS Counter handling (CSS 2.1 Section 12.4)
+    // Push a new counter scope for this element
+    if (lycon->counter_context) {
+        counter_push_scope(lycon->counter_context);
+
+        // Apply counter-reset if specified
+        if (block->blk && block->blk->counter_reset) {
+            log_debug("    [Block] Applying counter-reset: %s", block->blk->counter_reset);
+            counter_reset(lycon->counter_context, block->blk->counter_reset);
+        }
+
+        // Apply counter-increment if specified
+        if (block->blk && block->blk->counter_increment) {
+            log_debug("    [Block] Applying counter-increment: %s", block->blk->counter_increment);
+            counter_increment(lycon->counter_context, block->blk->counter_increment);
+        }
+    }
+
     if (block->position && (block->position->position == CSS_VALUE_ABSOLUTE || block->position->position == CSS_VALUE_FIXED)) {
         layout_abs_block(lycon, elmt, block, &pa_block, &pa_line);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
@@ -1676,6 +1816,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             layout_relative_positioned(lycon, block);
         }
     }
+
+    // Pop counter scope when leaving this block
+    if (lycon->counter_context) {
+        counter_pop_scope(lycon->counter_context);
+    }
+
     log_leave();
 
     auto t_block_end = high_resolution_clock::now();

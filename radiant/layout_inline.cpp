@@ -1,5 +1,10 @@
 #include "layout.hpp"
 
+// Forward declarations from layout_block.cpp for pseudo-element handling
+extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
+extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
+extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
+
 // Compute bounding box of a ViewSpan based on union of child views
 // The bounding box includes the span's own border and padding
 void compute_span_bounding_box(ViewSpan* span) {
@@ -164,6 +169,43 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
+
+    // CSS Counter handling (CSS 2.1 Section 12.4)
+    // Apply counter operations for this inline element
+    if (lycon->counter_context && span->blk) {
+        // Apply counter-reset if specified
+        if (span->blk->counter_reset) {
+            log_debug("    [Inline] Applying counter-reset: %s", span->blk->counter_reset);
+            counter_reset(lycon->counter_context, span->blk->counter_reset);
+        }
+
+        // Apply counter-increment if specified
+        if (span->blk->counter_increment) {
+            log_debug("    [Inline] Applying counter-increment: %s", span->blk->counter_increment);
+            counter_increment(lycon->counter_context, span->blk->counter_increment);
+        }
+    }
+
+    // Allocate pseudo-element content if ::before or ::after is present
+    // Inline elements can have pseudo-elements too (e.g., <span>::before)
+    if (elmt->is_element()) {
+        DomElement* elem = static_cast<DomElement*>(elmt);
+        elem->pseudo = alloc_pseudo_content_prop(lycon, (ViewBlock*)span);
+
+        // Generate pseudo-element content from CSS content property
+        generate_pseudo_element_content(lycon, (ViewBlock*)span, true);   // ::before
+        generate_pseudo_element_content(lycon, (ViewBlock*)span, false);  // ::after
+
+        // Insert pseudo-elements into DOM tree for proper view tree linking
+        if (elem->pseudo) {
+            if (elem->pseudo->before) {
+                insert_pseudo_into_dom(elem, elem->pseudo->before, true);
+            }
+            if (elem->pseudo->after) {
+                insert_pseudo_into_dom(elem, elem->pseudo->after, false);
+            }
+        }
+    }
 
     if (span->font) {
         setup_font(lycon->ui_context, &lycon->font,  span->font);
