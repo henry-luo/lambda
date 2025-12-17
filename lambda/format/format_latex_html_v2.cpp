@@ -287,7 +287,7 @@ public:
         : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false) {}
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -326,6 +326,12 @@ public:
     void enterItalicStyledSpan() { italic_styled_span_depth_++; }
     void exitItalicStyledSpan() { if (italic_styled_span_depth_ > 0) italic_styled_span_depth_--; }
     bool inItalicStyledSpan() const { return italic_styled_span_depth_ > 0; }
+    
+    // Restricted horizontal mode (inside \mbox, \fbox, etc.)
+    // In this mode: \\ and \newline are ignored, \par becomes a space
+    void enterRestrictedHMode() { restricted_h_mode_ = true; }
+    void exitRestrictedHMode() { restricted_h_mode_ = false; }
+    bool inRestrictedHMode() const { return restricted_h_mode_; }
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
@@ -378,6 +384,10 @@ private:
     // Recursion depth tracking for macro expansion (prevent infinite loops)
     int recursion_depth_;
     bool depth_exceeded_;  // Flag to halt processing when depth limit is exceeded
+    
+    // Restricted horizontal mode flag - set when inside \mbox, \fbox, etc.
+    // In this mode, linebreaks (\\, \newline) are ignored and \par becomes a space
+    bool restricted_h_mode_;
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -2748,22 +2758,49 @@ static void cmd_equation_star(LatexProcessor* proc, Item elem) {
 // Line break commands
 
 static void cmd_newline(LatexProcessor* proc, Item elem) {
-    // \\ or \newline
+    // \\ or \newline - create a line break
+    // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
+    // We only strip leading whitespace on next token (skip), not trailing (no unskip).
+    // This allows: "one \\ space" -> "one space" (trailing space preserved)
+    if (proc->inRestrictedHMode()) {
+        proc->setStripNextLeadingSpace(true);  // skip after
+        return;
+    }
     HtmlGenerator* gen = proc->generator();
     gen->lineBreak(false);
 }
 
 static void cmd_linebreak(LatexProcessor* proc, Item elem) {
-    // \linebreak
+    // \linebreak - optional line break hint
+    // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
+    // We only strip leading whitespace on next token (skip), not trailing (no unskip).
+    if (proc->inRestrictedHMode()) {
+        proc->setStripNextLeadingSpace(true);  // skip after
+        return;
+    }
     HtmlGenerator* gen = proc->generator();
     gen->lineBreak(false);
 }
 
 static void cmd_par(LatexProcessor* proc, Item elem) {
     // \par - end current paragraph and start a new one
+    // In restricted horizontal mode (inside \mbox, etc.), \par is ignored with unskip
+    log_debug("cmd_par: inRestrictedHMode=%d", proc->inRestrictedHMode());
+    if (proc->inRestrictedHMode()) {
+        HtmlGenerator* gen = proc->generator();
+        // Remove trailing whitespace (unskip) and skip following whitespace
+        gen->trimTrailingWhitespace();
+        proc->setStripNextLeadingSpace(true);
+        // \par takes no arguments in LaTeX, but parser may attach following curly groups
+        // Process any children as regular content
+        proc->processChildren(elem);
+        return;
+    }
     // Simply close the paragraph if open - the next text will start a new one
     proc->endParagraph();
-    (void)elem;  // unused
+    // \par takes no arguments in LaTeX, but parser may attach following curly groups
+    // Process any children as regular content
+    proc->processChildren(elem);
 }
 
 static void cmd_noindent(LatexProcessor* proc, Item elem) {
@@ -2779,6 +2816,11 @@ static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
     // latex.js: args.gobbleO = <[ H o? ]>, \gobbleO : -> []
     // 'H' means: unskip before, add brsp (ZWS) after IF optional arg was consumed
     // Returns empty array (no output), but adds ZWS if optional arg consumed
+    
+    HtmlGenerator* gen = proc->generator();
+    
+    // 'H' arg: unskip before
+    gen->trimTrailingWhitespace();
     
     ElementReader reader(elem);
     bool has_optional_arg = false;
@@ -2799,7 +2841,6 @@ static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
     
     // Output ZWS only if optional argument was consumed
     if (has_optional_arg) {
-        HtmlGenerator* gen = proc->generator();
         gen->text("\xE2\x80\x8B");  // Zero-width space (U+200B in UTF-8)
     }
     // Otherwise output nothing (just gobble the space)
@@ -3068,6 +3109,9 @@ static void cmd_qquad(LatexProcessor* proc, Item elem) {
 
 // Helper function for box commands - matches latex.js _box pattern
 // Creates structure: <span class="classes"><span>content</span></span>
+// Content is processed in restricted horizontal mode where:
+//   - \\ and \newline are ignored (no linebreak output)
+//   - \par and paragraph breaks become spaces
 static void _box(LatexProcessor* proc, Item elem, const char* classes,
                  const char* width = nullptr, const char* pos = nullptr) {
     HtmlGenerator* gen = proc->generator();
@@ -3089,7 +3133,12 @@ static void _box(LatexProcessor* proc, Item elem, const char* classes,
     gen->span(box_classes.c_str());
     // Inner span for content (pass nullptr to get <span> without class)
     gen->span(nullptr);
+    
+    // Process content in restricted horizontal mode
+    proc->enterRestrictedHMode();
     proc->processChildren(elem);
+    proc->exitRestrictedHMode();
+    
     gen->closeElement(); // close inner span
     gen->closeElement(); // close outer span
 }
@@ -4973,6 +5022,7 @@ bool LatexProcessor::isInlineCommand(const char* cmd_name) {
 void LatexProcessor::ensureParagraph() {
     // Only open paragraph if we're not inside an inline element
     if (!in_paragraph_ && inline_depth_ == 0) {
+        log_debug("ensureParagraph: opening paragraph, restricted=%d", restricted_h_mode_);
         if (next_paragraph_is_noindent_) {
             gen_->p("noindent");
             next_paragraph_is_noindent_ = false;  // Reset the flag
@@ -4988,6 +5038,7 @@ void LatexProcessor::ensureParagraph() {
 
 void LatexProcessor::closeParagraphIfOpen() {
     if (in_paragraph_) {
+        log_debug("closeParagraphIfOpen: closing paragraph, restricted=%d", restricted_h_mode_);
         gen_->trimTrailingWhitespace();  // Trim trailing whitespace before closing paragraph
         gen_->closeElement();
         in_paragraph_ = false;
@@ -5082,6 +5133,11 @@ void LatexProcessor::processNode(Item node) {
             const char* sym_name = str->chars;
             
             if (strcmp(sym_name, "parbreak") == 0) {
+                // In restricted horizontal mode (inside \mbox), paragraph breaks become spaces
+                if (restricted_h_mode_) {
+                    gen_->text(" ");
+                    return;
+                }
                 // Paragraph break: close current paragraph and prepare for next
                 closeParagraphIfOpen();
                 // Clear continue and noindent flags - parbreak resets paragraph styling
@@ -5193,7 +5249,8 @@ void LatexProcessor::processChildren(Item elem) {
             ElementReader child_elem(child_reader.item());
             const char* tag = child_elem.tagName();
             
-            if (tag && (strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0)) {
+            if (tag && (strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0 ||
+                        strcmp(tag, "newline") == 0)) {
                 // Check if next sibling is a brack_group (dimension argument)
                 bool has_dimension = false;
                 bool preserve_unit = false;
@@ -5246,8 +5303,70 @@ void LatexProcessor::processChildren(Item elem) {
                     }
                 }
                 
+                // In restricted horizontal mode, linebreaks collapse surrounding whitespace.
+                //
+                // LaTeX behavior in restricted horizontal mode:
+                // - \\ and \newline are essentially no-ops (can't break lines in a box)
+                // - But they still do \unskip (remove preceding space)
+                // - Following spaces are also absorbed
+                //
+                // Special case for \\[dim]:
+                // - If \\[dim] has a dimension argument AND next text has leading space,
+                //   preserve exactly one space (the dimension indicates intentional spacing)
+                // - Otherwise, collapse all whitespace
+                //
+                // Summary:
+                // - \linebreak: outputs exactly one space
+                // - \\[dim] with next leading space: preserve one space  
+                // - \\ without dim, or next has no leading space: collapse all
+                // - \newline: collapse all
+                if (restricted_h_mode_) {
+                    bool is_linebreak_cmd = (child_elem.childCount() > 0) || (strcmp(tag, "linebreak_command") == 0);
+                    bool had_trailing_ws = gen_->hasTrailingWhitespace();
+                    gen_->trimTrailingWhitespace();
+                    
+                    if (is_linebreak_cmd) {
+                        // \linebreak: always output exactly one space
+                        gen_->text(" ");
+                        strip_next_leading_space_ = true;
+                        continue;
+                    }
+                    
+                    // Check for next text having leading whitespace
+                    bool next_has_leading_ws = false;
+                    for (int64_t j = i + 1; j < count; j++) {
+                        ItemReader lookahead = elem_reader.childAt(j);
+                        if (lookahead.isElement()) {
+                            ElementReader la_elem(lookahead.item());
+                            const char* la_tag = la_elem.tagName();
+                            if (la_tag && strcmp(la_tag, "brack_group") == 0) {
+                                continue; // Keep looking for next text
+                            }
+                            break; // Stop at any other element
+                        } else if (lookahead.isString()) {
+                            String* la_str = lookahead.asString();
+                            if (la_str && la_str->len > 0) {
+                                char first = la_str->chars[0];
+                                next_has_leading_ws = (first == ' ' || first == '\t' || first == '\n' || first == '\r');
+                            }
+                            break;
+                        }
+                    }
+                    
+                    // For \\[dim] with leading space after: preserve one space
+                    // This handles cases like "one \\[4cm] space" where the dimension
+                    // indicates intentional vertical space, and word separation should be preserved
+                    // Note: has_dimension is set earlier when brack_group is consumed and i is incremented
+                    if (strcmp(tag, "linebreak") == 0 && has_dimension && 
+                        had_trailing_ws && next_has_leading_ws) {
+                        gen_->text(" ");
+                    }
+                    strip_next_leading_space_ = true;
+                    continue;
+                }
+                
                 // Output the linebreak
-                ensureParagraph();
+                ensureParagraph();;
                 if (has_dimension) {
                     // Output span with class and style: <span class="breakspace" style="margin-bottom:X"></span>
                     char style[256];
@@ -5887,7 +6006,8 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     }
     
     // Handle block vs inline commands differently
-    if (isBlockCommand(cmd_name)) {
+    // In restricted horizontal mode (inside \mbox), block commands should NOT close paragraph
+    if (isBlockCommand(cmd_name) && !restricted_h_mode_) {
         // Close paragraph before block commands
         closeParagraphIfOpen();
     } else if (isInlineCommand(cmd_name)) {
