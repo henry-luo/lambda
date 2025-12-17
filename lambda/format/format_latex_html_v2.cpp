@@ -1971,6 +1971,75 @@ static void cmd_dots(LatexProcessor* proc, Item elem) {
     gen->text("…");
 }
 
+// Helper to convert char code to UTF-8 string
+static std::string codepoint_to_utf8(uint32_t codepoint) {
+    std::string result;
+    if (codepoint < 0x80) {
+        result += static_cast<char>(codepoint);
+    } else if (codepoint < 0x800) {
+        result += static_cast<char>(0xC0 | (codepoint >> 6));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else if (codepoint < 0x10000) {
+        result += static_cast<char>(0xE0 | (codepoint >> 12));
+        result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else if (codepoint < 0x110000) {
+        result += static_cast<char>(0xF0 | (codepoint >> 18));
+        result += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+        result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    }
+    return result;
+}
+
+static void cmd_char(LatexProcessor* proc, Item elem) {
+    // \char<number> or \char"<hex> - output character by code
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    
+    // Get the argument text using ElementReader
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* arg_str = stringbuf_to_string(sb);
+    
+    if (!arg_str || arg_str->len == 0) {
+        return;
+    }
+    
+    // Skip leading whitespace
+    const char* arg = arg_str->chars;
+    while (*arg && (*arg == ' ' || *arg == '\t' || *arg == '\n' || *arg == '\r')) {
+        arg++;
+    }
+    
+    if (!*arg) {
+        return;
+    }
+    
+    uint32_t charcode = 0;
+    // Check if hex notation (starts with " or 0x)
+    if (arg[0] == '"') {
+        charcode = std::strtoul(arg + 1, nullptr, 16);
+    } else if (strlen(arg) > 2 && arg[0] == '0' && (arg[1] == 'x' || arg[1] == 'X')) {
+        charcode = std::strtoul(arg + 2, nullptr, 16);
+    } else {
+        charcode = std::strtoul(arg, nullptr, 10);
+    }
+    
+    if (charcode > 0) {
+        std::string utf8 = codepoint_to_utf8(charcode);
+        gen->text(utf8.c_str());
+    }
+}
+
+static void cmd_symbol(LatexProcessor* proc, Item elem) {
+    // \symbol{number} or \symbol{"hex} - output character by code
+    // Same as \char but with braced argument
+    cmd_char(proc, elem);
+}
+
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
     // \makeatletter - Make @ a letter (category code change)
     // In HTML output, this doesn't affect anything
@@ -4577,6 +4646,8 @@ void LatexProcessor::initCommandTable() {
     command_table_["textellipsis"] = cmd_textellipsis;
     command_table_["ldots"] = cmd_ldots;
     command_table_["dots"] = cmd_dots;
+    command_table_["char"] = cmd_char;
+    command_table_["symbol"] = cmd_symbol;
     command_table_["makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;
     
