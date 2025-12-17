@@ -912,7 +912,7 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 }
             }
 
-            // Single colon - pseudo-class
+            // Single colon - pseudo-class or legacy pseudo-element
             else if (pseudo_token->type == CSS_TOKEN_IDENT) {
                 const char* pseudo_name = pseudo_token->value;
                 if (!pseudo_name && pseudo_token->start && pseudo_token->length > 0) {
@@ -926,8 +926,38 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 (*pos)++;
 
-                // Map pseudo-class name to type (comprehensive list)
-                if (strcmp(pseudo_name, "first-child") == 0) {
+                // Handle legacy pseudo-elements with single colon (CSS2.1 backward compatibility)
+                // :before, :after, :first-line, :first-letter should be treated as pseudo-elements
+                if (strcmp(pseudo_name, "before") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE;
+                    selector->value = pseudo_name;
+                    selector->argument = NULL;
+                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
+                    matched = true;
+                } else if (strcmp(pseudo_name, "after") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_AFTER;
+                    selector->value = pseudo_name;
+                    selector->argument = NULL;
+                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
+                    matched = true;
+                } else if (strcmp(pseudo_name, "first-line") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LINE;
+                    selector->value = pseudo_name;
+                    selector->argument = NULL;
+                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
+                    matched = true;
+                } else if (strcmp(pseudo_name, "first-letter") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LETTER;
+                    selector->value = pseudo_name;
+                    selector->argument = NULL;
+                    log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
+                    matched = true;
+                }
+
+                // Only process as pseudo-class if not already matched as legacy pseudo-element
+                if (!matched) {
+                    // Map pseudo-class name to type (comprehensive list)
+                    if (strcmp(pseudo_name, "first-child") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_FIRST_CHILD;
                 } else if (strcmp(pseudo_name, "last-child") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_LAST_CHILD;
@@ -999,11 +1029,12 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     log_debug(" Generic pseudo-class: ':%s'", pseudo_name);
                 }
 
-                selector->value = pseudo_name;
-                selector->argument = NULL;
+                    selector->value = pseudo_name;
+                    selector->argument = NULL;
 
-                log_debug(" Simple pseudo-class: ':%s'", pseudo_name);
-                matched = true;
+                    log_debug(" Simple pseudo-class: ':%s'", pseudo_name);
+                    matched = true;
+                } // end if (!matched)
 
             } else if (pseudo_token->type == CSS_TOKEN_FUNCTION) {
                 // Functional pseudo-class after colon: :nth-child(...)
