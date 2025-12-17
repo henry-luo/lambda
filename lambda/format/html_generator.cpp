@@ -38,15 +38,46 @@ static std::string processTypography(const char* input) {
         // Note: Single hyphens (-) are NOT converted to Unicode hyphens (U+2010)
         // LaTeX.js keeps regular ASCII hyphens for words like "daughter-in-law"
         
-        // Check for fi ligature
+        // Check for ligatures - order matters! Check longer ligatures first
+        // ffi ligature
+        if (p[0] == 'f' && p[1] == 'f' && p[2] == 'i') {
+            result += "\xEF\xAC\x83";  // U+FB03 ffi ligature
+            p += 3;
+            continue;
+        }
+        // ffl ligature
+        if (p[0] == 'f' && p[1] == 'f' && p[2] == 'l') {
+            result += "\xEF\xAC\x84";  // U+FB04 ffl ligature
+            p += 3;
+            continue;
+        }
+        // ff ligature
+        if (p[0] == 'f' && p[1] == 'f') {
+            result += "\xEF\xAC\x80";  // U+FB00 ff ligature
+            p += 2;
+            continue;
+        }
+        // fi ligature
         if (p[0] == 'f' && p[1] == 'i') {
             result += "\xEF\xAC\x81";  // U+FB01 fi ligature
             p += 2;
             continue;
         }
-        // Check for fl ligature
+        // fl ligature
         if (p[0] == 'f' && p[1] == 'l') {
             result += "\xEF\xAC\x82";  // U+FB02 fl ligature
+            p += 2;
+            continue;
+        }
+        // Check for << (left guillemet)
+        if (p[0] == '<' && p[1] == '<') {
+            result += "\xC2\xAB";  // U+00AB left guillemet «
+            p += 2;
+            continue;
+        }
+        // Check for >> (right guillemet)
+        if (p[0] == '>' && p[1] == '>') {
+            result += "\xC2\xBB";  // U+00BB right guillemet »
             p += 2;
             continue;
         }
