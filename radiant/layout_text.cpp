@@ -449,6 +449,8 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         FT_GlyphSlot slot = lycon->font.ft_face->glyph;
         // Use precise float calculation for advance
         text_width += (float)(slot->advance.x) / 64.0f;
+        // Apply letter-spacing
+        text_width += lycon->font.style->letter_spacing;
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
@@ -697,6 +699,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
+            // Apply letter-spacing to spaces as well
+            wd += lycon->font.style->letter_spacing;
             is_word_start = true;  // Next non-space char is word start
         }
         else {
@@ -715,6 +719,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
             wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
+            // Apply letter-spacing (add to character width)
+            wd += lycon->font.style->letter_spacing;
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
