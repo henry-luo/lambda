@@ -479,11 +479,11 @@ After implementing phases 1-3:
 
 #### ✅ Phase 1: Block-in-Inline Splitting (COMPLETED)
 - **Implementation**: Added block-in-inline detection and splitting logic in `layout_inline.cpp`
-- **Files Modified**: 
+- **Files Modified**:
   - `radiant/layout_inline.cpp` - Added `layout_inline_with_block_children()` function
   - Detection scan added at lines 180-196
   - Handler function at lines 70-143
-- **Results**: 
+- **Results**:
   - `block-in-inline-001`: 76.9% match (improved from 0%)
   - Box suite: Many tests now 85-97% match (improved from 0-40%)
   - Baseline suite: Maintained 100% pass rate (1355/1355)
@@ -491,12 +491,12 @@ After implementing phases 1-3:
 #### ✅ Table Auto-Width Fix (Priority 4 - COMPLETED EARLY)
 - **Problem**: Table cells with block-in-inline content sized incorrectly
 - **Root Cause**: `measure_cell_intrinsic_width()` was calling `layout_flow_node()` which filled 10000px container
-- **Fix**: 
+- **Fix**:
   - Save/restore `block.max_width` around inline element measurement
   - Recursive content measurement for block children (text width only)
   - Added float exclusion per CSS 2.1 (floats don't contribute to intrinsic width)
 - **Files Modified**: `radiant/layout_table.cpp` lines 2218+, 2293-2308, 2503-2518
-- **Results**: 
+- **Results**:
   - `block-in-inline-001` table width: 48px (expected 47.33px) ✅
   - Float tests: `floats-151`, `floats-153` now pass 100%
 
@@ -504,11 +504,11 @@ After implementing phases 1-3:
 1. **block-in-inline-nested-001** (40.0% → 100.0%)
    - Removed premature `line_break()` in `layout_inline_with_block_children()`
    - Nested inline structures now maintain correct flow continuation
-   
+
 2. **floats-151** (37.5% → 100.0%)
    - Added float property check in table intrinsic width measurement
    - Floats now correctly excluded from content width per CSS 2.1
-   
+
 3. **floats-153** (37.5% → 100.0%)
    - Same fix as floats-151
 
@@ -582,7 +582,7 @@ if (has_mixed_fonts) {
 
 **Tasks**:
 - [x] Identify root cause (line height calculation in line_break)
-- [ ] Remove -1px hack and mixed font heuristics  
+- [ ] Remove -1px hack and mixed font heuristics
 - [ ] Implement proper strut height calculation
 - [ ] Test with `box_010_line_height`, `box_012_overflow`
 - [ ] Verify baseline tests don't regress
