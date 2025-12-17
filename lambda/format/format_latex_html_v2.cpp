@@ -1985,6 +1985,34 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Case 1: No braces - output nothing (null command)
 }
 
+static void cmd_unskip(LatexProcessor* proc, Item elem) {
+    // \unskip - removes preceding whitespace from output
+    // Unlike most LaTeX commands, this "breaks out" of groups - it affects output
+    // even when inside {...} groups
+    (void)elem;
+    HtmlGenerator* gen = proc->generator();
+    gen->trimTrailingWhitespace();
+}
+
+static void cmd_ignorespaces(LatexProcessor* proc, Item elem) {
+    // \ignorespaces - skips following whitespace
+    // Unlike \unskip, this does NOT break out of groups - it only affects whitespace
+    // that follows it within the current group
+    (void)elem;
+    LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
+    mutable_proc->setStripNextLeadingSpace(true);
+}
+
+static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
+    // \/ - ligature break (zero-width non-joiner)
+    // Prevents ligatures from forming, e.g., shelf\/ful prevents "shelfful" from becoming "shelﬀul"
+    // Inserts U+200C zero-width non-joiner
+    (void)elem;
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("\xE2\x80\x8C");  // U+200C zero-width non-joiner
+}
+
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
     // The {} serves as word terminator but produces no output
@@ -4821,6 +4849,9 @@ void LatexProcessor::initCommandTable() {
     command_table_["LaTeX"] = cmd_LaTeX;
     command_table_["today"] = cmd_today;
     command_table_["empty"] = cmd_empty;
+    command_table_["unskip"] = cmd_unskip;
+    command_table_["ignorespaces"] = cmd_ignorespaces;
+    command_table_["/"] = cmd_ligature_break;  // \/ ligature break
     command_table_["textbackslash"] = cmd_textbackslash;
     command_table_["textellipsis"] = cmd_textellipsis;
     command_table_["ldots"] = cmd_ldots;
@@ -5596,9 +5627,12 @@ void LatexProcessor::processSpacingCommand(Item elem) {
                 // Tilde (non-breaking space) - this path shouldn't be reached since
                 // ~ is handled as nbsp element, but keep for completeness
                 gen_->writer()->writeRawHtml("&nbsp;");
-            } else if (strcmp(cmd, "\\/") == 0 || strcmp(cmd, "\\@") == 0) {
-                // Italic correction or inter-sentence space marker - output nothing
-                // These are zero-width commands
+            } else if (strcmp(cmd, "\\/") == 0) {
+                // Ligature break - insert zero-width non-joiner U+200C
+                // Prevents ligatures from forming, e.g., shelf\/ful prevents "shelfful" from becoming "shelﬀul"
+                gen_->text("\xE2\x80\x8C");  // U+200C zero-width non-joiner
+            } else if (strcmp(cmd, "\\@") == 0) {
+                // Inter-sentence space marker - output nothing (it's just a marker for TeX)
             } else if (strcmp(cmd, "\\-") == 0) {
                 // Discretionary hyphen - soft hyphen U+00AD
                 gen_->text("\xC2\xAD");  // UTF-8 encoding of U+00AD
@@ -5738,6 +5772,11 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     if (strcmp(cmd_name, "curly_group") == 0) {
         gen_->enterGroup();
         
+        // Save strip_next_leading_space_ flag - it should not persist beyond group scope
+        // Commands like \ignorespaces only affect whitespace in the current group
+        bool saved_strip_flag = strip_next_leading_space_;
+        strip_next_leading_space_ = false;  // Reset for group content
+        
         // Check if group is empty (has no children or only whitespace)
         ElementReader reader(elem);
         bool is_empty_group = true;
@@ -5793,6 +5832,9 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         
         processChildren(elem);
         gen_->exitGroup();
+        
+        // Restore strip_next_leading_space_ flag after group
+        strip_next_leading_space_ = saved_strip_flag;
         
         // ZWS at exit for certain depths
         // - depth 1 (document level): 
