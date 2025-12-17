@@ -2742,11 +2742,75 @@ static void cmd_noindent(LatexProcessor* proc, Item elem) {
 
 static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
     // \gobbleO - gobble whitespace and optional argument (from echo package)
-    // latex.js: \gobbleO : -> []
-    // This command outputs a zero-width space (U+200B) to prevent whitespace collapse
+    // latex.js: args.gobbleO = <[ H o? ]>, \gobbleO : -> []
+    // 'H' means: unskip before, add brsp (ZWS) after IF optional arg was consumed
+    // Returns empty array (no output), but adds ZWS if optional arg consumed
+    
+    ElementReader reader(elem);
+    bool has_optional_arg = false;
+    
+    // Check if optional argument was consumed (brack_group or curly_group child)
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "curly_group") == 0) {
+                has_optional_arg = true;
+                break;
+            }
+        }
+    }
+    
+    // Output ZWS only if optional argument was consumed
+    if (has_optional_arg) {
+        HtmlGenerator* gen = proc->generator();
+        gen->text("\xE2\x80\x8B");  // Zero-width space (U+200B in UTF-8)
+    }
+    // Otherwise output nothing (just gobble the space)
+}
+
+static void cmd_echoO(LatexProcessor* proc, Item elem) {
+    // \echoO[optional] - from echo package for testing
+    // latex.js: args.echoO = <[ H o? ]>, \echoO : (o) -> [ "-", o, "-" ]
+    // Outputs "-optional-" if optional arg present, otherwise just "-"
+    
     HtmlGenerator* gen = proc->generator();
-    gen->text("\xE2\x80\x8B");  // Zero-width space (U+200B in UTF-8)
-    (void)elem;  // unused
+    Pool* pool = proc->pool();
+    ElementReader reader(elem);
+    
+    gen->text("-");
+    
+    // Find and output optional argument content
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            if (strcmp(tag, "brack_group") == 0) {
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                break;
+            }
+        }
+    }
+    
+    gen->text("-");
+}
+
+static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
+    // \echoOGO[o1]{g}[o2] - from echo package for testing
+    // latex.js: args.echoOGO = <[ H o? g o? ]>
+    // \echoOGO : (o1, g, o2) -> [] with optional parts
+    // Returns empty (just gobbles), used for testing arg parsing
+    
+    // This command produces no output in latex.js
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_newpage(LatexProcessor* proc, Item elem) {
@@ -4666,6 +4730,8 @@ void LatexProcessor::initCommandTable() {
     command_table_["par"] = cmd_par;
     command_table_["noindent"] = cmd_noindent;
     command_table_["gobbleO"] = cmd_gobbleO;
+    command_table_["echoO"] = cmd_echoO;
+    command_table_["echoOGO"] = cmd_echoOGO;
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
