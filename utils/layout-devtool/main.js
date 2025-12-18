@@ -314,10 +314,19 @@ class LayoutDevTool {
   }
 
   async renderLambdaView(testPath, viewportWidth = 1200, viewportHeight = 800) {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       // Output path with timestamp to avoid caching
       const outputDir = path.join(this.projectRoot, 'test_output');
       const outputPath = path.join(outputDir, 'lambda_render.png');
+
+      // Ensure output directory exists
+      try {
+        await fs.mkdir(outputDir, { recursive: true });
+      } catch (error) {
+        console.error('Failed to create output directory:', error);
+        reject(error);
+        return;
+      }
 
       // Construct the absolute path to the test file
       const absoluteTestPath = path.join(this.projectRoot, testPath);
