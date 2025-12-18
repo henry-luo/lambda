@@ -2545,35 +2545,46 @@ static bool should_collapse_whitespace(ViewTableCell* cell) {
     return true; // Default: collapse whitespace (normal, nowrap)
 }
 
-// Helper: Normalize whitespace according to CSS white-space: normal rules
-// Collapses consecutive whitespace to single space, trims leading/trailing whitespace
-static std::string normalize_whitespace(const char* text, size_t length) {
-    if (!text || length == 0) return "";
-
-    std::string result;
-    result.reserve(length);
-
-    bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
+// Helper: Check if text is all whitespace
+static bool is_all_whitespace(const char* text, size_t length) {
     for (size_t i = 0; i < length; i++) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Helper: Normalize whitespace in-place to a buffer
+// Returns length of normalized text (0 if all whitespace)
+// Collapses consecutive whitespace to single space, trims leading/trailing
+static size_t normalize_whitespace_to_buffer(const char* text, size_t length, char* buffer, size_t buffer_size) {
+    if (!text || length == 0 || !buffer || buffer_size == 0) return 0;
+
+    size_t out_pos = 0;
+    bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
+
+    for (size_t i = 0; i < length && out_pos < buffer_size - 1; i++) {
         unsigned char ch = (unsigned char)text[i];
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
             if (!in_whitespace) {
-                result += ' ';  // Collapse to single space
+                buffer[out_pos++] = ' ';  // Collapse to single space
                 in_whitespace = true;
             }
-            // Otherwise, skip consecutive whitespace
         } else {
-            result += (char)ch;
+            buffer[out_pos++] = (char)ch;
             in_whitespace = false;
         }
     }
 
-    // Trim trailing whitespace (last char if it's a space from collapse)
-    if (!result.empty() && result.back() == ' ') {
-        result.pop_back();
+    // Trim trailing whitespace
+    while (out_pos > 0 && buffer[out_pos - 1] == ' ') {
+        out_pos--;
     }
 
-    return result;
+    buffer[out_pos] = '\0';
+    return out_pos;
 }
 
 // Measure cell's intrinsic content width (Preferred Content Width - PCW)
@@ -2630,16 +2641,20 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
 
                 const char* measure_text = (const char*)text;
                 size_t measure_len = text_len;
-                std::string normalized;
+                static char normalized_buffer[4096];  // Static buffer for normalized text
 
                 if (collapse_ws) {
-                    // Normalize whitespace according to CSS white-space: normal rules
-                    // This collapses consecutive whitespace and trims leading/trailing
-                    normalized = normalize_whitespace((const char*)text, text_len);
-                    log_debug("PCW measuring text: '%s' -> normalized: '%s'", text, normalized.c_str());
-                    if (normalized.empty()) continue; // Skip whitespace-only text nodes
-                    measure_text = normalized.c_str();
-                    measure_len = normalized.length();
+                    // Check if all whitespace first (fast path)
+                    if (is_all_whitespace((const char*)text, text_len)) {
+                        continue; // Skip whitespace-only text nodes
+                    }
+                    // Normalize whitespace to buffer
+                    size_t normalized_len = normalize_whitespace_to_buffer(
+                        (const char*)text, text_len, normalized_buffer, sizeof(normalized_buffer));
+                    log_debug("PCW measuring text: '%s' -> normalized: '%s'", text, normalized_buffer);
+                    if (normalized_len == 0) continue; // Skip if normalized to nothing
+                    measure_text = normalized_buffer;
+                    measure_len = normalized_len;
                 }
 
                 // Use unified intrinsic sizing API
@@ -2720,22 +2735,22 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
 
                     if (child_elem->first_child) {
                         for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
-                            if (grandchild->is_text()) {
-                                const unsigned char* text = grandchild->text_data();
-                                if (text && *text) {
-                                    size_t text_len = strlen((const char*)text);
-                                    const char* measure_text = (const char*)text;
-                                    size_t measure_len = text_len;
-                                    std::string normalized;
+                                if (grandchild->is_text()) {
+                                    const unsigned char* text = grandchild->text_data();
+                                    if (text && *text) {
+                                        size_t text_len = strlen((const char*)text);
+                                        const char* measure_text = (const char*)text;
+                                        size_t measure_len = text_len;
+                                        static char normalized_buffer[4096];
 
-                                    if (collapse_ws) {
-                                        normalized = normalize_whitespace((const char*)text, text_len);
-                                        if (normalized.empty()) continue;
-                                        measure_text = normalized.c_str();
-                                        measure_len = normalized.length();
-                                    }
-
-                                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+                                        if (collapse_ws) {
+                                            if (is_all_whitespace((const char*)text, text_len)) continue;
+                                            size_t normalized_len = normalize_whitespace_to_buffer(
+                                                (const char*)text, text_len, normalized_buffer, sizeof(normalized_buffer));
+                                            if (normalized_len == 0) continue;
+                                            measure_text = normalized_buffer;
+                                            measure_len = normalized_len;
+                                        }                                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
                                         lycon, measure_text, measure_len);
                                     float text_width = (float)widths.max_content;
                                     if (text_width > block_content_width) block_content_width = text_width;
@@ -2848,14 +2863,16 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
 
                 const char* measure_text = (const char*)text;
                 size_t measure_len = text_len;
-                std::string normalized;
+                static char normalized_buffer[4096];
 
                 if (collapse_ws) {
-                    // Normalize whitespace according to CSS white-space: normal rules
-                    normalized = normalize_whitespace((const char*)text, text_len);
-                    if (normalized.empty()) continue; // Skip whitespace-only text nodes
-                    measure_text = normalized.c_str();
-                    measure_len = normalized.length();
+                    if (is_all_whitespace((const char*)text, text_len)) continue;
+                    size_t normalized_len = normalize_whitespace_to_buffer(
+                        (const char*)text, text_len, normalized_buffer, sizeof(normalized_buffer));
+                    log_debug("MCW measuring text: '%s' -> normalized: '%s'", text, normalized_buffer);
+                    if (normalized_len == 0) continue; // Skip whitespace-only text nodes
+                    measure_text = normalized_buffer;
+                    measure_len = normalized_len;
                 }
 
                 // Use unified intrinsic sizing API - min_content gives longest word
