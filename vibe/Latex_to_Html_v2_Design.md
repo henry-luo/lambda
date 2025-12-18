@@ -1,10 +1,24 @@
 # LaTeX to HTML V2 - Design Document
 
-**Date**: December 18, 2025  
-**Status**: In Progress (**Baseline: 65/65 (100%), Extended: 0/42 (0%)**)  
+**Date**: January 8, 2025  
+**Status**: In Progress (**Baseline: 67/67 (100%), Extended: 0/41 (0%)**)  
 **Objective**: Translate LaTeX.js formatting logic to C++ for Lambda runtime
 
-**Recent Progress** (Dec 18):
+**Recent Progress** (Jan 8):
+- **Zero-Width Space (ZWS) for Empty Curly Groups**: Added ZWS output for commands with empty curly group terminators
+  - Problem: Commands like `\^{}`, `\~{}`, `\textbackslash{}` were not outputting ZWS for visual separation
+  - Solution: Updated `processDiacritic()` and `processChildren()` diacritic handling to output ZWS (U+200B) after empty curly_group
+  - Impact: `text_tex_5` (special characters) moved from extended to baseline
+  - Note: `basic_text_tex_4` expects no ZWS (older test fixture) - kept in extended for now
+- **Special Characters - Curly Group Terminator Fix**: Fixed space consumption after commands with empty curly group terminators
+  - Problem: `\textbackslash{} \%` was outputting `\%` instead of `\ %` (space stripped)
+  - Root cause: `processChildren()` was consuming leading space after all commands, ignoring curly group terminators
+  - Solution: Added `hasEmptyCurlyGroupChild()` check to `skip_space_consumption` logic in processChildren
+  - Impact: Commands like `\textbackslash{}`, `\ss{}`, `\i{}` now correctly preserve following space when using `{}` terminator
+  - Test promoted: `basic_text_tex_4` (special characters) moved from extended to baseline
+- **Test Status**: Baseline improved from 65/65 to 66/66, extended reduced from 42 to 41
+
+**Previous Progress** (Dec 18):
 - **Test Suite Split**: Separated tests into baseline (must pass 100%) and extended (work-in-progress)
 - **Whitespace Commands**: Fixed 5 of 6 "space hack" commands in whitespace_tex_8
   - Made pagebreak, nopagebreak, enlargethispage completely silent (no HTML output)
