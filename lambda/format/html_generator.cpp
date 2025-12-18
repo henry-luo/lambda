@@ -848,6 +848,7 @@ void HtmlGenerator::hline() {
 
 void HtmlGenerator::startFigure(const char* position) {
     pushFloatState("figure", position);
+    // Note: ID will be added by caption if present
     writer_->openTag("div", "figure-float");
 }
 
@@ -872,7 +873,24 @@ void HtmlGenerator::startCaption() {
         stepCounter("table");
     }
     
-    writer_->openTag("div", "caption");
+    // Generate anchor for labeling
+    std::string anchor_id;
+    if (state.type == "figure") {
+        if (state.anchor.empty()) {
+            state.anchor = generateAnchorId("fig");
+        }
+        anchor_id = state.anchor;
+        setCurrentLabel(state.anchor, formatCounter("figure", "arabic"));
+    } else if (state.type == "table") {
+        if (state.anchor.empty()) {
+            state.anchor = generateAnchorId("tab");
+        }
+        anchor_id = state.anchor;
+        setCurrentLabel(state.anchor, formatCounter("table", "arabic"));
+    }
+    
+    // Open caption div with ID
+    writer_->openTag("div", "caption", anchor_id.c_str());
     
     // Write caption label
     std::string label;
@@ -883,7 +901,7 @@ void HtmlGenerator::startCaption() {
     }
     
     if (!label.empty()) {
-        span("class=\"caption-label\"");
+        span("caption-label");
         text(label.c_str());
         text(": ");
         closeElement();  // span
