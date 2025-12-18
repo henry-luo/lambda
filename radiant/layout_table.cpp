@@ -4,6 +4,7 @@
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
+#include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
@@ -290,18 +291,44 @@ static bool is_cell_empty(ViewTableCell* cell) {
             return false;
         }
         if (child->is_text()) {
-            // Check if text is only whitespace
-            // Extended whitespace check: space, tab, newline, carriage return, form feed, vertical tab
+            // Quick Win #2: Check for Unicode whitespace, not just ASCII
+            // Unicode whitespace categories: Zs (space separator), Zl (line separator), Zp (paragraph separator)
+            // Common whitespace: space (U+0020), tab (U+0009), LF (U+000A), CR (U+000D), NBSP (U+00A0),
+            //                    em space (U+2003), thin space (U+2009), zero-width space (U+200B), etc.
             const char* text = ((DomText*)child)->text;
             if (text) {
-                for (const char* p = text; *p; p++) {
-                    unsigned char c = (unsigned char)*p;
-                    // Check for all ASCII whitespace: space(32), tab(9), LF(10), VT(11), FF(12), CR(13)
-                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != '\v' &&
-                        c != 0xA0) {  // Also check for non-breaking space (0xA0)
+                const unsigned char* p = (const unsigned char*)text;
+                while (*p) {
+                    uint32_t codepoint;
+                    int bytes = utf8_to_codepoint(p, &codepoint);
+                    if (bytes <= 0) break;  // Invalid UTF-8
+                    
+                    // Check for Unicode whitespace
+                    // Basic ASCII whitespace: space, tab, LF, VT, FF, CR
+                    bool is_ws = (codepoint == 0x0020 || codepoint == 0x0009 || codepoint == 0x000A ||
+                                  codepoint == 0x000B || codepoint == 0x000C || codepoint == 0x000D);
+                    
+                    // Unicode whitespace characters
+                    if (!is_ws) {
+                        // U+00A0: Non-breaking space (NBSP)
+                        // U+1680: Ogham space mark
+                        // U+2000-U+200A: En quad, Em quad, En space, Em space, Three-per-em space,
+                        //                 Four-per-em space, Six-per-em space, Figure space,
+                        //                 Punctuation space, Thin space, Hair space
+                        // U+202F: Narrow no-break space
+                        // U+205F: Medium mathematical space
+                        // U+3000: Ideographic space
+                        is_ws = (codepoint == 0x00A0 || codepoint == 0x1680 ||
+                                 (codepoint >= 0x2000 && codepoint <= 0x200A) ||
+                                 codepoint == 0x202F || codepoint == 0x205F || codepoint == 0x3000);
+                    }
+                    
+                    if (!is_ws) {
                         // Non-whitespace content found
                         return false;
                     }
+                    
+                    p += bytes;
                 }
             }
         }
