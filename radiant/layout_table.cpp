@@ -346,10 +346,12 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
-            // For text content, use line-height as the content height (not just font metrics)
+            // CRITICAL: Use the maximum of CSS line-height and actual text bounding box height.
+            // For single-line text: line_height (24px from CSS line-height: 1.5) > text->height (18px from font metrics)
+            // For wrapped text: text->height (108px from 6 wrapped lines) > line_height (24px)
             // CSS 2.1 §17.5.3: "The height of a cell box is the minimum height required by the content"
-            // For inline content, this means the line box height which includes line-height
-            float text_height = cell_line_height > 0 ? cell_line_height : text->height;
+            // This ensures both single-line and wrapped content are measured correctly.
+            float text_height = max(cell_line_height > 0 ? cell_line_height : 0.0f, text->height);
 
             if (text_height > content_height) content_height = text_height;
         }
