@@ -6042,6 +6042,7 @@ void LatexProcessor::processChildren(Item elem) {
                 gen_->text(tag);
                 continue;
             }
+            
         }
         
         // Normal processing for other nodes
@@ -6085,10 +6086,11 @@ void LatexProcessor::processSpacingCommand(Item elem) {
             } else if (strcmp(cmd, "\\space") == 0) {
                 // Normal space
                 gen_->text(" ");
-            } else if (strcmp(cmd, "\\ ") == 0) {
-                // Backslash-space (control space) - produces zero-width space followed by regular space
-                // This allows a line break at this point unlike ~
-                gen_->text("\u200B ");  // ZWSP + space
+            } else if (strcmp(cmd, "\\ ") == 0 || strcmp(cmd, "\\\t") == 0 || 
+                       strcmp(cmd, "\\\n") == 0 || strcmp(cmd, "\\\r") == 0) {
+                // Backslash-space/tab/newline (control space) - produces zero-width space + regular space
+                // The ZWS allows line breaking, the space provides word separation
+                gen_->text("\u200B ");  // ZWSP + space (per LaTeX.js behavior)
             } else if (strcmp(cmd, "~") == 0) {
                 // Tilde (non-breaking space) - this path shouldn't be reached since
                 // ~ is handled as nbsp element, but keep for completeness
