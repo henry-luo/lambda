@@ -332,13 +332,13 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     // This ensures we use the cell's own line-height, not a stale value from lycon
     FontBox saved_font = lycon->font;
     BlockContext saved_block = lycon->block;
-    
+
     if (tcell->font) {
         setup_font(lycon->ui_context, &lycon->font, tcell->font);
     }
     setup_line_height(lycon, tcell);
     float cell_line_height = lycon->block.line_height;
-    
+
     // Restore context
     lycon->font = saved_font;
     lycon->block = saved_block;
@@ -4684,7 +4684,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         int available_for_content = explicit_css_height - table_border_vert;  // CSS height minus borders
         int extra_height = available_for_content - (content_only_height + table_padding_vert + table_spacing_vert);
 
-        log_debug("Table height distribution: explicit=%d, available=%d, content_only=%d, initial_extra=%d, rows=%d", 
+        log_debug("Table height distribution: explicit=%d, available=%d, content_only=%d, initial_extra=%d, rows=%d",
                  explicit_css_height, available_for_content, content_only_height, extra_height, meta->row_count);
 
         if (extra_height > 0) {
@@ -4694,14 +4694,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int body_natural_height = 0;
             int body_row_count = 0;
             int section_count = 0;  // Count sections for inter-section spacing
-            
+
             log_debug("Calculating natural heights for each section");
             for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
                 // Check for caption (HTML tag or CSS display)
                 DisplayValue child_display = resolve_display_value((void*)child);
                 bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
                                  (child_display.inner == CSS_VALUE_TABLE_CAPTION);
-                
+
                 if (is_caption) {
                     caption_and_header_height += (int)child->height;
                     section_count++;
@@ -4710,10 +4710,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     ViewTableRowGroup* group = (ViewTableRowGroup*)child;
                     TableSectionType section_type = group->get_section_type();
                     bool is_body_group = (section_type == TABLE_SECTION_TBODY);
-                    
-                    log_debug("  Row group section_type=%d (TBODY=%d), is_body=%d", 
+
+                    log_debug("  Row group section_type=%d (TBODY=%d), is_body=%d",
                              section_type, TABLE_SECTION_THEAD, TABLE_SECTION_TBODY, is_body_group);
-                    
+
                     // Calculate this group's natural height (rows only, no inter-row spacing yet)
                     int group_height = 0;
                     int row_count_in_group = 0;
@@ -4730,10 +4730,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             }
                         }
                     }
-                    
+
                     // DON'T add inter-row spacing here - it's already in the calculation
                     // We'll account for ALL spacing (inter-row and inter-section) separately
-                    
+
                     if (is_body_group) {
                         body_natural_height += group_height;
                         body_row_count += row_count_in_group;
@@ -4764,12 +4764,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Now calculate extra height available for body rows
             // Formula: extra_for_body = available - padding - all_spacing - caption/header - body_natural
-            int extra_for_body = available_for_content - table_padding_vert - total_spacing - 
+            int extra_for_body = available_for_content - table_padding_vert - total_spacing -
                                 caption_and_header_height - body_natural_height;
-            
-            log_debug("Height breakdown: caption+header=%d, body_natural=%d, total_spacing=%d (sections=%d, rows=%d), padding=%d", 
+
+            log_debug("Height breakdown: caption+header=%d, body_natural=%d, total_spacing=%d (sections=%d, rows=%d), padding=%d",
                      caption_and_header_height, body_natural_height, total_spacing, section_count, meta->row_count, table_padding_vert);
-            log_debug("Distributing %dpx extra height to %d body rows (was %dpx initial)", 
+            log_debug("Distributing %dpx extra height to %d body rows (was %dpx initial)",
                      extra_for_body, body_row_count, extra_height);
 
             if (extra_for_body > 0 && body_row_count > 0) {
@@ -4792,7 +4792,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     if (row_idx >= 0 && row_idx < meta->row_count) {
                                         int row_extra = height_per_row + (distributed_count < remainder ? 1 : 0);
                                         meta->row_heights[row_idx] += row_extra;
-                                        log_debug("    Body row %d: natural=%d + extra=%d = %d", 
+                                        log_debug("    Body row %d: natural=%d + extra=%d = %d",
                                                  row_idx, meta->row_heights[row_idx] - row_extra, row_extra, meta->row_heights[row_idx]);
                                         distributed_count++;
                                         break;  // Found row index
