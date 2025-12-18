@@ -2248,11 +2248,21 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             int caption_width = lycon->line.right - lycon->line.left;
             if (caption_width <= 0) caption_width = 600;
 
-            lycon->block.content_width = (float)caption_width;
+            // Calculate content width by subtracting padding and border (CSS box model)
+            float content_width = (float)caption_width;
+            if (caption->bound) {
+                content_width -= caption->bound->padding.left + caption->bound->padding.right;
+                if (caption->bound->border) {
+                    content_width -= caption->bound->border->width.left + caption->bound->border->width.right;
+                }
+            }
+            content_width = max(content_width, 0.0f);
+
+            lycon->block.content_width = content_width;
             lycon->block.content_height = 10000;  // Large enough for content
             lycon->block.advance_y = 0;
             lycon->line.left = 0;
-            lycon->line.right = caption_width;
+            lycon->line.right = (int)content_width;
             lycon->line.advance_x = 0;
             lycon->line.is_line_start = true;
 
@@ -2274,8 +2284,12 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             log_debug("Caption after line_break: advance_y=%.1f", lycon->block.advance_y);
 
             caption->height = lycon->block.advance_y;
+            // Add padding to height (advance_y is content height only)
+            if (caption->bound) {
+                caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
+            }
             caption->width = (float)caption_width;  // Also set width explicitly
-            log_debug("Caption layout end: caption->height=%.1f, advance_y=%.1f", caption->height, lycon->block.advance_y);
+            log_debug("Caption layout end: caption->height=%.1f (content+padding), advance_y=%.1f", caption->height, lycon->block.advance_y);
             lycon->block = saved_block;
             lycon->line = saved_line;
         }
@@ -3121,13 +3135,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                          (child_display.inner == CSS_VALUE_TABLE_CAPTION);
         if (is_caption) {
             caption = child;
-            // Caption height = content height + padding + border + margin
+            // Caption height calculation: caption->height includes padding, add border + margin
             if (caption->height > 0) {
-                float padding_v = 0;
                 float border_v = 0;
                 float margin_v = 0;
                 if (caption->bound) {
-                    padding_v = caption->bound->padding.top + caption->bound->padding.bottom;
                     // Include margin - caption-side:top means margin-bottom adds space,
                     // caption-side:bottom means margin-top adds space
                     if (table->tb && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
@@ -3139,9 +3151,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         border_v = caption->bound->border->width.top + caption->bound->border->width.bottom;
                     }
                 }
-                caption_height = (int)(caption->height + padding_v + border_v + margin_v);
-                log_debug("Caption height calculation: content=%.1f, padding_v=%.1f, border_v=%.1f, margin_v=%.1f, total=%d",
-                    caption->height, padding_v, border_v, margin_v, caption_height);
+                caption_height = (int)(caption->height + border_v + margin_v);
+                log_debug("Caption height calculation: height(content+padding)=%.1f, border_v=%.1f, margin_v=%.1f, total=%d",
+                    caption->height, border_v, margin_v, caption_height);
             }
             break;
         }
@@ -4032,8 +4044,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         float old_width = caption->width;
         caption->width = table_width;
 
-        // If the width increased, re-layout caption content to potentially unwrap text
-        if (table_width > old_width + 0.5f) {
+        // If the width changed significantly, re-layout caption content to reflow text
+        if (fabs(table_width - old_width) > 0.5f) {
             log_debug("Caption width changed: %.1f -> %.1f, re-laying out content", old_width, table_width);
 
             // Reset child views before re-layout
@@ -4060,12 +4072,25 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             Linebox saved_line = lycon->line;
             View* saved_view = lycon->view;
 
+            // Calculate content width by subtracting padding and border (CSS box model)
+            float content_width = (float)table_width;
+            if (caption->bound) {
+                content_width -= caption->bound->padding.left + caption->bound->padding.right;
+                if (caption->bound->border) {
+                    content_width -= caption->bound->border->width.left + caption->bound->border->width.right;
+                }
+            }
+            content_width = max(content_width, 0.0f);
+
             lycon->view = (View*)caption;
-            lycon->block.content_width = (float)table_width;
+            // Re-resolve caption styles to refresh font in layout context
+            dom_node_resolve_style((DomNode*)caption, lycon);
+            
+            lycon->block.content_width = content_width;
             lycon->block.content_height = 10000;
             lycon->block.advance_y = 0;
             lycon->line.left = 0;
-            lycon->line.right = table_width;
+            lycon->line.right = (int)content_width;
             lycon->line.advance_x = 0;
             lycon->line.is_line_start = true;
             line_reset(lycon);
@@ -4089,14 +4114,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             caption->height = lycon->block.advance_y;
-            log_debug("Caption re-layout complete: width=%.1f, height=%.1f", table_width, caption->height);
+            // Add padding to height (advance_y is content height only)
+            if (caption->bound) {
+                caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
+            }
+            log_debug("Caption re-layout complete: width=%.1f, height=%.1f (content+padding)", table_width, caption->height);
 
             // Recalculate caption_height since we re-laid out the caption
-            float padding_v = 0;
+            // Note: caption->height now includes padding (content + padding)
             float border_v = 0;
             float margin_v = 0;
             if (caption->bound) {
-                padding_v = caption->bound->padding.top + caption->bound->padding.bottom;
                 if (table->tb && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
                     margin_v = caption->bound->margin.bottom;
                 } else {
@@ -4106,8 +4134,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     border_v = caption->bound->border->width.top + caption->bound->border->width.bottom;
                 }
             }
-            caption_height = (int)(caption->height + padding_v + border_v + margin_v);
-            log_debug("Caption height recalculated after re-layout: %d", caption_height);
+            caption_height = (int)(caption->height + border_v + margin_v);
+            log_debug("Caption height recalculated after re-layout: %d (height includes padding)", caption_height);
 
             // Update current_y since caption_height changed
             // current_y was set before re-layout with old caption_height
@@ -4737,7 +4765,91 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
         caption->x = 0;
         caption->y = final_table_height;  // Position after all rows
+        
+        // Check if caption needs re-layout due to width change (same as top caption)
+        float old_width = caption->width;
         caption->width = table_width;
+
+        if (fabs(table_width - old_width) > 0.5f) {
+            log_debug("Bottom caption width changed: %.1f -> %.1f, re-laying out content", old_width, table_width);
+
+            // Reset child views before re-layout
+            DomElement* dom_elem = static_cast<DomElement*>(caption);
+            if (dom_elem) {
+                for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
+                    if (child->is_text()) {
+                        child->view_type = RDT_VIEW_NONE;
+                        ViewText* text_view = (ViewText*)child;
+                        text_view->rect = nullptr;
+                        text_view->width = 0;
+                        text_view->height = 0;
+                    }
+                }
+            }
+
+            // Save and set up layout context for caption
+            BlockContext saved_block = lycon->block;
+            Linebox saved_line = lycon->line;
+            View* saved_view = lycon->view;
+
+            // Calculate content width by subtracting padding and border
+            float content_width = (float)table_width;
+            if (caption->bound) {
+                content_width -= caption->bound->padding.left + caption->bound->padding.right;
+                if (caption->bound->border) {
+                    content_width -= caption->bound->border->width.left + caption->bound->border->width.right;
+                }
+            }
+            content_width = max(content_width, 0.0f);
+
+            lycon->view = (View*)caption;
+            // Re-resolve caption styles to refresh font in layout context
+            dom_node_resolve_style((DomNode*)caption, lycon);
+            
+            lycon->block.content_width = content_width;
+            lycon->block.content_height = 10000;
+            lycon->block.advance_y = 0;
+            lycon->line.left = 0;
+            lycon->line.right = (int)content_width;
+            lycon->line.advance_x = 0;
+            lycon->line.is_line_start = true;
+            line_reset(lycon);
+
+            // Propagate text-align from caption's resolved style
+            if (caption->blk && caption->blk->text_align) {
+                lycon->block.text_align = caption->blk->text_align;
+            }
+
+            // Re-layout caption content
+            if (dom_elem) {
+                DomNode* child = dom_elem->first_child;
+                for (; child; child = child->next_sibling) {
+                    layout_flow_node(lycon, child);
+                }
+                if (!lycon->line.is_line_start) { line_break(lycon); }
+            }
+
+            caption->height = lycon->block.advance_y;
+            // Add padding to height (advance_y is content height only)
+            if (caption->bound) {
+                caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
+            }
+            log_debug("Bottom caption re-layout complete: width=%.1f, height=%.1f (content+padding)", table_width, caption->height);
+
+            // Recalculate caption_height
+            float border_v = 0;
+            float margin_v = caption->bound ? caption->bound->margin.top : 0;  // Bottom caption uses top margin
+            if (caption->bound && caption->bound->border) {
+                border_v = caption->bound->border->width.top + caption->bound->border->width.bottom;
+            }
+            caption_height = (int)(caption->height + border_v + margin_v);
+            log_debug("Bottom caption height recalculated after re-layout: %d", caption_height);
+
+            lycon->block = saved_block;
+            lycon->line = saved_line;
+            lycon->view = saved_view;
+        }
+        
         final_table_height += caption_height;  // Add caption height to table
         log_debug("Positioned caption at bottom: y=%d, caption_height=%d", (int)caption->y, caption_height);
     }
