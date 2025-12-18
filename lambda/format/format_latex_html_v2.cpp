@@ -3491,11 +3491,139 @@ static void cmd_frame(LatexProcessor* proc, Item elem) {
 
 static void cmd_parbox(LatexProcessor* proc, Item elem) {
     // \parbox[pos][height][inner-pos]{width}{text} - paragraph box
-    // TODO: Parse all parameters
+    // LaTeX.js: args.\parbox = <[ H i? l? i? l g ]>
+    // pos: c,t,b (default: c)
+    // height: optional length
+    // inner-pos: t,c,b,s (default: same as pos)
     HtmlGenerator* gen = proc->generator();
-    gen->div("parbox");
-    proc->processChildren(elem);
-    gen->closeElement();
+    ElementReader elem_reader(elem);
+    
+    // Default values
+    std::string pos = "c";
+    std::string inner_pos = "";
+    std::string width = "";
+    std::string height = "";
+    
+    // Parse children to extract parameters
+    // Expected structure: [brack_group], [brack_group], [brack_group], {curly_group}, {curly_group}
+    std::vector<Item> brack_groups;
+    std::vector<Item> curly_groups;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                brack_groups.push_back(child.item());
+            } else if (strcmp(tag, "curly_group") == 0) {
+                curly_groups.push_back(child.item());
+            }
+        }
+    }
+    
+    // Parse bracket groups (optional arguments)
+    if (brack_groups.size() >= 1) {
+        // First bracket: position (t, c, b)
+        ElementReader bg0(brack_groups[0]);
+        Pool* pool = proc->pool();
+        StringBuf* sb = stringbuf_new(pool);
+        bg0.textContent(sb);
+        String* pos_str = stringbuf_to_string(sb);
+        if (pos_str->len > 0) {
+            pos = std::string(pos_str->chars, pos_str->len);
+        }
+    }
+    
+    if (brack_groups.size() >= 2) {
+        // Second bracket: height
+        ElementReader bg1(brack_groups[1]);
+        Pool* pool = proc->pool();
+        StringBuf* sb = stringbuf_new(pool);
+        bg1.textContent(sb);
+        String* height_str = stringbuf_to_string(sb);
+        if (height_str->len > 0) {
+            height = std::string(height_str->chars, height_str->len);
+        }
+    }
+    
+    if (brack_groups.size() >= 3) {
+        // Third bracket: inner position (t, c, b, s)
+        ElementReader bg2(brack_groups[2]);
+        Pool* pool = proc->pool();
+        StringBuf* sb = stringbuf_new(pool);
+        bg2.textContent(sb);
+        String* inner_str = stringbuf_to_string(sb);
+        if (inner_str->len > 0) {
+            inner_pos = std::string(inner_str->chars, inner_str->len);
+        }
+    }
+    
+    // Default inner_pos to pos if not specified
+    if (inner_pos.empty()) {
+        inner_pos = pos;
+    }
+    
+    // Parse curly groups (required arguments)
+    if (curly_groups.size() >= 1) {
+        // First curly: width
+        ElementReader cg0(curly_groups[0]);
+        Pool* pool = proc->pool();
+        StringBuf* sb = stringbuf_new(pool);
+        cg0.textContent(sb);
+        String* width_str = stringbuf_to_string(sb);
+        if (width_str->len > 0) {
+            width = std::string(width_str->chars, width_str->len);
+        }
+    }
+    
+    // Build CSS classes
+    std::string classes = "parbox";
+    
+    if (!height.empty()) {
+        classes += " pbh";
+    }
+    
+    // Position classes
+    if (pos == "c") classes += " p-c";
+    else if (pos == "t") classes += " p-t";
+    else if (pos == "b") classes += " p-b";
+    
+    // Inner position classes
+    if (inner_pos == "s") classes += " stretch";
+    else if (inner_pos == "c") classes += " p-cc";
+    else if (inner_pos == "t") classes += " p-ct";
+    else if (inner_pos == "b") classes += " p-cb";
+    
+    // Build style attribute
+    std::stringstream style;
+    if (!width.empty()) {
+        // Convert LaTeX length to CSS (simplified - just use the value)
+        style << "width:" << width << ";";
+    }
+    if (!height.empty()) {
+        style << "height:" << height << ";";
+    }
+    
+    // Generate HTML
+    proc->ensureParagraph();
+    std::stringstream attrs;
+    attrs << "class=\"" << classes << "\"";
+    if (!style.str().empty()) {
+        attrs << " style=\"" << style.str() << "\"";
+    }
+    
+    gen->writer()->openTagRaw("span", attrs.str().c_str());
+    gen->writer()->openTag("span");
+    
+    // Process text content (second curly group)
+    if (curly_groups.size() >= 2) {
+        proc->processNode(curly_groups[1]);
+    }
+    
+    gen->writer()->closeTag("span");
+    gen->writer()->closeTag("span");
 }
 
 static void cmd_makebox(LatexProcessor* proc, Item elem) {
@@ -5007,7 +5135,6 @@ static void cmd_value(LatexProcessor* proc, Item elem) {
     gen->text("0");
 }
 
-/* Commented out - need to implement helper methods toRoman, toAlph, toFnSymbol in HtmlGenerator
 static void cmd_arabic(LatexProcessor* proc, Item elem) {
     // \arabic{counter} - format counter as arabic numerals (1, 2, 3, ...)
     HtmlGenerator* gen = proc->generator();
@@ -5017,10 +5144,15 @@ static void cmd_arabic(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = std::to_string(value);
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatArabic(value);
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        // Counter doesn't exist - output counter name as fallback
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_roman(LatexProcessor* proc, Item elem) {
@@ -5032,10 +5164,14 @@ static void cmd_roman(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toRoman(value, false);  // lowercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatRoman(value, false);  // lowercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_Roman(LatexProcessor* proc, Item elem) {
@@ -5047,10 +5183,14 @@ static void cmd_Roman(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toRoman(value, true);  // uppercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatRoman(value, true);  // uppercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_alph(LatexProcessor* proc, Item elem) {
@@ -5062,10 +5202,14 @@ static void cmd_alph(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toAlph(value, false);  // lowercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatAlph(value, false);  // lowercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_Alph(LatexProcessor* proc, Item elem) {
@@ -5077,10 +5221,14 @@ static void cmd_Alph(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toAlph(value, true);  // uppercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatAlph(value, true);  // uppercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_fnsymbol(LatexProcessor* proc, Item elem) {
@@ -5092,12 +5240,15 @@ static void cmd_fnsymbol(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toFnSymbol(value);
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatFnSymbol(value);
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
-*/
 
 static void cmd_newlength(LatexProcessor* proc, Item elem) {
     // \newlength{\lengthcmd}
@@ -5378,13 +5529,14 @@ void LatexProcessor::initCommandTable() {
     command_table_["stepcounter"] = cmd_stepcounter;
     command_table_["refstepcounter"] = cmd_refstepcounter;
     command_table_["value"] = cmd_value;
-    // Commented out - need to implement helper methods first
-    // command_table_["arabic"] = cmd_arabic;
-    // command_table_["roman"] = cmd_roman;
-    // command_table_["Roman"] = cmd_Roman;
-    // command_table_["alph"] = cmd_alph;
-    // command_table_["Alph"] = cmd_Alph;
-    // command_table_["fnsymbol"] = cmd_fnsymbol;
+    // Counter display commands (now implemented)
+    command_table_["arabic"] = cmd_arabic;
+    command_table_["roman"] = cmd_roman;
+    command_table_["Roman"] = cmd_Roman;
+    command_table_["alph"] = cmd_alph;
+    command_table_["Alph"] = cmd_Alph;
+    command_table_["fnsymbol"] = cmd_fnsymbol;
+    // \the<counter> commands are handled dynamically in processCommand()
     command_table_["newlength"] = cmd_newlength;
     command_table_["setlength"] = cmd_setlength;
 }
@@ -6639,6 +6791,21 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                strcmp(cmd_name, "linebreak") == 0) {
         // Line breaks: ensure paragraph but don't affect nesting depth
         ensureParagraph();
+    }
+    
+    // Check for \the<counter> commands (e.g., \thec, \thesection)
+    // These are automatically created by \newcounter{name} and format the counter
+    if (strncmp(cmd_name, "the", 3) == 0 && strlen(cmd_name) > 3) {
+        const char* counter_name = cmd_name + 3;  // Skip "the" prefix
+        if (gen_->hasCounter(counter_name)) {
+            // Format counter as arabic (default representation)
+            int value = gen_->getCounter(counter_name);
+            std::string output = gen_->formatArabic(value);
+            ensureParagraph();
+            gen_->text(output.c_str());
+            return;
+        }
+        // Counter doesn't exist - fall through to unknown command handling
     }
     
     // Look up command in table
