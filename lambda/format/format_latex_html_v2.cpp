@@ -196,6 +196,105 @@ static int getUtf8CharLen(unsigned char first_byte) {
     return 1;  // Invalid, treat as single byte
 }
 
+// Helper function to convert hex character to value
+static int hex_to_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;  // Not a hex digit
+}
+
+// Helper function to encode Unicode codepoint to UTF-8
+static std::string utf8_encode(uint32_t codepoint) {
+    std::string result;
+    if (codepoint <= 0x7F) {
+        // 1-byte sequence
+        result += static_cast<char>(codepoint);
+    } else if (codepoint <= 0x7FF) {
+        // 2-byte sequence
+        result += static_cast<char>(0xC0 | (codepoint >> 6));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else if (codepoint <= 0xFFFF) {
+        // 3-byte sequence
+        result += static_cast<char>(0xE0 | (codepoint >> 12));
+        result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    } else if (codepoint <= 0x10FFFF) {
+        // 4-byte sequence
+        result += static_cast<char>(0xF0 | (codepoint >> 18));
+        result += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+        result += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+        result += static_cast<char>(0x80 | (codepoint & 0x3F));
+    }
+    return result;
+}
+
+// Process LaTeX ^^ notation for special characters
+// ^^HH     = hex HH (2 digits)
+// ^^^^HHHH = hex HHHH (4 digits)
+// ^^c      = if charcode(c) < 64 then charcode(c)+64 else charcode(c)-64
+static std::string processHatNotation(const char* text) {
+    std::string result;
+    result.reserve(strlen(text));
+    
+    for (const char* p = text; *p; p++) {
+        if (*p == '^' && *(p+1) == '^') {
+            // Found ^^
+            p += 2;  // Skip ^^
+            
+            // Check for ^^^^ (4 hats total)
+            if (*p == '^' && *(p+1) == '^') {
+                p += 2;  // Skip the second ^^
+                
+                // Parse 4 hex digits
+                int h1 = hex_to_value(*p);
+                int h2 = hex_to_value(*(p+1));
+                int h3 = hex_to_value(*(p+2));
+                int h4 = hex_to_value(*(p+3));
+                
+                if (h1 >= 0 && h2 >= 0 && h3 >= 0 && h4 >= 0) {
+                    uint32_t codepoint = (h1 << 12) | (h2 << 8) | (h3 << 4) | h4;
+                    result += utf8_encode(codepoint);
+                    p += 3;  // Skip 4 hex digits (p will be incremented by loop)
+                    continue;
+                } else {
+                    // Invalid hex sequence, output as-is
+                    result += "^^^^";
+                    p--;  // Back up one char (loop will increment)
+                    continue;
+                }
+            }
+            
+            // Check for ^^HH (2 hex digits)
+            int h1 = hex_to_value(*p);
+            int h2 = hex_to_value(*(p+1));
+            
+            if (h1 >= 0 && h2 >= 0) {
+                // Valid 2-digit hex
+                uint32_t codepoint = (h1 << 4) | h2;
+                result += utf8_encode(codepoint);
+                p += 1;  // Skip 2 hex digits (p will be incremented by loop)
+                continue;
+            }
+            
+            // ^^c (single character transform)
+            unsigned char c = static_cast<unsigned char>(*p);
+            uint32_t transformed;
+            if (c < 64) {
+                transformed = c + 64;
+            } else {
+                transformed = c - 64;
+            }
+            result += utf8_encode(transformed);
+            // p will be incremented by loop to move past c
+        } else {
+            result += *p;
+        }
+    }
+    
+    return result;
+}
+
 // Convert ASCII apostrophe (') to right single quotation mark (')
 // Returns a new string with apostrophes converted to U+2019
 static std::string convertApostrophes(const char* text) {
@@ -302,6 +401,7 @@ public:
     
     // Process text content
     void processText(const char* text);
+    void outputTextWithSpecialChars(const char* text);
     
     // Get generator
     HtmlGenerator* generator() { return gen_; }
@@ -6678,6 +6778,47 @@ void LatexProcessor::processSpacingCommand(Item elem) {
     }
 }
 
+// Output text with special handling for non-breaking space (U+00A0)
+// which must be output as &nbsp; HTML entity
+void LatexProcessor::outputTextWithSpecialChars(const char* text) {
+    if (!text || *text == '\0') return;
+    
+    const char* p = text;
+    const char* segment_start = p;
+    
+    while (*p) {
+        // Check for UTF-8 encoded U+00A0 (non-breaking space): 0xC2 0xA0
+        if ((unsigned char)*p == 0xC2 && (unsigned char)*(p+1) == 0xA0) {
+            // Output any text before this nbsp
+            if (p > segment_start) {
+                std::string segment(segment_start, p - segment_start);
+                gen_->text(segment.c_str());
+            }
+            // Output nbsp as HTML entity
+            gen_->writer()->writeRawHtml("&nbsp;");
+            p += 2;  // Skip the 2-byte UTF-8 sequence
+            segment_start = p;
+        } else {
+            // Regular character - advance by UTF-8 char length
+            unsigned char c = (unsigned char)*p;
+            if (c < 0x80) {
+                p++;  // 1-byte ASCII
+            } else if (c < 0xE0) {
+                p += 2;  // 2-byte UTF-8
+            } else if (c < 0xF0) {
+                p += 3;  // 3-byte UTF-8
+            } else {
+                p += 4;  // 4-byte UTF-8
+            }
+        }
+    }
+    
+    // Output any remaining text
+    if (p > segment_start) {
+        gen_->text(segment_start);
+    }
+}
+
 void LatexProcessor::processText(const char* text) {
     if (!text) return;
     
@@ -6703,6 +6844,10 @@ void LatexProcessor::processText(const char* text) {
             in_whitespace = false;
         }
     }
+    
+    // Process LaTeX ^^ notation for special characters
+    // This must be done before other text transformations
+    normalized = processHatNotation(normalized.c_str());
     
     // Convert ASCII apostrophe (') to right single quotation mark (')
     // LaTeX uses ' for typographic apostrophes in running text
@@ -6784,12 +6929,12 @@ void LatexProcessor::processText(const char* text) {
         // Wrap content in span with font class
         if (!normalized.empty()) {
             gen_->span(font_class.c_str());
-            gen_->text(normalized.c_str());
+            outputTextWithSpecialChars(normalized.c_str());
             gen_->closeElement();
         }
     } else if (!all_whitespace || normalized.length() == 1) {
-        // Normal text or single space - output as-is
-        gen_->text(normalized.c_str());
+        // Normal text or single space - output with special character handling
+        outputTextWithSpecialChars(normalized.c_str());
     }
     // Skip pure whitespace (more than one space) - already handled above
 }

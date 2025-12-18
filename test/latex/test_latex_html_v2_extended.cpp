@@ -171,7 +171,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
     std::map<std::string, std::set<int>> extended_test_ids = {
         {"basic_text.tex", {4, 6}},  // test 4 expects no ZWS (inconsistent with text.tex); test 6 needs verb
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 moved to baseline; tex_4 has \noindent issue
-        {"counters.tex", {1, 2}},
+        {"counters.tex", {2}},  // Test 1 PASSES (counter arithmetic) - moved to baseline
         {"environments.tex", {7, 10, 14}},
         {"fonts.tex", {6, 7, 8}},
         {"groups.tex", {2, 3}},
@@ -179,7 +179,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"layout-marginpar.tex", {1, 2, 3}},
         {"macros.tex", {2, 4, 5, 6}},
         {"sectioning.tex", {3}},
-        {"symbols.tex", {2}},
+        // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
         {"text.tex", {4, 6, 7, 8, 10}},  // test 5 moved to baseline (special characters pass)
         {"whitespace.tex", {5, 6, 7, 8, 12, 13, 15, 21}}
     };
