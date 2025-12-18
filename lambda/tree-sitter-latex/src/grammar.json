@@ -179,6 +179,10 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "controlspace_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "text"
         },
         {
@@ -200,6 +204,10 @@
         {
           "type": "SYMBOL",
           "name": "verb_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "char_command"
         },
         {
           "type": "SYMBOL",
@@ -280,6 +288,44 @@
         }
       ]
     },
+    "controlspace_command": {
+      "type": "PREC",
+      "value": 3,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "\\"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": " "
+              },
+              {
+                "type": "STRING",
+                "value": "\t"
+              },
+              {
+                "type": "STRING",
+                "value": "\n"
+              },
+              {
+                "type": "STRING",
+                "value": "\r\n"
+              },
+              {
+                "type": "STRING",
+                "value": "\r"
+              }
+            ]
+          }
+        ]
+      }
+    },
     "control_symbol": {
       "type": "TOKEN",
       "content": {
@@ -303,6 +349,10 @@
     "verb_command": {
       "type": "SYMBOL",
       "name": "_verb_command"
+    },
+    "char_command": {
+      "type": "SYMBOL",
+      "name": "_char_command"
     },
     "command": {
       "type": "PREC_RIGHT",
@@ -997,6 +1047,14 @@
     [
       "verb_command",
       "command"
+    ],
+    [
+      "char_command",
+      "command"
+    ],
+    [
+      "controlspace_command",
+      "control_symbol"
     ]
   ],
   "precedences": [],
@@ -1020,6 +1078,10 @@
     {
       "type": "SYMBOL",
       "name": "_verb_command"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_char_command"
     }
   ],
   "inline": [],
