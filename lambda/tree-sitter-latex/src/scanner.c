@@ -316,6 +316,7 @@ static bool scan_char_command(TSLexer *lexer) {
   return false;
 }
 
+// Scan for control space command: \<space>, \<tab>, \<newline>, \<CR>
 // Tree-sitter external scanner interface
 void *tree_sitter_latex_external_scanner_create(void) {
   return NULL;
