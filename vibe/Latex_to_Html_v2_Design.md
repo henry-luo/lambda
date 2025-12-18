@@ -1001,29 +1001,34 @@ diff lambda_output.html latexjs_output.html
 ### 📊 Baseline Test Suite Status
 
 **Baseline Fixture Tests** (test/latex/fixtures_v2/*.tex):
-- 51/107 tests passing (47.7%)
+- **62/108 tests passing (57.4%)** - up from 61 (December 18, 2025)
 - These are end-to-end tests comparing formatted output against expected HTML
 
-**Known Limitations**:
-- **Empty curly groups**: `\^{}` and `\~{}` now correctly output no ZWS (fixed)
-- **Verbatim command**: `\verb|...|` now implemented via external scanner (fixed) ✅
-- **Verbatim environment**: `verbatim` environment not yet implemented
-- **Smart quotes**: Single quotes not converted to typographic quotes
-
-**Recent Fixes** (December 17, 2025):
+**Recent Fixes** (December 18, 2025):
+- **`\char` command**: ✅ Fixed via formatter lookahead (symbols_tex_1 now passes)
+  - Handles decimal (`\char98`), hex (`\char"A0`), octal (`\char'77`)
+  - Uses `strtoul()` with endptr to parse numeric prefix from sibling strings
+  - Special case: `0xA0` → `&nbsp;`
+- **`\verb` command**: ✅ Already working via external scanner (verified functional)
 - **Linebreak in mbox (`\\[dim]`)**: Fixed whitespace handling in restricted horizontal mode
-  - `\\[dim]` with surrounding whitespace now preserves one space (indicates intentional spacing)
-  - `\\` without dimension collapses all whitespace (standard LaTeX behavior)
-  - Root cause: Was looking for `brack_group` at wrong index after it was already consumed
-  - Solution: Use `has_dimension` flag (set when brack_group parsed) instead of re-searching
-  - Fixture note: `sp \\ ace` → `space` vs `one \\[4cm] space` → `one space` appear conflicting but both are correct per LaTeX.js unskip behavior
 
-**Next Steps** (Enhancement Phase):
-- Fix remaining baseline test failures
-- Advanced Math: `align`, `gather`, `cases`, matrices, operators
-- Custom Environments: `\newenvironment`, `\renewenvironment`
-- Packages: `hyperref`, `geometry`, `fancyhdr`, `multicol`, `listings`
-- Document Classes: `article`, `book`, `report` CSS styles
+**Major Failing Areas** (45 tests, by category):
+1. **Whitespace handling** (12 tests): `whitespace_tex_5-8, 12-13, 17-21` - spacing rules
+2. **Text formatting** (5 tests): `text_tex_4-8, 10` - special characters, formatting
+3. **Boxes** (4 tests): `boxes_tex_2-5` - `\mbox`, `\fbox`, `\framebox`
+4. **Label/references** (4 tests): `label_ref_tex_2,3,6,7` - cross-reference system
+5. **Macros** (4 tests): `macros_tex_2,4,5,6` - user-defined commands
+6. **Environments** (3 tests): `environments_tex_7,10,14` - specialized environments
+7. **Fonts** (3 tests): `fonts_tex_6,7,8` - font command edge cases
+8. **Layout** (3 tests): `layout_marginpar_tex_1-3` - margin notes
+9. **Others** (7 tests): counters, groups, sectioning, symbols
+
+**Next Steps** (Priority Order):
+1. **Whitespace system**: Fix spacing rules (tilde `~`, inter-word spacing, paragraph breaks)
+2. **Text formatting**: Special character handling (`\%`, `\&`, ligatures)
+3. **Box commands**: Complete `\mbox`/`\fbox` restricted mode handling
+4. **Label/ref system**: Cross-references, `\label`, `\ref`, `\pageref`
+5. **Macro debugging**: Fix remaining macro test failures (stack overflow issues)
 
 ---
 

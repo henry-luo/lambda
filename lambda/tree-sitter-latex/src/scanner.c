@@ -10,6 +10,7 @@ enum TokenType {
   BEGIN_DOCUMENT,
   END_DOCUMENT,
   VERB_COMMAND,
+  CHAR_COMMAND,
 };
 
 // Skip whitespace (space, tab, newline)
@@ -239,6 +240,83 @@ static bool scan_verb_command(TSLexer *lexer) {
   return false;
 }
 
+// Scan \char<number> - returns true if matched
+// Handles three formats:
+//   \char<decimal>  e.g., \char98
+//   \char"<hex>     e.g., \char"A0
+//   \char'<octal>   e.g., \char'77
+static bool scan_char_command(TSLexer *lexer) {
+  // Must start with backslash
+  if (lexer->lookahead != '\\') {
+    return false;
+  }
+  lexer->advance(lexer, false);
+  
+  // Match "char"
+  if (!try_match_string(lexer, "char")) {
+    return false;
+  }
+  
+  // Check what follows: digit, ", or '
+  if (lexer->eof(lexer)) {
+    return false;
+  }
+  
+  if (lexer->lookahead == '"') {
+    // Hex format: \char"<hex>
+    lexer->advance(lexer, false);
+    
+    // Consume hex digits (at least one required)
+    int hex_count = 0;
+    while (!lexer->eof(lexer) && 
+           ((lexer->lookahead >= '0' && lexer->lookahead <= '9') ||
+            (lexer->lookahead >= 'A' && lexer->lookahead <= 'F') ||
+            (lexer->lookahead >= 'a' && lexer->lookahead <= 'f'))) {
+      lexer->advance(lexer, false);
+      hex_count++;
+    }
+    
+    if (hex_count > 0) {
+      lexer->mark_end(lexer);
+      return true;
+    }
+    return false;
+    
+  } else if (lexer->lookahead == '\'') {
+    // Octal format: \char'<octal>
+    lexer->advance(lexer, false);
+    
+    // Consume octal digits (at least one required)
+    int octal_count = 0;
+    while (!lexer->eof(lexer) && 
+           (lexer->lookahead >= '0' && lexer->lookahead <= '7')) {
+      lexer->advance(lexer, false);
+      octal_count++;
+    }
+    
+    if (octal_count > 0) {
+      lexer->mark_end(lexer);
+      return true;
+    }
+    return false;
+    
+  } else if (lexer->lookahead >= '0' && lexer->lookahead <= '9') {
+    // Decimal format: \char<decimal>
+    // Consume decimal digits
+    while (!lexer->eof(lexer) && 
+           (lexer->lookahead >= '0' && lexer->lookahead <= '9')) {
+      lexer->advance(lexer, false);
+    }
+    
+    lexer->mark_end(lexer);
+    return true;
+  }
+  
+  // No valid number format found after \char
+  return false;
+}
+
+// Scan for control space command: \<space>, \<tab>, \<newline>, \<CR>
 // Tree-sitter external scanner interface
 void *tree_sitter_latex_external_scanner_create(void) {
   return NULL;
@@ -261,6 +339,14 @@ bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, cons
   if (valid_symbols[VERB_COMMAND] && lexer->lookahead == '\\') {
     if (scan_verb_command(lexer)) {
       lexer->result_symbol = VERB_COMMAND;
+      return true;
+    }
+  }
+  
+  // Check for \char command - must take precedence over regular command tokens
+  if (valid_symbols[CHAR_COMMAND] && lexer->lookahead == '\\') {
+    if (scan_char_command(lexer)) {
+      lexer->result_symbol = CHAR_COMMAND;
       return true;
     }
   }

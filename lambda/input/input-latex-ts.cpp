@@ -49,6 +49,8 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     // Commands (generic pattern)
     {"command", NODE_CONTAINER},
     {"verb_command", NODE_CONTAINER},  // \verb|text| inline verbatim (handled specially)
+    {"char_command", NODE_CONTAINER},  // \char<number> TeX character code (handled specially)
+    {"controlspace_command", NODE_CONTAINER},  // \<space>, \<tab>, \<newline> control space
     {"command_name", NODE_LEAF},
     {"star", NODE_LEAF},
     
@@ -411,6 +413,26 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
         return elem.final();
     }
     
+    // Special handling for controlspace_command (\<space>, \<tab>, \<newline>)
+    if (strcmp(node_type, "controlspace_command") == 0) {
+        MarkBuilder& builder = ctx.builder;
+        
+        // Extract the full token text (e.g., "\ ", "\t", "\n")
+        uint32_t start = ts_node_start_byte(node);
+        uint32_t end = ts_node_end_byte(node);
+        const char* text = source + start;
+        size_t len = end - start;
+        
+        // Create space_cmd element (reuse existing infrastructure)
+        ElementBuilder elem = builder.element("space_cmd");
+        
+        // Store the command text as a string child
+        Item token_string = builder.createStringItem(text, len);
+        elem.child(token_string);
+        
+        return elem.final();
+    }
+    
     NodeCategory category = classify_node_type(node_type);
     
     switch (category) {
@@ -476,6 +498,36 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             
             if (strcmp(node_type, "generic_environment") == 0) {
                 return convert_environment(ctx, node, source);
+            }
+            
+            // Special handling for document container: skip begin_document/end_document
+            if (strcmp(node_type, "document") == 0) {
+                MarkBuilder& builder = ctx.builder;
+                ElementBuilder doc_builder = builder.element("document");
+                
+                uint32_t child_count = ts_node_child_count(node);
+                for (uint32_t i = 0; i < child_count; i++) {
+                    if (should_skip_comment_and_space(node, i)) {
+                        i++;
+                        continue;
+                    }
+                    
+                    TSNode child = ts_node_child(node, i);
+                    const char* child_type = ts_node_type(child);
+                    
+                    // Skip begin_document and end_document nodes
+                    if (strcmp(child_type, "begin_document") == 0 || 
+                        strcmp(child_type, "end_document") == 0) {
+                        continue;
+                    }
+                    
+                    Item child_item = convert_latex_node(ctx, child, source);
+                    if (child_item.item != ITEM_NULL) {
+                        doc_builder.child(child_item);
+                    }
+                }
+                
+                return doc_builder.final();
             }
             
             // NEW: section handling in hybrid grammar
@@ -564,12 +616,14 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                         return elem_builder.final();
                     }
                     
-                    // Spacing commands: \, \! \; \: \/ \@ \space - preserve as space_cmd element
+                    // Spacing commands: \, \! \; \: \/ \@ \space \<tab> \<newline> - preserve as space_cmd element
                     // These need special handling in the formatter
+                    // Note: \<space>, \<tab>, and \<newline> all produce zero-width space
                     if (escaped_char == ',' || escaped_char == '!' || 
                         escaped_char == ';' || escaped_char == ':' ||
                         escaped_char == '/' || escaped_char == '@' ||
-                        escaped_char == ' ') {
+                        escaped_char == ' ' || escaped_char == '\t' || 
+                        escaped_char == '\n' || escaped_char == '\r') {
                         ElementBuilder elem_builder = builder.element("space_cmd");
                         // Store the full command including backslash
                         String* cmd_str = builder.createString(source + start, end - start);
@@ -651,6 +705,42 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
                     
                     TSNode child = ts_node_child(node, i);
+                    const char* child_type = ts_node_type(child);
+                    
+                    // Special case for paragraph: detect `controlspace_command` followed by `space`
+                    // Pattern: `\<newline>` followed by another newline creates paragraph break
+                    if (strcmp(node_type, "paragraph") == 0 && strcmp(child_type, "controlspace_command") == 0) {
+                        // Check if next child is a space node
+                        if (i + 1 < child_count) {
+                            TSNode next_child = ts_node_child(node, i + 1);
+                            const char* next_type = ts_node_type(next_child);
+                            
+                            if (strcmp(next_type, "space") == 0) {
+                                // Check if the space spans a newline (by checking start/end positions)
+                                uint32_t space_start_row = ts_node_start_point(next_child).row;
+                                uint32_t space_end_row = ts_node_end_point(next_child).row;
+                                
+                                if (space_end_row > space_start_row) {
+                                    // Space spans multiple lines - it contains newline!
+                                    // This means: \<NL> followed by <NL> → paragraph break
+                                    
+                                    // First add the controlspace_command (will output ZWS + space)
+                                    Item child_item = convert_latex_node(ctx, child, source);
+                                    if (child_item.item != ITEM_NULL) {
+                                        elem_builder.child(child_item);
+                                    }
+                                    
+                                    // Then add a paragraph break symbol
+                                    elem_builder.child({.item = y2it(builder.createSymbol("parbreak"))});
+                                    
+                                    // Skip the space node since we converted it to parbreak
+                                    i++;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    
                     Item child_item = convert_latex_node(ctx, child, source);
                     if (child_item.item != ITEM_NULL) {
                         elem_builder.child(child_item);
