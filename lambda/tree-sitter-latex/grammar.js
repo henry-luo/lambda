@@ -23,6 +23,7 @@ module.exports = grammar({
     $._begin_document,        // \begin{document} - higher priority than command
     $._end_document,          // \end{document} - higher priority than command
     $._verb_command,          // \verb<delim>text<delim> - context-gated external token
+    $._char_command,          // \char<number> - decimal/hex/octal number token
   ],
 
   word: $ => $.command_name,
@@ -32,6 +33,10 @@ module.exports = grammar({
     [$._block, $._inline],
     // verb_command and command both start with backslash - need GLR to disambiguate
     [$.verb_command, $.command],
+    // char_command and command both start with backslash - need GLR to disambiguate
+    [$.char_command, $.command],
+    // controlspace_command and control_symbol both start with backslash - need GLR
+    [$.controlspace_command, $.control_symbol],
   ],
 
   rules: {
@@ -101,12 +106,14 @@ module.exports = grammar({
     // ========================================================================
 
     _inline: $ => choice(
+      $.controlspace_command, // \<space>, \<tab>, \<newline> - MUST BE FIRST to catch \<newline>
       $.text,
       $.space,
       $.paragraph_break, // Paragraph break (double newline) - must be checked as inline too
       $.line_comment,   // Comments can appear inline
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
       $.verb_command,   // \verb|text| - must be before command (context-gated)
+      $.char_command,   // \char<number> - must be before command (context-gated)
       $.command,
       $.curly_group,
       $.brack_group,
@@ -133,10 +140,26 @@ module.exports = grammar({
     // Ligatures (matches LaTeX.js: ligature)
     ligature: $ => choice('---', '--', '``', "''", '<<', '>>'),
 
+    // Control space command: \<space>, \<tab>, \<newline> handled by external scanner
+    // Control space: backslash followed by whitespace
+    // LaTeX.js: ctrl_space = escape (&nl &break / nl / sp)
+    // This is a PARSER rule, not a lexer token, so it can match sequences
+    controlspace_command: $ => prec(3, seq(
+      '\\',
+      choice(
+        ' ',        // Backslash-space
+        '\t',       // Backslash-tab
+        '\n',       // Backslash-newline (Unix)
+        '\r\n',     // Backslash-CRLF (Windows)
+        '\r'        // Backslash-CR (old Mac)
+      )
+    )),
+
     // Control symbols (matches LaTeX.js: ctrl_sym) 
     // High precedence to match before line_comment sees the %
     // Includes: escape chars ($%#&{}_-), spacing (\! \, \; \: \/ \@), 
     // punctuation (\. \' \` \^ \" \~ \=), control space (\ ), and line break (\\)
+    // Note: \<tab> and \<newline> are handled by external scanner (controlspace_command)
     control_symbol: $ => token(prec(2, seq('\\', /[$%#&{}_\-,\/@ !;:.'`^"~=\\]/))),
 
     // ========================================================================
@@ -147,6 +170,15 @@ module.exports = grammar({
     // The external scanner will only emit this token when valid_symbols[VERB_COMMAND] is true
     // This happens when the parser is in _inline context and hasn't yet committed to command
     verb_command: $ => $._verb_command,
+
+    // ========================================================================
+    // Char command - TeX character code with decimal/hex/octal number
+    // ========================================================================
+    
+    // Context-gated external token (Pattern 2)
+    // The external scanner will only emit this token when valid_symbols[CHAR_COMMAND] is true
+    // Matches: \char<decimal>, \char"<hex>, \char'<octal>
+    char_command: $ => $._char_command,
 
     // ========================================================================
     // Commands/Macros (matches LaTeX.js: macro, macro_args)

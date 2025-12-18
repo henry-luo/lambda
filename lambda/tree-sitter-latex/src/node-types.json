@@ -92,6 +92,11 @@
     }
   },
   {
+    "type": "char_command",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "command",
     "named": true,
     "fields": {
@@ -124,6 +129,11 @@
         ]
       }
     }
+  },
+  {
+    "type": "controlspace_command",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "curly_group",
@@ -394,11 +404,19 @@
           "named": true
         },
         {
+          "type": "char_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
         {
           "type": "control_symbol",
+          "named": true
+        },
+        {
+          "type": "controlspace_command",
           "named": true
         },
         {
@@ -576,6 +594,26 @@
     "fields": {}
   },
   {
+    "type": "\t",
+    "named": false
+  },
+  {
+    "type": "\n",
+    "named": false
+  },
+  {
+    "type": "\r",
+    "named": false
+  },
+  {
+    "type": "\r\n",
+    "named": false
+  },
+  {
+    "type": " ",
+    "named": false
+  },
+  {
     "type": "$",
     "named": false
   },
@@ -613,6 +651,10 @@
   },
   {
     "type": "[",
+    "named": false
+  },
+  {
+    "type": "\\",
     "named": false
   },
   {

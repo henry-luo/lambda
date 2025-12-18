@@ -13,6 +13,8 @@
 #include <string>
 #include <sstream>
 #include <cstring>
+#include <cstdlib>
+#include <strings.h>
 #include <map>
 #include <vector>
 #include <unordered_map>
@@ -332,6 +334,7 @@ public:
     void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
     void setNextParagraphIsNoindent() { next_paragraph_is_noindent_ = true; }
     void setNextParagraphAlignment(const char* alignment) { next_paragraph_alignment_ = alignment; }
+    const char* getCurrentAlignment() const { return next_paragraph_alignment_; }
     void pushAlignmentScope() { alignment_stack_.push_back(next_paragraph_alignment_); }
     void popAlignmentScope() { 
         if (!alignment_stack_.empty()) {
@@ -2160,8 +2163,13 @@ static void cmd_char(LatexProcessor* proc, Item elem) {
     }
     
     if (charcode > 0) {
-        std::string utf8 = codepoint_to_utf8(charcode);
-        gen->text(utf8.c_str());
+        // Special case: 0xA0 is non-breaking space, output as HTML entity
+        if (charcode == 0xA0) {
+            gen->writer()->writeRawHtml("&nbsp;");
+        } else {
+            std::string utf8 = codepoint_to_utf8(charcode);
+            gen->text(utf8.c_str());
+        }
     }
 }
 
@@ -2428,7 +2436,7 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
 }
 
 // Helper to extract label string from brack_group children
-// Renders elements like \textendash to their text equivalents
+// For formatted labels, pass the brack_group Item to createItem
 static std::string extractLabelFromBrackGroup(ElementReader& brack_elem) {
     std::string label_buf;
     
@@ -2656,15 +2664,76 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     }
 }
 
+// Helper to scan for alignment declarations at the start of list content
+static const char* scanForListAlignment(Item elem) {
+    ElementReader elem_reader(elem);
+    
+    // Scan element children for alignment declarations
+    
+    // Look for centering/raggedright/raggedleft commands in first paragraph
+    for (size_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (!tag) continue;
+            
+            // Check paragraph wrapper
+            if (strcmp(tag, "paragraph") == 0) {
+                // Scan paragraph content for alignment commands before first item
+                for (size_t j = 0; j < child_elem.childCount(); j++) {
+                    ItemReader para_child = child_elem.childAt(j);
+                    
+                    if (para_child.isElement()) {
+                        ElementReader para_child_elem = para_child.asElement();
+                        const char* para_tag = para_child_elem.tagName();
+                        if (!para_tag) continue;
+                        
+                        // Stop at first item - alignment must come before items
+                        if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
+                            return nullptr;
+                        }
+                        
+                        // Check for alignment commands
+                        if (strcmp(para_tag, "centering") == 0) {
+                            return "centering";
+                        } else if (strcmp(para_tag, "raggedright") == 0) {
+                            return "raggedright";
+                        } else if (strcmp(para_tag, "raggedleft") == 0) {
+                            return "raggedleft";
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return nullptr;
+}
+
 // List environment commands
 
 static void cmd_itemize(LatexProcessor* proc, Item elem) {
     // \begin{itemize} ... \end{itemize}
     HtmlGenerator* gen = proc->generator();
     
-    gen->startItemize();
+    // Scan for alignment declarations in list content
+    const char* list_alignment = scanForListAlignment(elem);
+    if (list_alignment) {
+        // Set alignment in processor so items can use it
+        proc->setNextParagraphAlignment(list_alignment);
+    }
+    
+    // Pass alignment to list
+    gen->startItemize(list_alignment ? list_alignment : proc->getCurrentAlignment());
     processListItems(proc, elem, "itemize");
     gen->endItemize();
+    
+    // Clear alignment if it was set by the list
+    if (list_alignment) {
+        proc->setNextParagraphAlignment(nullptr);
+    }
     
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
@@ -2674,9 +2743,22 @@ static void cmd_enumerate(LatexProcessor* proc, Item elem) {
     // \begin{enumerate} ... \end{enumerate}
     HtmlGenerator* gen = proc->generator();
     
-    gen->startEnumerate();
+    // Scan for alignment declarations in list content
+    const char* list_alignment = scanForListAlignment(elem);
+    if (list_alignment) {
+        // Set alignment in processor so items can use it
+        proc->setNextParagraphAlignment(list_alignment);
+    }
+    
+    // Pass alignment to list
+    gen->startEnumerate(list_alignment ? list_alignment : proc->getCurrentAlignment());
     processListItems(proc, elem, "enumerate");
     gen->endEnumerate();
+    
+    // Clear alignment if it was set by the list
+    if (list_alignment) {
+        proc->setNextParagraphAlignment(nullptr);
+    }
     
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
@@ -2721,27 +2803,36 @@ static void cmd_quote(LatexProcessor* proc, Item elem) {
     // \begin{quote} ... \end{quote}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startQuote();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endQuote();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_quotation(LatexProcessor* proc, Item elem) {
     // \begin{quotation} ... \end{quotation}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startQuotation();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endQuotation();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_verse(LatexProcessor* proc, Item elem) {
     // \begin{verse} ... \end{verse}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startVerse();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endVerse();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_center(LatexProcessor* proc, Item elem) {
@@ -2778,6 +2869,13 @@ static void cmd_flushright(LatexProcessor* proc, Item elem) {
     proc->closeParagraphIfOpen();
     gen->endFlushRight();
     proc->setNextParagraphIsContinue();
+}
+
+static void cmd_comment(LatexProcessor* proc, Item elem) {
+    // \begin{comment} ... \end{comment}
+    // Comment environment - skip all content (do nothing)
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_verb_command(LatexProcessor* proc, Item elem) {
@@ -2958,14 +3056,11 @@ static void cmd_noindent(LatexProcessor* proc, Item elem) {
 static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
     // \gobbleO - gobble whitespace and optional argument (from echo package)
     // latex.js: args.gobbleO = <[ H o? ]>, \gobbleO : -> []
-    // 'H' means: unskip before, add brsp (ZWS) after IF optional arg was consumed
-    // Returns empty array (no output), but adds ZWS if optional arg consumed
+    // 'H' means: add brsp (ZWS + space) after IF optional arg was consumed
+    // Note: Don't unskip - the preceding space should be preserved
+    // Returns empty array (no output), but adds brsp if optional arg consumed
     
     HtmlGenerator* gen = proc->generator();
-    
-    // 'H' arg: unskip before
-    gen->trimTrailingWhitespace();
-    
     ElementReader reader(elem);
     bool has_optional_arg = false;
     
@@ -2983,9 +3078,10 @@ static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
         }
     }
     
-    // Output ZWS only if optional argument was consumed
+    // Output ZWS + space (brsp) if optional argument was consumed
+    // LaTeX.js: brsp = '\u200B ' (breakable but non-collapsible space)
     if (has_optional_arg) {
-        gen->text("\xE2\x80\x8B");  // Zero-width space (U+200B in UTF-8)
+        gen->text("\u200B ");  // Zero-width space + space
     }
     // Otherwise output nothing (just gobble the space)
 }
@@ -4713,6 +4809,12 @@ static void cmd_tableofcontents(LatexProcessor* proc, Item elem) {
     gen->closeElement();
 }
 
+static void cmd_document(LatexProcessor* proc, Item elem) {
+    // \begin{document}...\end{document}
+    // The main document environment - just process children without wrapper
+    proc->processChildren(elem);
+}
+
 static void cmd_appendix(LatexProcessor* proc, Item elem) {
     // \appendix
     // Changes section numbering to letters (A, B, C...)
@@ -4888,6 +4990,98 @@ static void cmd_value(LatexProcessor* proc, Item elem) {
     gen->text("0");
 }
 
+/* Commented out - need to implement helper methods toRoman, toAlph, toFnSymbol in HtmlGenerator
+static void cmd_arabic(LatexProcessor* proc, Item elem) {
+    // \arabic{counter} - format counter as arabic numerals (1, 2, 3, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = std::to_string(value);
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_roman(LatexProcessor* proc, Item elem) {
+    // \roman{counter} - format counter as lowercase roman numerals (i, ii, iii, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toRoman(value, false);  // lowercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_Roman(LatexProcessor* proc, Item elem) {
+    // \Roman{counter} - format counter as uppercase roman numerals (I, II, III, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toRoman(value, true);  // uppercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_alph(LatexProcessor* proc, Item elem) {
+    // \alph{counter} - format counter as lowercase letters (a, b, c, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toAlph(value, false);  // lowercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_Alph(LatexProcessor* proc, Item elem) {
+    // \Alph{counter} - format counter as uppercase letters (A, B, C, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toAlph(value, true);  // uppercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_fnsymbol(LatexProcessor* proc, Item elem) {
+    // \fnsymbol{counter} - format counter as footnote symbols (*, †, ‡, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toFnSymbol(value);
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+*/
+
 static void cmd_newlength(LatexProcessor* proc, Item elem) {
     // \newlength{\lengthcmd}
     // Defines a new length variable
@@ -5006,6 +5200,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["center"] = cmd_center;
     command_table_["flushleft"] = cmd_flushleft;
     command_table_["flushright"] = cmd_flushright;
+    command_table_["comment"] = cmd_comment;
     command_table_["verbatim"] = cmd_verbatim;
     command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim
     
@@ -5147,6 +5342,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["usepackage"] = cmd_usepackage;
     command_table_["include"] = cmd_include;
     command_table_["input"] = cmd_input;
+    command_table_["document"] = cmd_document;
     command_table_["abstract"] = cmd_abstract;
     command_table_["tableofcontents"] = cmd_tableofcontents;
     command_table_["tableofcontents*"] = cmd_tableofcontents_star;
@@ -5162,6 +5358,13 @@ void LatexProcessor::initCommandTable() {
     command_table_["stepcounter"] = cmd_stepcounter;
     command_table_["refstepcounter"] = cmd_refstepcounter;
     command_table_["value"] = cmd_value;
+    // Commented out - need to implement helper methods first
+    // command_table_["arabic"] = cmd_arabic;
+    // command_table_["roman"] = cmd_roman;
+    // command_table_["Roman"] = cmd_Roman;
+    // command_table_["alph"] = cmd_alph;
+    // command_table_["Alph"] = cmd_Alph;
+    // command_table_["fnsymbol"] = cmd_fnsymbol;
     command_table_["newlength"] = cmd_newlength;
     command_table_["setlength"] = cmd_setlength;
 }
@@ -5303,6 +5506,11 @@ void LatexProcessor::processNode(Item node) {
         if (str && str->len > 0) {
             const char* text = str->chars;
             
+            // Debug: log "document" string to track where it's coming from
+            if (strcmp(text, "document") == 0) {
+                log_debug("processNode: found 'document' string - context unknown");
+            }
+            
             // Find the first backslash to check for embedded command
             const char* backslash = strchr(text, '\\');
             
@@ -5420,6 +5628,14 @@ void LatexProcessor::processNode(Item node) {
             return;
         }
         
+        // Skip "end" elements (malformed \end{...} that parser incorrectly included)
+        // These occur when the parser fails to match environment closing tags correctly
+        if (strcmp(tag, "end") == 0) {
+            // Skip - this is a parsing artifact
+            log_debug("processNode: skipping malformed 'end' element");
+            return;
+        }
+        
         // Special handling for linebreak_command (\\)
         if (strcmp(tag, "linebreak_command") == 0) {
             ensureParagraph();
@@ -5466,6 +5682,62 @@ void LatexProcessor::processChildren(Item elem) {
     int64_t count = elem_reader.childCount();
     for (int64_t i = 0; i < count; i++) {
         ItemReader child_reader = elem_reader.childAt(i);
+        
+        // Check for \char command that needs lookahead for its numeric argument
+        if (child_reader.isElement()) {
+            ElementReader child_elem(child_reader.item());
+            const char* tag = child_elem.tagName();
+            
+            if (tag && strcmp(tag, "char") == 0 && child_elem.childCount() == 0) {
+                // \char command with no children - parser limitation
+                // Look ahead to next sibling for the numeric argument
+                if (i + 1 < count) {
+                    ItemReader next_reader = elem_reader.childAt(i + 1);
+                    if (next_reader.isString()) {
+                        const char* text = next_reader.cstring();
+                        if (text && (isdigit((unsigned char)text[0]) || text[0] == '"' || text[0] == '\'')) {
+                            // Found the number argument - parse and consume just the numeric part
+                            ensureParagraph();
+                            uint32_t charcode = 0;
+                            char* endptr = nullptr;
+                            
+                            if (text[0] == '"') {
+                                // Hex: \char"A0 - consume quote + hex digits
+                                charcode = std::strtoul(text + 1, &endptr, 16);
+                            } else if (text[0] == '\'') {
+                                // Octal: \char'77 - consume quote + octal digits
+                                charcode = std::strtoul(text + 1, &endptr, 8);
+                            } else {
+                                // Decimal: \char98 - consume decimal digits
+                                charcode = std::strtoul(text, &endptr, 10);
+                            }
+                            
+                            // Output the character
+                            if (charcode > 0) {
+                                if (charcode == 0xA0) {
+                                    gen_->writer()->writeRawHtml("&nbsp;");
+                                } else {
+                                    std::string utf8 = codepoint_to_utf8(charcode);
+                                    gen_->text(utf8.c_str());
+                                }
+                            }
+                            
+                            // Output remaining text after the number (e.g., " test" from "98 test")
+                            if (endptr && *endptr) {
+                                processText(endptr);
+                            }
+                            
+                            // Skip the next string element since we consumed it
+                            i++;
+                            continue;
+                        }
+                    }
+                }
+                
+                // No valid number found - just skip the \char command
+                continue;
+            }
+        }
         
         // Check if this is a linebreak element
         if (child_reader.isElement()) {
@@ -5768,6 +6040,7 @@ void LatexProcessor::processChildren(Item elem) {
                 gen_->text(tag);
                 continue;
             }
+            
         }
         
         // Normal processing for other nodes
@@ -5811,10 +6084,11 @@ void LatexProcessor::processSpacingCommand(Item elem) {
             } else if (strcmp(cmd, "\\space") == 0) {
                 // Normal space
                 gen_->text(" ");
-            } else if (strcmp(cmd, "\\ ") == 0) {
-                // Backslash-space (control space) - produces zero-width space followed by regular space
-                // This allows a line break at this point unlike ~
-                gen_->text("\u200B ");  // ZWSP + space
+            } else if (strcmp(cmd, "\\ ") == 0 || strcmp(cmd, "\\\t") == 0 || 
+                       strcmp(cmd, "\\\n") == 0 || strcmp(cmd, "\\\r") == 0) {
+                // Backslash-space/tab/newline (control space) - produces zero-width space + regular space
+                // The ZWS allows line breaking, the space provides word separation
+                gen_->text("\u200B ");  // ZWSP + space (per LaTeX.js behavior)
             } else if (strcmp(cmd, "~") == 0) {
                 // Tilde (non-breaking space) - this path shouldn't be reached since
                 // ~ is handled as nbsp element, but keep for completeness
