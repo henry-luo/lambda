@@ -328,16 +328,30 @@ static bool is_visibility_collapse(ViewBlock* element) {
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     float content_height = 0.0f;
 
+    // Set up line-height for this cell so we can use it for text content measurement
+    // This ensures we use the cell's own line-height, not a stale value from lycon
+    FontBox saved_font = lycon->font;
+    BlockContext saved_block = lycon->block;
+
+    if (tcell->font) {
+        setup_font(lycon->ui_context, &lycon->font, tcell->font);
+    }
+    setup_line_height(lycon, tcell);
+    float cell_line_height = lycon->block.line_height;
+
+    // Restore context
+    lycon->font = saved_font;
+    lycon->block = saved_block;
+
     for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
-            float text_height = text->height > 0 ? text->height : 17.0f;
-
-            // Use line-height from context if available (CSS line-height)
-            // This ensures proper vertical spacing for table cells
-            if (lycon->block.line_height > 0 && lycon->block.line_height > text_height) {
-                text_height = lycon->block.line_height;
-            }
+            // CRITICAL: Use the maximum of CSS line-height and actual text bounding box height.
+            // For single-line text: line_height (24px from CSS line-height: 1.5) > text->height (18px from font metrics)
+            // For wrapped text: text->height (108px from 6 wrapped lines) > line_height (24px)
+            // CSS 2.1 §17.5.3: "The height of a cell box is the minimum height required by the content"
+            // This ensures both single-line and wrapped content are measured correctly.
+            float text_height = max(cell_line_height > 0 ? cell_line_height : 0.0f, text->height);
 
             if (text_height > content_height) content_height = text_height;
         }
@@ -358,8 +372,8 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         }
     }
 
-    // Ensure minimum content height
-    return (content_height < 17.0f) ? 17.0f : content_height;
+    // Return measured content height (no artificial minimum)
+    return content_height;
 }
 
 // Calculate final cell height from content, padding, border
@@ -521,7 +535,9 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     cell->width = cell_width;
 
     // Layout cell content now that width is set
+    log_debug("[PROCESS_TABLE_CELL] About to call layout_table_cell_content for cell: %s", cell->node_name());
     layout_table_cell_content(lycon, cell);
+    log_debug("[PROCESS_TABLE_CELL] Returned from layout_table_cell_content");
 
     // Get explicit CSS height and measure content
     float explicit_cell_height = get_explicit_css_height(lycon, cell);
@@ -2567,6 +2583,23 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     ViewTableCell* tcell = static_cast<ViewTableCell*>(cell);
     if (!tcell) return;
 
+    // Debug: count children and log their types
+    if (tcell->is_element()) {
+        int child_count = 0;
+        int img_count = 0;
+        DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
+        for (; cc; cc = cc->next_sibling) {
+            child_count++;
+            if (cc->tag() == HTM_TAG_IMG) {
+                img_count++;
+                log_debug("[TABLE CELL CHILDREN] Found IMG child #%d: %s", img_count, cc->node_name());
+            } else {
+                log_debug("[TABLE CELL CHILDREN] Child #%d: %s (tag=%lu)", child_count, cc->node_name(), cc->tag());
+            }
+        }
+        log_debug("[TABLE CELL CHILDREN] Total children: %d, IMG elements: %d", child_count, img_count);
+    }
+
     // No need to clear text rectangles - this is the first and only layout pass!
 
     // Save layout context to restore later
@@ -2690,6 +2723,10 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     if (tcell->is_element()) {
         DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
         for (; cc; cc = cc->next_sibling) {
+            uintptr_t child_tag = cc->tag();
+            if (child_tag == HTM_TAG_IMG) {
+                log_debug("[TABLE CELL IMG] Found IMG child in table cell, calling layout_flow_node: %s", cc->node_name());
+            }
             layout_flow_node(lycon, cc);
         }
     }
@@ -4667,24 +4704,144 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int content_only_height = min_content_height - table_padding_vert;  // current_y includes top padding
 
     // If explicit height is larger than content, distribute extra height to rows
+    // CSS 2.1 §17.5.3: Extra height is distributed to body rows only, not header/footer
     if (explicit_css_height > 0 && meta->row_count > 0) {
         int available_for_content = explicit_css_height - table_border_vert;  // CSS height minus borders
         int extra_height = available_for_content - (content_only_height + table_padding_vert + table_spacing_vert);
 
+        log_debug("Table height distribution: explicit=%d, available=%d, content_only=%d, initial_extra=%d, rows=%d",
+                 explicit_css_height, available_for_content, content_only_height, extra_height, meta->row_count);
+
         if (extra_height > 0) {
-            log_debug("Distributing %dpx extra height to %d rows", extra_height, meta->row_count);
+            // CSS 2.1 §17.5.3: Extra height goes to body rows only
+            // Calculate natural heights for all sections and count sections for spacing
+            int caption_and_header_height = 0;
+            int body_natural_height = 0;
+            int body_row_count = 0;
+            int section_count = 0;  // Count sections for inter-section spacing
 
-            // Distribute extra height equally among rows
-            int height_per_row = extra_height / meta->row_count;
-            int remainder = extra_height % meta->row_count;
+            log_debug("Calculating natural heights for each section");
+            for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                // Check for caption (HTML tag or CSS display)
+                DisplayValue child_display = resolve_display_value((void*)child);
+                bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
+                                 (child_display.inner == CSS_VALUE_TABLE_CAPTION);
 
-            // Adjust row heights and y positions
-            int y_adjustment = 0;
-            for (int r = 0; r < meta->row_count; r++) {
-                int row_extra = height_per_row + (r < remainder ? 1 : 0);
-                meta->row_heights[r] += row_extra;
-                meta->row_y_positions[r] += y_adjustment;
-                y_adjustment += row_extra;
+                if (is_caption) {
+                    caption_and_header_height += (int)child->height;
+                    section_count++;
+                    log_debug("  Caption height: %d", (int)child->height);
+                } else if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                    ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+                    TableSectionType section_type = group->get_section_type();
+                    bool is_body_group = (section_type == TABLE_SECTION_TBODY);
+
+                    log_debug("  Row group section_type=%d (TBODY=%d), is_body=%d",
+                             section_type, TABLE_SECTION_THEAD, TABLE_SECTION_TBODY, is_body_group);
+
+                    // Calculate this group's natural height (rows only, no inter-row spacing yet)
+                    int group_height = 0;
+                    int row_count_in_group = 0;
+                    for (ViewTableRow* row = group->first_row(); row; row = group->next_row(row)) {
+                        // Get row index to access its natural height
+                        for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
+                            int row_idx = tcell->td->row_index;
+                            if (row_idx >= 0 && row_idx < meta->row_count) {
+                                int row_height = meta->row_heights[row_idx];
+                                group_height += row_height;
+                                row_count_in_group++;
+                                log_debug("    Row %d natural height: %d", row_idx, row_height);
+                                break;  // Found row index
+                            }
+                        }
+                    }
+
+                    // DON'T add inter-row spacing here - it's already in the calculation
+                    // We'll account for ALL spacing (inter-row and inter-section) separately
+
+                    if (is_body_group) {
+                        body_natural_height += group_height;
+                        body_row_count += row_count_in_group;
+                        section_count++;
+                        log_debug("  Body group natural height: %d (rows only), rows: %d", group_height, row_count_in_group);
+                    } else {
+                        caption_and_header_height += group_height;
+                        section_count++;
+                        log_debug("  Header/Footer group natural height: %d (rows only)", group_height);
+                    }
+                }
+            }
+
+            // Calculate total spacing: edge spacing + inter-section spacing
+            // With border-spacing and N sections, there are N+1 spacing gaps:
+            // [top edge] section1 [spacing] section2 [spacing] ... sectionN [bottom edge]
+            int total_spacing = 0;
+            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+                // Inter-section spacing (between caption, header, body groups)
+                if (section_count > 0) {
+                    total_spacing = (section_count + 1) * table->tb->border_spacing_v;
+                }
+                // Add inter-row spacing within ALL groups (already counted in content_only_height via current_y)
+                // We need to calculate how many row boundaries there are
+                int total_row_boundaries = (meta->row_count > 0) ? (meta->row_count - 1) : 0;
+                total_spacing += total_row_boundaries * table->tb->border_spacing_v;
+            }
+
+            // Now calculate extra height available for body rows
+            // Formula: extra_for_body = available - padding - all_spacing - caption/header - body_natural
+            int extra_for_body = available_for_content - table_padding_vert - total_spacing -
+                                caption_and_header_height - body_natural_height;
+
+            log_debug("Height breakdown: caption+header=%d, body_natural=%d, total_spacing=%d (sections=%d, rows=%d), padding=%d",
+                     caption_and_header_height, body_natural_height, total_spacing, section_count, meta->row_count, table_padding_vert);
+            log_debug("Distributing %dpx extra height to %d body rows (was %dpx initial)",
+                     extra_for_body, body_row_count, extra_height);
+
+            if (extra_for_body > 0 && body_row_count > 0) {
+                // Distribute extra height equally among body rows only
+                int height_per_row = extra_for_body / body_row_count;
+                int remainder = extra_for_body % body_row_count;
+                int distributed_count = 0;
+
+                // First pass: update meta->row_heights for body rows
+                for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                    if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                        ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+                        TableSectionType section_type = group->get_section_type();
+                        bool is_body_group = (section_type == TABLE_SECTION_TBODY);
+
+                        if (is_body_group) {
+                            for (ViewTableRow* trow = group->first_row(); trow; trow = group->next_row(trow)) {
+                                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                                    int row_idx = tcell->td->row_index;
+                                    if (row_idx >= 0 && row_idx < meta->row_count) {
+                                        int row_extra = height_per_row + (distributed_count < remainder ? 1 : 0);
+                                        meta->row_heights[row_idx] += row_extra;
+                                        log_debug("    Body row %d: natural=%d + extra=%d = %d",
+                                                 row_idx, meta->row_heights[row_idx] - row_extra, row_extra, meta->row_heights[row_idx]);
+                                        distributed_count++;
+                                        break;  // Found row index
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Second pass: recalculate row y positions after height changes
+                int y_accum = table_padding_top;
+                if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+                    y_accum += table->tb->border_spacing_v;
+                }
+                for (int r = 0; r < meta->row_count; r++) {
+                    meta->row_y_positions[r] = y_accum;
+                    y_accum += meta->row_heights[r];
+                    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+                        y_accum += table->tb->border_spacing_v;
+                    }
+                }
+            } else {
+                log_debug("No body rows found, skipping height distribution");
             }
 
             // Now update all row and cell views with new heights
