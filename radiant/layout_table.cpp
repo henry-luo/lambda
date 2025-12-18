@@ -745,41 +745,39 @@ static CollapsedBorder get_cell_border(ViewTableCell* cell, int side) {
     return border;
 }
 
-// Apply collapsed border to cell (modifies cell's border property)
-// CSS 2.1 §17.6.2: In the collapsing border model, borders are centered on grid lines
-// For internal borders (between two cells), each cell paints half the border
-// For edge borders (at table edge), the cell paints the full border
-static void apply_collapsed_border_to_cell(ViewTableCell* cell, const CollapsedBorder& border, int side, bool is_edge) {
-    if (!cell || !cell->bound || !cell->bound->border) return;
+// Apply collapsed border to cell (stores in TableCellProp for rendering)
+// CSS 2.1 §17.6.2: Border resolution is for RENDERING, not layout
+// This stores resolved borders in TableCellProp->*_resolved fields
+// Layout calculations continue to use original BorderProp widths
+static void apply_collapsed_border_to_cell(LayoutContext* lycon, ViewTableCell* cell,
+                                           const CollapsedBorder& border, int side) {
+    if (!cell || !cell->td) return;
 
-    BorderProp* bp = cell->bound->border;
-
-    // CSS 2.1: Edge borders get full width, internal borders get half width
-    // This ensures borders are centered on grid lines between cells
-    float width = is_edge ? border.width : (border.width / 2.0f);
-
+    // Allocate resolved border storage if needed
+    CollapsedBorder** target = nullptr;
     switch (side) {
-        case 0: // top
-            bp->width.top = width;
-            bp->top_style = border.style;
-            bp->top_color = border.color;
-            break;
-        case 1: // right
-            bp->width.right = width;
-            bp->right_style = border.style;
-            bp->right_color = border.color;
-            break;
-        case 2: // bottom
-            bp->width.bottom = width;
-            bp->bottom_style = border.style;
-            bp->bottom_color = border.color;
-            break;
-        case 3: // left
-            bp->width.left = width;
-            bp->left_style = border.style;
-            bp->left_color = border.color;
-            break;
+        case 0: target = &cell->td->top_resolved; break;
+        case 1: target = &cell->td->right_resolved; break;
+        case 2: target = &cell->td->bottom_resolved; break;
+        case 3: target = &cell->td->left_resolved; break;
     }
+
+    if (!target) return;
+
+    // Allocate CollapsedBorder if not already allocated
+    if (!*target) {
+        *target = (CollapsedBorder*)alloc_prop(lycon, sizeof(CollapsedBorder));
+        if (!*target) {
+            log_error("Failed to allocate CollapsedBorder");
+            return;
+        }
+    }
+
+    // Store resolved border for rendering phase
+    (*target)->width = border.width;
+    (*target)->style = border.style;
+    (*target)->color = border.color;
+    (*target)->priority = border.priority;
 }
 
 // Forward declaration
@@ -861,7 +859,7 @@ static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_
 // This implements CSS 2.1 Section 17.6.2 border conflict resolution
 // CSS 2.1 §17.6.2: Each border around a cell can be specified by various elements
 // (cell, row, row group, column, column group, table), and these must be resolved
-static void resolve_collapsed_borders(ViewTable* table, TableMetadata* meta) {
+static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, TableMetadata* meta) {
     if (!table || !meta || !table->tb->border_collapse) return;
 
     log_debug("resolve_collapsed_borders: starting comprehensive border resolution for %dx%d table",
@@ -947,20 +945,17 @@ static void resolve_collapsed_borders(ViewTable* table, TableMetadata* meta) {
                 }
 
                 // Apply winner to affected cells
-                // Edge borders (row 0 or row count) get full width, internal get half
-                bool is_top_edge = (row == 0);
-                bool is_bottom_edge = (row == meta->row_count);
 
                 if (row > 0) {
                     ViewTableCell* cell_above = find_cell_at(table, row - 1, col);
                     if (cell_above) {
-                        apply_collapsed_border_to_cell(cell_above, *winner, 2, is_bottom_edge);
+                        apply_collapsed_border_to_cell(lycon, cell_above, *winner, 2);
                     }
                 }
                 if (row < meta->row_count) {
                     ViewTableCell* cell_below = find_cell_at(table, row, col);
                     if (cell_below) {
-                        apply_collapsed_border_to_cell(cell_below, *winner, 0, is_top_edge);
+                        apply_collapsed_border_to_cell(lycon, cell_below, *winner, 0);
                     }
                 }
             }
@@ -1023,20 +1018,17 @@ static void resolve_collapsed_borders(ViewTable* table, TableMetadata* meta) {
                 }
 
                 // Apply winner to affected cells
-                // Edge borders (col 0 or col count) get full width, internal get half
-                bool is_left_edge = (col == 0);
-                bool is_right_edge = (col == meta->column_count);
 
                 if (col > 0) {
                     ViewTableCell* cell_left = find_cell_at(table, row, col - 1);
                     if (cell_left) {
-                        apply_collapsed_border_to_cell(cell_left, *winner, 1, is_right_edge);
+                        apply_collapsed_border_to_cell(lycon, cell_left, *winner, 1);
                     }
                 }
                 if (col < meta->column_count) {
                     ViewTableCell* cell_right = find_cell_at(table, row, col);
                     if (cell_right) {
-                        apply_collapsed_border_to_cell(cell_right, *winner, 3, is_left_edge);
+                        apply_collapsed_border_to_cell(lycon, cell_right, *winner, 3);
                     }
                 }
             }
@@ -3331,16 +3323,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table has %d columns, %d rows (analyzed in single pass)", columns, rows);
 
     // Step 1.5: Border-collapse resolution
-    // NOTE: CSS 2.1 §17.6.2 border resolution is for RENDERING, not layout.
-    // Layout uses the original specified borders for width/height calculations.
-    // Border resolution only affects which borders are painted and their visual appearance.
-    // Since this is a layout engine (not a renderer), we skip border resolution.
-    // The border overlap calculations in positioning (lines 4126-4138) handle the
-    // spacing correctly for collapsed borders using the original border widths.
-    if (false && table->tb->border_collapse) {
-        // Border resolution disabled - not needed for layout calculations
-        log_debug("Border-collapse: using original borders for layout (resolution is rendering-only)");
-        resolve_collapsed_borders(table, meta);
+    // CSS 2.1 §17.6.2: Border resolution determines which borders win in conflicts
+    // Resolved borders are stored in TableCellProp->*_resolved fields for rendering
+    // Layout continues to use original BorderProp widths for positioning calculations
+    if (table->tb->border_collapse) {
+        log_debug("Resolving collapsed borders for rendering (layout uses original borders)");
+        resolve_collapsed_borders(lycon, table, meta);
     }
 
     // Check if table has explicit width (for percentage cell width calculation)
