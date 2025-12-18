@@ -332,6 +332,7 @@ public:
     void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
     void setNextParagraphIsNoindent() { next_paragraph_is_noindent_ = true; }
     void setNextParagraphAlignment(const char* alignment) { next_paragraph_alignment_ = alignment; }
+    const char* getCurrentAlignment() const { return next_paragraph_alignment_; }
     void pushAlignmentScope() { alignment_stack_.push_back(next_paragraph_alignment_); }
     void popAlignmentScope() { 
         if (!alignment_stack_.empty()) {
@@ -2656,15 +2657,76 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     }
 }
 
+// Helper to scan for alignment declarations at the start of list content
+static const char* scanForListAlignment(Item elem) {
+    ElementReader elem_reader(elem);
+    
+    // Scan element children for alignment declarations
+    
+    // Look for centering/raggedright/raggedleft commands in first paragraph
+    for (size_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (!tag) continue;
+            
+            // Check paragraph wrapper
+            if (strcmp(tag, "paragraph") == 0) {
+                // Scan paragraph content for alignment commands before first item
+                for (size_t j = 0; j < child_elem.childCount(); j++) {
+                    ItemReader para_child = child_elem.childAt(j);
+                    
+                    if (para_child.isElement()) {
+                        ElementReader para_child_elem = para_child.asElement();
+                        const char* para_tag = para_child_elem.tagName();
+                        if (!para_tag) continue;
+                        
+                        // Stop at first item - alignment must come before items
+                        if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
+                            return nullptr;
+                        }
+                        
+                        // Check for alignment commands
+                        if (strcmp(para_tag, "centering") == 0) {
+                            return "centering";
+                        } else if (strcmp(para_tag, "raggedright") == 0) {
+                            return "raggedright";
+                        } else if (strcmp(para_tag, "raggedleft") == 0) {
+                            return "raggedleft";
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return nullptr;
+}
+
 // List environment commands
 
 static void cmd_itemize(LatexProcessor* proc, Item elem) {
     // \begin{itemize} ... \end{itemize}
     HtmlGenerator* gen = proc->generator();
     
-    gen->startItemize();
+    // Scan for alignment declarations in list content
+    const char* list_alignment = scanForListAlignment(elem);
+    if (list_alignment) {
+        // Set alignment in processor so items can use it
+        proc->setNextParagraphAlignment(list_alignment);
+    }
+    
+    // Pass alignment to list
+    gen->startItemize(list_alignment ? list_alignment : proc->getCurrentAlignment());
     processListItems(proc, elem, "itemize");
     gen->endItemize();
+    
+    // Clear alignment if it was set by the list
+    if (list_alignment) {
+        proc->setNextParagraphAlignment(nullptr);
+    }
     
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
@@ -2674,9 +2736,22 @@ static void cmd_enumerate(LatexProcessor* proc, Item elem) {
     // \begin{enumerate} ... \end{enumerate}
     HtmlGenerator* gen = proc->generator();
     
-    gen->startEnumerate();
+    // Scan for alignment declarations in list content
+    const char* list_alignment = scanForListAlignment(elem);
+    if (list_alignment) {
+        // Set alignment in processor so items can use it
+        proc->setNextParagraphAlignment(list_alignment);
+    }
+    
+    // Pass alignment to list
+    gen->startEnumerate(list_alignment ? list_alignment : proc->getCurrentAlignment());
     processListItems(proc, elem, "enumerate");
     gen->endEnumerate();
+    
+    // Clear alignment if it was set by the list
+    if (list_alignment) {
+        proc->setNextParagraphAlignment(nullptr);
+    }
     
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
