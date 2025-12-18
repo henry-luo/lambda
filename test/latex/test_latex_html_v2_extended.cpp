@@ -17,7 +17,7 @@ extern "C" {
     Item format_latex_html_v2_c(Input* input, int text_mode);
 }
 
-class LatexHtmlV2FixtureTest : public ::testing::Test {
+class LatexHtmlV2ExtendedTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Initialize logging
@@ -101,7 +101,7 @@ protected:
                                        const std::string& actual_html,
                                        const std::vector<HtmlDifference>& differences) {
         std::stringstream report;
-        report << "\n=== V2 FIXTURE TEST FAILURE ===\n";
+        report << "\n=== V2 EXTENDED TEST FAILURE ===\n";
         report << "File: " << fixture.filename << "\n";
         report << "Test: " << fixture.header << " (ID: " << fixture.id << ")\n\n";
 
@@ -128,34 +128,12 @@ protected:
     HtmlComparator comparator;
 };
 
-// Test fixture loading functionality
-TEST_F(LatexHtmlV2FixtureTest, FixtureLoaderBasic) {
-    FixtureLoader loader;
-
-    // Test with a simple fixture string
-    std::string test_content = R"(
-** simple test
-.
-Hello world
-.
-<div class="body"><p>Hello world</p></div>
-.
-)";
-
-    std::vector<LatexHtmlFixture> fixtures = loader.parse_fixtures(test_content, "test.tex");
-
-    ASSERT_EQ(fixtures.size(), 1);
-    EXPECT_EQ(fixtures[0].header, "simple test");
-    EXPECT_EQ(fixtures[0].latex_source, "Hello world");
-    EXPECT_TRUE(fixtures[0].expected_html.find("<p>Hello world</p>") != std::string::npos);
-}
-
-// Parameterized test for running all fixtures from a directory with V2
-class LatexHtmlV2FixtureParameterizedTest : public LatexHtmlV2FixtureTest,
-                                           public ::testing::WithParamInterface<LatexHtmlFixture> {
+// Parameterized test for running all extended fixtures
+class LatexHtmlV2ExtendedParameterizedTest : public LatexHtmlV2ExtendedTest,
+                                             public ::testing::WithParamInterface<LatexHtmlFixture> {
 };
 
-TEST_P(LatexHtmlV2FixtureParameterizedTest, RunFixture) {
+TEST_P(LatexHtmlV2ExtendedParameterizedTest, RunFixture) {
     const LatexHtmlFixture& fixture = GetParam();
 
     // Skip tests marked with "!" (original mechanism)
@@ -166,41 +144,33 @@ TEST_P(LatexHtmlV2FixtureParameterizedTest, RunFixture) {
     run_fixture_test(fixture);
 }
 
-// Load baseline fixtures only (must pass 100%) - Same as V1 baseline
-std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
-    std::vector<LatexHtmlFixture> baseline_fixtures;
+// Load extended fixtures (tests that currently fail but should be fixed)
+std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
+    std::vector<LatexHtmlFixture> extended_fixtures;
 
     std::string fixtures_dir = "test/latex/fixtures";
 
-    // Baseline test files that must always pass 100%
-    // Using original latex-js fixtures
-    std::set<std::string> baseline_files = {
-        "basic_test.tex",
-        "text.tex",
-        "environments.tex",
-        "sectioning.tex",
-        "whitespace.tex",
-        // New baseline files
-        "counters.tex",
-        "formatting.tex",
-        "preamble.tex",
+    // Extended test files - tests that currently fail but are work-in-progress
+    std::set<std::string> extended_files = {
         "basic_text.tex",
-        "spacing.tex",
-        "symbols.tex",
-        "macros.tex",
-        "fonts.tex",
-        // Additional files - full test suite
         "boxes.tex",
+        "counters.tex",
+        "environments.tex",
+        "fonts.tex",
         "groups.tex",
         "label-ref.tex",
-        "layout-marginpar.tex"
+        "layout-marginpar.tex",
+        "macros.tex",
+        "sectioning.tex",
+        "symbols.tex",
+        "text.tex",
+        "whitespace.tex"
     };
 
-    // Tests to exclude from V2 baseline (moved to extended test suite)
-    // These are tests that currently fail and need work
-    std::map<std::string, std::set<int>> excluded_test_ids = {
-        {"basic_text.tex", {4, 6}},  // test 4 expects no ZWS (older test); test 6 needs verb command
-        {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
+    // Specific test IDs to include in extended (failing tests only)
+    std::map<std::string, std::set<int>> extended_test_ids = {
+        {"basic_text.tex", {4, 6}},  // test 4 expects no ZWS (inconsistent with text.tex); test 6 needs verb
+        {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 moved to baseline; tex_4 has \noindent issue
         {"counters.tex", {1, 2}},
         {"environments.tex", {7, 10, 14}},
         {"fonts.tex", {6, 7, 8}},
@@ -210,13 +180,13 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         {"macros.tex", {2, 4, 5, 6}},
         {"sectioning.tex", {3}},
         {"symbols.tex", {2}},
-        {"text.tex", {4, 6, 7, 8, 10}},  // test 5 passed: special characters with ZWS
+        {"text.tex", {4, 6, 7, 8, 10}},  // test 5 moved to baseline (special characters pass)
         {"whitespace.tex", {5, 6, 7, 8, 12, 13, 15, 21}}
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
         std::cerr << "Warning: Fixtures directory not found: " << fixtures_dir << std::endl;
-        return baseline_fixtures;
+        return extended_fixtures;
     }
 
     FixtureLoader loader;
@@ -224,33 +194,22 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
 
     for (const auto& file : fixture_files) {
         for (const auto& fixture : file.fixtures) {
-            // Check if this fixture belongs to a baseline file
-            if (baseline_files.find(fixture.filename) != baseline_files.end()) {
-                // Skip tests that are in the excluded list for this file
-                bool exclude = false;
-                
-                // Check ID-based exclusion
-                auto excluded_id_it = excluded_test_ids.find(fixture.filename);
-                if (excluded_id_it != excluded_test_ids.end() &&
-                    excluded_id_it->second.find(fixture.id) != excluded_id_it->second.end()) {
-                    exclude = true;
-                }
-                
-                if (!exclude) {
-                    baseline_fixtures.push_back(fixture);
-                }
+            // Check if this fixture is in the extended test list
+            auto extended_id_it = extended_test_ids.find(fixture.filename);
+            if (extended_id_it != extended_test_ids.end() &&
+                extended_id_it->second.find(fixture.id) != extended_id_it->second.end()) {
+                extended_fixtures.push_back(fixture);
             }
         }
     }
 
-    std::cout << "Loaded " << baseline_fixtures.size() << " V2 baseline fixtures from "
-              << baseline_files.size() << " files" << std::endl;
+    std::cout << "Loaded " << extended_fixtures.size() << " V2 extended (failing) fixtures" << std::endl;
 
-    return baseline_fixtures;
+    return extended_fixtures;
 }
 
 // Generate test names for parameterized tests
-std::string generate_v2_test_name(const ::testing::TestParamInfo<LatexHtmlFixture>& info) {
+std::string generate_v2_extended_test_name(const ::testing::TestParamInfo<LatexHtmlFixture>& info) {
     std::string name = info.param.filename + "_" + std::to_string(info.param.id);
 
     // Replace invalid characters for test names
@@ -261,64 +220,13 @@ std::string generate_v2_test_name(const ::testing::TestParamInfo<LatexHtmlFixtur
     return name;
 }
 
-// Register V2 BASELINE parameterized tests (must always pass 100%)
+// Register V2 EXTENDED parameterized tests (tests that currently fail)
 INSTANTIATE_TEST_SUITE_P(
-    V2BaselineFixtures,
-    LatexHtmlV2FixtureParameterizedTest,
-    ::testing::ValuesIn(load_v2_baseline_fixtures()),
-    generate_v2_test_name
+    V2ExtendedFixtures,
+    LatexHtmlV2ExtendedParameterizedTest,
+    ::testing::ValuesIn(load_v2_extended_fixtures()),
+    generate_v2_extended_test_name
 );
-
-// Individual test suites for specific functionality with V2
-TEST_F(LatexHtmlV2FixtureTest, BasicTextFormatting) {
-    LatexHtmlFixture fixture;
-    fixture.id = 1;
-    fixture.header = "basic text formatting";
-    fixture.latex_source = R"(\textbf{Bold text} and \textit{italic text})";
-    fixture.expected_html = R"(<div class="body"><p><span class="bf">Bold text</span> and <span class="it">italic text</span></p></div>)";
-    fixture.skip_test = false;
-
-    run_fixture_test(fixture);
-}
-
-TEST_F(LatexHtmlV2FixtureTest, SectioningCommands) {
-    GTEST_SKIP() << "Moved to extended - sectioning commands have known issues";
-    LatexHtmlFixture fixture;
-    fixture.id = 2;
-    fixture.header = "sectioning commands";
-    fixture.latex_source = R"(\section{Introduction}
-This is the introduction.
-\subsection{Background}
-This is background information.)";
-    fixture.expected_html = "<div class=\"body\">\n"
-        "<h2 id=\"sec-1\">1\xE2\x80\x83Introduction</h2>\n"
-        "<p>This is the introduction.</p>\n"
-        "<div class=\"latex-subsection\">Background</div>\n"
-        "<p>This is background information.</p>\n"
-        "</div>";
-    fixture.skip_test = false;
-
-    run_fixture_test(fixture);
-}
-
-TEST_F(LatexHtmlV2FixtureTest, ListEnvironments) {
-    LatexHtmlFixture fixture;
-    fixture.id = 3;
-    fixture.header = "list environments";
-    fixture.latex_source = R"(\begin{itemize}
-\item First item
-\item Second item
-\end{itemize})";
-    fixture.expected_html = R"(<div class="body">
-<ul class="list">
-<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>First item</p></li>
-<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>Second item</p></li>
-</ul>
-</div>)";
-    fixture.skip_test = false;
-
-    run_fixture_test(fixture);
-}
 
 // =============================================================================
 // Main Entry Point - Using GTest default main
