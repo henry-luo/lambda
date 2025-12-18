@@ -3056,14 +3056,11 @@ static void cmd_noindent(LatexProcessor* proc, Item elem) {
 static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
     // \gobbleO - gobble whitespace and optional argument (from echo package)
     // latex.js: args.gobbleO = <[ H o? ]>, \gobbleO : -> []
-    // 'H' means: unskip before, add brsp (ZWS) after IF optional arg was consumed
-    // Returns empty array (no output), but adds ZWS if optional arg consumed
+    // 'H' means: add brsp (ZWS + space) after IF optional arg was consumed
+    // Note: Don't unskip - the preceding space should be preserved
+    // Returns empty array (no output), but adds brsp if optional arg consumed
     
     HtmlGenerator* gen = proc->generator();
-    
-    // 'H' arg: unskip before
-    gen->trimTrailingWhitespace();
-    
     ElementReader reader(elem);
     bool has_optional_arg = false;
     
@@ -3081,9 +3078,10 @@ static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
         }
     }
     
-    // Output ZWS only if optional argument was consumed
+    // Output ZWS + space (brsp) if optional argument was consumed
+    // LaTeX.js: brsp = '\u200B ' (breakable but non-collapsible space)
     if (has_optional_arg) {
-        gen->text("\xE2\x80\x8B");  // Zero-width space (U+200B in UTF-8)
+        gen->text("\u200B ");  // Zero-width space + space
     }
     // Otherwise output nothing (just gobble the space)
 }
