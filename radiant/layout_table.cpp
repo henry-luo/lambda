@@ -535,7 +535,9 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     cell->width = cell_width;
 
     // Layout cell content now that width is set
+    log_debug("[PROCESS_TABLE_CELL] About to call layout_table_cell_content for cell: %s", cell->node_name());
     layout_table_cell_content(lycon, cell);
+    log_debug("[PROCESS_TABLE_CELL] Returned from layout_table_cell_content");
 
     // Get explicit CSS height and measure content
     float explicit_cell_height = get_explicit_css_height(lycon, cell);
@@ -2581,6 +2583,23 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     ViewTableCell* tcell = static_cast<ViewTableCell*>(cell);
     if (!tcell) return;
 
+    // Debug: count children and log their types
+    if (tcell->is_element()) {
+        int child_count = 0;
+        int img_count = 0;
+        DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
+        for (; cc; cc = cc->next_sibling) {
+            child_count++;
+            if (cc->tag() == HTM_TAG_IMG) {
+                img_count++;
+                log_debug("[TABLE CELL CHILDREN] Found IMG child #%d: %s", img_count, cc->node_name());
+            } else {
+                log_debug("[TABLE CELL CHILDREN] Child #%d: %s (tag=%lu)", child_count, cc->node_name(), cc->tag());
+            }
+        }
+        log_debug("[TABLE CELL CHILDREN] Total children: %d, IMG elements: %d", child_count, img_count);
+    }
+
     // No need to clear text rectangles - this is the first and only layout pass!
 
     // Save layout context to restore later
@@ -2704,6 +2723,10 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     if (tcell->is_element()) {
         DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
         for (; cc; cc = cc->next_sibling) {
+            uintptr_t child_tag = cc->tag();
+            if (child_tag == HTM_TAG_IMG) {
+                log_debug("[TABLE CELL IMG] Found IMG child in table cell, calling layout_flow_node: %s", cc->node_name());
+            }
             layout_flow_node(lycon, cc);
         }
     }
