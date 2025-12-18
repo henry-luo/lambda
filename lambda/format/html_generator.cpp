@@ -445,7 +445,7 @@ void HtmlGenerator::startEnumerate() {
     LatexGenerator::startList();
     pushListState("enumerate");
     
-    writer_->openTag("ol", "enumerate");
+    writer_->openTag("ol", "list");
 }
 
 void HtmlGenerator::endEnumerate() {
@@ -520,12 +520,24 @@ void HtmlGenerator::createItem(const char* label) {
         // Open paragraph for content
         writer_->openTag("p", nullptr);
     } else if (state.type == "enumerate") {
+        // Step the enumerate counter for this depth level
+        std::string counter_name;
+        int depth = getListDepth();
+        switch (depth) {
+            case 1: counter_name = "enumi"; break;
+            case 2: counter_name = "enumii"; break;
+            case 3: counter_name = "enumiii"; break;
+            case 4: counter_name = "enumiv"; break;
+            default: counter_name = "enumi"; break;
+        }
+        stepCounter(counter_name);
+        
         writer_->openTag("li", nullptr);
         // Add item label span structure matching LaTeX.js
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
-        // Generate enumerate label based on depth
-        std::string enumLabel = getEnumerateLabel(getListDepth());
+        // Generate enumerate label based on depth (counter already incremented)
+        std::string enumLabel = getEnumerateLabel(depth);
         writer_->writeRawHtml(enumLabel.c_str());
         writer_->closeTag("span");  // close hbox llap
         writer_->closeTag("span");  // close itemlabel
@@ -649,23 +661,23 @@ std::string HtmlGenerator::getEnumerateLabel(int depth) const {
 // =============================================================================
 
 void HtmlGenerator::startQuote() {
-    writer_->openTag("blockquote", "quote");
+    writer_->openTag("div", "list quote");
 }
 
 void HtmlGenerator::endQuote() {
-    writer_->closeTag("blockquote");
+    writer_->closeTag("div");
 }
 
 void HtmlGenerator::startQuotation() {
-    writer_->openTag("blockquote", "quotation");
+    writer_->openTag("div", "list quotation");
 }
 
 void HtmlGenerator::endQuotation() {
-    writer_->closeTag("blockquote");
+    writer_->closeTag("div");
 }
 
 void HtmlGenerator::startVerse() {
-    writer_->openTag("div", "verse");
+    writer_->openTag("div", "list verse");
 }
 
 void HtmlGenerator::endVerse() {

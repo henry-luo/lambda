@@ -2428,7 +2428,7 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
 }
 
 // Helper to extract label string from brack_group children
-// Renders elements like \textendash to their text equivalents
+// For formatted labels, pass the brack_group Item to createItem
 static std::string extractLabelFromBrackGroup(ElementReader& brack_elem) {
     std::string label_buf;
     
@@ -2721,27 +2721,36 @@ static void cmd_quote(LatexProcessor* proc, Item elem) {
     // \begin{quote} ... \end{quote}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startQuote();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endQuote();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_quotation(LatexProcessor* proc, Item elem) {
     // \begin{quotation} ... \end{quotation}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startQuotation();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endQuotation();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_verse(LatexProcessor* proc, Item elem) {
     // \begin{verse} ... \end{verse}
     HtmlGenerator* gen = proc->generator();
     
+    proc->closeParagraphIfOpen();
     gen->startVerse();
     proc->processChildren(elem);
+    proc->closeParagraphIfOpen();
     gen->endVerse();
+    proc->setNextParagraphIsContinue();
 }
 
 static void cmd_center(LatexProcessor* proc, Item elem) {
@@ -2778,6 +2787,13 @@ static void cmd_flushright(LatexProcessor* proc, Item elem) {
     proc->closeParagraphIfOpen();
     gen->endFlushRight();
     proc->setNextParagraphIsContinue();
+}
+
+static void cmd_comment(LatexProcessor* proc, Item elem) {
+    // \begin{comment} ... \end{comment}
+    // Comment environment - skip all content (do nothing)
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_verb_command(LatexProcessor* proc, Item elem) {
@@ -5006,6 +5022,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["center"] = cmd_center;
     command_table_["flushleft"] = cmd_flushleft;
     command_table_["flushright"] = cmd_flushright;
+    command_table_["comment"] = cmd_comment;
     command_table_["verbatim"] = cmd_verbatim;
     command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim
     
