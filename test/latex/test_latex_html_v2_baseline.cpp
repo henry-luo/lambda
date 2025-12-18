@@ -201,7 +201,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
     std::map<std::string, std::set<int>> excluded_test_ids = {
         {"basic_text.tex", {4, 6}},  // test 4 expects no ZWS (older test); test 6 needs verb command
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
-        {"counters.tex", {1, 2}},
+        {"counters.tex", {2}},  // Test 1 FIXED; Test 2: whitespace between commands issue (tree-sitter parser)
         {"environments.tex", {7, 10, 14}},
         {"fonts.tex", {6, 7, 8}},
         {"groups.tex", {2, 3}},

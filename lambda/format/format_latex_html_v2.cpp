@@ -20,6 +20,9 @@
 #include <vector>
 #include <unordered_map>
 
+// external function for evaluating LaTeX numeric expressions
+extern "C" int latex_eval_num_expr(const char* expr);
+
 namespace lambda {
 
 // =============================================================================
@@ -5099,9 +5102,123 @@ static void cmd_newcounter(LatexProcessor* proc, Item elem) {
     }
 }
 
+// Helper function to evaluate numeric expressions with embedded LaTeX commands
+// Handles the fact that parser outputs \real{1.6} as siblings: [" text\real", {curly_group: ["1.6"]}]
+static std::string evaluate_numeric_expression_recursive(LatexProcessor* proc, ElementReader& elem_reader, int64_t& index);
+
+static std::string evaluate_numeric_expression(LatexProcessor* proc, Item expr_item) {
+    std::ostringstream result;
+    HtmlGenerator* gen = proc->generator();
+    
+    ItemReader reader(expr_item.to_const());
+    TypeId type = reader.getType();
+    
+    if (type == LMD_TYPE_ELEMENT) {
+        ElementReader elem_reader(expr_item);
+        
+        // Process all children with lookahead for \real and \value
+        int64_t count = elem_reader.childCount();
+        int64_t i = 0;
+        while (i < count) {
+            result << evaluate_numeric_expression_recursive(proc, elem_reader, i);
+            i++;
+        }
+    } else if (type == LMD_TYPE_STRING) {
+        String* str = reader.asString();
+        if (str && str->len > 0) {
+            result << std::string(str->chars, str->len);
+        }
+    }
+    
+    return result.str();
+}
+
+// Helper that processes one child with lookahead
+static std::string evaluate_numeric_expression_recursive(LatexProcessor* proc, ElementReader& elem_reader, int64_t& index) {
+    std::ostringstream result;
+    HtmlGenerator* gen = proc->generator();
+    
+    ItemReader child = elem_reader.childAt(index);
+    TypeId type = child.getType();
+    
+    if (type == LMD_TYPE_STRING) {
+        String* str = child.asString();
+        if (str && str->len > 0) {
+            std::string text(str->chars, str->len);
+            
+            // Check if text ends with \real or \value command
+            if (text.length() >= 5 && text.substr(text.length() - 5) == "\\real") {
+                // Output text before \real
+                result << text.substr(0, text.length() - 5);
+                
+                // Look ahead to next sibling for curly_group with value
+                if (index + 1 < elem_reader.childCount()) {
+                    ItemReader next = elem_reader.childAt(index + 1);
+                    if (next.isElement()) {
+                        ElementReader next_elem(next.item());
+                        if (strcmp(next_elem.tagName(), "curly_group") == 0 && next_elem.childCount() > 0) {
+                            // Extract float value from curly_group
+                            ItemReader value_child = next_elem.childAt(0);
+                            if (value_child.isString()) {
+                                const char* num_str = value_child.cstring();
+                                double value = atof(num_str);
+                                result << (int)value;  // Truncate to int like LaTeX.js
+                                index++;  // Skip the curly_group we just consumed
+                            }
+                        }
+                    }
+                }
+            } else if (text.length() >= 6 && text.substr(text.length() - 6) == "\\value") {
+                // Output text before \value
+                result << text.substr(0, text.length() - 6);
+                
+                // Look ahead to next sibling for curly_group with counter name
+                if (index + 1 < elem_reader.childCount()) {
+                    ItemReader next = elem_reader.childAt(index + 1);
+                    if (next.isElement()) {
+                        ElementReader next_elem(next.item());
+                        if (strcmp(next_elem.tagName(), "curly_group") == 0 && next_elem.childCount() > 0) {
+                            // Extract counter name from curly_group
+                            ItemReader name_child = next_elem.childAt(0);
+                            if (name_child.isString()) {
+                                const char* counter_name = name_child.cstring();
+                                int value = gen->getCounter(counter_name);
+                                result << value;
+                                index++;  // Skip the curly_group we just consumed
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Plain text
+                result << text;
+            }
+        }
+    } else if (type == LMD_TYPE_ELEMENT) {
+        // For elements like curly_group, recursively process
+        ElementReader child_elem(child.item());
+        if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+            // Process children
+            int64_t child_count = child_elem.childCount();
+            for (int64_t j = 0; j < child_count; j++) {
+                result << evaluate_numeric_expression_recursive(proc, child_elem, j);
+            }
+        }
+    }
+    
+    return result.str();
+}
+
 static void cmd_setcounter(LatexProcessor* proc, Item elem) {
     // \setcounter{counter}{value}
     // Sets counter to a specific value
+    
+    FILE* debugf = fopen("/tmp/latex_debug.txt", "a");
+    if (debugf) {
+        fprintf(debugf, "=== cmd_setcounter CALLED ===\n");
+        fclose(debugf);
+    }
+    
     HtmlGenerator* gen = proc->generator();
     
     // Extract counter name and value from children
@@ -5121,17 +5238,75 @@ static void cmd_setcounter(LatexProcessor* proc, Item elem) {
         }
         String* counter_str = stringbuf_to_string(sb1);
         
-        // Second child: value
-        ItemReader second = elem_reader.childAt(1);
-        StringBuf* sb2 = stringbuf_new(pool);
-        if (second.isElement()) {
-            second.asElement().textContent(sb2);
-        } else if (second.isString()) {
-            stringbuf_append_str(sb2, second.cstring());
-        }
-        String* value_str = stringbuf_to_string(sb2);
+        // Remaining children (from index 1 onwards): value expression parts
+        // Parser creates Element nodes for \real{} and \value{} commands
+        // Example: [" 3*", {real: ["1.6"]}, " * ", {real: ["1.7"]}, " + -- 2"]
         
-        int value = atoi(value_str->chars);
+        std::ostringstream expr_builder;
+        for (int i = 1; i < child_count; i++) {
+            ItemReader child = elem_reader.childAt(i);
+            TypeId child_type = child.getType();
+            
+            if (child_type == LMD_TYPE_STRING) {
+                // Plain text - append as-is
+                String* str = child.asString();
+                if (str && str->len > 0) {
+                    expr_builder << std::string(str->chars, str->len);
+                }
+            } else if (child_type == LMD_TYPE_ELEMENT) {
+                ElementReader child_elem(child.item());
+                const char* tag = child_elem.tagName();
+                
+                if (strcmp(tag, "real") == 0) {
+                    // \real{x} - extract float value (keep as string for expression eval)
+                    if (child_elem.childCount() > 0) {
+                        ItemReader value_child = child_elem.childAt(0);
+                        if (value_child.isString()) {
+                            // Append the numeric string directly - evaluator will parse as float
+                            expr_builder << value_child.cstring();
+                        }
+                    }
+                } else if (strcmp(tag, "value") == 0) {
+                    // \value{counter} - look up counter value
+                    if (child_elem.childCount() > 0) {
+                        ItemReader name_child = child_elem.childAt(0);
+                        if (name_child.isString()) {
+                            const char* counter_name = name_child.cstring();
+                            int value = gen->getCounter(counter_name);
+                            expr_builder << value;
+                        }
+                    }
+                } else {
+                    // Other elements (curly_group, etc.) - extract text content
+                    Pool* pool = proc->pool();
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* text_str = stringbuf_to_string(sb);
+                    if (text_str && text_str->len > 0) {
+                        expr_builder << std::string(text_str->chars, text_str->len);
+                    }
+                }
+            }
+        }
+        
+        std::string expr_str = expr_builder.str();
+        
+        // debug: write to file to see what's happening
+        debugf = fopen("/tmp/latex_debug.txt", "a");
+        if (debugf) {
+            fprintf(debugf, "cmd_setcounter: counter='%s', expr_str='%s'\n", counter_str->chars, expr_str.c_str());
+            fclose(debugf);
+        }
+        
+        // evaluate numeric expression (supports +, -, *, /, parentheses)
+        int value = latex_eval_num_expr(expr_str.c_str());
+        
+        debugf = fopen("/tmp/latex_debug.txt", "a");
+        if (debugf) {
+            fprintf(debugf, "cmd_setcounter: result=%d\n", value);
+            fclose(debugf);
+        }
+        
         gen->setCounter(counter_str->chars, value);
     }
 }
@@ -5157,17 +5332,28 @@ static void cmd_addtocounter(LatexProcessor* proc, Item elem) {
         }
         String* counter_str = stringbuf_to_string(sb1);
         
-        // Second child: value to add
+        // Second child: value expression to add (may contain \real{}, \value{}, etc.)
         ItemReader second = elem_reader.childAt(1);
-        StringBuf* sb2 = stringbuf_new(pool);
-        if (second.isElement()) {
-            second.asElement().textContent(sb2);
-        } else if (second.isString()) {
-            stringbuf_append_str(sb2, second.cstring());
-        }
-        String* value_str = stringbuf_to_string(sb2);
         
-        int value = atoi(value_str->chars);
+        // Recursively evaluate the expression, resolving any embedded commands
+        std::string expr_str = evaluate_numeric_expression(proc, second.item());
+        
+        // debug: write to file to see what's happening
+        FILE* debugf = fopen("/tmp/latex_debug.txt", "a");
+        if (debugf) {
+            fprintf(debugf, "cmd_addtocounter: counter='%s', expr_str='%s'\n", counter_str->chars, expr_str.c_str());
+            fclose(debugf);
+        }
+        
+        // evaluate numeric expression (supports +, -, *, /, parentheses)
+        int value = latex_eval_num_expr(expr_str.c_str());
+        
+        debugf = fopen("/tmp/latex_debug.txt", "a");
+        if (debugf) {
+            fprintf(debugf, "cmd_addtocounter: result=%d\n", value);
+            fclose(debugf);
+        }
+        
         gen->addToCounter(counter_str->chars, value);
     }
 }
@@ -5215,6 +5401,15 @@ static void cmd_refstepcounter(LatexProcessor* proc, Item elem) {
     attrs << "id=\"" << anchor.str() << "\"";
     gen->writer()->openTagRaw("a", attrs.str().c_str());
     gen->writer()->closeTag("a");
+}
+
+static void cmd_the(LatexProcessor* proc, Item elem) {
+    // \the command - expands following counter/length reference
+    // In LaTeX, \the\value{c} expands to the value of counter c
+    // The tree-sitter parser treats "\the\value{c}" as text "\the\u000balue" + {c}
+    // So we need to process children to find the actual counter reference
+    proc->ensureParagraph();
+    proc->processChildren(elem);
 }
 
 static void cmd_value(LatexProcessor* proc, Item elem) {
@@ -5632,6 +5827,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["stepcounter"] = cmd_stepcounter;
     command_table_["refstepcounter"] = cmd_refstepcounter;
     command_table_["value"] = cmd_value;
+    command_table_["the"] = cmd_the;
     // Counter display commands (now implemented)
     command_table_["arabic"] = cmd_arabic;
     command_table_["roman"] = cmd_roman;
@@ -5896,6 +6092,8 @@ void LatexProcessor::processNode(Item node) {
         ElementReader elem_reader(node);
         const char* tag = elem_reader.tagName();
         
+        log_debug("processNode element tag='%s'", tag);
+        
         // Special handling for root element
         if (strcmp(tag, "latex_document") == 0) {
             // Just process children
@@ -5934,6 +6132,16 @@ void LatexProcessor::processNode(Item node) {
         if (strcmp(tag, "nbsp") == 0) {
             ensureParagraph();
             gen_->writer()->writeRawHtml("&nbsp;");
+            return;
+        }
+        
+        // Special handling for space (horizontal whitespace or single newline)
+        // In LaTeX, single newlines are treated as spaces
+        // The space element contains the actual whitespace text as children
+        if (strcmp(tag, "space") == 0) {
+            // Get the actual space text from children and normalize to single space
+            // In LaTeX, any amount of horizontal whitespace or single newline = one space
+            processText(" ");
             return;
         }
         
@@ -6473,6 +6681,9 @@ void LatexProcessor::processSpacingCommand(Item elem) {
 void LatexProcessor::processText(const char* text) {
     if (!text) return;
     
+    // Debug: log text content to see what's being processed
+    log_debug("processText: '%s' (len=%zu, in_paragraph=%d)", text, strlen(text), in_paragraph_ ? 1 : 0);
+    
     // Normalize whitespace: collapse multiple spaces/newlines/tabs to single space
     // This matches LaTeX behavior where whitespace is collapsed
     std::string normalized;
@@ -6917,6 +7128,13 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     // Look up command in table
     auto it = command_table_.find(cmd_name);
     if (it != command_table_.end()) {
+        // debug: log command dispatch
+        FILE* debugf = fopen("/tmp/latex_debug.txt", "a");
+        if (debugf) {
+            fprintf(debugf, "processCommand: dispatching '%s'\n", cmd_name);
+            fclose(debugf);
+        }
+        
         // Call command handler
         it->second(this, elem);
         
@@ -6937,6 +7155,13 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
 // =============================================================================
 
 Item format_latex_html_v2(Input* input, bool text_mode) {
+    // debug: confirm this function is being called
+    FILE* debugf = fopen("/tmp/latex_debug.txt", "a");
+    if (debugf) {
+        fprintf(debugf, "format_latex_html_v2: ENTRY text_mode=%d\n", text_mode ? 1 : 0);
+        fclose(debugf);
+    }
+    
     if (!input || !input->root.item) {
         log_error("format_latex_html_v2: invalid input");
         Item result;
