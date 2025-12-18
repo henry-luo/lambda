@@ -93,6 +93,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         else if (slen > 4 && strcmp(file_path + slen - 4, ".png") == 0) {
             surface->format = IMAGE_FORMAT_PNG;
         }
+        else if (slen > 4 && strcmp(file_path + slen - 4, ".gif") == 0) {
+            surface->format = IMAGE_FORMAT_GIF;
+        }
     }
     surface->url = abs_url;
 
@@ -191,11 +194,11 @@ static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y
     uint32_t* p12 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x1 * 4);
     uint32_t* p22 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x2 * 4);
 
-    // extract RGBA components for each pixel
-    uint8_t r11 = (*p11 >> 24) & 0xFF, g11 = (*p11 >> 16) & 0xFF, b11 = (*p11 >> 8) & 0xFF, a11 = *p11 & 0xFF;
-    uint8_t r21 = (*p21 >> 24) & 0xFF, g21 = (*p21 >> 16) & 0xFF, b21 = (*p21 >> 8) & 0xFF, a21 = *p21 & 0xFF;
-    uint8_t r12 = (*p12 >> 24) & 0xFF, g12 = (*p12 >> 16) & 0xFF, b12 = (*p12 >> 8) & 0xFF, a12 = *p12 & 0xFF;
-    uint8_t r22 = (*p22 >> 24) & 0xFF, g22 = (*p22 >> 16) & 0xFF, b22 = (*p22 >> 8) & 0xFF, a22 = *p22 & 0xFF;
+    // extract RGBA components for each pixel (little-endian: RGBA bytes -> ABGR uint32)
+    uint8_t r11 = *p11 & 0xFF, g11 = (*p11 >> 8) & 0xFF, b11 = (*p11 >> 16) & 0xFF, a11 = (*p11 >> 24) & 0xFF;
+    uint8_t r21 = *p21 & 0xFF, g21 = (*p21 >> 8) & 0xFF, b21 = (*p21 >> 16) & 0xFF, a21 = (*p21 >> 24) & 0xFF;
+    uint8_t r12 = *p12 & 0xFF, g12 = (*p12 >> 8) & 0xFF, b12 = (*p12 >> 16) & 0xFF, a12 = (*p12 >> 24) & 0xFF;
+    uint8_t r22 = *p22 & 0xFF, g22 = (*p22 >> 8) & 0xFF, b22 = (*p22 >> 16) & 0xFF, a22 = (*p22 >> 24) & 0xFF;
 
     // bilinear interpolation for each component
     uint8_t r = (uint8_t)(r11 * (1 - fx) * (1 - fy) + r21 * fx * (1 - fy) + r12 * (1 - fx) * fy + r22 * fx * fy);
@@ -203,13 +206,21 @@ static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y
     uint8_t b = (uint8_t)(b11 * (1 - fx) * (1 - fy) + b21 * fx * (1 - fy) + b12 * (1 - fx) * fy + b22 * fx * fy);
     uint8_t a = (uint8_t)(a11 * (1 - fx) * (1 - fy) + a21 * fx * (1 - fy) + a12 * (1 - fx) * fy + a22 * fx * fy);
 
-    return (r << 24) | (g << 16) | (b << 8) | a;
+    return r | (g << 8) | (b << 16) | (a << 24);
 }
 
 // Enhanced blit function with support for different scaling modes
 void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode) {
     Rect rect;
     if (!src || !dst || !dst_rect || !clip) return;
+    if (!src->pixels) {
+        log_error("blit_surface_scaled: src->pixels is NULL!");
+        return;
+    }
+    if (!dst->pixels) {
+        log_error("blit_surface_scaled: dst->pixels is NULL!");
+        return;
+    }
     if (!src_rect) { // use the entire source image
         rect = (Rect){0, 0, (float)src->width, (float)src->height};
         src_rect = &rect;
@@ -232,10 +243,10 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
 
             uint8_t* dst_pixel = (uint8_t*)row_pixels + (j * 4);
 
+            uint32_t src_color;
             if (scale_mode == SCALE_MODE_LINEAR) {
                 // Bilinear interpolation
-                uint32_t interpolated_color = bilinear_interpolate(src, src_x, src_y);
-                *((uint32_t*)dst_pixel) = interpolated_color;
+                src_color = bilinear_interpolate(src, src_x, src_y);
             }
             else { // Nearest neighbor scaling (default)
                 int int_src_x = (int)(src_x + 0.5f);  // round to nearest
@@ -247,8 +258,35 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
                 }
 
                 uint8_t* src_pixel = (uint8_t*)src->pixels + (int_src_y * src->pitch) + (int_src_x * 4);
-                *((uint32_t*)dst_pixel) = *((uint32_t*)src_pixel);
+                src_color = *((uint32_t*)src_pixel);
             }
+
+            // Alpha blend: src over dst
+            uint8_t src_r = src_color & 0xFF;
+            uint8_t src_g = (src_color >> 8) & 0xFF;
+            uint8_t src_b = (src_color >> 16) & 0xFF;
+            uint8_t src_a = (src_color >> 24) & 0xFF;
+
+            if (src_a == 255) {
+                // Fully opaque - direct copy
+                *((uint32_t*)dst_pixel) = src_color;
+            } else if (src_a > 0) {
+                // Partially transparent - blend with background
+                uint8_t dst_r = dst_pixel[0];
+                uint8_t dst_g = dst_pixel[1];
+                uint8_t dst_b = dst_pixel[2];
+                uint8_t dst_a = dst_pixel[3];
+
+                // Alpha compositing: src over dst
+                float alpha = src_a / 255.0f;
+                float inv_alpha = 1.0f - alpha;
+
+                dst_pixel[0] = (uint8_t)(src_r * alpha + dst_r * inv_alpha);
+                dst_pixel[1] = (uint8_t)(src_g * alpha + dst_g * inv_alpha);
+                dst_pixel[2] = (uint8_t)(src_b * alpha + dst_b * inv_alpha);
+                dst_pixel[3] = (uint8_t)(src_a + dst_a * inv_alpha);
+            }
+            // if src_a == 0, skip (fully transparent)
         }
     }
 }

@@ -251,6 +251,11 @@
             "name": "turbojpeg",
             "lib": "/opt/homebrew/lib/libturbojpeg.a",
             "link": "static"
+        },
+        {
+            "name": "gif",
+            "lib": "/opt/homebrew/lib/libgif.a",
+            "link": "static"
         }
     ],
     "dev_libraries": [
