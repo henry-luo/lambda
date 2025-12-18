@@ -2805,15 +2805,21 @@ static size_t normalize_whitespace_to_buffer(const char* text, size_t length, ch
     return out_pos;
 }
 
-// Measure cell's intrinsic content width (Preferred Content Width - PCW)
-// This performs accurate measurement using font metrics for CSS 2.1 compliance
-// REFACTORED: Now uses unified intrinsic_sizing.hpp for text measurement
-static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cell) {
-    if (!cell || !cell->is_element()) return 20.0f; // CSS minimum usable width
+// Result structure for consolidated width measurement
+struct CellWidths {
+    float min_width;  // Minimum content width (MCW) - narrowest without overflow
+    float max_width;  // Maximum content width (PCW) - preferred content width
+};
 
+// Measure cell's minimum and maximum content widths in single pass
+// This performs accurate measurement using font metrics for CSS 2.1 compliance
+// CONSOLIDATED: Combines previous measure_cell_intrinsic_width() and measure_cell_minimum_width()
+static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell) {
+    CellWidths result = {20.0f, 20.0f}; // CSS minimum usable width
+    if (!cell || !cell->is_element()) return result;
 
     DomElement* cell_elem = cell->as_element();
-    if (!cell_elem->first_child) return 20.0f; // Empty cell minimum
+    if (!cell_elem->first_child) return result; // Empty cell minimum
 
     // Save current layout context
     BlockContext saved_block = lycon->block;
@@ -2845,6 +2851,7 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
     lycon->line.is_line_start = true;
 
     float max_width = 0.0f;
+    float min_width = 0.0f;
 
     // Check if we should collapse whitespace based on CSS white-space property
     bool collapse_ws = should_collapse_whitespace(cell);
@@ -2869,19 +2876,21 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                     // Normalize whitespace to buffer
                     size_t normalized_len = normalize_whitespace_to_buffer(
                         (const char*)text, text_len, normalized_buffer, sizeof(normalized_buffer));
-                    log_debug("PCW measuring text: '%s' -> normalized: '%s'", text, normalized_buffer);
+                    log_debug("Cell width measuring text: '%s' -> normalized: '%s'", text, normalized_buffer);
                     if (normalized_len == 0) continue; // Skip if normalized to nothing
                     measure_text = normalized_buffer;
                     measure_len = normalized_len;
                 }
 
-                // Use unified intrinsic sizing API
+                // Use unified intrinsic sizing API - measures both widths in one call
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
                     lycon, measure_text, measure_len);
 
-                float text_width = (float)widths.max_content;  // PCW uses max-content
-                log_debug("PCW text measured width: %.2f (unified API)", text_width);
-                if (text_width > max_width) max_width = text_width;
+                float text_max = (float)widths.max_content;  // PCW (max-content)
+                float text_min = (float)widths.min_content;  // MCW (min-content)
+                log_debug("Cell widths: text max=%.2f, min=%.2f (unified API)", text_max, text_min);
+                if (text_max > max_width) max_width = text_max;
+                if (text_min > min_width) min_width = text_min;
             }
         }
         else if (child->is_element()) {
@@ -2898,7 +2907,7 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                         if (val->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum float_val = val->data.keyword;
                             if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
-                                log_debug("PCW: skipping floated element %s (float=%d)",
+                                log_debug("Cell widths: skipping floated element %s (float=%d)",
                                          child->node_name(), float_val);
                                 continue; // Skip floats - they don't contribute to content width
                             }
@@ -2907,19 +2916,21 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                 }
             }
 
-            float child_width = 0;
+            float child_max = 0;
+            float child_min = 0;
 
             if (child_elem->specified_style) {
                 CssDeclaration* width_decl = style_tree_get_declaration(
                     child_elem->specified_style, CSS_PROPERTY_WIDTH);
                 if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                     // Resolve length value (handles em, rem, px, etc.)
-                    child_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+                    float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+                    child_max = child_min = explicit_width; // Both use explicit width
                 }
             }
 
             // If no explicit CSS width, check for HTML width attribute (for tables)
-            if (child_width == 0) {
+            if (child_max == 0 && child_min == 0) {
                 // Check HTML width attribute directly (don't call dom_node_resolve_style
                 // during measurement - it's not safe with the current context)
                 DomElement* child_elmt = child->as_element();
@@ -2932,78 +2943,87 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
                             StrView width_view = strview_init(width_attr, value_len);
                             float width = strview_to_int(&width_view);
                             if (width > 0) {
-                                child_width = width * lycon->ui_context->pixel_ratio;
-                                log_debug("PCW: using HTML width attribute: %.1fpx for %s",
-                                    child_width, child->node_name());
+                                float attr_width = width * lycon->ui_context->pixel_ratio;
+                                child_max = child_min = attr_width; // Both use attribute width
+                                log_debug("Cell widths: using HTML width attribute: %.1fpx for %s",
+                                    attr_width, child->node_name());
                             }
                         }
                     }
                 }
             }
 
-            // If still no explicit width, check if it's a block or inline element
-            if (child_width == 0) {
+            // If still no explicit width, measure content
+            if (child_max == 0 && child_min == 0) {
                 DisplayValue child_display = resolve_display_value(child);
 
                 if (child_display.outer == CSS_VALUE_BLOCK) {
-                    // Block elements: recursively measure their content width
-                    // Don't layout them (they'd fill 10000px container)
-                    // Instead, measure text children directly
-                    float block_content_width = 0.0f;
+                    // Block elements: measure their content width directly
+                    float block_max = 0.0f;
+                    float block_min = 0.0f;
 
                     if (child_elem->first_child) {
                         for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
-                                if (grandchild->is_text()) {
-                                    const unsigned char* text = grandchild->text_data();
-                                    if (text && *text) {
-                                        size_t text_len = strlen((const char*)text);
-                                        const char* measure_text = (const char*)text;
-                                        size_t measure_len = text_len;
-                                        static char normalized_buffer[4096];
+                            if (grandchild->is_text()) {
+                                const unsigned char* text = grandchild->text_data();
+                                if (text && *text) {
+                                    size_t text_len = strlen((const char*)text);
+                                    const char* measure_text = (const char*)text;
+                                    size_t measure_len = text_len;
+                                    static char normalized_buffer2[4096];
 
-                                        if (collapse_ws) {
-                                            if (is_all_whitespace((const char*)text, text_len)) continue;
-                                            size_t normalized_len = normalize_whitespace_to_buffer(
-                                                (const char*)text, text_len, normalized_buffer, sizeof(normalized_buffer));
-                                            if (normalized_len == 0) continue;
-                                            measure_text = normalized_buffer;
-                                            measure_len = normalized_len;
-                                        }                                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+                                    if (collapse_ws) {
+                                        if (is_all_whitespace((const char*)text, text_len)) continue;
+                                        size_t normalized_len = normalize_whitespace_to_buffer(
+                                            (const char*)text, text_len, normalized_buffer2, sizeof(normalized_buffer2));
+                                        if (normalized_len == 0) continue;
+                                        measure_text = normalized_buffer2;
+                                        measure_len = normalized_len;
+                                    }
+
+                                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
                                         lycon, measure_text, measure_len);
-                                    float text_width = (float)widths.max_content;
-                                    if (text_width > block_content_width) block_content_width = text_width;
+                                    float gchild_max = (float)widths.max_content;
+                                    float gchild_min = (float)widths.min_content;
+                                    if (gchild_max > block_max) block_max = gchild_max;
+                                    if (gchild_min > block_min) block_min = gchild_min;
                                 }
                             }
                         }
                     }
 
-                    child_width = block_content_width;
-                    log_debug("PCW: block %s content width=%.1f", child->node_name(), child_width);
+                    child_max = block_max;
+                    child_min = block_min;
+                    log_debug("Cell widths: block %s max=%.1f, min=%.1f",
+                              child->node_name(), child_max, child_min);
                 } else {
-                    // Inline element: layout it to measure width
+                    // Inline elements: layout in measurement context and track widths
+                    // For inline, both min and max come from measured layout width
                     float child_start_x = lycon->line.advance_x;
                     float saved_max_width = lycon->block.max_width;
                     lycon->block.max_width = 0; // Reset to track this child's width
 
-                    log_debug("PCW: before layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
+                    log_debug("Cell widths: before layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
                              child->node_name(), child_start_x, lycon->block.max_width);
 
                     // Temporarily layout the child element in measurement mode
                     layout_flow_node(lycon, child);
 
-                    log_debug("PCW: after layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
+                    log_debug("Cell widths: after layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
                              child->node_name(), lycon->line.advance_x, lycon->block.max_width);
 
                     // For inline elements with block children, line_break() resets advance_x,
                     // so we use block.max_width which tracks maximum line width reached
-                    child_width = max(lycon->block.max_width, lycon->line.advance_x - child_start_x);
+                    float measured_width = max(lycon->block.max_width, lycon->line.advance_x - child_start_x);
+                    child_max = child_min = measured_width; // Both use measured width
 
                     lycon->block.max_width = saved_max_width; // Restore
-                    log_debug("PCW: child %s measured width=%.1f", child->node_name(), child_width);
+                    log_debug("Cell widths: child %s measured width=%.1f", child->node_name(), measured_width);
                 }
             }
 
-            if (child_width > max_width) max_width = child_width;
+            if (child_max > max_width) max_width = child_max;
+            if (child_min > min_width) min_width = child_min;
         }
     }
 
@@ -3014,168 +3034,7 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
     lycon->is_measuring = saved_measuring;
     lycon->font = saved_font; // Restore original font context
 
-    // Add padding
-    float padding_horizontal = 0.0f;
-    if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
-        padding_horizontal = (float)(cell->bound->padding.left + cell->bound->padding.right);
-    }
-
-    // Add border - read actual border widths from style
-    float border_horizontal = 0.0f;
-    if (cell->bound && cell->bound->border) {
-        border_horizontal = cell->bound->border->width.left + cell->bound->border->width.right;
-    }
-
-    max_width += border_horizontal;
-    max_width += padding_horizontal;
-
-    // CSS 2.1: Ensure reasonable minimum width for empty cells
-    if (max_width < 16.0f) max_width = 16.0f;
-
-    log_debug("PCW: %.2fpx (content + padding=%.1f + border=%.1f)",
-        max_width, padding_horizontal, border_horizontal);
-
-    // Use ceiling to ensure we always have enough space for content
-    // roundf can round down (e.g., 71.30 → 71) leaving insufficient content area
-    return ceilf(max_width);
-}
-
-// Measure cell's minimum content width (MCW) - narrowest width without overflow
-// This calculates the width needed for the longest word or unbreakable content
-// REFACTORED: Now uses unified intrinsic_sizing.hpp for text measurement
-static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cell) {
-    if (!cell || !cell->is_element()) return 16.0f; // Minimum default
-
-    DomElement* cell_elem = cell->as_element();
-    if (!cell_elem->first_child) return 16.0f; // Empty cell
-
-    // Save current layout context
-    BlockContext saved_block = lycon->block;
-    Linebox saved_line = lycon->line;
-    DomNode* saved_elmt = lycon->elmt;
-    bool saved_measuring = lycon->is_measuring;
-    FontBox saved_font = lycon->font; // Save font context
-
-    // Set up temporary measurement context
-    lycon->is_measuring = true;
-    lycon->elmt = cell;
-
-    // Apply the cell's CSS font properties for accurate measurement
-    if (cell->font) {
-        setup_font(lycon->ui_context, &lycon->font, cell->font);
-    }
-
-    // For minimum width, we want the width of the longest word
-    float min_width = 0.0f;
-
-    // Check if we should collapse whitespace based on CSS white-space property
-    bool collapse_ws = should_collapse_whitespace(cell);
-
-    // Measure each child's minimum width
-    for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
-        if (child->is_text()) {
-            // Use unified text measurement from intrinsic_sizing.hpp
-            const unsigned char* text = child->text_data();
-            if (text && *text) {
-                size_t text_len = strlen((const char*)text);
-
-                const char* measure_text = (const char*)text;
-                size_t measure_len = text_len;
-                static char normalized_buffer[4096];
-
-                if (collapse_ws) {
-                    if (is_all_whitespace((const char*)text, text_len)) continue;
-                    size_t normalized_len = normalize_whitespace_to_buffer(
-                        (const char*)text, text_len, normalized_buffer, sizeof(normalized_buffer));
-                    log_debug("MCW measuring text: '%s' -> normalized: '%s'", text, normalized_buffer);
-                    if (normalized_len == 0) continue; // Skip whitespace-only text nodes
-                    measure_text = normalized_buffer;
-                    measure_len = normalized_len;
-                }
-
-                // Use unified intrinsic sizing API - min_content gives longest word
-                TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len);
-
-                float longest_word = (float)widths.min_content;
-                if (longest_word > min_width) min_width = longest_word;
-            }
-        }
-        else if (child->is_element()) {
-            // For nested elements, check for explicit width first
-            DomElement* child_elem = child->as_element();
-
-            // CSS 2.1: Floats are taken out of normal flow and don't contribute to intrinsic width
-            if (child_elem->specified_style && child_elem->specified_style->tree) {
-                AvlNode* float_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-                if (float_node) {
-                    StyleNode* style_node = (StyleNode*)float_node->declaration;
-                    if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                        CssValue* val = style_node->winning_decl->value;
-                        if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-                            CssEnum float_val = val->data.keyword;
-                            if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
-                                log_debug("MCW: skipping floated element %s (float=%d)",
-                                         child->node_name(), float_val);
-                                continue; // Skip floats - they don't contribute to content width
-                            }
-                        }
-                    }
-                }
-            }
-
-            float child_min = 0.0f;
-
-            // Check for CSS explicit width
-            if (child_elem->specified_style) {
-                CssDeclaration* width_decl = style_tree_get_declaration(
-                    child_elem->specified_style, CSS_PROPERTY_WIDTH);
-                if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                    child_min = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-                    log_debug("MCW: using CSS width: %.1fpx for %s", child_min, child->node_name());
-                }
-            }
-
-            // Check for HTML width attribute (for tables like <table width="435">)
-            if (child_min == 0) {
-                // Check HTML width attribute directly (don't call dom_node_resolve_style
-                // during measurement - it's not safe with the current context)
-                DomElement* child_elmt = child->as_element();
-                if (child_elmt) {
-                    const char* width_attr = child_elmt->get_attribute("width");
-                    if (width_attr) {
-                        size_t value_len = strlen(width_attr);
-                        if (value_len > 0 && width_attr[value_len - 1] != '%') {
-                            // Parse pixel value (skip percentages - they need parent context)
-                            StrView width_view = strview_init(width_attr, value_len);
-                            float width = strview_to_int(&width_view);
-                            if (width > 0) {
-                                child_min = width * lycon->ui_context->pixel_ratio;
-                                log_debug("MCW: using HTML width attribute: %.1fpx for %s",
-                                    child_min, child->node_name());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fall back to conservative minimum
-            if (child_min == 0) {
-                child_min = 20.0f;
-            }
-
-            if (child_min > min_width) min_width = child_min;
-        }
-    }
-
-    // Restore context
-    lycon->block = saved_block;
-    lycon->line = saved_line;
-    lycon->elmt = saved_elmt;
-    lycon->is_measuring = saved_measuring;
-    lycon->font = saved_font;
-
-    // Add padding and border with precise calculation
+    // Add padding and border to both widths
     float padding_horizontal = 0.0f;
     if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
         padding_horizontal = (float)(cell->bound->padding.left + cell->bound->padding.right);
@@ -3186,17 +3045,25 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
         border_horizontal = cell->bound->border->width.left + cell->bound->border->width.right;
     }
 
+    max_width += border_horizontal + padding_horizontal;
     min_width += border_horizontal + padding_horizontal;
 
-    // CSS 2.1: Apply minimum cell width constraint for usability (reduced for accuracy)
-    float min_cell_constraint = 16.0f + padding_horizontal + border_horizontal;
-    if (min_width < min_cell_constraint) {
-        min_width = min_cell_constraint;
-    }
+    // CSS 2.1: Ensure reasonable minimum widths for empty cells
+    if (max_width < 16.0f) max_width = 16.0f;
+    if (min_width < 16.0f) min_width = 16.0f;
 
-    // Use precise rounding for pixel-perfect layout
-    return ceilf(min_width);  // Always round up for minimum width to prevent overflow
+    log_debug("Cell widths: max=%.2f, min=%.2f (content + padding=%.1f + border=%.1f)",
+        max_width, min_width, padding_horizontal, border_horizontal);
+
+    // Use ceiling to ensure we always have enough space for content
+    result.max_width = ceilf(max_width);
+    result.min_width = ceilf(min_width);
+    return result;
 }
+
+// DEPRECATED: Old separate functions removed - now using measure_cell_widths()
+// measure_cell_intrinsic_width() - merged into measure_cell_widths().max_width
+// measure_cell_minimum_width() - merged into measure_cell_widths().min_width
 
 // Single-pass table structure analysis - Phase 3 optimization
 // Counts columns/rows and assigns column indices in one pass
@@ -3426,8 +3293,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             if (cell_width == 0.0f) {
                 // No explicit CSS width - measure intrinsic content widths
-                pref_width = measure_cell_intrinsic_width(lycon, tcell);
-                min_width = measure_cell_minimum_width(lycon, tcell);
+                CellWidths widths = measure_cell_widths(lycon, tcell);
+                pref_width = widths.max_width;  // PCW (preferred/max-content)
+                min_width = widths.min_width;   // MCW (minimum/min-content)
                 cell_width = pref_width; // Use preferred for backward compatibility
             } else {
                 // Has explicit CSS width - use it for both min and preferred
