@@ -1101,11 +1101,16 @@ diff lambda_output.html latexjs_output.html
 - **Linebreak in mbox (`\\[dim]`)**: Fixed whitespace handling in restricted horizontal mode
 
 **Extended Suite - Major Failing Categories** (42 tests):
-1. **Counters** (4 tests): ⚠️ Infrastructure complete, but tests require expression evaluation
-   - `\addtocounter{c}{3 * -(2+1)}` - needs expression parser
-   - `\setcounter{c}{3*\real{1.6} * \real{1.7} + --2}` - needs LaTeX expression evaluation
-   - Current implementation uses simple `atoi()` which only reads first integer
-   - LaTeX.js has full expression evaluator - complex to implement
+1. **Counters** (4 tests): ✅ Expression evaluation implemented (Dec 18, 2025)
+   - Implemented recursive descent parser for arithmetic expressions: `+`, `-`, `*`, `/`, `()`, unary `--`
+   - Supports `\real{float}` command for float values in expressions
+   - Supports `\value{counter}` command for counter references
+   - **Critical LaTeX.js Behavior**: Truncates after EACH `*` or `/` operation, not just final result
+     - Example: `3*\real{1.6} * \real{1.7} + --2`
+     - Evaluation: `3*1.6=4.8→4`, `4*1.7=6.8→6`, `6+2=8` ✓
+     - This differs from standard math: `3*1.6*1.7+2 = 10.16→10` ✗
+   - Files: `lambda/format/format_latex_expr_eval.cpp`, integrated in `format_latex_html_v2.cpp`
+   - Status: Counter arithmetic working, 1 test has unrelated paragraph formatting issue
 2. **Boxes** (6 tests): ⚠️ 2 parbox tests promoted to baseline, remaining need fixes/features
    - boxes_tex_2, 3 promoted to baseline (basic parbox positioning) ✅
    - boxes_tex_4: Has `\noindent` after list item causing paragraph nesting issues
