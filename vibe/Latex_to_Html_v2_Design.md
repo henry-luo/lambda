@@ -1,8 +1,15 @@
 # LaTeX to HTML V2 - Design Document
 
-**Date**: December 17, 2025  
-**Status**: Production Ready (Phases 1-8 Complete - **100% COVERAGE ACHIEVED**)  
+**Date**: December 18, 2025  
+**Status**: In Progress (**65/107 tests passing - 60.7%**)  
 **Objective**: Translate LaTeX.js formatting logic to C++ for Lambda runtime
+
+**Recent Progress** (Dec 18):
+- Fixed `\char` command numeric argument parsing with lookahead
+- Implemented parser rule for `controlspace_command` (backslash-whitespace sequences)
+- Added parser-level paragraph break detection after `\<newline>`
+- Whitespace tests: 13/21 passing (62%)
+- Main remaining issues: macro argument space consumption, mbox whitespace handling
 
 ---
 

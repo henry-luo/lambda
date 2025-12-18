@@ -1954,15 +1954,15 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Three cases for \empty:
     // 1. \empty (no braces) - produces nothing (null command)
-    // 2. \empty{} (empty braces) - produces ZWSP for space preservation
-    // 3. \begin{empty}...\end{empty} (environment) - processes content + ZWSP
+    // 2. \empty{} (empty braces) - ZWS is output by general logic in processChildren
+    // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at end
     
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
     
     // Check what kind of children we have
-    bool has_curly_group = false;
-    bool has_content = false;
+    bool has_curly_group_only = false;
+    bool has_other_content = false;
     
     auto iter = reader.children();
     ItemReader child;
@@ -1971,29 +1971,27 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             if (tag && strcmp(tag, "curly_group") == 0) {
-                has_curly_group = true;
+                has_curly_group_only = true;
             } else {
                 // Has other content (e.g., paragraph from environment)
-                has_content = true;
+                has_other_content = true;
+                has_curly_group_only = false;
             }
         } else if (child.isString()) {
-            has_content = true;
+            has_other_content = true;
+            has_curly_group_only = false;
         }
     }
     
-    // Case 3: Environment with content - process children + ZWSP
-    if (has_content) {
+    // Case 3: Environment with content - process children + ZWS at end
+    // The ZWS at the end prevents the following space from being consumed
+    if (has_other_content) {
         proc->processChildren(elem);
         gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
         return;
     }
     
-    // Case 2: Empty braces - output ZWSP only
-    if (has_curly_group) {
-        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
-        return;
-    }
-    
+    // Case 2: Empty braces - ZWS will be output by processChildren, so do nothing here
     // Case 1: No braces - output nothing (null command)
 }
 
@@ -3266,6 +3264,27 @@ static void cmd_bigbreak(LatexProcessor* proc, Item elem) {
     gen->closeElement();
 }
 
+static void cmd_marginpar(LatexProcessor* proc, Item elem) {
+    // \marginpar{text} - margin note
+    // In HTML text mode, this is a no-op (consume argument but don't output)
+    (void)proc;
+    (void)elem;
+}
+
+static void cmd_index(LatexProcessor* proc, Item elem) {
+    // \index{entry} - index entry
+    // In HTML text mode, this is a no-op (consume argument but don't output)
+    (void)proc;
+    (void)elem;
+}
+
+static void cmd_glossary(LatexProcessor* proc, Item elem) {
+    // \glossary{entry} - glossary entry
+    // In HTML text mode, this is a no-op (consume argument but don't output)
+    (void)proc;
+    (void)elem;
+}
+
 static void cmd_smallskip(LatexProcessor* proc, Item elem) {
     // \smallskip - small vertical space
     // In LaTeX, skip commands have different behavior based on mode:
@@ -3337,18 +3356,16 @@ static void cmd_nolinebreak(LatexProcessor* proc, Item elem) {
 
 static void cmd_nopagebreak(LatexProcessor* proc, Item elem) {
     // \nopagebreak[priority] - discourage page break
-    // In HTML, use CSS page-break hint
-    HtmlGenerator* gen = proc->generator();
-    gen->spanWithStyle("page-break-inside:avoid");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // Complete no-op: no page concept in HTML text mode
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_pagebreak(LatexProcessor* proc, Item elem) {
     // \pagebreak[priority] - encourage page break
-    HtmlGenerator* gen = proc->generator();
-    gen->divWithClassAndStyle(nullptr, "page-break-after:always");
-    gen->closeElement();
+    // Complete no-op: no page concept in HTML text mode
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_clearpage(LatexProcessor* proc, Item elem) {
@@ -3368,8 +3385,8 @@ static void cmd_cleardoublepage(LatexProcessor* proc, Item elem) {
 static void cmd_enlargethispage(LatexProcessor* proc, Item elem) {
     // \enlargethispage{length} - enlarge current page
     // In HTML, this is a no-op (no page concept)
-    // Just process children
-    proc->processChildren(elem);
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
@@ -5256,6 +5273,9 @@ void LatexProcessor::initCommandTable() {
     command_table_["nopagebreak"] = cmd_nopagebreak;
     command_table_["pagebreak"] = cmd_pagebreak;
     command_table_["clearpage"] = cmd_clearpage;
+    command_table_["marginpar"] = cmd_marginpar;
+    command_table_["index"] = cmd_index;
+    command_table_["glossary"] = cmd_glossary;
     command_table_["cleardoublepage"] = cmd_cleardoublepage;
     command_table_["enlargethispage"] = cmd_enlargethispage;
     command_table_["negthinspace"] = cmd_negthinspace;
@@ -6045,6 +6065,90 @@ void LatexProcessor::processChildren(Item elem) {
         
         // Normal processing for other nodes
         processNode(child_reader.item());
+        
+        // LaTeX behavior: commands consume following space, but with exceptions:
+        // - \macro{} with empty braces FOLLOWING: outputs ZWS, does NOT consume space
+        // - \macro (no args): consumes space
+        // - \macro{arg} (with args): consumes space
+        // - \begin{empty}...\end{empty}: outputs ZWS, does NOT consume space
+        // 
+        // Key distinction: \empty{} has {} as a SIBLING (following element)
+        //                  \gobbleO{} has {} as a CHILD (argument to command)
+        if (child_reader.isElement()) {
+            // Check if this is an "empty" command or "curly_group" - they output ZWS and preserve spaces
+            ElementReader cmd_elem(child_reader.item());
+            const char* cmd_name = cmd_elem.tagName();
+            
+            bool is_empty_cmd = (cmd_name && strcmp(cmd_name, "empty") == 0);
+            bool is_curly_group = (cmd_name && strcmp(cmd_name, "curly_group") == 0);
+            bool skip_space_consumption = is_empty_cmd || is_curly_group;
+            
+            // Check if NEXT sibling is an empty curly_group (e.g., "\empty {}")
+            bool next_is_empty_curly = false;
+            if (i + 1 < count) {
+                ItemReader next_reader = elem_reader.childAt(i + 1);
+                if (next_reader.isElement()) {
+                    ElementReader next_elem(next_reader.item());
+                    const char* next_tag = next_elem.tagName();
+                    if (next_tag && strcmp(next_tag, "curly_group") == 0) {
+                        // Check if the curly_group is empty (no children or only whitespace)
+                        auto group_iter = next_elem.children();
+                        ItemReader group_child;
+                        bool has_content = false;
+                        while (group_iter.next(&group_child)) {
+                            if (group_child.isElement()) {
+                                has_content = true;
+                                break;
+                            } else if (group_child.isString()) {
+                                const char* str = group_child.cstring();
+                                if (str && str[0] != '\0') {
+                                    // Check if it's not just whitespace
+                                    bool has_non_ws = false;
+                                    for (const char* p = str; *p; p++) {
+                                        if (!isspace(*p)) {
+                                            has_non_ws = true;
+                                            break;
+                                        }
+                                    }
+                                    if (has_non_ws) {
+                                        has_content = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!has_content) {
+                            next_is_empty_curly = true;
+                        }
+                    }
+                }
+            }
+            
+            if (next_is_empty_curly) {
+                // Next sibling is empty {}: output ZWS, skip the empty braces, don't consume space
+                ensureParagraph();
+                gen_->text("\u200B");
+                // Skip the next child (the empty curly_group)
+                i++;
+            } else if (!skip_space_consumption && i + 1 < count) {
+                // Standard behavior: consume following space (but NOT for empty command or curly_group)
+                ItemReader next_reader = elem_reader.childAt(i + 1);
+                if (next_reader.isString()) {
+                    const char* next_text = next_reader.cstring();
+                    if (next_text && (next_text[0] == ' ' || next_text[0] == '\t')) {
+                        // Next sibling starts with whitespace - consume it by processing
+                        // the text starting from position 1 instead of 0
+                        if (next_text[1] != '\0') {
+                            // Process remaining text after first space
+                            processText(next_text + 1);
+                        }
+                        // Skip the next child since we processed it here
+                        i++;
+                        continue;
+                    }
+                }
+            }
+        }
     }
 }
 
