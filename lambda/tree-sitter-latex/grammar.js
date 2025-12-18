@@ -35,6 +35,8 @@ module.exports = grammar({
     [$.verb_command, $.command],
     // char_command and command both start with backslash - need GLR to disambiguate
     [$.char_command, $.command],
+    // controlspace_command and control_symbol both start with backslash - need GLR
+    [$.controlspace_command, $.control_symbol],
   ],
 
   rules: {
@@ -104,6 +106,7 @@ module.exports = grammar({
     // ========================================================================
 
     _inline: $ => choice(
+      $.controlspace_command, // \<space>, \<tab>, \<newline> - MUST BE FIRST to catch \<newline>
       $.text,
       $.space,
       $.paragraph_break, // Paragraph break (double newline) - must be checked as inline too
@@ -137,10 +140,26 @@ module.exports = grammar({
     // Ligatures (matches LaTeX.js: ligature)
     ligature: $ => choice('---', '--', '``', "''", '<<', '>>'),
 
+    // Control space command: \<space>, \<tab>, \<newline> handled by external scanner
+    // Control space: backslash followed by whitespace
+    // LaTeX.js: ctrl_space = escape (&nl &break / nl / sp)
+    // This is a PARSER rule, not a lexer token, so it can match sequences
+    controlspace_command: $ => prec(3, seq(
+      '\\',
+      choice(
+        ' ',        // Backslash-space
+        '\t',       // Backslash-tab
+        '\n',       // Backslash-newline (Unix)
+        '\r\n',     // Backslash-CRLF (Windows)
+        '\r'        // Backslash-CR (old Mac)
+      )
+    )),
+
     // Control symbols (matches LaTeX.js: ctrl_sym) 
     // High precedence to match before line_comment sees the %
     // Includes: escape chars ($%#&{}_-), spacing (\! \, \; \: \/ \@), 
     // punctuation (\. \' \` \^ \" \~ \=), control space (\ ), and line break (\\)
+    // Note: \<tab> and \<newline> are handled by external scanner (controlspace_command)
     control_symbol: $ => token(prec(2, seq('\\', /[$%#&{}_\-,\/@ !;:.'`^"~=\\]/))),
 
     // ========================================================================
