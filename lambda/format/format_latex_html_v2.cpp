@@ -227,8 +227,8 @@ static std::string convertApostrophes(const char* text) {
                 p++;  // Skip second hyphen
             } else {
                 // Single hyphen: keep as ASCII hyphen-minus (U+002D)
-                // LaTeX.js behavior: don't convert single hyphens to Unicode hyphen (U+2010)
-                // This preserves compatibility and avoids issues with technical content
+                // Note: text.tex expects Unicode hyphen (U+2010) but basic_text.tex and spacing.tex expect ASCII
+                // This is inconsistent across test fixtures. Keep ASCII to maintain baseline compatibility.
                 result += '-';
             }
         } else if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
@@ -6685,7 +6685,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             if (is_empty_group) {
                 // Empty groups at doc level serve as terminators (e.g., \^{}, \~{})
                 should_output_zws = true;
-            } else {
+            } else{
                 // Non-empty groups: only output if trailing space indicates more content
                 should_output_zws = has_trailing_space;
             }
