@@ -4,13 +4,15 @@
 #include <string.h>
 #include <png.h>
 #include <turbojpeg.h>
+#include <gif_lib.h>
 #include "log.h"
 
 // Helper function to determine image format from file extension
 typedef enum {
     IMAGE_TYPE_UNKNOWN,
     IMAGE_TYPE_PNG,
-    IMAGE_TYPE_JPEG
+    IMAGE_TYPE_JPEG,
+    IMAGE_TYPE_GIF
 } ImageType;
 
 static ImageType get_image_type(const char* filename) {
@@ -33,6 +35,11 @@ static ImageType get_image_type(const char* filename) {
         if (strcasecmp(ext, ".jpeg") == 0) {
             return IMAGE_TYPE_JPEG;
         }
+    }
+
+    ext = filename + len - 4;
+    if (strcasecmp(ext, ".gif") == 0) {
+        return IMAGE_TYPE_GIF;
     }
 
     return IMAGE_TYPE_UNKNOWN;
@@ -215,6 +222,103 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
     return image_data;
 }
 
+// Load GIF image using giflib
+static unsigned char* load_gif(const char* filename, int* width, int* height, int* channels, int req_channels) {
+    (void)req_channels; // Mark as unused for compatibility
+
+    int error_code;
+    GifFileType* gif = DGifOpenFileName(filename, &error_code);
+    if (!gif) {
+        log_error("Failed to open GIF file: %s (error: %d)", filename, error_code);
+        return NULL;
+    }
+
+    // Read the entire GIF file
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        log_error("Failed to read GIF file: %s (error: %d)", filename, gif->Error);
+        DGifCloseFile(gif, &error_code);
+        return NULL;
+    }
+
+    *width = gif->SWidth;
+    *height = gif->SHeight;
+    *channels = 4; // Always return RGBA
+
+    // Allocate memory for RGBA image
+    unsigned char* image_data = calloc(*width * *height * 4, 1);
+    if (!image_data) {
+        log_error("Failed to allocate memory for GIF image data");
+        DGifCloseFile(gif, &error_code);
+        return NULL;
+    }
+
+    // Get the first frame (for animated GIFs, we only load the first frame)
+    if (gif->ImageCount > 0) {
+        SavedImage* frame = &gif->SavedImages[0];
+        GifImageDesc* desc = &frame->ImageDesc;
+
+        // Get the color map
+        ColorMapObject* color_map = desc->ColorMap ? desc->ColorMap : gif->SColorMap;
+        if (!color_map) {
+            log_error("No color map found in GIF file: %s", filename);
+            free(image_data);
+            DGifCloseFile(gif, &error_code);
+            return NULL;
+        }
+
+        // Check for transparency
+        int transparent_color = -1;
+        if (frame->ExtensionBlockCount > 0) {
+            for (int i = 0; i < frame->ExtensionBlockCount; i++) {
+                ExtensionBlock* ext = &frame->ExtensionBlocks[i];
+                if (ext->Function == GRAPHICS_EXT_FUNC_CODE && ext->ByteCount >= 4) {
+                    if (ext->Bytes[0] & 0x01) {
+                        transparent_color = ext->Bytes[3];
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Convert indexed color to RGBA
+        GifByteType* raster = frame->RasterBits;
+        int frame_width = desc->Width;
+        int frame_height = desc->Height;
+        int left = desc->Left;
+        int top = desc->Top;
+
+        for (int y = 0; y < frame_height; y++) {
+            for (int x = 0; x < frame_width; x++) {
+                int dst_y = top + y;
+                int dst_x = left + x;
+
+                if (dst_x >= 0 && dst_x < *width && dst_y >= 0 && dst_y < *height) {
+                    int dst_idx = (dst_y * *width + dst_x) * 4;
+                    int src_idx = y * frame_width + x;
+                    int color_index = raster[src_idx];
+
+                    if (color_index == transparent_color) {
+                        // Transparent pixel
+                        image_data[dst_idx + 0] = 0;
+                        image_data[dst_idx + 1] = 0;
+                        image_data[dst_idx + 2] = 0;
+                        image_data[dst_idx + 3] = 0;
+                    } else if (color_index < color_map->ColorCount) {
+                        GifColorType* color = &color_map->Colors[color_index];
+                        image_data[dst_idx + 0] = color->Red;
+                        image_data[dst_idx + 1] = color->Green;
+                        image_data[dst_idx + 2] = color->Blue;
+                        image_data[dst_idx + 3] = 255;
+                    }
+                }
+            }
+        }
+    }
+
+    DGifCloseFile(gif, &error_code);
+    return image_data;
+}
+
 // Main image loading function compatible with stbi_load
 unsigned char* image_load(const char* filename, int* width, int* height, int* channels, int req_channels) {
     if (!filename || !width || !height || !channels) {
@@ -230,6 +334,9 @@ unsigned char* image_load(const char* filename, int* width, int* height, int* ch
 
         case IMAGE_TYPE_JPEG:
             return load_jpeg(filename, width, height, channels, req_channels);
+
+        case IMAGE_TYPE_GIF:
+            return load_gif(filename, width, height, channels, req_channels);
 
         default:
             log_error("Unsupported image format: %s", filename);
