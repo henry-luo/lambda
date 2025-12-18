@@ -200,7 +200,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
     // These are tests that currently fail and need work
     std::map<std::string, std::set<int>> excluded_test_ids = {
         {"basic_text.tex", {4, 6}},  // test 4 expects no ZWS (older test); test 6 needs verb command
-        {"boxes.tex", {4, 5}},  // boxes_tex_2, 3 pass; tex_4 has paragraph nesting issue; tex_5+ need minipage
+        {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
         {"counters.tex", {1, 2}},
         {"environments.tex", {7, 10, 14}},
         {"fonts.tex", {6, 7, 8}},
