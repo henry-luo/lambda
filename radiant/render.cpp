@@ -773,6 +773,12 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
         rect.width = view->width;  rect.height = view->height;
+        log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
+                  img->url && img->url->href ? img->url->href->chars : "unknown",
+                  img->format, img->width, img->height,
+                  rect.width, rect.height, rect.x, rect.y,
+                  rdcon->block.clip.left, rdcon->block.clip.top,
+                  rdcon->block.clip.right, rdcon->block.clip.bottom);
         if (img->format == IMAGE_FORMAT_SVG) {
             // render the SVG image
             log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
@@ -870,7 +876,11 @@ void render_children(RenderContext* rdcon, View* view) {
             view->view_type == RDT_VIEW_TABLE || view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
             view->view_type == RDT_VIEW_TABLE_ROW || view->view_type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
+            log_debug("[RENDER DISPATCH] view_type=%d, embed=%p, img=%p, width=%.0f, height=%.0f",
+                      view->view_type, block->embed,
+                      block->embed ? block->embed->img : NULL, block->width, block->height);
             if (block->embed && block->embed->img) {
+                log_debug("[RENDER DISPATCH] calling render_image_view");
                 render_image_view(rdcon, block);
             }
             else if (block->embed && block->embed->doc) {

@@ -347,6 +347,30 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
         ctx->color = block->in_line->color;
     }
 
+    // Render embedded image if present
+    if (block->embed && block->embed->img) {
+        ImageSurface* img = block->embed->img;
+        float img_x = ctx->block.x + block->x;
+        float img_y = ctx->block.y + block->y;
+        float img_width = block->width;
+        float img_height = block->height;
+
+        log_debug("[SVG IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f)",
+                  img->url && img->url->href ? img->url->href->chars : "unknown",
+                  img->format, img->width, img->height,
+                  img_width, img_height, img_x, img_y);
+
+        if (img->url && img->url->href) {
+            // Convert local file path to href for SVG
+            const char* href = img->url->href->chars;
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"%s\" "
+                "preserveAspectRatio=\"none\" />\n",
+                img_x, img_y, img_width, img_height, href);
+        }
+    }
+
     // Render children
     if (block->first_child) {
         svg_indent(ctx);

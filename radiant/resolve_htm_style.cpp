@@ -66,6 +66,19 @@ static float get_parent_table_cellpadding(DomNode* elmt, float pixel_ratio) {
     return -1;
 }
 
+// get parent TR's valign attribute (for TD/TH cells)
+static const char* get_parent_tr_valign(DomNode* elmt) {
+    // TD/TH -> TR, check TR's valign attribute
+    DomNode* node = elmt->parent;
+    if (node && node->is_element()) {
+        DomElement* elem = node->as_element();
+        if (elem->tag_id == HTM_TAG_TR) {
+            return elem->get_attribute("valign");
+        }
+    }
+    return nullptr;
+}
+
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = (ViewSpan*)elmt;  ViewBlock* block = (ViewBlock*)elmt;
     float em_size = 0;  uintptr_t elmt_name = elmt->tag();
@@ -528,6 +541,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
         const char* valign_attr = elmt->get_attribute("valign");
+        // if TH doesn't have valign, inherit from parent TR
+        if (!valign_attr) {
+            valign_attr = get_parent_tr_valign(elmt);
+        }
         if (valign_attr) {
             if (strcasecmp(valign_attr, "top") == 0) {
                 block->in_line->vertical_align = CSS_VALUE_TOP;
@@ -590,6 +607,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
         const char* valign_attr = elmt->get_attribute("valign");
+        // if TD doesn't have valign, inherit from parent TR
+        if (!valign_attr) {
+            valign_attr = get_parent_tr_valign(elmt);
+        }
         if (valign_attr) {
             if (strcasecmp(valign_attr, "top") == 0) {
                 block->in_line->vertical_align = CSS_VALUE_TOP;

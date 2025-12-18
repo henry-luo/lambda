@@ -515,6 +515,7 @@ project "lambda"
         "/opt/homebrew/lib/libglfw3.a",
         "/opt/homebrew/lib/libpng.a",
         "/opt/homebrew/lib/libturbojpeg.a",
+        "/opt/homebrew/lib/libgif.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",

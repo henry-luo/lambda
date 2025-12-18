@@ -1073,8 +1073,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     uintptr_t elmt_name = block->tag();
     if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
+        log_debug("[IMG LAYOUT] Processing IMG element: %s", block->node_name());
         const char *value;
         value = block->get_attribute("src");
+        log_debug("[IMG LAYOUT] src attribute: %s", value ? value : "NULL");
         if (value) {
             size_t value_len = strlen(value);
             StrBuf* src = strbuf_new_cap(value_len);
@@ -1139,7 +1141,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("image dimensions: %f x %f", lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
-            lycon->block.given_width = 40;  lycon->block.given_height = 30;
+            // use html width/height attributes if specified, otherwise use placeholder size
+            if (lycon->block.given_width <= 0) lycon->block.given_width = 40;
+            if (lycon->block.given_height <= 0) lycon->block.given_height = 30;
             // todo: use a placeholder
         }
     }
@@ -1476,6 +1480,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 }
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
+    uintptr_t tag = elmt->tag();
+    if (tag == HTM_TAG_IMG) {
+        log_debug("[LAYOUT_BLOCK IMG] layout_block ENTRY for IMG element: %s", elmt->node_name());
+    }
     auto t_block_start = high_resolution_clock::now();
 
     log_enter();
