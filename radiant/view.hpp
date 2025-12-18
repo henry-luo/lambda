@@ -784,6 +784,9 @@ typedef struct ViewTableRow : ViewBlock {
     ViewBlock* parent_row_group();
 } ViewTableRow;
 
+// Forward declaration for border-collapse support
+struct CollapsedBorder;
+
 struct TableCellProp {
     // Vertical alignment
     enum {
@@ -803,6 +806,15 @@ struct TableCellProp {
     uint8_t is_annoy_colgroup:1; // whether this element is doubled as an anonymous colgroup
     uint8_t is_empty:1;          // whether this cell has no content (for empty-cells: hide)
     uint8_t hide_empty:1;        // combined flag: is_empty && table has empty-cells: hide
+
+    // Border-collapse resolved borders (CSS 2.1 §17.6.2)
+    // Only populated when table has border-collapse: collapse
+    // These store the winning borders after conflict resolution
+    // Used during rendering phase to draw correct collapsed borders
+    CollapsedBorder* top_resolved;
+    CollapsedBorder* right_resolved;
+    CollapsedBorder* bottom_resolved;
+    CollapsedBorder* left_resolved;
 };
 
 typedef struct ViewTableCell : ViewBlock {
