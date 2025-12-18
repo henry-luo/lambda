@@ -421,14 +421,24 @@ void HtmlGenerator::addTocEntry(const std::string& level, const std::string& num
 // List Methods (html-generator.ls lines 302-380)
 // =============================================================================
 
-void HtmlGenerator::startItemize() {
+void HtmlGenerator::startItemize(const char* alignment) {
     // html-generator.ls startItemize method - match LaTeX.js output
     
     LatexGenerator::startList();  // Update list depth counter
     pushListState("itemize");
     
-    // Use "list" class to match LaTeX.js (not "itemize")
-    writer_->openTag("ul", "list");
+    // Store alignment in list state
+    if (alignment && alignment[0]) {
+        currentList().alignment = alignment;
+    }
+    
+    // Use "list" class, add alignment class if present
+    if (alignment && alignment[0]) {
+        std::string list_class = std::string("list ") + alignment;
+        writer_->openTag("ul", list_class.c_str());
+    } else {
+        writer_->openTag("ul", "list");
+    }
 }
 
 void HtmlGenerator::endItemize() {
@@ -439,13 +449,24 @@ void HtmlGenerator::endItemize() {
     LatexGenerator::endList();
 }
 
-void HtmlGenerator::startEnumerate() {
+void HtmlGenerator::startEnumerate(const char* alignment) {
     // html-generator.ls startEnumerate method
     
     LatexGenerator::startList();
     pushListState("enumerate");
     
-    writer_->openTag("ol", "enumerate");
+    // Store alignment in list state
+    if (alignment && alignment[0]) {
+        currentList().alignment = alignment;
+    }
+    
+    // Use "list" class, add alignment class if present
+    if (alignment && alignment[0]) {
+        std::string list_class = std::string("list ") + alignment;
+        writer_->openTag("ol", list_class.c_str());
+    } else {
+        writer_->openTag("ol", "list");
+    }
 }
 
 void HtmlGenerator::endEnumerate() {
@@ -489,7 +510,9 @@ void HtmlGenerator::createItem(const char* label) {
     state.item_count++;
     
     if (state.type == "itemize") {
-        writer_->openTag("li", nullptr);
+        // Check if we have an alignment class to add to the li
+        const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("li", li_class);
         // Add item label span structure matching LaTeX.js
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
@@ -517,20 +540,36 @@ void HtmlGenerator::createItem(const char* label) {
         
         writer_->closeTag("span");  // close hbox llap
         writer_->closeTag("span");  // close itemlabel
-        // Open paragraph for content
-        writer_->openTag("p", nullptr);
+        // Open paragraph for content with alignment class if present
+        const char* p_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("p", p_class);
     } else if (state.type == "enumerate") {
-        writer_->openTag("li", nullptr);
+        // Step the enumerate counter for this depth level
+        std::string counter_name;
+        int depth = getListDepth();
+        switch (depth) {
+            case 1: counter_name = "enumi"; break;
+            case 2: counter_name = "enumii"; break;
+            case 3: counter_name = "enumiii"; break;
+            case 4: counter_name = "enumiv"; break;
+            default: counter_name = "enumi"; break;
+        }
+        stepCounter(counter_name);
+        
+        // Check if we have an alignment class to add
+        const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("li", li_class);
         // Add item label span structure matching LaTeX.js
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
-        // Generate enumerate label based on depth
-        std::string enumLabel = getEnumerateLabel(getListDepth());
+        // Generate enumerate label based on depth (counter already incremented)
+        std::string enumLabel = getEnumerateLabel(depth);
         writer_->writeRawHtml(enumLabel.c_str());
         writer_->closeTag("span");  // close hbox llap
         writer_->closeTag("span");  // close itemlabel
-        // Open paragraph for content
-        writer_->openTag("p", nullptr);
+        // Open paragraph for content with alignment class if present
+        const char* p_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("p", p_class);
     } else if (state.type == "description") {
         if (label) {
             writer_->openTag("dt", nullptr);
@@ -649,23 +688,23 @@ std::string HtmlGenerator::getEnumerateLabel(int depth) const {
 // =============================================================================
 
 void HtmlGenerator::startQuote() {
-    writer_->openTag("blockquote", "quote");
+    writer_->openTag("div", "list quote");
 }
 
 void HtmlGenerator::endQuote() {
-    writer_->closeTag("blockquote");
+    writer_->closeTag("div");
 }
 
 void HtmlGenerator::startQuotation() {
-    writer_->openTag("blockquote", "quotation");
+    writer_->openTag("div", "list quotation");
 }
 
 void HtmlGenerator::endQuotation() {
-    writer_->closeTag("blockquote");
+    writer_->closeTag("div");
 }
 
 void HtmlGenerator::startVerse() {
-    writer_->openTag("div", "verse");
+    writer_->openTag("div", "list verse");
 }
 
 void HtmlGenerator::endVerse() {
