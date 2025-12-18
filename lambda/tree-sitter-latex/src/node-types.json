@@ -131,6 +131,11 @@
     }
   },
   {
+    "type": "controlspace_command",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "curly_group",
     "named": true,
     "fields": {},
@@ -411,6 +416,10 @@
           "named": true
         },
         {
+          "type": "controlspace_command",
+          "named": true
+        },
+        {
           "type": "curly_group",
           "named": true
         },
@@ -585,6 +594,26 @@
     "fields": {}
   },
   {
+    "type": "\t",
+    "named": false
+  },
+  {
+    "type": "\n",
+    "named": false
+  },
+  {
+    "type": "\r",
+    "named": false
+  },
+  {
+    "type": "\r\n",
+    "named": false
+  },
+  {
+    "type": " ",
+    "named": false
+  },
+  {
     "type": "$",
     "named": false
   },
@@ -622,6 +651,10 @@
   },
   {
     "type": "[",
+    "named": false
+  },
+  {
+    "type": "\\",
     "named": false
   },
   {
