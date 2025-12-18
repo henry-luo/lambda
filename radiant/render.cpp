@@ -11,6 +11,14 @@
 
 #define DEBUG_RENDER 0
 
+// Forward declaration for border-collapse support
+struct CollapsedBorder {
+    float width;
+    CssEnum style;
+    Color color;
+    uint8_t priority;
+};
+
 // ============================================================================
 // CSS white-space Property Helpers for Rendering
 // ============================================================================
@@ -499,27 +507,73 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
     if (view->bound->border) {
         log_debug("render border");
-        if (view->bound->border->left_color.a) {
-            Rect border_rect = rect;
-            border_rect.width = view->bound->border->width.left;
-            fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->left_color.c, &rdcon->block.clip);
+
+        // CSS 2.1 §17.6.2: Use resolved borders for border-collapse cells
+        bool use_resolved = false;
+        CollapsedBorder* resolved_top = nullptr;
+        CollapsedBorder* resolved_right = nullptr;
+        CollapsedBorder* resolved_bottom = nullptr;
+        CollapsedBorder* resolved_left = nullptr;
+
+        if (view->view_type == RDT_VIEW_TABLE_CELL) {
+            ViewTableCell* cell = (ViewTableCell*)view;
+            if (cell->td && cell->td->top_resolved) {
+                use_resolved = true;
+                resolved_top = cell->td->top_resolved;
+                resolved_right = cell->td->right_resolved;
+                resolved_bottom = cell->td->bottom_resolved;
+                resolved_left = cell->td->left_resolved;
+            }
         }
-        if (view->bound->border->right_color.a) {
-            Rect border_rect = rect;
-            border_rect.x = rect.x + rect.width - view->bound->border->width.right;
-            border_rect.width = view->bound->border->width.right;
-            fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->right_color.c, &rdcon->block.clip);
-        }
-        if (view->bound->border->top_color.a) {
-            Rect border_rect = rect;
-            border_rect.height = view->bound->border->width.top;
-            fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->top_color.c, &rdcon->block.clip);
-        }
-        if (view->bound->border->bottom_color.a) {
-            Rect border_rect = rect;
-            border_rect.y = rect.y + rect.height - view->bound->border->width.bottom;
-            border_rect.height = view->bound->border->width.bottom;
-            fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->bottom_color.c, &rdcon->block.clip);
+
+        if (use_resolved) {
+            // Render collapsed borders using resolved border data
+            if (resolved_left && resolved_left->style != CSS_VALUE_NONE && resolved_left->color.a) {
+                Rect border_rect = rect;
+                border_rect.width = resolved_left->width;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_left->color.c, &rdcon->block.clip);
+            }
+            if (resolved_right && resolved_right->style != CSS_VALUE_NONE && resolved_right->color.a) {
+                Rect border_rect = rect;
+                border_rect.x = rect.x + rect.width - resolved_right->width;
+                border_rect.width = resolved_right->width;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_right->color.c, &rdcon->block.clip);
+            }
+            if (resolved_top && resolved_top->style != CSS_VALUE_NONE && resolved_top->color.a) {
+                Rect border_rect = rect;
+                border_rect.height = resolved_top->width;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_top->color.c, &rdcon->block.clip);
+            }
+            if (resolved_bottom && resolved_bottom->style != CSS_VALUE_NONE && resolved_bottom->color.a) {
+                Rect border_rect = rect;
+                border_rect.y = rect.y + rect.height - resolved_bottom->width;
+                border_rect.height = resolved_bottom->width;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_bottom->color.c, &rdcon->block.clip);
+            }
+        } else {
+            // Render normal borders using BorderProp
+            if (view->bound->border->left_color.a) {
+                Rect border_rect = rect;
+                border_rect.width = view->bound->border->width.left;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->left_color.c, &rdcon->block.clip);
+            }
+            if (view->bound->border->right_color.a) {
+                Rect border_rect = rect;
+                border_rect.x = rect.x + rect.width - view->bound->border->width.right;
+                border_rect.width = view->bound->border->width.right;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->right_color.c, &rdcon->block.clip);
+            }
+            if (view->bound->border->top_color.a) {
+                Rect border_rect = rect;
+                border_rect.height = view->bound->border->width.top;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->top_color.c, &rdcon->block.clip);
+            }
+            if (view->bound->border->bottom_color.a) {
+                Rect border_rect = rect;
+                border_rect.y = rect.y + rect.height - view->bound->border->width.bottom;
+                border_rect.height = view->bound->border->width.bottom;
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->bottom_color.c, &rdcon->block.clip);
+            }
         }
     }
 }
