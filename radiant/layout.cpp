@@ -697,6 +697,12 @@ void line_align(LayoutContext* lycon) {
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     log_debug("layout node %s, advance_y: %f", node->node_name(), lycon->block.advance_y);
 
+    // Log for IMG elements
+    uintptr_t node_tag = node->tag();
+    if (node_tag == HTM_TAG_IMG) {
+        log_debug("[FLOW_NODE IMG] Processing IMG element: %s", node->node_name());
+    }
+
     // Skip HTML comments (Lambda CSS parser creates these as elements with name "!--")
     const char* node_name = node->node_name();
     if (node_name && (strcmp(node_name, "!--") == 0 || strcmp(node_name, "#comment") == 0)) {
@@ -716,6 +722,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
         log_debug("processing element: %s, with display: outer=%d, inner=%d", node->node_name(), display.outer, display.inner);
+
+        // Log IMG display resolution
+        if (node_tag == HTM_TAG_IMG) {
+            log_debug("[FLOW_NODE IMG] Resolved display for IMG: outer=%d, inner=%d (INLINE_BLOCK=%d, INLINE=%d)",
+                     display.outer, display.inner, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_INLINE);
+        }
 
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         // Check float property from specified styles (before view is created)

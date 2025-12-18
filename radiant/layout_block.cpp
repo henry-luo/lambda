@@ -1073,8 +1073,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     uintptr_t elmt_name = block->tag();
     if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
+        log_debug("[IMG LAYOUT] Processing IMG element: %s", block->node_name());
         const char *value;
         value = block->get_attribute("src");
+        log_debug("[IMG LAYOUT] src attribute: %s", value ? value : "NULL");
         if (value) {
             size_t value_len = strlen(value);
             StrBuf* src = strbuf_new_cap(value_len);
@@ -1478,6 +1480,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 }
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
+    uintptr_t tag = elmt->tag();
+    if (tag == HTM_TAG_IMG) {
+        log_debug("[LAYOUT_BLOCK IMG] layout_block ENTRY for IMG element: %s", elmt->node_name());
+    }
     auto t_block_start = high_resolution_clock::now();
 
     log_enter();
