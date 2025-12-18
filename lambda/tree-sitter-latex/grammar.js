@@ -23,6 +23,7 @@ module.exports = grammar({
     $._begin_document,        // \begin{document} - higher priority than command
     $._end_document,          // \end{document} - higher priority than command
     $._verb_command,          // \verb<delim>text<delim> - context-gated external token
+    $._char_command,          // \char<number> - decimal/hex/octal number token
   ],
 
   word: $ => $.command_name,
@@ -32,6 +33,8 @@ module.exports = grammar({
     [$._block, $._inline],
     // verb_command and command both start with backslash - need GLR to disambiguate
     [$.verb_command, $.command],
+    // char_command and command both start with backslash - need GLR to disambiguate
+    [$.char_command, $.command],
   ],
 
   rules: {
@@ -107,6 +110,7 @@ module.exports = grammar({
       $.line_comment,   // Comments can appear inline
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
       $.verb_command,   // \verb|text| - must be before command (context-gated)
+      $.char_command,   // \char<number> - must be before command (context-gated)
       $.command,
       $.curly_group,
       $.brack_group,
@@ -147,6 +151,15 @@ module.exports = grammar({
     // The external scanner will only emit this token when valid_symbols[VERB_COMMAND] is true
     // This happens when the parser is in _inline context and hasn't yet committed to command
     verb_command: $ => $._verb_command,
+
+    // ========================================================================
+    // Char command - TeX character code with decimal/hex/octal number
+    // ========================================================================
+    
+    // Context-gated external token (Pattern 2)
+    // The external scanner will only emit this token when valid_symbols[CHAR_COMMAND] is true
+    // Matches: \char<decimal>, \char"<hex>, \char'<octal>
+    char_command: $ => $._char_command,
 
     // ========================================================================
     // Commands/Macros (matches LaTeX.js: macro, macro_args)
