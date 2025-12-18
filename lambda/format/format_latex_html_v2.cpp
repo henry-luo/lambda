@@ -695,6 +695,32 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
 // Command Implementations
 // =============================================================================
 
+// Helper to check if a command element has an empty curly_group child (terminator like \ss{})
+// If so, the {} consumes the command, so we shouldn't strip trailing space
+static bool hasEmptyCurlyGroupChild(Item elem) {
+    ElementReader reader(elem);
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* child_tag = child_elem.tagName();
+            if (child_tag && strcmp(child_tag, "curly_group") == 0) {
+                // Check if empty (no children or only whitespace)
+                // A curly_group with 0 children is definitely empty
+                if (child_elem.childCount() == 0) {
+                    return true;
+                }
+                // Has children but check if they're all empty/whitespace
+                // For simplicity, if it has any children, treat as non-empty
+                // The terminator {} should have exactly 0 children
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
 // =============================================================================
 // Diacritic Commands - Handle accent marks like \^{o}, \'{e}, etc.
 // =============================================================================
@@ -759,6 +785,10 @@ static void processDiacritic(LatexProcessor* proc, Item elem, char diacritic_cmd
         proc->ensureParagraph();
         char diacritic_str[2] = {diacritic_cmd, '\0'};
         gen->text(diacritic_str);
+        // Output ZWS if empty curly group (e.g., \^{} produces ^​)
+        if (hasEmptyCurlyGroupChild(elem)) {
+            gen->text("\xe2\x80\x8b");  // U+200B zero-width space
+        }
     }
 }
 
@@ -782,32 +812,6 @@ static void cmd_ogonek(LatexProcessor* proc, Item elem) { processDiacritic(proc,
 // =============================================================================
 // Special Character Commands - Non-combining special letters
 // =============================================================================
-
-// Helper to check if a command element has an empty curly_group child (terminator like \ss{})
-// If so, the {} consumes the command, so we shouldn't strip trailing space
-static bool hasEmptyCurlyGroupChild(Item elem) {
-    ElementReader reader(elem);
-    auto iter = reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            const char* child_tag = child_elem.tagName();
-            if (child_tag && strcmp(child_tag, "curly_group") == 0) {
-                // Check if empty (no children or only whitespace)
-                // A curly_group with 0 children is definitely empty
-                if (child_elem.childCount() == 0) {
-                    return true;
-                }
-                // Has children but check if they're all empty/whitespace
-                // For simplicity, if it has any children, treat as non-empty
-                // The terminator {} should have exactly 0 children
-                return false;
-            }
-        }
-    }
-    return false;
-}
 
 static void cmd_i(LatexProcessor* proc, Item elem) {
     // \i - Dotless i (ı) for use with diacritics
@@ -2080,11 +2084,14 @@ static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
 
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
-    // The {} serves as word terminator but produces no output
-    (void)elem;  // Curly group child handled by processChildren
+    // The {} serves as word terminator and produces ZWS for visual separation
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("\\");
+    // Output ZWS if empty curly group (e.g., \textbackslash{} produces \​)
+    if (hasEmptyCurlyGroupChild(elem)) {
+        gen->text("\xe2\x80\x8b");  // U+200B zero-width space
+    }
 }
 
 static void cmd_textellipsis(LatexProcessor* proc, Item elem) {
@@ -6215,9 +6222,10 @@ void LatexProcessor::processChildren(Item elem) {
                                 std::string result = applyDiacritic(diacritic_cmd, str->chars);
                                 gen_->text(result.c_str());
                             } else {
-                                // Empty curly_group (like \^{}) - just output the diacritic char
+                                // Empty curly_group (like \^{}) - output diacritic char + ZWS
                                 ensureParagraph();
                                 gen_->text(tag);
+                                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
                             }
                             i++;  // Skip the curly_group (even if empty)
                             continue;

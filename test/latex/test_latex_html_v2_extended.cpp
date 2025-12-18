@@ -169,7 +169,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
 
     // Specific test IDs to include in extended (failing tests only)
     std::map<std::string, std::set<int>> extended_test_ids = {
-        {"basic_text.tex", {6}},  // test 4 moved to baseline (special characters pass)
+        {"basic_text.tex", {4, 6}},  // test 4 expects no ZWS (inconsistent with text.tex); test 6 needs verb
         {"boxes.tex", {4, 5}},  // boxes_tex_2, 3 moved to baseline; tex_4 has \noindent issue; tex_5+ need minipage
         {"counters.tex", {1, 2}},
         {"environments.tex", {7, 10, 14}},
@@ -180,7 +180,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"macros.tex", {2, 4, 5, 6}},
         {"sectioning.tex", {3}},
         {"symbols.tex", {2}},
-        {"text.tex", {4, 5, 6, 7, 8, 10}},
+        {"text.tex", {4, 6, 7, 8, 10}},  // test 5 moved to baseline (special characters pass)
         {"whitespace.tex", {5, 6, 7, 8, 12, 13, 15, 21}}
     };
 
