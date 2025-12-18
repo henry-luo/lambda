@@ -49,6 +49,7 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     // Commands (generic pattern)
     {"command", NODE_CONTAINER},
     {"verb_command", NODE_CONTAINER},  // \verb|text| inline verbatim (handled specially)
+    {"char_command", NODE_CONTAINER},  // \char<number> TeX character code (handled specially)
     {"command_name", NODE_LEAF},
     {"star", NODE_LEAF},
     
@@ -476,6 +477,36 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             
             if (strcmp(node_type, "generic_environment") == 0) {
                 return convert_environment(ctx, node, source);
+            }
+            
+            // Special handling for document container: skip begin_document/end_document
+            if (strcmp(node_type, "document") == 0) {
+                MarkBuilder& builder = ctx.builder;
+                ElementBuilder doc_builder = builder.element("document");
+                
+                uint32_t child_count = ts_node_child_count(node);
+                for (uint32_t i = 0; i < child_count; i++) {
+                    if (should_skip_comment_and_space(node, i)) {
+                        i++;
+                        continue;
+                    }
+                    
+                    TSNode child = ts_node_child(node, i);
+                    const char* child_type = ts_node_type(child);
+                    
+                    // Skip begin_document and end_document nodes
+                    if (strcmp(child_type, "begin_document") == 0 || 
+                        strcmp(child_type, "end_document") == 0) {
+                        continue;
+                    }
+                    
+                    Item child_item = convert_latex_node(ctx, child, source);
+                    if (child_item.item != ITEM_NULL) {
+                        doc_builder.child(child_item);
+                    }
+                }
+                
+                return doc_builder.final();
             }
             
             // NEW: section handling in hybrid grammar

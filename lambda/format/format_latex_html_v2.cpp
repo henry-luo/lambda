@@ -13,6 +13,8 @@
 #include <string>
 #include <sstream>
 #include <cstring>
+#include <cstdlib>
+#include <strings.h>
 #include <map>
 #include <vector>
 #include <unordered_map>
@@ -2161,8 +2163,13 @@ static void cmd_char(LatexProcessor* proc, Item elem) {
     }
     
     if (charcode > 0) {
-        std::string utf8 = codepoint_to_utf8(charcode);
-        gen->text(utf8.c_str());
+        // Special case: 0xA0 is non-breaking space, output as HTML entity
+        if (charcode == 0xA0) {
+            gen->writer()->writeRawHtml("&nbsp;");
+        } else {
+            std::string utf8 = codepoint_to_utf8(charcode);
+            gen->text(utf8.c_str());
+        }
     }
 }
 
@@ -4804,6 +4811,12 @@ static void cmd_tableofcontents(LatexProcessor* proc, Item elem) {
     gen->closeElement();
 }
 
+static void cmd_document(LatexProcessor* proc, Item elem) {
+    // \begin{document}...\end{document}
+    // The main document environment - just process children without wrapper
+    proc->processChildren(elem);
+}
+
 static void cmd_appendix(LatexProcessor* proc, Item elem) {
     // \appendix
     // Changes section numbering to letters (A, B, C...)
@@ -4978,6 +4991,98 @@ static void cmd_value(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     gen->text("0");
 }
+
+/* Commented out - need to implement helper methods toRoman, toAlph, toFnSymbol in HtmlGenerator
+static void cmd_arabic(LatexProcessor* proc, Item elem) {
+    // \arabic{counter} - format counter as arabic numerals (1, 2, 3, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = std::to_string(value);
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_roman(LatexProcessor* proc, Item elem) {
+    // \roman{counter} - format counter as lowercase roman numerals (i, ii, iii, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toRoman(value, false);  // lowercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_Roman(LatexProcessor* proc, Item elem) {
+    // \Roman{counter} - format counter as uppercase roman numerals (I, II, III, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toRoman(value, true);  // uppercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_alph(LatexProcessor* proc, Item elem) {
+    // \alph{counter} - format counter as lowercase letters (a, b, c, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toAlph(value, false);  // lowercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_Alph(LatexProcessor* proc, Item elem) {
+    // \Alph{counter} - format counter as uppercase letters (A, B, C, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toAlph(value, true);  // uppercase
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+
+static void cmd_fnsymbol(LatexProcessor* proc, Item elem) {
+    // \fnsymbol{counter} - format counter as footnote symbols (*, †, ‡, ...)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    int value = gen->getCounter(counter_str->chars);
+    std::string output = gen->toFnSymbol(value);
+    proc->ensureParagraph();
+    gen->text(output.c_str());
+}
+*/
 
 static void cmd_newlength(LatexProcessor* proc, Item elem) {
     // \newlength{\lengthcmd}
@@ -5239,6 +5344,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["usepackage"] = cmd_usepackage;
     command_table_["include"] = cmd_include;
     command_table_["input"] = cmd_input;
+    command_table_["document"] = cmd_document;
     command_table_["abstract"] = cmd_abstract;
     command_table_["tableofcontents"] = cmd_tableofcontents;
     command_table_["tableofcontents*"] = cmd_tableofcontents_star;
@@ -5254,6 +5360,13 @@ void LatexProcessor::initCommandTable() {
     command_table_["stepcounter"] = cmd_stepcounter;
     command_table_["refstepcounter"] = cmd_refstepcounter;
     command_table_["value"] = cmd_value;
+    // Commented out - need to implement helper methods first
+    // command_table_["arabic"] = cmd_arabic;
+    // command_table_["roman"] = cmd_roman;
+    // command_table_["Roman"] = cmd_Roman;
+    // command_table_["alph"] = cmd_alph;
+    // command_table_["Alph"] = cmd_Alph;
+    // command_table_["fnsymbol"] = cmd_fnsymbol;
     command_table_["newlength"] = cmd_newlength;
     command_table_["setlength"] = cmd_setlength;
 }
@@ -5395,6 +5508,11 @@ void LatexProcessor::processNode(Item node) {
         if (str && str->len > 0) {
             const char* text = str->chars;
             
+            // Debug: log "document" string to track where it's coming from
+            if (strcmp(text, "document") == 0) {
+                log_debug("processNode: found 'document' string - context unknown");
+            }
+            
             // Find the first backslash to check for embedded command
             const char* backslash = strchr(text, '\\');
             
@@ -5512,6 +5630,14 @@ void LatexProcessor::processNode(Item node) {
             return;
         }
         
+        // Skip "end" elements (malformed \end{...} that parser incorrectly included)
+        // These occur when the parser fails to match environment closing tags correctly
+        if (strcmp(tag, "end") == 0) {
+            // Skip - this is a parsing artifact
+            log_debug("processNode: skipping malformed 'end' element");
+            return;
+        }
+        
         // Special handling for linebreak_command (\\)
         if (strcmp(tag, "linebreak_command") == 0) {
             ensureParagraph();
@@ -5558,6 +5684,62 @@ void LatexProcessor::processChildren(Item elem) {
     int64_t count = elem_reader.childCount();
     for (int64_t i = 0; i < count; i++) {
         ItemReader child_reader = elem_reader.childAt(i);
+        
+        // Check for \char command that needs lookahead for its numeric argument
+        if (child_reader.isElement()) {
+            ElementReader child_elem(child_reader.item());
+            const char* tag = child_elem.tagName();
+            
+            if (tag && strcmp(tag, "char") == 0 && child_elem.childCount() == 0) {
+                // \char command with no children - parser limitation
+                // Look ahead to next sibling for the numeric argument
+                if (i + 1 < count) {
+                    ItemReader next_reader = elem_reader.childAt(i + 1);
+                    if (next_reader.isString()) {
+                        const char* text = next_reader.cstring();
+                        if (text && (isdigit((unsigned char)text[0]) || text[0] == '"' || text[0] == '\'')) {
+                            // Found the number argument - parse and consume just the numeric part
+                            ensureParagraph();
+                            uint32_t charcode = 0;
+                            char* endptr = nullptr;
+                            
+                            if (text[0] == '"') {
+                                // Hex: \char"A0 - consume quote + hex digits
+                                charcode = std::strtoul(text + 1, &endptr, 16);
+                            } else if (text[0] == '\'') {
+                                // Octal: \char'77 - consume quote + octal digits
+                                charcode = std::strtoul(text + 1, &endptr, 8);
+                            } else {
+                                // Decimal: \char98 - consume decimal digits
+                                charcode = std::strtoul(text, &endptr, 10);
+                            }
+                            
+                            // Output the character
+                            if (charcode > 0) {
+                                if (charcode == 0xA0) {
+                                    gen_->writer()->writeRawHtml("&nbsp;");
+                                } else {
+                                    std::string utf8 = codepoint_to_utf8(charcode);
+                                    gen_->text(utf8.c_str());
+                                }
+                            }
+                            
+                            // Output remaining text after the number (e.g., " test" from "98 test")
+                            if (endptr && *endptr) {
+                                processText(endptr);
+                            }
+                            
+                            // Skip the next string element since we consumed it
+                            i++;
+                            continue;
+                        }
+                    }
+                }
+                
+                // No valid number found - just skip the \char command
+                continue;
+            }
+        }
         
         // Check if this is a linebreak element
         if (child_reader.isElement()) {
