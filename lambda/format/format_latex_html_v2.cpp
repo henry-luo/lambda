@@ -14,6 +14,7 @@
 #include <sstream>
 #include <cstring>
 #include <map>
+#include <vector>
 #include <unordered_map>
 
 namespace lambda {
@@ -277,6 +278,7 @@ public:
     LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
         : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
+          next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
           recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false) {}
     
@@ -329,6 +331,14 @@ public:
     void closeParagraphIfOpen();  // Alias for endParagraph
     void setNextParagraphIsContinue() { next_paragraph_is_continue_ = true; }
     void setNextParagraphIsNoindent() { next_paragraph_is_noindent_ = true; }
+    void setNextParagraphAlignment(const char* alignment) { next_paragraph_alignment_ = alignment; }
+    void pushAlignmentScope() { alignment_stack_.push_back(next_paragraph_alignment_); }
+    void popAlignmentScope() { 
+        if (!alignment_stack_.empty()) {
+            next_paragraph_alignment_ = alignment_stack_.back();
+            alignment_stack_.pop_back();
+        }
+    }
     void ensureParagraph();  // Start a paragraph if not already in one
     bool inParagraph() const { return in_paragraph_; }  // Check if currently in a paragraph
     
@@ -360,6 +370,13 @@ private:
     // When true, the next paragraph should have class="noindent"
     // Set by \noindent command
     bool next_paragraph_is_noindent_;
+    
+    // Alignment for next paragraph (centering, raggedright, raggedleft)
+    // Set by alignment declaration commands (\centering, \raggedright, \raggedleft)
+    const char* next_paragraph_alignment_;
+    
+    // Stack for tracking alignment in nested groups (for proper scope restoration)
+    std::vector<const char*> alignment_stack_;
     
     // Font declaration tracking - when true, the next text should strip leading space
     // This is set by font declaration commands like \bfseries, \em, etc.
@@ -1977,6 +1994,52 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Case 1: No braces - output nothing (null command)
 }
 
+// Helper function to convert LaTeX lengths to pixels
+// LaTeX.js conversion: 1pt = 1.333px (based on 72pt/inch, 96px/inch)
+static double convertLatexLengthToPixels(const char* length_str) {
+    if (!length_str || !*length_str) {
+        return 0.0;
+    }
+    
+    // Parse numeric value
+    char* end_ptr;
+    double value = strtod(length_str, &end_ptr);
+    
+    // Skip whitespace after number
+    while (*end_ptr == ' ' || *end_ptr == '\t') {
+        end_ptr++;
+    }
+    
+    // Check unit (case-insensitive comparison)
+    const char* unit = end_ptr;
+    if (strncasecmp(unit, "pt", 2) == 0) {
+        return value * 1.333;  // 1pt = 1.333px
+    } else if (strncasecmp(unit, "mm", 2) == 0) {
+        return value * 3.7795;  // 1mm = 3.7795px
+    } else if (strncasecmp(unit, "cm", 2) == 0) {
+        return value * 37.795;  // 1cm = 37.795px (10mm)
+    } else if (strncasecmp(unit, "in", 2) == 0) {
+        return value * 96.0;    // 1in = 96px
+    } else if (strncasecmp(unit, "em", 2) == 0) {
+        return value * 16.0;    // 1em ≈ 16px (default font size)
+    } else if (strncasecmp(unit, "ex", 2) == 0) {
+        return value * 8.0;     // 1ex ≈ 8px (approximately 0.5em)
+    } else if (strncasecmp(unit, "pc", 2) == 0) {
+        return value * 16.0;    // 1pc = 12pt = 16px
+    } else if (strncasecmp(unit, "bp", 2) == 0) {
+        return value * 1.333;   // 1bp = 1pt (big point = PostScript point)
+    } else if (strncasecmp(unit, "dd", 2) == 0) {
+        return value * 1.494;   // 1dd = 1.07pt (Didot point)
+    } else if (strncasecmp(unit, "cc", 2) == 0) {
+        return value * 17.9;    // 1cc = 12dd (Cicero)
+    } else if (strncasecmp(unit, "sp", 2) == 0) {
+        return value * 0.000020;  // 1sp = 1/65536 pt (scaled point, smallest TeX unit)
+    }
+    
+    // Default: assume pixels if no recognized unit
+    return value;
+}
+
 static void cmd_unskip(LatexProcessor* proc, Item elem) {
     // \unskip - removes preceding whitespace from output
     // Unlike most LaTeX commands, this "breaks out" of groups - it affects output
@@ -3043,6 +3106,9 @@ static void cmd_hspace(LatexProcessor* proc, Item elem) {
 
 static void cmd_vspace(LatexProcessor* proc, Item elem) {
     // \vspace{length} - vertical space
+    // In LaTeX, \vspace behavior depends on mode:
+    // - Horizontal mode (inline): stays inline with text → <span class="vspace-inline" style="margin-bottom:...">
+    // - Vertical mode (block): creates space between paragraphs → <span class="vspace" style="margin-bottom:...">
     HtmlGenerator* gen = proc->generator();
     
     // Extract length from children
@@ -3052,11 +3118,25 @@ static void cmd_vspace(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* length_str = stringbuf_to_string(sb);
     
-    // Create block spacer using divWithClassAndStyle for proper attribute handling
+    // Convert LaTeX length to pixels (approximate conversion)
+    // LaTeX units: pt, cm, mm, in, em, ex
+    // For now, use browser's ability to handle these units directly
+    double px_value = convertLatexLengthToPixels(length_str->chars);
+    
+    // Create style with margin-bottom (not height, as vertical space affects flow)
     char style[256];
-    snprintf(style, sizeof(style), "display:block;height:%s", length_str->chars);
-    gen->divWithClassAndStyle("vspace", style);
-    gen->closeElement();
+    snprintf(style, sizeof(style), "margin-bottom:%.3fpx", px_value);
+    
+    // Context-dependent output
+    if (proc->inParagraph()) {
+        // Inline context: output inline span within paragraph
+        gen->spanWithClassAndStyle("vspace-inline", style);
+        gen->closeElement();
+    } else {
+        // Block context: output span between paragraphs
+        gen->spanWithClassAndStyle("vspace", style);
+        gen->closeElement();
+    }
 }
 
 static void cmd_addvspace(LatexProcessor* proc, Item elem) {
@@ -3068,13 +3148,10 @@ static void cmd_addvspace(LatexProcessor* proc, Item elem) {
 static void cmd_smallbreak(LatexProcessor* proc, Item elem) {
     // \smallbreak - small vertical break with paragraph break
     // Ends current paragraph and outputs span between paragraphs
-    log_debug("cmd_smallbreak: calling endParagraph");
     proc->endParagraph();
     HtmlGenerator* gen = proc->generator();
-    log_debug("cmd_smallbreak: outputting span");
     gen->span("vspace smallskip");
     gen->closeElement();
-    log_debug("cmd_smallbreak: done");
 }
 
 static void cmd_medbreak(LatexProcessor* proc, Item elem) {
@@ -3099,7 +3176,6 @@ static void cmd_smallskip(LatexProcessor* proc, Item elem) {
     // - Horizontal mode (inline): stays inline with text → <span class="vspace-inline smallskip"></span>
     // - Vertical mode (block): creates space between paragraphs → <span class="vspace smallskip"></span>
     HtmlGenerator* gen = proc->generator();
-    log_debug("cmd_smallskip: inParagraph=%d", proc->inParagraph());
     
     if (proc->inParagraph()) {
         // Inline context: output inline span within paragraph
@@ -3392,26 +3468,28 @@ static void cmd_rlap(LatexProcessor* proc, Item elem) {
 
 static void cmd_centering(LatexProcessor* proc, Item elem) {
     // \centering - center alignment (declaration)
-    HtmlGenerator* gen = proc->generator();
-    gen->divWithStyle("text-align:center");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // This is a paragraph alignment declaration that affects following paragraphs
+    // in the current group scope. It does NOT wrap content in a div.
+    // Instead, we close the current paragraph and set alignment for the next one.
+    (void)elem;
+    proc->endParagraph();
+    proc->setNextParagraphAlignment("centering");
 }
 
 static void cmd_raggedright(LatexProcessor* proc, Item elem) {
     // \raggedright - ragged right (left-aligned, declaration)
-    HtmlGenerator* gen = proc->generator();
-    gen->divWithStyle("text-align:left");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // This is a paragraph alignment declaration
+    (void)elem;
+    proc->endParagraph();
+    proc->setNextParagraphAlignment("raggedright");
 }
 
 static void cmd_raggedleft(LatexProcessor* proc, Item elem) {
     // \raggedleft - ragged left (right-aligned, declaration)
-    HtmlGenerator* gen = proc->generator();
-    gen->divWithStyle("text-align:right");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // This is a paragraph alignment declaration
+    (void)elem;
+    proc->endParagraph();
+    proc->setNextParagraphAlignment("raggedleft");
 }
 
 // =============================================================================
@@ -5163,7 +5241,12 @@ void LatexProcessor::ensureParagraph() {
     // Only open paragraph if we're not inside an inline element
     if (!in_paragraph_ && inline_depth_ == 0) {
         log_debug("ensureParagraph: opening paragraph, restricted=%d", restricted_h_mode_);
-        if (next_paragraph_is_noindent_) {
+        if (next_paragraph_alignment_) {
+            // Alignment declaration takes precedence
+            gen_->p(next_paragraph_alignment_);
+            // Keep alignment for subsequent paragraphs (until explicitly changed)
+            // next_paragraph_alignment_ is NOT reset here
+        } else if (next_paragraph_is_noindent_) {
             gen_->p("noindent");
             next_paragraph_is_noindent_ = false;  // Reset the flag
         } else if (next_paragraph_is_continue_) {
@@ -5329,7 +5412,6 @@ void LatexProcessor::processNode(Item node) {
         // Command or environment - use ElementReader
         ElementReader elem_reader(node);
         const char* tag = elem_reader.tagName();
-        log_debug("processNode: ELEMENT tag='%s'", tag);
         
         // Special handling for root element
         if (strcmp(tag, "latex_document") == 0) {
@@ -5882,6 +5964,10 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     if (strcmp(cmd_name, "curly_group") == 0) {
         gen_->enterGroup();
         
+        // Save alignment state - alignment declarations are scoped to groups
+        // When we enter a group, save current alignment so we can restore it on exit
+        pushAlignmentScope();
+        
         // Save strip_next_leading_space_ flag - it should not persist beyond group scope
         // Commands like \ignorespaces only affect whitespace in the current group
         bool saved_strip_flag = strip_next_leading_space_;
@@ -5942,6 +6028,9 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         
         processChildren(elem);
         gen_->exitGroup();
+        
+        // Restore alignment state after exiting group
+        popAlignmentScope();
         
         // Restore strip_next_leading_space_ flag after group
         strip_next_leading_space_ = saved_strip_flag;
@@ -6178,7 +6267,6 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     auto it = command_table_.find(cmd_name);
     if (it != command_table_.end()) {
         // Call command handler
-        log_debug("processCommand: calling handler for '%s'", cmd_name);
         it->second(this, elem);
         
         // Exit inline element tracking
