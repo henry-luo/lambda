@@ -1139,7 +1139,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("image dimensions: %f x %f", lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
-            lycon->block.given_width = 40;  lycon->block.given_height = 30;
+            // use html width/height attributes if specified, otherwise use placeholder size
+            if (lycon->block.given_width <= 0) lycon->block.given_width = 40;
+            if (lycon->block.given_height <= 0) lycon->block.given_height = 30;
             // todo: use a placeholder
         }
     }
