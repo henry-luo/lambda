@@ -92,6 +92,11 @@
     }
   },
   {
+    "type": "char_command",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "command",
     "named": true,
     "fields": {
@@ -391,6 +396,10 @@
       "types": [
         {
           "type": "brack_group",
+          "named": true
+        },
+        {
+          "type": "char_command",
           "named": true
         },
         {
