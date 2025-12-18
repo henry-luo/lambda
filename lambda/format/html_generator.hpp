@@ -299,6 +299,7 @@ protected:
         std::string type;  // "figure", "table"
         std::string position;
         bool has_caption;
+        std::string anchor;  // anchor ID for label/ref
     };
     std::vector<FloatState> float_stack_;
     

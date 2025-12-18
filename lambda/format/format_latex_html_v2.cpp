@@ -4108,10 +4108,10 @@ static void cmd_table_float(LatexProcessor* proc, Item elem) {
         }
     }
     
-    // Use startFigure with "table" type
-    gen->startFigure(position);  // HtmlGenerator uses same method for both
+    // Use startTable/endTable for table float environment
+    gen->startTable(position);
     proc->processChildren(elem);
-    gen->endFigure();
+    gen->endTable();
 }
 
 static void cmd_caption(LatexProcessor* proc, Item elem) {
