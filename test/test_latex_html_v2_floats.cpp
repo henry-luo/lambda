@@ -78,7 +78,7 @@ TEST_F(LatexHtmlV2FloatsTest, SimpleFigure) {
     EXPECT_TRUE(strstr(html, "img") != nullptr) << "Should contain img tag";
     EXPECT_TRUE(strstr(html, "image.png") != nullptr) << "Should contain filename";
     EXPECT_TRUE(strstr(html, "caption") != nullptr) << "Should contain caption";
-    EXPECT_TRUE(strstr(html, "A sample figure") != nullptr) << "Should contain caption text";
+    EXPECT_TRUE(strstr(html, "A sample \xEF\xAC\x81gure") != nullptr) << "Should contain caption text (with fi ligature)";
 }
 
 TEST_F(LatexHtmlV2FloatsTest, FigureWithPosition) {
@@ -95,7 +95,7 @@ TEST_F(LatexHtmlV2FloatsTest, FigureWithPosition) {
     ASSERT_NE(html, nullptr);
     EXPECT_TRUE(strstr(html, "figure") != nullptr);
     EXPECT_TRUE(strstr(html, "photo.jpg") != nullptr);
-    EXPECT_TRUE(strstr(html, "Here positioned figure") != nullptr);
+    EXPECT_TRUE(strstr(html, "Here positioned \xEF\xAC\x81gure") != nullptr) << "Should contain caption with fi ligature";
 }
 
 TEST_F(LatexHtmlV2FloatsTest, FigureWithLabel) {
@@ -116,7 +116,8 @@ See Figure \ref{fig:diagram} for details.
     EXPECT_TRUE(strstr(html, "figure") != nullptr);
     EXPECT_TRUE(strstr(html, "diagram.pdf") != nullptr);
     EXPECT_TRUE(strstr(html, "A diagram") != nullptr);
-    EXPECT_TRUE(strstr(html, "fig:diagram") != nullptr) << "Should have label";
+    EXPECT_TRUE(strstr(html, "id=\"fig-") != nullptr) << "Should have figure anchor ID";
+    EXPECT_TRUE(strstr(html, "href=\"#fig-") != nullptr) << "Should have working reference link";
 }
 
 // =============================================================================
@@ -184,7 +185,8 @@ Table \ref{tab:results} shows the results.
     
     ASSERT_NE(html, nullptr);
     EXPECT_TRUE(strstr(html, "Results summary") != nullptr);
-    EXPECT_TRUE(strstr(html, "tab:results") != nullptr) << "Should have label";
+    EXPECT_TRUE(strstr(html, "id=\"tab-") != nullptr) << "Should have table anchor ID";
+    EXPECT_TRUE(strstr(html, "href=\"#tab-") != nullptr) << "Should have working reference link";
     EXPECT_TRUE(strstr(html, "42") != nullptr);
 }
 

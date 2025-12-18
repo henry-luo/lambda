@@ -12,6 +12,7 @@
 #include "../../lib/stringbuf.h"
 #include <string>
 #include <sstream>
+#include <iomanip>
 #include <cstring>
 #include <cstdlib>
 #include <strings.h>
@@ -226,8 +227,8 @@ static std::string convertApostrophes(const char* text) {
                 p++;  // Skip second hyphen
             } else {
                 // Single hyphen: keep as ASCII hyphen-minus (U+002D)
-                // LaTeX.js behavior: don't convert single hyphens to Unicode hyphen (U+2010)
-                // This preserves compatibility and avoids issues with technical content
+                // Note: text.tex expects Unicode hyphen (U+2010) but basic_text.tex and spacing.tex expect ASCII
+                // This is inconsistent across test fixtures. Keep ASCII to maintain baseline compatibility.
                 result += '-';
             }
         } else if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
@@ -282,7 +283,7 @@ public:
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false) {}
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -327,6 +328,10 @@ public:
     void enterRestrictedHMode() { restricted_h_mode_ = true; }
     void exitRestrictedHMode() { restricted_h_mode_ = false; }
     bool inRestrictedHMode() const { return restricted_h_mode_; }
+    
+    // Frame class flag - when true, next box command should add "frame" class
+    void set_next_box_frame(bool frame) { next_box_frame_ = frame; }
+    bool get_next_box_frame() const { return next_box_frame_; }
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
@@ -398,6 +403,10 @@ private:
     bool depth_exceeded_;  // Flag to halt processing when depth limit is exceeded
     
     // Restricted horizontal mode flag - set when inside \mbox, \fbox, etc.
+    
+    // Frame class flag - when true, next box command should add "frame" class
+    // Set by fbox when it contains a single parbox/minipage/makebox
+    bool next_box_frame_;
     // In this mode, linebreaks (\\, \newline) are ignored and \par becomes a space
     bool restricted_h_mode_;
     
@@ -686,6 +695,32 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
 // Command Implementations
 // =============================================================================
 
+// Helper to check if a command element has an empty curly_group child (terminator like \ss{})
+// If so, the {} consumes the command, so we shouldn't strip trailing space
+static bool hasEmptyCurlyGroupChild(Item elem) {
+    ElementReader reader(elem);
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* child_tag = child_elem.tagName();
+            if (child_tag && strcmp(child_tag, "curly_group") == 0) {
+                // Check if empty (no children or only whitespace)
+                // A curly_group with 0 children is definitely empty
+                if (child_elem.childCount() == 0) {
+                    return true;
+                }
+                // Has children but check if they're all empty/whitespace
+                // For simplicity, if it has any children, treat as non-empty
+                // The terminator {} should have exactly 0 children
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
 // =============================================================================
 // Diacritic Commands - Handle accent marks like \^{o}, \'{e}, etc.
 // =============================================================================
@@ -750,6 +785,10 @@ static void processDiacritic(LatexProcessor* proc, Item elem, char diacritic_cmd
         proc->ensureParagraph();
         char diacritic_str[2] = {diacritic_cmd, '\0'};
         gen->text(diacritic_str);
+        // Output ZWS if empty curly group (e.g., \^{} produces ^​)
+        if (hasEmptyCurlyGroupChild(elem)) {
+            gen->text("\xe2\x80\x8b");  // U+200B zero-width space
+        }
     }
 }
 
@@ -773,32 +812,6 @@ static void cmd_ogonek(LatexProcessor* proc, Item elem) { processDiacritic(proc,
 // =============================================================================
 // Special Character Commands - Non-combining special letters
 // =============================================================================
-
-// Helper to check if a command element has an empty curly_group child (terminator like \ss{})
-// If so, the {} consumes the command, so we shouldn't strip trailing space
-static bool hasEmptyCurlyGroupChild(Item elem) {
-    ElementReader reader(elem);
-    auto iter = reader.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem(child.item());
-            const char* child_tag = child_elem.tagName();
-            if (child_tag && strcmp(child_tag, "curly_group") == 0) {
-                // Check if empty (no children or only whitespace)
-                // A curly_group with 0 children is definitely empty
-                if (child_elem.childCount() == 0) {
-                    return true;
-                }
-                // Has children but check if they're all empty/whitespace
-                // For simplicity, if it has any children, treat as non-empty
-                // The terminator {} should have exactly 0 children
-                return false;
-            }
-        }
-    }
-    return false;
-}
 
 static void cmd_i(LatexProcessor* proc, Item elem) {
     // \i - Dotless i (ı) for use with diacritics
@@ -1954,15 +1967,15 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Three cases for \empty:
     // 1. \empty (no braces) - produces nothing (null command)
-    // 2. \empty{} (empty braces) - produces ZWSP for space preservation
-    // 3. \begin{empty}...\end{empty} (environment) - processes content + ZWSP
+    // 2. \empty{} (empty braces) - ZWS is output by general logic in processChildren
+    // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at end
     
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
     
     // Check what kind of children we have
-    bool has_curly_group = false;
-    bool has_content = false;
+    bool has_curly_group_only = false;
+    bool has_other_content = false;
     
     auto iter = reader.children();
     ItemReader child;
@@ -1971,29 +1984,27 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             if (tag && strcmp(tag, "curly_group") == 0) {
-                has_curly_group = true;
+                has_curly_group_only = true;
             } else {
                 // Has other content (e.g., paragraph from environment)
-                has_content = true;
+                has_other_content = true;
+                has_curly_group_only = false;
             }
         } else if (child.isString()) {
-            has_content = true;
+            has_other_content = true;
+            has_curly_group_only = false;
         }
     }
     
-    // Case 3: Environment with content - process children + ZWSP
-    if (has_content) {
+    // Case 3: Environment with content - process children + ZWS at end
+    // The ZWS at the end prevents the following space from being consumed
+    if (has_other_content) {
         proc->processChildren(elem);
         gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
         return;
     }
     
-    // Case 2: Empty braces - output ZWSP only
-    if (has_curly_group) {
-        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
-        return;
-    }
-    
+    // Case 2: Empty braces - ZWS will be output by processChildren, so do nothing here
     // Case 1: No braces - output nothing (null command)
 }
 
@@ -2073,11 +2084,14 @@ static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
 
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
-    // The {} serves as word terminator but produces no output
-    (void)elem;
+    // The {} serves as word terminator and produces ZWS for visual separation
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("\\");
+    // Output ZWS if empty curly group (e.g., \textbackslash{} produces \​)
+    if (hasEmptyCurlyGroupChild(elem)) {
+        gen->text("\xe2\x80\x8b");  // U+200B zero-width space
+    }
 }
 
 static void cmd_textellipsis(LatexProcessor* proc, Item elem) {
@@ -3266,6 +3280,27 @@ static void cmd_bigbreak(LatexProcessor* proc, Item elem) {
     gen->closeElement();
 }
 
+static void cmd_marginpar(LatexProcessor* proc, Item elem) {
+    // \marginpar{text} - margin note
+    // In HTML text mode, this is a no-op (consume argument but don't output)
+    (void)proc;
+    (void)elem;
+}
+
+static void cmd_index(LatexProcessor* proc, Item elem) {
+    // \index{entry} - index entry
+    // In HTML text mode, this is a no-op (consume argument but don't output)
+    (void)proc;
+    (void)elem;
+}
+
+static void cmd_glossary(LatexProcessor* proc, Item elem) {
+    // \glossary{entry} - glossary entry
+    // In HTML text mode, this is a no-op (consume argument but don't output)
+    (void)proc;
+    (void)elem;
+}
+
 static void cmd_smallskip(LatexProcessor* proc, Item elem) {
     // \smallskip - small vertical space
     // In LaTeX, skip commands have different behavior based on mode:
@@ -3337,18 +3372,16 @@ static void cmd_nolinebreak(LatexProcessor* proc, Item elem) {
 
 static void cmd_nopagebreak(LatexProcessor* proc, Item elem) {
     // \nopagebreak[priority] - discourage page break
-    // In HTML, use CSS page-break hint
-    HtmlGenerator* gen = proc->generator();
-    gen->spanWithStyle("page-break-inside:avoid");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // Complete no-op: no page concept in HTML text mode
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_pagebreak(LatexProcessor* proc, Item elem) {
     // \pagebreak[priority] - encourage page break
-    HtmlGenerator* gen = proc->generator();
-    gen->divWithClassAndStyle(nullptr, "page-break-after:always");
-    gen->closeElement();
+    // Complete no-op: no page concept in HTML text mode
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_clearpage(LatexProcessor* proc, Item elem) {
@@ -3368,8 +3401,8 @@ static void cmd_cleardoublepage(LatexProcessor* proc, Item elem) {
 static void cmd_enlargethispage(LatexProcessor* proc, Item elem) {
     // \enlargethispage{length} - enlarge current page
     // In HTML, this is a no-op (no page concept)
-    // Just process children
-    proc->processChildren(elem);
+    (void)proc;
+    (void)elem;
 }
 
 static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
@@ -3456,7 +3489,51 @@ static void cmd_mbox(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_fbox(LatexProcessor* proc, Item elem) {
-    // \fbox{text} - framed box (matches latex.js: calls framebox with "hbox frame")
+    // \fbox{text} - framed box
+    // Special handling: if content is a single parbox/minipage/makebox, add frame class to it
+    // Otherwise, wrap in hbox frame
+    
+    ElementReader reader(elem);
+    
+    // Check if content is a single box command (parbox, minipage, makebox)
+    std::vector<Item> children;
+    for (int64_t i = 0; i < reader.childCount(); i++) {
+        ItemReader child = reader.childAt(i);
+        TypeId type = get_type_id(child.item());
+        if (type == LMD_TYPE_STRING) {
+            String* str = child.asString();
+            // Skip whitespace-only strings
+            bool all_whitespace = true;
+            for (size_t j = 0; j < str->len; j++) {
+                if (!isspace((unsigned char)str->chars[j])) {
+                    all_whitespace = false;
+                    break;
+                }
+            }
+            if (!all_whitespace) {
+                children.push_back(child.item());
+            }
+        } else {
+            children.push_back(child.item());
+        }
+    }
+    
+    // If exactly one child and it's a box element (parbox, minipage, makebox), add frame class to it
+    if (children.size() == 1 && get_type_id(children[0]) == LMD_TYPE_ELEMENT) {
+        ElementReader child_elem(children[0]);
+        const char* elem_name = child_elem.tagName();
+        
+        if (strcmp(elem_name, "parbox") == 0 || strcmp(elem_name, "minipage") == 0 || 
+            strcmp(elem_name, "makebox") == 0) {
+            // Set flag in processor that next box should have frame class
+            proc->set_next_box_frame(true);
+            proc->processNode(children[0]);
+            proc->set_next_box_frame(false);
+            return;
+        }
+    }
+    
+    // Default: wrap in hbox frame
     _box(proc, elem, "hbox frame");
 }
 
@@ -3474,11 +3551,139 @@ static void cmd_frame(LatexProcessor* proc, Item elem) {
 
 static void cmd_parbox(LatexProcessor* proc, Item elem) {
     // \parbox[pos][height][inner-pos]{width}{text} - paragraph box
-    // TODO: Parse all parameters
+    // LaTeX.js: args.\parbox = <[ H i? l? i? l g ]>
+    // pos: c,t,b (default: c)
+    // height: optional length
+    // inner-pos: t,c,b,s (default: same as pos)
+    // 
+    // Parser output: <parbox [brack_group]* string string [element*]>
+    // First string is width, second string/elements are content
     HtmlGenerator* gen = proc->generator();
-    gen->div("parbox");
-    proc->processChildren(elem);
-    gen->closeElement();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    
+    // Default values
+    std::string pos = "c";
+    std::string inner_pos = "";
+    std::string width = "";
+    std::string height = "";
+    
+    // Collect bracket groups and text children
+    std::vector<std::string> brack_params;
+    std::vector<Item> content_items;
+    bool found_width = false;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                brack_params.push_back(std::string(str->chars, str->len));
+            } else {
+                // Content elements
+                if (found_width) {
+                    content_items.push_back(child.item());
+                }
+            }
+        } else if (child.isString()) {
+            String* str = child.asString();
+            if (!found_width && str && str->len > 0) {
+                // First string is width
+                width = std::string(str->chars, str->len);
+                found_width = true;
+            } else if (found_width) {
+                // Subsequent strings are content
+                content_items.push_back(child.item());
+            }
+        }
+    }
+    
+    // Parse bracket parameters
+    if (brack_params.size() >= 1) {
+        pos = brack_params[0];  // Position: t, c, b
+    }
+    if (brack_params.size() >= 2) {
+        height = brack_params[1];  // Height
+    }
+    if (brack_params.size() >= 3) {
+        inner_pos = brack_params[2];  // Inner position: t, c, b, s
+    }
+    
+    // Default inner_pos to pos if not specified
+    if (inner_pos.empty()) {
+        inner_pos = pos;
+    }
+    
+    // Build CSS classes
+    std::string classes = "parbox";
+    
+    if (!height.empty()) {
+        classes += " pbh";
+    }
+    
+    // Position classes
+    if (pos == "c") classes += " p-c";
+    else if (pos == "t") classes += " p-t";
+    else if (pos == "b") classes += " p-b";
+    
+    // Inner position classes
+    if (inner_pos == "s") classes += " stretch";
+    else if (inner_pos == "c") classes += " p-cc";
+    else if (inner_pos == "t") classes += " p-ct";
+    else if (inner_pos == "b") classes += " p-cb";
+    
+    // Add frame class if requested by fbox
+    if (proc->get_next_box_frame()) {
+        classes += " frame";
+    }
+    
+    // Build style attribute
+    std::stringstream style;
+    style << std::fixed << std::setprecision(3);  // 3 decimal places for pixel values
+    if (!width.empty()) {
+        // Convert LaTeX length to pixels
+        double width_px = convert_length_to_px(width.c_str());
+        if (width_px >= 0) {
+            style << "width:" << width_px << "px;";
+        } else {
+            style << "width:" << width << ";";  // fallback to original value
+        }
+    }
+    if (!height.empty()) {
+        // Convert LaTeX length to pixels
+        double height_px = convert_length_to_px(height.c_str());
+        if (height_px >= 0) {
+            style << "height:" << height_px << "px;";
+        } else {
+            style << "height:" << height << ";";  // fallback to original value
+        }
+    }
+    
+    // Generate HTML
+    proc->ensureParagraph();
+    std::stringstream attrs;
+    attrs << "class=\"" << classes << "\"";
+    if (!style.str().empty()) {
+        attrs << " style=\"" << style.str() << "\"";
+    }
+    
+    gen->writer()->openTagRaw("span", attrs.str().c_str());
+    gen->writer()->openTag("span");
+    
+    // Process content items
+    for (const Item& item : content_items) {
+        proc->processNode(item);
+    }
+    
+    gen->writer()->closeTag("span");
+    gen->writer()->closeTag("span");
 }
 
 static void cmd_makebox(LatexProcessor* proc, Item elem) {
@@ -3903,10 +4108,10 @@ static void cmd_table_float(LatexProcessor* proc, Item elem) {
         }
     }
     
-    // Use startFigure with "table" type
-    gen->startFigure(position);  // HtmlGenerator uses same method for both
+    // Use startTable/endTable for table float environment
+    gen->startTable(position);
     proc->processChildren(elem);
-    gen->endFigure();
+    gen->endTable();
 }
 
 static void cmd_caption(LatexProcessor* proc, Item elem) {
@@ -4850,18 +5055,48 @@ static void cmd_tableofcontents_star(LatexProcessor* proc, Item elem) {
 
 static void cmd_newcounter(LatexProcessor* proc, Item elem) {
     // \newcounter{counter}[parent]
-    // Defines a new counter
+    // Defines a new counter with optional parent for automatic reset
     HtmlGenerator* gen = proc->generator();
-    
-    // Extract counter name from children
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* counter_str = stringbuf_to_string(sb);
     
-    // Create the counter (initial value 0)
-    gen->newCounter(counter_str->chars);
+    // Find counter name (first curly_group or direct text)
+    std::string counter_name;
+    std::string parent_name;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isString()) {
+            String* str = child.asString();
+            if (str && str->len > 0 && counter_name.empty()) {
+                counter_name = std::string(str->chars, str->len);
+            }
+        } else if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group") == 0) {
+                if (counter_name.empty()) {
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    counter_name = std::string(str->chars, str->len);
+                }
+            } else if (strcmp(tag, "brack_group") == 0) {
+                // Optional parent parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                parent_name = std::string(str->chars, str->len);
+            }
+        }
+    }
+    
+    // Create the counter with optional parent
+    if (!counter_name.empty()) {
+        gen->newCounter(counter_name, parent_name);
+    }
 }
 
 static void cmd_setcounter(LatexProcessor* proc, Item elem) {
@@ -4985,12 +5220,24 @@ static void cmd_refstepcounter(LatexProcessor* proc, Item elem) {
 static void cmd_value(LatexProcessor* proc, Item elem) {
     // \value{counter}
     // Returns the value of a counter (for use in calculations)
-    // In HTML, output "0" as placeholder
+    // Note: In LaTeX, \value returns a numeric value that can be used in expressions
+    // For now, we output the counter value as text
     HtmlGenerator* gen = proc->generator();
-    gen->text("0");
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = std::to_string(value);
+        gen->text(output.c_str());
+    } else {
+        gen->text("0");
+    }
 }
 
-/* Commented out - need to implement helper methods toRoman, toAlph, toFnSymbol in HtmlGenerator
 static void cmd_arabic(LatexProcessor* proc, Item elem) {
     // \arabic{counter} - format counter as arabic numerals (1, 2, 3, ...)
     HtmlGenerator* gen = proc->generator();
@@ -5000,10 +5247,15 @@ static void cmd_arabic(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = std::to_string(value);
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatArabic(value);
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        // Counter doesn't exist - output counter name as fallback
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_roman(LatexProcessor* proc, Item elem) {
@@ -5015,10 +5267,14 @@ static void cmd_roman(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toRoman(value, false);  // lowercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatRoman(value, false);  // lowercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_Roman(LatexProcessor* proc, Item elem) {
@@ -5030,10 +5286,14 @@ static void cmd_Roman(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toRoman(value, true);  // uppercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatRoman(value, true);  // uppercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_alph(LatexProcessor* proc, Item elem) {
@@ -5045,10 +5305,14 @@ static void cmd_alph(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toAlph(value, false);  // lowercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatAlph(value, false);  // lowercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_Alph(LatexProcessor* proc, Item elem) {
@@ -5060,10 +5324,14 @@ static void cmd_Alph(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toAlph(value, true);  // uppercase
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatAlph(value, true);  // uppercase
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
 
 static void cmd_fnsymbol(LatexProcessor* proc, Item elem) {
@@ -5075,12 +5343,15 @@ static void cmd_fnsymbol(LatexProcessor* proc, Item elem) {
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
     
-    int value = gen->getCounter(counter_str->chars);
-    std::string output = gen->toFnSymbol(value);
-    proc->ensureParagraph();
-    gen->text(output.c_str());
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = gen->formatFnSymbol(value);
+        proc->ensureParagraph();
+        gen->text(output.c_str());
+    } else {
+        gen->text(counter_str->chars);
+    }
 }
-*/
 
 static void cmd_newlength(LatexProcessor* proc, Item elem) {
     // \newlength{\lengthcmd}
@@ -5256,6 +5527,9 @@ void LatexProcessor::initCommandTable() {
     command_table_["nopagebreak"] = cmd_nopagebreak;
     command_table_["pagebreak"] = cmd_pagebreak;
     command_table_["clearpage"] = cmd_clearpage;
+    command_table_["marginpar"] = cmd_marginpar;
+    command_table_["index"] = cmd_index;
+    command_table_["glossary"] = cmd_glossary;
     command_table_["cleardoublepage"] = cmd_cleardoublepage;
     command_table_["enlargethispage"] = cmd_enlargethispage;
     command_table_["negthinspace"] = cmd_negthinspace;
@@ -5358,13 +5632,14 @@ void LatexProcessor::initCommandTable() {
     command_table_["stepcounter"] = cmd_stepcounter;
     command_table_["refstepcounter"] = cmd_refstepcounter;
     command_table_["value"] = cmd_value;
-    // Commented out - need to implement helper methods first
-    // command_table_["arabic"] = cmd_arabic;
-    // command_table_["roman"] = cmd_roman;
-    // command_table_["Roman"] = cmd_Roman;
-    // command_table_["alph"] = cmd_alph;
-    // command_table_["Alph"] = cmd_Alph;
-    // command_table_["fnsymbol"] = cmd_fnsymbol;
+    // Counter display commands (now implemented)
+    command_table_["arabic"] = cmd_arabic;
+    command_table_["roman"] = cmd_roman;
+    command_table_["Roman"] = cmd_Roman;
+    command_table_["alph"] = cmd_alph;
+    command_table_["Alph"] = cmd_Alph;
+    command_table_["fnsymbol"] = cmd_fnsymbol;
+    // \the<counter> commands are handled dynamically in processCommand()
     command_table_["newlength"] = cmd_newlength;
     command_table_["setlength"] = cmd_setlength;
 }
@@ -5947,9 +6222,10 @@ void LatexProcessor::processChildren(Item elem) {
                                 std::string result = applyDiacritic(diacritic_cmd, str->chars);
                                 gen_->text(result.c_str());
                             } else {
-                                // Empty curly_group (like \^{}) - just output the diacritic char
+                                // Empty curly_group (like \^{}) - output diacritic char + ZWS
                                 ensureParagraph();
                                 gen_->text(tag);
+                                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
                             }
                             i++;  // Skip the curly_group (even if empty)
                             continue;
@@ -6045,6 +6321,92 @@ void LatexProcessor::processChildren(Item elem) {
         
         // Normal processing for other nodes
         processNode(child_reader.item());
+        
+        // LaTeX behavior: commands consume following space, but with exceptions:
+        // - \macro{} with empty braces FOLLOWING: outputs ZWS, does NOT consume space
+        // - \macro (no args): consumes space
+        // - \macro{arg} (with args): consumes space
+        // - \begin{empty}...\end{empty}: outputs ZWS, does NOT consume space
+        // 
+        // Key distinction: \empty{} has {} as a SIBLING (following element)
+        //                  \gobbleO{} has {} as a CHILD (argument to command)
+        if (child_reader.isElement()) {
+            // Check if this is an "empty" command or "curly_group" - they output ZWS and preserve spaces
+            ElementReader cmd_elem(child_reader.item());
+            const char* cmd_name = cmd_elem.tagName();
+            
+            bool is_empty_cmd = (cmd_name && strcmp(cmd_name, "empty") == 0);
+            bool is_curly_group = (cmd_name && strcmp(cmd_name, "curly_group") == 0);
+            // Also skip space consumption if the command has an empty curly_group child (e.g., \textbackslash{})
+            bool has_empty_curly_child = hasEmptyCurlyGroupChild(child_reader.item());
+            bool skip_space_consumption = is_empty_cmd || is_curly_group || has_empty_curly_child;
+            
+            // Check if NEXT sibling is an empty curly_group (e.g., "\empty {}")
+            bool next_is_empty_curly = false;
+            if (i + 1 < count) {
+                ItemReader next_reader = elem_reader.childAt(i + 1);
+                if (next_reader.isElement()) {
+                    ElementReader next_elem(next_reader.item());
+                    const char* next_tag = next_elem.tagName();
+                    if (next_tag && strcmp(next_tag, "curly_group") == 0) {
+                        // Check if the curly_group is empty (no children or only whitespace)
+                        auto group_iter = next_elem.children();
+                        ItemReader group_child;
+                        bool has_content = false;
+                        while (group_iter.next(&group_child)) {
+                            if (group_child.isElement()) {
+                                has_content = true;
+                                break;
+                            } else if (group_child.isString()) {
+                                const char* str = group_child.cstring();
+                                if (str && str[0] != '\0') {
+                                    // Check if it's not just whitespace
+                                    bool has_non_ws = false;
+                                    for (const char* p = str; *p; p++) {
+                                        if (!isspace(*p)) {
+                                            has_non_ws = true;
+                                            break;
+                                        }
+                                    }
+                                    if (has_non_ws) {
+                                        has_content = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!has_content) {
+                            next_is_empty_curly = true;
+                        }
+                    }
+                }
+            }
+            
+            if (next_is_empty_curly) {
+                // Next sibling is empty {}: output ZWS, skip the empty braces, don't consume space
+                ensureParagraph();
+                gen_->text("\u200B");
+                // Skip the next child (the empty curly_group)
+                i++;
+            } else if (!skip_space_consumption && i + 1 < count) {
+                // Standard behavior: consume following space (but NOT for empty command or curly_group)
+                ItemReader next_reader = elem_reader.childAt(i + 1);
+                if (next_reader.isString()) {
+                    const char* next_text = next_reader.cstring();
+                    if (next_text && (next_text[0] == ' ' || next_text[0] == '\t')) {
+                        // Next sibling starts with whitespace - consume it by processing
+                        // the text starting from position 1 instead of 0
+                        if (next_text[1] != '\0') {
+                            // Process remaining text after first space
+                            processText(next_text + 1);
+                        }
+                        // Skip the next child since we processed it here
+                        i++;
+                        continue;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -6323,7 +6685,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             if (is_empty_group) {
                 // Empty groups at doc level serve as terminators (e.g., \^{}, \~{})
                 should_output_zws = true;
-            } else {
+            } else{
                 // Non-empty groups: only output if trailing space indicates more content
                 should_output_zws = has_trailing_space;
             }
@@ -6537,6 +6899,21 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         ensureParagraph();
     }
     
+    // Check for \the<counter> commands (e.g., \thec, \thesection)
+    // These are automatically created by \newcounter{name} and format the counter
+    if (strncmp(cmd_name, "the", 3) == 0 && strlen(cmd_name) > 3) {
+        const char* counter_name = cmd_name + 3;  // Skip "the" prefix
+        if (gen_->hasCounter(counter_name)) {
+            // Format counter as arabic (default representation)
+            int value = gen_->getCounter(counter_name);
+            std::string output = gen_->formatArabic(value);
+            ensureParagraph();
+            gen_->text(output.c_str());
+            return;
+        }
+        // Counter doesn't exist - fall through to unknown command handling
+    }
+    
     // Look up command in table
     auto it = command_table_.find(cmd_name);
     if (it != command_table_.end()) {
@@ -6574,7 +6951,7 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     if (text_mode) {
         // Text mode - generate HTML string
         // Disable pretty print to avoid extra newlines in output
-        writer = new TextHtmlWriter(pool, false);
+        writer = new TextHtmlWriter(pool, false);  // Pretty-printing not needed since tests normalize whitespace
     } else {
         // Node mode - generate Element tree
         writer = new NodeHtmlWriter(input);
