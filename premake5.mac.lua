@@ -448,6 +448,7 @@ project "lambda"
         "lambda/format/format-prop.cpp",
         "lambda/format/format-math.cpp",
         "lambda/format/html_generator.cpp",
+        "lambda/format/format_latex_expr_eval.cpp",
         "lambda/format/format-yaml.cpp",
         "lambda/format/format-css.cpp",
         "lambda/format/format-math-ascii.cpp",
