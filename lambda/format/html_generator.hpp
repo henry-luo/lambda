@@ -111,8 +111,8 @@ public:
     // =============================================================================
     
     // Start list environment (itemize, enumerate, description)
-    void startItemize();
-    void startEnumerate();
+    void startItemize(const char* alignment = nullptr);
+    void startEnumerate(const char* alignment = nullptr);
     void startDescription();
     
     // End list environment
@@ -290,6 +290,7 @@ protected:
     struct ListState {
         std::string type;  // "itemize", "enumerate", "description"
         int item_count;
+        std::string alignment;  // "centering", "raggedright", "raggedleft", or empty
     };
     std::vector<ListState> list_stack_;
     
