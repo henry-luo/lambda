@@ -12,6 +12,7 @@
 #include "../../lib/stringbuf.h"
 #include <string>
 #include <sstream>
+#include <iomanip>
 #include <cstring>
 #include <cstdlib>
 #include <strings.h>
@@ -282,7 +283,7 @@ public:
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false) {}
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -327,6 +328,10 @@ public:
     void enterRestrictedHMode() { restricted_h_mode_ = true; }
     void exitRestrictedHMode() { restricted_h_mode_ = false; }
     bool inRestrictedHMode() const { return restricted_h_mode_; }
+    
+    // Frame class flag - when true, next box command should add "frame" class
+    void set_next_box_frame(bool frame) { next_box_frame_ = frame; }
+    bool get_next_box_frame() const { return next_box_frame_; }
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
@@ -398,6 +403,10 @@ private:
     bool depth_exceeded_;  // Flag to halt processing when depth limit is exceeded
     
     // Restricted horizontal mode flag - set when inside \mbox, \fbox, etc.
+    
+    // Frame class flag - when true, next box command should add "frame" class
+    // Set by fbox when it contains a single parbox/minipage/makebox
+    bool next_box_frame_;
     // In this mode, linebreaks (\\, \newline) are ignored and \par becomes a space
     bool restricted_h_mode_;
     
@@ -3473,7 +3482,51 @@ static void cmd_mbox(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_fbox(LatexProcessor* proc, Item elem) {
-    // \fbox{text} - framed box (matches latex.js: calls framebox with "hbox frame")
+    // \fbox{text} - framed box
+    // Special handling: if content is a single parbox/minipage/makebox, add frame class to it
+    // Otherwise, wrap in hbox frame
+    
+    ElementReader reader(elem);
+    
+    // Check if content is a single box command (parbox, minipage, makebox)
+    std::vector<Item> children;
+    for (int64_t i = 0; i < reader.childCount(); i++) {
+        ItemReader child = reader.childAt(i);
+        TypeId type = get_type_id(child.item());
+        if (type == LMD_TYPE_STRING) {
+            String* str = child.asString();
+            // Skip whitespace-only strings
+            bool all_whitespace = true;
+            for (size_t j = 0; j < str->len; j++) {
+                if (!isspace((unsigned char)str->chars[j])) {
+                    all_whitespace = false;
+                    break;
+                }
+            }
+            if (!all_whitespace) {
+                children.push_back(child.item());
+            }
+        } else {
+            children.push_back(child.item());
+        }
+    }
+    
+    // If exactly one child and it's a box element (parbox, minipage, makebox), add frame class to it
+    if (children.size() == 1 && get_type_id(children[0]) == LMD_TYPE_ELEMENT) {
+        ElementReader child_elem(children[0]);
+        const char* elem_name = child_elem.tagName();
+        
+        if (strcmp(elem_name, "parbox") == 0 || strcmp(elem_name, "minipage") == 0 || 
+            strcmp(elem_name, "makebox") == 0) {
+            // Set flag in processor that next box should have frame class
+            proc->set_next_box_frame(true);
+            proc->processNode(children[0]);
+            proc->set_next_box_frame(false);
+            return;
+        }
+    }
+    
+    // Default: wrap in hbox frame
     _box(proc, elem, "hbox frame");
 }
 
@@ -3495,8 +3548,12 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     // pos: c,t,b (default: c)
     // height: optional length
     // inner-pos: t,c,b,s (default: same as pos)
+    // 
+    // Parser output: <parbox [brack_group]* string string [element*]>
+    // First string is width, second string/elements are content
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
     
     // Default values
     std::string pos = "c";
@@ -3504,78 +3561,57 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     std::string width = "";
     std::string height = "";
     
-    // Parse children to extract parameters
-    // Expected structure: [brack_group], [brack_group], [brack_group], {curly_group}, {curly_group}
-    std::vector<Item> brack_groups;
-    std::vector<Item> curly_groups;
+    // Collect bracket groups and text children
+    std::vector<std::string> brack_params;
+    std::vector<Item> content_items;
+    bool found_width = false;
     
     for (int64_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
+        
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
             
             if (strcmp(tag, "brack_group") == 0) {
-                brack_groups.push_back(child.item());
-            } else if (strcmp(tag, "curly_group") == 0) {
-                curly_groups.push_back(child.item());
+                // Optional parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                brack_params.push_back(std::string(str->chars, str->len));
+            } else {
+                // Content elements
+                if (found_width) {
+                    content_items.push_back(child.item());
+                }
+            }
+        } else if (child.isString()) {
+            String* str = child.asString();
+            if (!found_width && str && str->len > 0) {
+                // First string is width
+                width = std::string(str->chars, str->len);
+                found_width = true;
+            } else if (found_width) {
+                // Subsequent strings are content
+                content_items.push_back(child.item());
             }
         }
     }
     
-    // Parse bracket groups (optional arguments)
-    if (brack_groups.size() >= 1) {
-        // First bracket: position (t, c, b)
-        ElementReader bg0(brack_groups[0]);
-        Pool* pool = proc->pool();
-        StringBuf* sb = stringbuf_new(pool);
-        bg0.textContent(sb);
-        String* pos_str = stringbuf_to_string(sb);
-        if (pos_str->len > 0) {
-            pos = std::string(pos_str->chars, pos_str->len);
-        }
+    // Parse bracket parameters
+    if (brack_params.size() >= 1) {
+        pos = brack_params[0];  // Position: t, c, b
     }
-    
-    if (brack_groups.size() >= 2) {
-        // Second bracket: height
-        ElementReader bg1(brack_groups[1]);
-        Pool* pool = proc->pool();
-        StringBuf* sb = stringbuf_new(pool);
-        bg1.textContent(sb);
-        String* height_str = stringbuf_to_string(sb);
-        if (height_str->len > 0) {
-            height = std::string(height_str->chars, height_str->len);
-        }
+    if (brack_params.size() >= 2) {
+        height = brack_params[1];  // Height
     }
-    
-    if (brack_groups.size() >= 3) {
-        // Third bracket: inner position (t, c, b, s)
-        ElementReader bg2(brack_groups[2]);
-        Pool* pool = proc->pool();
-        StringBuf* sb = stringbuf_new(pool);
-        bg2.textContent(sb);
-        String* inner_str = stringbuf_to_string(sb);
-        if (inner_str->len > 0) {
-            inner_pos = std::string(inner_str->chars, inner_str->len);
-        }
+    if (brack_params.size() >= 3) {
+        inner_pos = brack_params[2];  // Inner position: t, c, b, s
     }
     
     // Default inner_pos to pos if not specified
     if (inner_pos.empty()) {
         inner_pos = pos;
-    }
-    
-    // Parse curly groups (required arguments)
-    if (curly_groups.size() >= 1) {
-        // First curly: width
-        ElementReader cg0(curly_groups[0]);
-        Pool* pool = proc->pool();
-        StringBuf* sb = stringbuf_new(pool);
-        cg0.textContent(sb);
-        String* width_str = stringbuf_to_string(sb);
-        if (width_str->len > 0) {
-            width = std::string(width_str->chars, width_str->len);
-        }
     }
     
     // Build CSS classes
@@ -3596,14 +3632,31 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     else if (inner_pos == "t") classes += " p-ct";
     else if (inner_pos == "b") classes += " p-cb";
     
+    // Add frame class if requested by fbox
+    if (proc->get_next_box_frame()) {
+        classes += " frame";
+    }
+    
     // Build style attribute
     std::stringstream style;
+    style << std::fixed << std::setprecision(3);  // 3 decimal places for pixel values
     if (!width.empty()) {
-        // Convert LaTeX length to CSS (simplified - just use the value)
-        style << "width:" << width << ";";
+        // Convert LaTeX length to pixels
+        double width_px = convert_length_to_px(width.c_str());
+        if (width_px >= 0) {
+            style << "width:" << width_px << "px;";
+        } else {
+            style << "width:" << width << ";";  // fallback to original value
+        }
     }
     if (!height.empty()) {
-        style << "height:" << height << ";";
+        // Convert LaTeX length to pixels
+        double height_px = convert_length_to_px(height.c_str());
+        if (height_px >= 0) {
+            style << "height:" << height_px << "px;";
+        } else {
+            style << "height:" << height << ";";  // fallback to original value
+        }
     }
     
     // Generate HTML
@@ -3617,9 +3670,9 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     gen->writer()->openTagRaw("span", attrs.str().c_str());
     gen->writer()->openTag("span");
     
-    // Process text content (second curly group)
-    if (curly_groups.size() >= 2) {
-        proc->processNode(curly_groups[1]);
+    // Process content items
+    for (const Item& item : content_items) {
+        proc->processNode(item);
     }
     
     gen->writer()->closeTag("span");
@@ -4995,18 +5048,48 @@ static void cmd_tableofcontents_star(LatexProcessor* proc, Item elem) {
 
 static void cmd_newcounter(LatexProcessor* proc, Item elem) {
     // \newcounter{counter}[parent]
-    // Defines a new counter
+    // Defines a new counter with optional parent for automatic reset
     HtmlGenerator* gen = proc->generator();
-    
-    // Extract counter name from children
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* counter_str = stringbuf_to_string(sb);
     
-    // Create the counter (initial value 0)
-    gen->newCounter(counter_str->chars);
+    // Find counter name (first curly_group or direct text)
+    std::string counter_name;
+    std::string parent_name;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isString()) {
+            String* str = child.asString();
+            if (str && str->len > 0 && counter_name.empty()) {
+                counter_name = std::string(str->chars, str->len);
+            }
+        } else if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group") == 0) {
+                if (counter_name.empty()) {
+                    StringBuf* sb = stringbuf_new(pool);
+                    child_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    counter_name = std::string(str->chars, str->len);
+                }
+            } else if (strcmp(tag, "brack_group") == 0) {
+                // Optional parent parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                parent_name = std::string(str->chars, str->len);
+            }
+        }
+    }
+    
+    // Create the counter with optional parent
+    if (!counter_name.empty()) {
+        gen->newCounter(counter_name, parent_name);
+    }
 }
 
 static void cmd_setcounter(LatexProcessor* proc, Item elem) {
@@ -5130,9 +5213,22 @@ static void cmd_refstepcounter(LatexProcessor* proc, Item elem) {
 static void cmd_value(LatexProcessor* proc, Item elem) {
     // \value{counter}
     // Returns the value of a counter (for use in calculations)
-    // In HTML, output "0" as placeholder
+    // Note: In LaTeX, \value returns a numeric value that can be used in expressions
+    // For now, we output the counter value as text
     HtmlGenerator* gen = proc->generator();
-    gen->text("0");
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* counter_str = stringbuf_to_string(sb);
+    
+    if (gen->hasCounter(counter_str->chars)) {
+        int value = gen->getCounter(counter_str->chars);
+        std::string output = std::to_string(value);
+        gen->text(output.c_str());
+    } else {
+        gen->text("0");
+    }
 }
 
 static void cmd_arabic(LatexProcessor* proc, Item elem) {
@@ -6845,7 +6941,7 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     if (text_mode) {
         // Text mode - generate HTML string
         // Disable pretty print to avoid extra newlines in output
-        writer = new TextHtmlWriter(pool, false);
+        writer = new TextHtmlWriter(pool, false);  // Pretty-printing not needed since tests normalize whitespace
     } else {
         // Node mode - generate Element tree
         writer = new NodeHtmlWriter(input);
