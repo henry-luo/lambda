@@ -465,7 +465,7 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE || tag_id == HTM_TAG_SVG ||
             tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
             tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
-            tag_id == HTM_TAG_TEMPLATE) {
+            tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA) {
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
         } else if (tag_id == HTM_TAG_TABLE) {
