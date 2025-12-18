@@ -29,46 +29,26 @@
 // whether elements have proper HTML structure or use anonymous box wrappers.
 
 ViewTableRow* ViewTable::first_row() {
-    // If table acts as its own tbody (is_annoy_tbody), rows are direct children
-    if (acts_as_tbody()) {
-        for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
-            if (child->view_type == RDT_VIEW_TABLE_ROW) {
-                return (ViewTableRow*)child;
-            }
-            // Also check for cells if table acts as row too
-            if (acts_as_row() && child->view_type == RDT_VIEW_TABLE_CELL) {
-                // Table is acting as both tbody and tr - cells are direct children
-                // Return nullptr for row iteration; use cell iteration instead
-                return nullptr;
-            }
-        }
-    }
-
-    // Otherwise, look in row groups
+    // Direct children first (handles both normal rows and acts_as_tbody case)
     for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
-        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            ViewTableRowGroup* group = (ViewTableRowGroup*)child;
-            ViewTableRow* row = group->first_row();
-            if (row) return row;
-        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            // Direct row child (table acting as tbody)
+        if (child->view_type == RDT_VIEW_TABLE_ROW) {
             return (ViewTableRow*)child;
+        }
+        // Look inside row groups
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            ViewTableRow* row = ((ViewTableRowGroup*)child)->first_row();
+            if (row) return row;
         }
     }
     return nullptr;
 }
 
 ViewBlock* ViewTable::first_row_group() {
-    // If table acts as its own tbody, return the table itself
-    if (acts_as_tbody()) {
-        return this;
-    }
+    // If table acts as tbody, return self; otherwise find first row group child
+    if (acts_as_tbody()) return this;
 
-    // Otherwise, find first actual row group
     for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
-        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            return child;
-        }
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) return child;
     }
     return nullptr;
 }
@@ -76,29 +56,22 @@ ViewBlock* ViewTable::first_row_group() {
 ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
 
-    // First try next sibling in same parent
+    // Try next sibling first
     for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
-        if (sibling->view_type == RDT_VIEW_TABLE_ROW) {
-            return (ViewTableRow*)sibling;
-        }
+        if (sibling->view_type == RDT_VIEW_TABLE_ROW) return (ViewTableRow*)sibling;
     }
 
-    // If no more rows in current group, try next row group or direct rows
+    // If in row group, try next row group
     ViewBlock* parent = (ViewBlock*)current->parent;
     if (parent && parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-        // Find next row group or direct row after this group
-        for (ViewBlock* next_item = (ViewBlock*)parent->next_sibling; next_item; next_item = (ViewBlock*)next_item->next_sibling) {
-            if (next_item->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                ViewTableRowGroup* group = (ViewTableRowGroup*)next_item;
-                ViewTableRow* row = group->first_row();
+        for (ViewBlock* next = (ViewBlock*)parent->next_sibling; next; next = (ViewBlock*)next->next_sibling) {
+            if (next->view_type == RDT_VIEW_TABLE_ROW) return (ViewTableRow*)next;
+            if (next->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                ViewTableRow* row = ((ViewTableRowGroup*)next)->first_row();
                 if (row) return row;
-            } else if (next_item->view_type == RDT_VIEW_TABLE_ROW) {
-                // Found a direct row after row groups
-                return (ViewTableRow*)next_item;
             }
         }
     }
-
     return nullptr;
 }
 
