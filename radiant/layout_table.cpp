@@ -302,12 +302,12 @@ static bool is_cell_empty(ViewTableCell* cell) {
                     uint32_t codepoint;
                     int bytes = utf8_to_codepoint(p, &codepoint);
                     if (bytes <= 0) break;  // Invalid UTF-8
-                    
+
                     // Check for Unicode whitespace
                     // Basic ASCII whitespace: space, tab, LF, VT, FF, CR
                     bool is_ws = (codepoint == 0x0020 || codepoint == 0x0009 || codepoint == 0x000A ||
                                   codepoint == 0x000B || codepoint == 0x000C || codepoint == 0x000D);
-                    
+
                     // Unicode whitespace characters
                     if (!is_ws) {
                         // U+00A0: Non-breaking space (NBSP)
@@ -322,12 +322,12 @@ static bool is_cell_empty(ViewTableCell* cell) {
                                  (codepoint >= 0x2000 && codepoint <= 0x200A) ||
                                  codepoint == 0x202F || codepoint == 0x205F || codepoint == 0x3000);
                     }
-                    
+
                     if (!is_ws) {
                         // Non-whitespace content found
                         return false;
                     }
-                    
+
                     p += bytes;
                 }
             }
