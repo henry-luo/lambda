@@ -509,9 +509,28 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 
 void print_view_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
-    strbuf_append_format(buf, "[view-%s:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
+    strbuf_append_format(buf, "[view-%s:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f",
         block->view_name(), block->node_name(),
         (float)block->x, (float)block->y, (float)block->width, (float)block->height);
+
+    // For IMG elements, print the src attribute
+    if (block->tag() == HTM_TAG_IMG) {
+        const char* src = block->get_attribute("src");
+        if (src) {
+            strbuf_append_str(buf, ", src=\"");
+            strbuf_append_str(buf, src);
+            strbuf_append_str(buf, "\"");
+        }
+        // Also print if the image is loaded
+        if (block->embed && block->embed->img) {
+            strbuf_append_format(buf, ", img-loaded(%dx%d)",
+                block->embed->img->width, block->embed->img->height);
+        } else {
+            strbuf_append_str(buf, ", img-NOT-LOADED");
+        }
+    }
+
+    strbuf_append_str(buf, "\n");
     print_block_props(block, buf, indent + 2);
     print_inline_props((ViewSpan*)block, buf, indent+2);
     print_view_group((ViewElement*)block, buf, indent+2);
