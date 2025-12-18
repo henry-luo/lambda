@@ -607,6 +607,46 @@ static void apply_fixed_row_height(LayoutContext* lycon, ViewTableRow* trow, flo
 //   4. Style priority: double > solid > dashed > dotted > ridge > outset > groove > inset
 //   5. Top/left wins over bottom/right (arbitrary tie-breaker)
 
+// Table metadata cache - Phase 3 optimization
+// Stores pre-analyzed table structure to avoid multiple DOM iterations
+struct TableMetadata {
+    int column_count;           // Total columns
+    int row_count;              // Total rows
+    bool* grid_occupied;        // colspan/rowspan tracking (row_count × column_count)
+    float* col_widths;          // Final column widths
+    float* col_min_widths;      // Minimum column widths (CSS MCW)
+    float* col_max_widths;      // Maximum column widths (CSS PCW)
+    float* row_heights;         // Row heights for rowspan calculation
+    float* row_y_positions;     // Row Y positions for rowspan calculation
+    bool* row_collapsed;        // Visibility: collapse tracking per row
+
+    TableMetadata(int cols, int rows)
+        : column_count(cols), row_count(rows) {
+        grid_occupied = (bool*)calloc(rows * cols, sizeof(bool));
+        col_widths = (float*)calloc(cols, sizeof(float));
+        col_min_widths = (float*)calloc(cols, sizeof(float));  // Minimum content widths (CSS MCW)
+        col_max_widths = (float*)calloc(cols, sizeof(float));  // Preferred content widths (CSS PCW)
+        row_heights = (float*)calloc(rows, sizeof(float));
+        row_y_positions = (float*)calloc(rows, sizeof(float));
+        row_collapsed = (bool*)calloc(rows, sizeof(bool));
+    }
+
+    ~TableMetadata() {
+        free(grid_occupied);
+        free(col_widths);
+        free(col_min_widths);
+        free(col_max_widths);
+        free(row_heights);
+        free(row_y_positions);
+        free(row_collapsed);
+    }
+
+    // Grid accessor
+    inline bool& grid(int row, int col) {
+        return grid_occupied[row * column_count + col];
+    }
+};
+
 struct CollapsedBorder {
     float width;
     CssEnum style;      // CSS_VALUE_NONE, CSS_VALUE_HIDDEN, CSS_VALUE_SOLID, etc.
@@ -706,42 +746,38 @@ static CollapsedBorder get_cell_border(ViewTableCell* cell, int side) {
 }
 
 // Apply collapsed border to cell (modifies cell's border property)
-static void apply_collapsed_border_to_cell(ViewTableCell* cell, const CollapsedBorder& border, int side) {
+// CSS 2.1 §17.6.2: In the collapsing border model, borders are centered on grid lines
+// For internal borders (between two cells), each cell paints half the border
+// For edge borders (at table edge), the cell paints the full border
+static void apply_collapsed_border_to_cell(ViewTableCell* cell, const CollapsedBorder& border, int side, bool is_edge) {
     if (!cell || !cell->bound || !cell->bound->border) return;
 
     BorderProp* bp = cell->bound->border;
+
+    // CSS 2.1: Edge borders get full width, internal borders get half width
+    // This ensures borders are centered on grid lines between cells
+    float width = is_edge ? border.width : (border.width / 2.0f);
+
     switch (side) {
         case 0: // top
-            bp->width.top = border.width / 2.0f;  // Split border between cells
+            bp->width.top = width;
             bp->top_style = border.style;
-            bp->top_color.r = border.color.r;
-            bp->top_color.g = border.color.g;
-            bp->top_color.b = border.color.b;
-            bp->top_color.a = border.color.a;
+            bp->top_color = border.color;
             break;
         case 1: // right
-            bp->width.right = border.width / 2.0f;
+            bp->width.right = width;
             bp->right_style = border.style;
-            bp->right_color.r = border.color.r;
-            bp->right_color.g = border.color.g;
-            bp->right_color.b = border.color.b;
-            bp->right_color.a = border.color.a;
+            bp->right_color = border.color;
             break;
         case 2: // bottom
-            bp->width.bottom = border.width / 2.0f;
+            bp->width.bottom = width;
             bp->bottom_style = border.style;
-            bp->bottom_color.r = border.color.r;
-            bp->bottom_color.g = border.color.g;
-            bp->bottom_color.b = border.color.b;
-            bp->bottom_color.a = border.color.a;
+            bp->bottom_color = border.color;
             break;
         case 3: // left
-            bp->width.left = border.width / 2.0f;
+            bp->width.left = width;
             bp->left_style = border.style;
-            bp->left_color.r = border.color.r;
-            bp->left_color.g = border.color.g;
-            bp->left_color.b = border.color.b;
-            bp->left_color.a = border.color.a;
+            bp->left_color = border.color;
             break;
     }
 }
@@ -749,70 +785,273 @@ static void apply_collapsed_border_to_cell(ViewTableCell* cell, const CollapsedB
 // Forward declaration
 struct TableMetadata;
 
+// Get table border (outer edge of table element)
+static CollapsedBorder get_table_border(ViewTable* table, int side) {
+    CollapsedBorder border;
+    if (!table || !table->bound || !table->bound->border) return border;
+
+    const BorderProp* bp = table->bound->border;
+    switch (side) {
+        case 0: // top
+            border.width = bp->width.top;
+            border.style = bp->top_style;
+            border.color = bp->top_color;
+            break;
+        case 1: // right
+            border.width = bp->width.right;
+            border.style = bp->right_style;
+            border.color = bp->right_color;
+            break;
+        case 2: // bottom
+            border.width = bp->width.bottom;
+            border.style = bp->bottom_style;
+            border.color = bp->bottom_color;
+            break;
+        case 3: // left
+            border.width = bp->width.left;
+            border.style = bp->left_style;
+            border.color = bp->left_color;
+            break;
+    }
+    border.priority = get_border_style_priority(border.style);
+    return border;
+}
+
+// Get row border (for row elements with borders)
+static CollapsedBorder get_row_border(ViewTableRow* row, int side) {
+    CollapsedBorder border;
+    if (!row || !row->bound || !row->bound->border) return border;
+
+    const BorderProp* bp = row->bound->border;
+    switch (side) {
+        case 0: // top
+            border.width = bp->width.top;
+            border.style = bp->top_style;
+            border.color = bp->top_color;
+            break;
+        case 2: // bottom
+            border.width = bp->width.bottom;
+            border.style = bp->bottom_style;
+            border.color = bp->bottom_color;
+            break;
+    }
+    border.priority = get_border_style_priority(border.style);
+    return border;
+}
+
+// Find cell at specific grid position (handles rowspan/colspan)
+static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_col) {
+    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
+            int row_start = cell->td->row_index;
+            int row_end = row_start + cell->td->row_span;
+            int col_start = cell->td->col_index;
+            int col_end = col_start + cell->td->col_span;
+
+            if (target_row >= row_start && target_row < row_end &&
+                target_col >= col_start && target_col < col_end) {
+                return cell;
+            }
+        }
+    }
+    return nullptr;
+}
+
 // Resolve collapsed borders for all cells in table
 // This implements CSS 2.1 Section 17.6.2 border conflict resolution
+// CSS 2.1 §17.6.2: Each border around a cell can be specified by various elements
+// (cell, row, row group, column, column group, table), and these must be resolved
 static void resolve_collapsed_borders(ViewTable* table, TableMetadata* meta) {
     if (!table || !meta || !table->tb->border_collapse) return;
 
-    log_debug("collapse_borders: resolving collapsed borders for table");
+    log_debug("resolve_collapsed_borders: starting comprehensive border resolution for %dx%d table",
+              meta->column_count, meta->row_count);
 
-    // Process each cell and resolve borders with neighbors
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
-            int row_idx = cell->td->row_index;
-            int col_idx = cell->td->col_index;
+    // Pass 1: Resolve all horizontal borders (between rows)
+    // For each horizontal border position (between row i and i+1, including top/bottom edges)
+    for (int row = 0; row <= meta->row_count; row++) {
+        for (int col = 0; col < meta->column_count; col++) {
+            // Collect candidate borders for this horizontal edge
+            ArrayList* candidates = arraylist_new(4);
 
-            // Resolve top border (with cell above or table edge)
-            if (row_idx > 0) {
-                // Find cell above (accounting for rowspan)
-                ViewTableCell* cell_above = nullptr;
-                for (ViewTableRow* prev_row = table->first_row(); prev_row && prev_row != row;
-                     prev_row = table->next_row(prev_row)) {
-                    for (ViewTableCell* candidate = prev_row->first_cell(); candidate;
-                         candidate = prev_row->next_cell(candidate)) {
-                        if (candidate->td->col_index == col_idx &&
-                            candidate->td->row_index + candidate->td->row_span > row_idx) {
-                            cell_above = candidate;
-                            break;
-                        }
-                    }
-                    if (cell_above) break;
-                }
-
+            // Border from cell above (bottom border)
+            if (row > 0) {
+                ViewTableCell* cell_above = find_cell_at(table, row - 1, col);
                 if (cell_above) {
-                    CollapsedBorder top = get_cell_border(cell, 0);        // Current cell top
-                    CollapsedBorder bottom = get_cell_border(cell_above, 2); // Cell above bottom
-                    CollapsedBorder winner = select_winning_border(top, bottom);
-                    apply_collapsed_border_to_cell(cell, winner, 0);
-                    apply_collapsed_border_to_cell(cell_above, winner, 2);
+                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    *border = get_cell_border(cell_above, 2); // bottom
+                    arraylist_append(candidates, border);
+                }
+            } else {
+                // Top edge of table
+                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                *border = get_table_border(table, 0); // top
+                arraylist_append(candidates, border);
+            }
+
+            // Border from cell below (top border)
+            if (row < meta->row_count) {
+                ViewTableCell* cell_below = find_cell_at(table, row, col);
+                if (cell_below) {
+                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    *border = get_cell_border(cell_below, 0); // top
+                    arraylist_append(candidates, border);
+                }
+            } else {
+                // Bottom edge of table
+                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                *border = get_table_border(table, 2); // bottom
+                arraylist_append(candidates, border);
+            }
+
+            // Row borders (if row elements have borders)
+            if (row > 0 && row < meta->row_count) {
+                ViewTableRow* trow = nullptr;
+                int curr = 0;
+                for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
+                    if (curr == row - 1) {
+                        CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                        *border = get_row_border(r, 2); // bottom of row above
+                        if (border->style != CSS_VALUE_NONE) {
+                            arraylist_append(candidates, border);
+                        } else {
+                            free(border);
+                        }
+                        break;
+                    }
+                    curr++;
+                }
+                curr = 0;
+                for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
+                    if (curr == row) {
+                        CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                        *border = get_row_border(r, 0); // top of row below
+                        if (border->style != CSS_VALUE_NONE) {
+                            arraylist_append(candidates, border);
+                        } else {
+                            free(border);
+                        }
+                        break;
+                    }
+                    curr++;
                 }
             }
 
-            // Resolve left border (with cell to left or table edge)
-            if (col_idx > 0) {
-                // Find cell to left (accounting for colspan)
-                ViewTableCell* cell_left = nullptr;
-                for (ViewTableCell* candidate = row->first_cell(); candidate && candidate != cell;
-                     candidate = row->next_cell(candidate)) {
-                    if (candidate->td->col_index + candidate->td->col_span > col_idx) {
-                        cell_left = candidate;
+            // Select winner from all candidates
+            if (candidates->length > 0) {
+                CollapsedBorder* winner = (CollapsedBorder*)candidates->data[0];
+                for (int i = 1; i < candidates->length; i++) {
+                    CollapsedBorder* candidate = (CollapsedBorder*)candidates->data[i];
+                    CollapsedBorder result = select_winning_border(*winner, *candidate);
+                    *winner = result;
+                }
+
+                // Apply winner to affected cells
+                // Edge borders (row 0 or row count) get full width, internal get half
+                bool is_top_edge = (row == 0);
+                bool is_bottom_edge = (row == meta->row_count);
+
+                if (row > 0) {
+                    ViewTableCell* cell_above = find_cell_at(table, row - 1, col);
+                    if (cell_above) {
+                        apply_collapsed_border_to_cell(cell_above, *winner, 2, is_bottom_edge);
                     }
                 }
-
-                if (cell_left) {
-                    CollapsedBorder left = get_cell_border(cell, 3);       // Current cell left
-                    CollapsedBorder right = get_cell_border(cell_left, 1); // Cell left right
-                    CollapsedBorder winner = select_winning_border(left, right);
-                    apply_collapsed_border_to_cell(cell, winner, 3);
-                    apply_collapsed_border_to_cell(cell_left, winner, 1);
+                if (row < meta->row_count) {
+                    ViewTableCell* cell_below = find_cell_at(table, row, col);
+                    if (cell_below) {
+                        apply_collapsed_border_to_cell(cell_below, *winner, 0, is_top_edge);
+                    }
                 }
             }
 
-            // Right and bottom borders will be resolved when adjacent cells are processed
+            // Cleanup
+            for (int i = 0; i < candidates->length; i++) {
+                free(candidates->data[i]);
+            }
+            arraylist_free(candidates);
         }
     }
 
-    log_debug("collapse_borders: border resolution complete");
+    // Pass 2: Resolve all vertical borders (between columns)
+    // For each vertical border position (between col i and i+1, including left/right edges)
+    for (int row = 0; row < meta->row_count; row++) {
+        for (int col = 0; col <= meta->column_count; col++) {
+            // Collect candidate borders for this vertical edge
+            ArrayList* candidates = arraylist_new(4);
+
+            // Border from cell to left (right border)
+            if (col > 0) {
+                ViewTableCell* cell_left = find_cell_at(table, row, col - 1);
+                if (cell_left) {
+                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    *border = get_cell_border(cell_left, 1); // right
+                    arraylist_append(candidates, border);
+                }
+            } else {
+                // Left edge of table
+                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                *border = get_table_border(table, 3); // left
+                arraylist_append(candidates, border);
+            }
+
+            // Border from cell to right (left border)
+            if (col < meta->column_count) {
+                ViewTableCell* cell_right = find_cell_at(table, row, col);
+                if (cell_right) {
+                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    *border = get_cell_border(cell_right, 3); // left
+                    arraylist_append(candidates, border);
+                }
+            } else {
+                // Right edge of table
+                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                *border = get_table_border(table, 1); // right
+                arraylist_append(candidates, border);
+            }
+
+            // TODO: Add column and column group border support (CSS 2.1 §17.6.2)
+            // For now, we handle cell and table borders which covers most cases
+
+            // Select winner from all candidates
+            if (candidates->length > 0) {
+                CollapsedBorder* winner = (CollapsedBorder*)candidates->data[0];
+                for (int i = 1; i < candidates->length; i++) {
+                    CollapsedBorder* candidate = (CollapsedBorder*)candidates->data[i];
+                    CollapsedBorder result = select_winning_border(*winner, *candidate);
+                    *winner = result;
+                }
+
+                // Apply winner to affected cells
+                // Edge borders (col 0 or col count) get full width, internal get half
+                bool is_left_edge = (col == 0);
+                bool is_right_edge = (col == meta->column_count);
+
+                if (col > 0) {
+                    ViewTableCell* cell_left = find_cell_at(table, row, col - 1);
+                    if (cell_left) {
+                        apply_collapsed_border_to_cell(cell_left, *winner, 1, is_right_edge);
+                    }
+                }
+                if (col < meta->column_count) {
+                    ViewTableCell* cell_right = find_cell_at(table, row, col);
+                    if (cell_right) {
+                        apply_collapsed_border_to_cell(cell_right, *winner, 3, is_left_edge);
+                    }
+                }
+            }
+
+            // Cleanup
+            for (int i = 0; i < candidates->length; i++) {
+                free(candidates->data[i]);
+            }
+            arraylist_free(candidates);
+        }
+    }
+
+    log_debug("resolve_collapsed_borders: completed - processed %d horizontal and %d vertical borders",
+              (meta->row_count + 1) * meta->column_count,
+              meta->row_count * (meta->column_count + 1));
 }
 
 // =============================================================================
@@ -820,46 +1059,6 @@ static void resolve_collapsed_borders(ViewTable* table, TableMetadata* meta) {
 // =============================================================================
 // INTERNAL DATA STRUCTURES
 // =============================================================================
-
-// Table metadata cache - Phase 3 optimization
-// Stores pre-analyzed table structure to avoid multiple DOM iterations
-struct TableMetadata {
-    int column_count;           // Total columns
-    int row_count;              // Total rows
-    bool* grid_occupied;        // colspan/rowspan tracking (row_count × column_count)
-    float* col_widths;          // Final column widths
-    float* col_min_widths;      // Minimum column widths (CSS MCW)
-    float* col_max_widths;      // Maximum column widths (CSS PCW)
-    float* row_heights;         // Row heights for rowspan calculation
-    float* row_y_positions;     // Row Y positions for rowspan calculation
-    bool* row_collapsed;        // Visibility: collapse tracking per row
-
-    TableMetadata(int cols, int rows)
-        : column_count(cols), row_count(rows) {
-        grid_occupied = (bool*)calloc(rows * cols, sizeof(bool));
-        col_widths = (float*)calloc(cols, sizeof(float));
-        col_min_widths = (float*)calloc(cols, sizeof(float));  // Minimum content widths (CSS MCW)
-        col_max_widths = (float*)calloc(cols, sizeof(float));  // Preferred content widths (CSS PCW)
-        row_heights = (float*)calloc(rows, sizeof(float));
-        row_y_positions = (float*)calloc(rows, sizeof(float));
-        row_collapsed = (bool*)calloc(rows, sizeof(bool));
-    }
-
-    ~TableMetadata() {
-        free(grid_occupied);
-        free(col_widths);
-        free(col_min_widths);
-        free(col_max_widths);
-        free(row_heights);
-        free(row_y_positions);
-        free(row_collapsed);
-    }
-
-    // Grid accessor
-    inline bool& grid(int row, int col) {
-        return grid_occupied[row * column_count + col];
-    }
-};
 
 // =============================================================================
 // ROWSPAN HEIGHT DISTRIBUTION (CSS 2.1 Section 17.5.3)
@@ -3131,6 +3330,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int rows = meta->row_count;
     log_debug("Table has %d columns, %d rows (analyzed in single pass)", columns, rows);
 
+    // Step 1.5: Border-collapse resolution
+    // NOTE: CSS 2.1 §17.6.2 border resolution is for RENDERING, not layout.
+    // Layout uses the original specified borders for width/height calculations.
+    // Border resolution only affects which borders are painted and their visual appearance.
+    // Since this is a layout engine (not a renderer), we skip border resolution.
+    // The border overlap calculations in positioning (lines 4126-4138) handle the
+    // spacing correctly for collapsed borders using the original border widths.
+    if (false && table->tb->border_collapse) {
+        // Border resolution disabled - not needed for layout calculations
+        log_debug("Border-collapse: using original borders for layout (resolution is rendering-only)");
+        resolve_collapsed_borders(table, meta);
+    }
+
     // Check if table has explicit width (for percentage cell width calculation)
     int explicit_table_width = 0;
     int table_content_width = 0; // Width available for cells
@@ -4485,16 +4697,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
         }
-    }
-
-    // =========================================================================
-    // BORDER-COLLAPSE RESOLUTION
-    // Apply CSS 2.1 border conflict resolution if border-collapse is enabled
-    // This must happen after all cells are positioned but before final rendering
-    // =========================================================================
-    if (table->tb->border_collapse) {
-        log_debug("Resolving collapsed borders for table");
-        resolve_collapsed_borders(table, meta);
     }
 
     // =========================================================================
