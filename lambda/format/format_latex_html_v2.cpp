@@ -2081,7 +2081,7 @@ static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
     // The {} serves as word terminator but produces no output
-    (void)elem;
+    (void)elem;  // Curly group child handled by processChildren
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("\\");
@@ -6329,7 +6329,9 @@ void LatexProcessor::processChildren(Item elem) {
             
             bool is_empty_cmd = (cmd_name && strcmp(cmd_name, "empty") == 0);
             bool is_curly_group = (cmd_name && strcmp(cmd_name, "curly_group") == 0);
-            bool skip_space_consumption = is_empty_cmd || is_curly_group;
+            // Also skip space consumption if the command has an empty curly_group child (e.g., \textbackslash{})
+            bool has_empty_curly_child = hasEmptyCurlyGroupChild(child_reader.item());
+            bool skip_space_consumption = is_empty_cmd || is_curly_group || has_empty_curly_child;
             
             // Check if NEXT sibling is an empty curly_group (e.g., "\empty {}")
             bool next_is_empty_curly = false;
