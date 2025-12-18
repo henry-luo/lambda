@@ -4085,7 +4085,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             lycon->view = (View*)caption;
             // Re-resolve caption styles to refresh font in layout context
             dom_node_resolve_style((DomNode*)caption, lycon);
-            
+
             lycon->block.content_width = content_width;
             lycon->block.content_height = 10000;
             lycon->block.advance_y = 0;
@@ -4765,7 +4765,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
         caption->x = 0;
         caption->y = final_table_height;  // Position after all rows
-        
+
         // Check if caption needs re-layout due to width change (same as top caption)
         float old_width = caption->width;
         caption->width = table_width;
@@ -4805,7 +4805,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             lycon->view = (View*)caption;
             // Re-resolve caption styles to refresh font in layout context
             dom_node_resolve_style((DomNode*)caption, lycon);
-            
+
             lycon->block.content_width = content_width;
             lycon->block.content_height = 10000;
             lycon->block.advance_y = 0;
@@ -4838,7 +4838,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Recalculate caption_height
             float border_v = 0;
-            float margin_v = caption->bound ? caption->bound->margin.top : 0;  // Bottom caption uses top margin
+            float margin_v = caption->bound ? caption->bound->margin.top : 0;  // Bottom caption uses top margin (space above)
             if (caption->bound && caption->bound->border) {
                 border_v = caption->bound->border->width.top + caption->bound->border->width.bottom;
             }
@@ -4849,7 +4849,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             lycon->line = saved_line;
             lycon->view = saved_view;
         }
-        
+
         final_table_height += caption_height;  // Add caption height to table
         log_debug("Positioned caption at bottom: y=%d, caption_height=%d", (int)caption->y, caption_height);
     }
