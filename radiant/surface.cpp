@@ -93,6 +93,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         else if (slen > 4 && strcmp(file_path + slen - 4, ".png") == 0) {
             surface->format = IMAGE_FORMAT_PNG;
         }
+        else if (slen > 4 && strcmp(file_path + slen - 4, ".gif") == 0) {
+            surface->format = IMAGE_FORMAT_GIF;
+        }
     }
     surface->url = abs_url;
 

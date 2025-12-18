@@ -275,6 +275,7 @@ typedef enum {
     IMAGE_FORMAT_SVG,
     IMAGE_FORMAT_PNG,
     IMAGE_FORMAT_JPEG,
+    IMAGE_FORMAT_GIF,
 } ImageFormat;
 
 typedef enum {
