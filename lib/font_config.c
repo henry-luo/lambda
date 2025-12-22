@@ -1790,8 +1790,17 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
             if (placeholder && placeholder->is_placeholder && placeholder->family_name &&
                 string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
 
-                if (parse_placeholder_font(placeholder, db->string_arena)) {
-                    loaded_more = true;
+                // For TTC files, use lazy_load_font which handles TTC properly
+                FontFormat format = detect_font_format(placeholder->file_path);
+                if (format == FONT_FORMAT_TTC) {
+                    if (lazy_load_font(db, placeholder->file_path)) {
+                        loaded_more = true;
+                    }
+                } else {
+                    // For single-font files, parse in-place
+                    if (parse_placeholder_font(placeholder, db->string_arena)) {
+                        loaded_more = true;
+                    }
                 }
             }
         }
