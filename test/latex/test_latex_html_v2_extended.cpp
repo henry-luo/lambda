@@ -176,7 +176,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         // label-ref.tex: All tests pass! Test 7 fixed (list item paragraph tracking)
         // layout-marginpar.tex: All tests pass! Moved to baseline
         {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
-        {"sectioning.tex", {3}},
+        // sectioning.tex: All tests pass! test 3 fixed with inStyledSpan() check - moved to baseline
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
         {"text.tex", {10}},  // tests 4, 6 moved to baseline (typographic hyphen fix); test 5, 7, 8 baseline (PASS)
         {"whitespace.tex", {5, 7, 8, 21}}  // test 1 passes, test 6 fixed: fixture typo (missing comma)
