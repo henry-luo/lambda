@@ -12,11 +12,22 @@ extern "C" {
 // Forward declarations
 struct LayoutContext;
 
+// Maximum number of src entries in a single @font-face rule
+#define FONT_FACE_MAX_SRC 8
+
+// Individual src entry with path and format
+typedef struct FontFaceSrc {
+    char* path;                  // Resolved local path
+    char* format;                // Format string: "woff", "truetype", "opentype", etc.
+} FontFaceSrc;
+
 // Font face descriptor for @font-face support
 typedef struct FontFaceDescriptor {
     char* family_name;           // font-family value
-    char* src_local_path;        // local font file path (no web URLs)
+    char* src_local_path;        // local font file path (no web URLs) - first/fallback
     char* src_local_name;        // src: local() font name value
+    FontFaceSrc* src_entries;    // Array of all src entries with formats
+    int src_count;               // Number of entries in src_entries array
     CssEnum font_style;        // normal, italic, oblique
     CssEnum font_weight;       // 100-900, normal, bold
     CssEnum font_display;      // auto, block, swap, fallback, optional

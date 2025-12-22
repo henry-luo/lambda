@@ -99,6 +99,8 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
             rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
         return; // glyph outside the surface
     }
+    log_debug("[GLYPH RENDER] drawing glyph at x=%d y=%d size=%dx%d color=#%02x%02x%02x (c=0x%08x)",
+        x, y, bitmap->width, bitmap->rows, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.c);
     ImageSurface* surface = rdcon->ui_context->surface;
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
@@ -111,7 +113,7 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                 // important to use 32bit int for computation below
                 uint32_t v = 255 - intensity;
                 // can further optimize if background is a fixed color
-                if (rdcon->color.c == 0xFF) { // black text color
+                if (rdcon->color.c == 0xFF000000) { // black text color (ABGR: alpha=FF, b=00, g=00, r=00)
                     p[0] = p[0] * v / 255;
                     p[1] = p[1] * v / 255;
                     p[2] = p[2] * v / 255;
@@ -745,7 +747,16 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     View* view = block->first_child;
     if (view) {
         if (block->in_line && block->in_line->color.c) {
+            log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
+                      block->node_name(),
+                      block->in_line->color.r, block->in_line->color.g, block->in_line->color.b,
+                      rdcon->color.r, rdcon->color.g, rdcon->color.b,
+                      block->in_line->color.c);
             rdcon->color = block->in_line->color;
+        } else {
+            log_debug("[RENDER COLOR] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
+                      block->node_name(), rdcon->color.r, rdcon->color.g, rdcon->color.b,
+                      block->in_line, block->in_line ? block->in_line->color.c : 0);
         }
         // setup clip box
         if (block->scroller) {
@@ -926,7 +937,16 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
             setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
         }
         if (view_span->in_line && view_span->in_line->color.c) {
+            log_debug("[RENDER COLOR INLINE] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
+                      view_span->node_name(),
+                      view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
+                      pa_color.r, pa_color.g, pa_color.b,
+                      view_span->in_line->color.c);
             rdcon->color = view_span->in_line->color;
+        } else {
+            log_debug("[RENDER COLOR INLINE] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
+                      view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
+                      view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
         }
         render_children(rdcon, view);
     }
