@@ -1789,7 +1789,7 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
             FontEntry* placeholder = (FontEntry*)db->all_fonts->data[i];
             if (placeholder && placeholder->is_placeholder && placeholder->family_name &&
                 string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
-                
+
                 if (parse_placeholder_font(placeholder, db->string_arena)) {
                     loaded_more = true;
                 }
@@ -1798,7 +1798,7 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
 
         if (loaded_more) {
             organize_fonts_into_families(db);
-            
+
             // Re-search for better match
             best_score = 0.0f;
             best_font = NULL;
