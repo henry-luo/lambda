@@ -6248,21 +6248,31 @@ void LatexProcessor::processNode(Item node) {
             } else if (strcmp(sym_name, "TeX") == 0) {
                 // TeX logo
                 ensureParagraph();
-                gen_->span("tex-logo");
+                gen_->span("tex");
                 gen_->text("T");
-                gen_->text("E");
+                gen_->span("e");
+                gen_->text("e");
+                gen_->closeElement();  // close inner span
                 gen_->text("X");
-                gen_->closeElement();
+                gen_->closeElement();  // close outer span
+                // Set pending ZWS flag - will be checked in processChildren
+                pending_zws_output_ = true;
             } else if (strcmp(sym_name, "LaTeX") == 0) {
                 // LaTeX logo
                 ensureParagraph();
-                gen_->span("latex-logo");
+                gen_->span("latex");
                 gen_->text("L");
-                gen_->text("A");
+                gen_->span("a");
+                gen_->text("a");
+                gen_->closeElement();  // close inner span
                 gen_->text("T");
-                gen_->text("E");
+                gen_->span("e");
+                gen_->text("e");
+                gen_->closeElement();  // close inner span
                 gen_->text("X");
-                gen_->closeElement();
+                gen_->closeElement();  // close outer span
+                // Set pending ZWS flag - will be checked in processChildren
+                pending_zws_output_ = true;
             } else if (strlen(sym_name) == 1) {
                 // Single-character symbols are escaped special characters
                 // Output them as literal text
@@ -6388,6 +6398,30 @@ void LatexProcessor::processChildren(Item elem) {
     
     // Use index-based iteration for lookahead capability
     int64_t count = elem_reader.childCount();
+    
+    // Debug: log first few children to understand structure
+    FILE* debug_file = fopen("/tmp/zws_debug_direct.txt", "a");
+    if (debug_file) {
+        fprintf(debug_file, "[STRUCTURE] processChildren called, %lld children\n", count);
+        for (int64_t dbg_i = 0; dbg_i < std::min(count, (int64_t)5); dbg_i++) {
+            ItemReader dbg_reader = elem_reader.childAt(dbg_i);
+            TypeId dbg_type = dbg_reader.getType();
+            if (dbg_type == LMD_TYPE_STRING) {
+                const char* text = dbg_reader.cstring();
+                fprintf(debug_file, "[STRUCTURE]   child[%lld]: STRING \"%s\"\n", dbg_i, text ? text : "NULL");
+            } else if (dbg_type == LMD_TYPE_SYMBOL) {
+                const char* sym = dbg_reader.asSymbol()->chars;
+                fprintf(debug_file, "[STRUCTURE]   child[%lld]: SYMBOL '%s'\n", dbg_i, sym ? sym : "NULL");
+            } else if (dbg_type == LMD_TYPE_ELEMENT) {
+                ElementReader dbg_elem(dbg_reader.item());
+                const char* tag = dbg_elem.tagName();
+                fprintf(debug_file, "[STRUCTURE]   child[%lld]: ELEMENT tag='%s'\n", dbg_i, tag ? tag : "NULL");
+            } else {
+                fprintf(debug_file, "[STRUCTURE]   child[%lld]: type=%d\n", dbg_i, dbg_type);
+            }
+        }
+        fclose(debug_file);
+    }
     for (int64_t i = 0; i < count; i++) {
         ItemReader child_reader = elem_reader.childAt(i);
         
@@ -6816,6 +6850,18 @@ void LatexProcessor::processChildren(Item elem) {
                     // Check strings and symbols (whitespace may be stored as symbols)
                     const char* next_text = next_reader.isString() ? next_reader.cstring() : (next_reader.isSymbol() ? next_reader.asSymbol()->chars : nullptr);
                     if (next_text && next_text[0] != '\0') {
+                        // First check if this is a space-absorbing symbol (like TeX, LaTeX)
+                        if (next_reader.isSymbol()) {
+                            bool absorbs = commandAbsorbsSpace(next_text);
+                            printf("[DEBUG] Symbol '%s', absorbs=%d\n", next_text, absorbs ? 1 : 0);
+                            if (absorbs) {
+                                // Next sibling is a space-absorbing command - suppress ZWS
+                                printf("[DEBUG] Suppressing ZWS for symbol '%s'\n", next_text);
+                                has_following_content = false;
+                                goto done_checking_siblings;
+                            }
+                        }
+                        
                         // Count consecutive newlines to detect paragraph break
                         for (const char* p = next_text; *p; p++) {
                             if (*p == '\n') {
@@ -6847,8 +6893,38 @@ void LatexProcessor::processChildren(Item elem) {
                         // Continue to next sibling to keep checking
                     }
                 } else if (next_reader.isElement()) {
-                    // Element found - only output ZWS if no paragraph break seen
-                    if (consecutive_newlines < 2) {
+                    // Element found - check if it's a space-absorbing command
+                    // Don't output ZWS between two space-absorbing commands (e.g., \TeX \LaTeX)
+                    ElementReader next_elem(next_reader.item());
+                    const char* next_tag = next_elem.tagName();
+                    bool is_space_absorbing_cmd = false;
+                    
+                    // Check if the element tag itself is a space-absorbing command
+                    // (e.g., tag="LaTeX" from symbol processing)
+                    if (next_tag && commandAbsorbsSpace(next_tag)) {
+                        is_space_absorbing_cmd = true;
+                    }
+                    // Otherwise, check if it's a "command" element containing a space-absorbing command
+                    else if (next_tag && strcmp(next_tag, "command") == 0) {
+                        // Check if this command absorbs space
+                        auto cmd_iter = next_elem.children();
+                        ItemReader cmd_child;
+                        while (cmd_iter.next(&cmd_child)) {
+                            if (cmd_child.isElement()) {
+                                ElementReader cmd_child_elem(cmd_child.item());
+                                const char* child_tag = cmd_child_elem.tagName();
+                                if (child_tag && strcmp(child_tag, "command_name") == 0) {
+                                    String* name_str = cmd_child_elem.get_string_attr("name");
+                                    if (name_str && commandAbsorbsSpace(name_str->chars)) {
+                                        is_space_absorbing_cmd = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // Only output ZWS if no paragraph break and not a space-absorbing command
+                    if (consecutive_newlines < 2 && !is_space_absorbing_cmd) {
                         has_following_content = true;
                         next_is_plain_text = false;
                     }
@@ -6962,36 +7038,68 @@ void LatexProcessor::processChildren(Item elem) {
                 }
             }
             
-            // Output ZWS marker if needed and next sibling is text or another command
+            // Output ZWS marker if needed and next sibling is text or another command  
             if (needs_zws && i + 1 < count) {
-                ItemReader next_reader = elem_reader.childAt(i + 1);
-                bool next_is_text_or_cmd = false;
+                // Skip whitespace-only strings to find next real content
+                int64_t next_idx = i + 1;
+                bool found_next = false;
+                bool next_is_space_absorbing = false;
                 
-                if (next_reader.isString()) {
-                    const char* next_text = next_reader.cstring();
-                    // Only output ZWS if next text is not just whitespace
-                    if (next_text && next_text[0] != '\0') {
-                        bool has_non_ws = false;
-                        for (const char* p = next_text; *p; p++) {
-                            if (!isspace(*p)) {
-                                has_non_ws = true;
-                                break;
+                while (next_idx < count && !found_next) {
+                    ItemReader scan_reader = elem_reader.childAt(next_idx);
+                    
+                    if (scan_reader.isString()) {
+                        const char* text = scan_reader.cstring();
+                        bool is_whitespace_only = true;
+                        if (text) {
+                            for (const char* p = text; *p; p++) {
+                                if (!isspace(*p)) {
+                                    is_whitespace_only = false;
+                                    found_next = true;
+                                    break;
+                                }
                             }
                         }
-                        if (has_non_ws) {
-                            next_is_text_or_cmd = true;
+                        if (!is_whitespace_only) {
+                            break;  // Found non-whitespace text
                         }
+                        next_idx++;
+                    } else if (scan_reader.isElement()) {
+                        // Check if it's a space-absorbing command
+                        ElementReader scan_elem(scan_reader.item());
+                        const char* scan_tag = scan_elem.tagName();
+                        if (scan_tag && strcmp(scan_tag, "command") == 0) {
+                            // Extract command name to check if space-absorbing
+                            auto scan_iter = scan_elem.children();
+                            ItemReader scan_child;
+                            while (scan_iter.next(&scan_child)) {
+                                if (scan_child.isElement()) {
+                                    ElementReader scan_child_elem(scan_child.item());
+                                    const char* child_tag = scan_child_elem.tagName();
+                                    if (child_tag && strcmp(child_tag, "command_name") == 0) {
+                                        String* name_str = scan_child_elem.get_string_attr("name");
+                                        if (name_str && commandAbsorbsSpace(name_str->chars)) {
+                                            next_is_space_absorbing = true;
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        found_next = true;
+                        break;
+                    } else {
+                        // Other types - consider found
+                        found_next = true;
+                        break;
                     }
-                } else if (next_reader.isElement()) {
-                    // Next is another element - likely need ZWS
-                    next_is_text_or_cmd = true;
                 }
                 
-                if (next_is_text_or_cmd) {
+                // Only output ZWS if we found next content and it's NOT space-absorbing
+                if (found_next && !next_is_space_absorbing) {
                     ensureParagraph();
-                    // NOTE: ZWS output disabled here - now handled by flag-based logic above
-                    // which properly checks for paragraph breaks before outputting ZWS
-                    // gen_->writeZWS();
+                    // TEMPORARILY DISABLED TO TEST
+                    // gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
                 }
             }
         }
@@ -7422,29 +7530,34 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
         }
         
-        // For empty groups with only spaces, convert spaces alternating ZWS/space pattern
-        // e.g., {  } → ZWS + space, {   } → ZWS + space + ZWS
+        // For empty groups with only spaces, output ZWS separated by spaces
+        // e.g., {  } → ZWS + space + ZWS, {   } → ZWS + space + ZWS + space + ZWS
+        // Pattern: N spaces → N ZWS markers with (N-1) spaces between them
         if (is_empty_group && (has_leading_space || has_trailing_space)) {
-            // Count spaces and output alternating ZWS/space pattern
-            auto space_iter = reader.children();
-            ItemReader space_child;
-            bool output_zws = true;  // Start with ZWS
-            while (space_iter.next(&space_child)) {
-                if (space_child.isString()) {
-                    String* str = space_child.asString();
+            // Count total spaces first
+            int space_count = 0;
+            auto count_iter = reader.children();
+            ItemReader count_child;
+            while (count_iter.next(&count_child)) {
+                if (count_child.isString()) {
+                    String* str = count_child.asString();
                     if (str && str->len > 0) {
-                        ensureParagraph();
-                        // Output alternating ZWS and space for each space character
                         for (int64_t i = 0; i < str->len; i++) {
                             if (str->chars[i] == ' ' || str->chars[i] == '\t') {
-                                if (output_zws) {
-                                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
-                                } else {
-                                    gen_->text(" ");  // Regular space
-                                }
-                                output_zws = !output_zws;  // Alternate
+                                space_count++;
                             }
                         }
+                    }
+                }
+            }
+            
+            // Output ZWS markers separated by spaces
+            if (space_count > 0) {
+                ensureParagraph();
+                for (int i = 0; i < space_count; i++) {
+                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                    if (i < space_count - 1) {
+                        gen_->text(" ");  // Space between ZWS markers
                     }
                 }
             }
