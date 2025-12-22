@@ -420,7 +420,7 @@ public:
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
           recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false),
           pending_zws_output_(false), pending_zws_had_trailing_space_(false),
-          group_suppresses_zws_(false), monospace_depth_(0) {}
+          group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -510,6 +510,11 @@ public:
     MacroDefinition* getMacro(const std::string& name);
     Element* expandMacro(const std::string& name, const std::vector<Element*>& args);
     
+    // Margin paragraph functions
+    int addMarginParagraph(const std::string& content);
+    bool hasMarginParagraphs() const;
+    void writeMarginParagraphs(HtmlWriter* writer);
+    
 private:
     HtmlGenerator* gen_;
     Pool* pool_;
@@ -577,6 +582,14 @@ private:
     // In monospace mode, dash ligatures (-- → en-dash, --- → em-dash) are suppressed
     // and single hyphens are not converted to Unicode hyphen
     int monospace_depth_;
+    
+    // Margin paragraph tracking
+    struct MarginParagraph {
+        int id;              // Unique ID (1-based)
+        std::string content; // Rendered HTML content of the marginpar
+    };
+    std::vector<MarginParagraph> margin_paragraphs_;
+    int margin_par_counter_;  // Counter for generating unique IDs
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -663,6 +676,46 @@ Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<
     }
     
     return expanded;
+}
+
+// =============================================================================
+// Margin Paragraph - Member Function Implementations
+// =============================================================================
+
+int LatexProcessor::addMarginParagraph(const std::string& content) {
+    margin_par_counter_++;
+    MarginParagraph mp;
+    mp.id = margin_par_counter_;
+    mp.content = content;
+    margin_paragraphs_.push_back(mp);
+    return margin_par_counter_;
+}
+
+bool LatexProcessor::hasMarginParagraphs() const {
+    return !margin_paragraphs_.empty();
+}
+
+void LatexProcessor::writeMarginParagraphs(HtmlWriter* writer) {
+    if (margin_paragraphs_.empty()) return;
+    
+    // Output: <div class="margin-right"><div class="marginpar">...content...</div></div>
+    writer->openTag("div", "margin-right");
+    writer->openTag("div", "marginpar");
+    
+    for (const auto& mp : margin_paragraphs_) {
+        // Each marginpar gets: <div id="N"><span class="mpbaseline"></span>content</div>
+        char id_str[32];
+        snprintf(id_str, sizeof(id_str), "%d", mp.id);
+        writer->writeRawHtml("<div id=\"");
+        writer->writeRawHtml(id_str);
+        writer->writeRawHtml("\">");
+        writer->writeRawHtml("<span class=\"mpbaseline\"></span>");
+        writer->writeRawHtml(mp.content.c_str());
+        writer->writeRawHtml("</div>");
+    }
+    
+    writer->closeTag("div");  // marginpar
+    writer->closeTag("div");  // margin-right
 }
 
 // =============================================================================
@@ -1330,16 +1383,33 @@ static void cmd_textnormal(LatexProcessor* proc, Item elem) {
 
 // =============================================================================
 // Font Declaration Commands (bfseries, mdseries, rmfamily, etc.)
-// These set font state and mark that the following text should strip leading space
-// (LaTeX commands consume their trailing space)
+// These can operate in two modes:
+// 1. Declaration-style (no children): \bfseries sets font for subsequent text in current scope
+// 2. Environment-style (with children): \begin{bfseries}...\end{bfseries} wraps content in a span
+// Note: When the parser sees \begin{bfseries}, it creates an element with tag "bfseries"
+// and the environment content as children.
 // =============================================================================
 
 static void cmd_bfseries(LatexProcessor* proc, Item elem) {
-    // \bfseries - switch to bold (declaration)
+    // \bfseries - switch to bold
     HtmlGenerator* gen = proc->generator();
-    gen->currentFont().series = FontSeries::Bold;
-    proc->setStripNextLeadingSpace(true);
-    proc->processChildren(elem);
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        // Declaration-style: just set font state
+        gen->currentFont().series = FontSeries::Bold;
+        proc->setStripNextLeadingSpace(true);
+    } else {
+        // Environment-style: wrap content in a span
+        gen->enterGroup();
+        gen->currentFont().series = FontSeries::Bold;
+        proc->enterStyledSpan();
+        gen->span("bf");  // LaTeX.js uses "bf" not "bfseries"
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_mdseries(LatexProcessor* proc, Item elem) {
@@ -1965,125 +2035,195 @@ static void cmd_def(LatexProcessor* proc, Item elem) {
 }
 
 // Font size commands
+// These commands can operate in two modes:
+// 1. Declaration-style (no children): \small sets font for subsequent text in current scope
+// 2. Argument-style (with children): {\small text} wraps children in a span
+// Note: In LaTeX, \small by itself is a declaration that affects all following text
+// until the end of the current group/scope. The span wrapping happens in processText()
+// based on the current font state.
 
 static void cmd_tiny(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Tiny;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("tiny");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    // Check if this is declaration-style (no children) or argument-style (with children)
+    if (reader.isEmpty()) {
+        // Declaration-style: just set font state, no span here
+        // The font state persists until group exit, and processText() will wrap text in spans
+        gen->currentFont().size = FontSize::Tiny;
+    } else {
+        // Argument-style: wrap children in a span
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Tiny;
+        proc->enterStyledSpan();
+        gen->span("tiny");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_scriptsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::ScriptSize;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("scriptsize");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::ScriptSize;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::ScriptSize;
+        proc->enterStyledSpan();
+        gen->span("scriptsize");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_footnotesize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::FootnoteSize;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("footnotesize");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::FootnoteSize;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::FootnoteSize;
+        proc->enterStyledSpan();
+        gen->span("footnotesize");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_small(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Small;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("small");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Small;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Small;
+        proc->enterStyledSpan();
+        gen->span("small");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_normalsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::NormalSize;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("normalsize");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::NormalSize;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::NormalSize;
+        proc->enterStyledSpan();
+        gen->span("normalsize");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Large;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("large");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Large;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Large;
+        proc->enterStyledSpan();
+        gen->span("large");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_Large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Large2;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("Large");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Large2;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Large2;
+        proc->enterStyledSpan();
+        gen->span("Large");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_LARGE(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Large3;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("LARGE");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Large3;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Large3;
+        proc->enterStyledSpan();
+        gen->span("LARGE");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Huge;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("huge");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Huge;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Huge;
+        proc->enterStyledSpan();
+        gen->span("huge");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_Huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Huge2;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("Huge");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Huge2;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Huge2;
+        proc->enterStyledSpan();
+        gen->span("Huge");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 // =============================================================================
@@ -3647,9 +3787,41 @@ static void cmd_bigbreak(LatexProcessor* proc, Item elem) {
 
 static void cmd_marginpar(LatexProcessor* proc, Item elem) {
     // \marginpar{text} - margin note
-    // In HTML text mode, this is a no-op (consume argument but don't output)
-    (void)proc;
-    (void)elem;
+    // 1. Output inline placeholder: <span class="mpbaseline" id="marginref-N"></span>
+    // 2. Capture marginpar content and store for later output after body div
+    
+    HtmlGenerator* gen = proc->generator();
+    ElementReader reader(elem);
+    
+    // Enter a new group to isolate font changes from the main document
+    gen->enterGroup();
+    
+    // Enter inline mode to prevent paragraph creation inside marginpar
+    proc->enterInlineMode();
+    
+    // Get the marginpar content by capturing output
+    gen->startCapture();
+    proc->processChildren(elem);
+    std::string content = gen->endCapture();
+    
+    // Exit inline mode
+    proc->exitInlineMode();
+    
+    // Exit group to restore font state
+    gen->exitGroup();
+    
+    // Add to margin paragraphs list and get unique ID
+    int id = proc->addMarginParagraph(content);
+    
+    // Ensure we're in a paragraph before outputting the placeholder
+    // This ensures the span appears inside <p> not before it
+    proc->ensureParagraph();
+    
+    // Output inline placeholder at current position
+    char id_attr[64];
+    snprintf(id_attr, sizeof(id_attr), "mpbaseline\" id=\"marginref-%d", id);
+    gen->span(id_attr);
+    gen->closeElement();
 }
 
 static void cmd_index(LatexProcessor* proc, Item elem) {
@@ -8059,6 +8231,11 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     
     // Close HTML document container
     writer->closeTag("div");
+    
+    // Output margin paragraphs if any were collected
+    if (proc.hasMarginParagraphs()) {
+        proc.writeMarginParagraphs(writer);
+    }
     
     // Get result
     Item result = writer->getResult();
