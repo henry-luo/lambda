@@ -206,7 +206,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         // label-ref.tex: All tests pass! Test 7 moved from extended (list item paragraph fix)
         // layout-marginpar.tex: All tests pass! (marginpar implementation complete)
         {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
-        {"sectioning.tex", {3}},
+        // sectioning.tex: All tests pass! test 3 fixed with inStyledSpan() check
         {"spacing.tex", {1}},  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
         {"text.tex", {10}},  // tests 4, 6 now pass with typographic hyphen fix
