@@ -199,7 +199,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
     // Tests to exclude from V2 baseline (moved to extended test suite)
     // These are tests that currently fail and need work
     std::map<std::string, std::set<int>> excluded_test_ids = {
-        {"basic_text.tex", {4, 6}},  // test 4 expects no ZWS (older test); test 6 needs verb command
+        {"basic_text.tex", {4}},  // test 4 expects no ZWS (older test); test 6 PASSES (verb command fixed)
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
         {"counters.tex", {2}},  // Test 1 PASSES (counter arithmetic); Test 2: whitespace between commands issue
         {"environments.tex", {7, 10, 14}},
@@ -281,8 +281,7 @@ TEST_F(LatexHtmlV2FixtureTest, BasicTextFormatting) {
     run_fixture_test(fixture);
 }
 
-TEST_F(LatexHtmlV2FixtureTest, SectioningCommands) {
-    GTEST_SKIP() << "Moved to extended - sectioning commands have known issues";
+TEST_F(LatexHtmlV2FixtureTest, DISABLED_SectioningCommands) {
     LatexHtmlFixture fixture;
     fixture.id = 2;
     fixture.header = "sectioning commands";

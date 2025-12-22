@@ -195,6 +195,8 @@ static bool scan_verb_command(TSLexer *lexer) {
   if (lexer->lookahead != '\\') {
     return false;
   }
+  
+  // Advance past backslash
   lexer->advance(lexer, false);
   
   // Match "verb"
@@ -219,24 +221,21 @@ static bool scan_verb_command(TSLexer *lexer) {
   lexer->advance(lexer, false);
   
   // Scan until we find the matching delimiter or newline
-  // Note: \verb cannot span multiple lines in LaTeX
   while (!lexer->eof(lexer)) {
     if (lexer->lookahead == delimiter) {
-      // Found closing delimiter
+      // Found closing delimiter - include it
       lexer->advance(lexer, false);
       lexer->mark_end(lexer);
       return true;
     } else if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
-      // \verb cannot span lines - this is an error, but we'll match what we have
-      lexer->mark_end(lexer);
+      // \verb cannot span lines
       return false;
     } else {
       lexer->advance(lexer, false);
     }
   }
   
-  // EOF reached without closing delimiter - error, but we'll match what we have
-  lexer->mark_end(lexer);
+  // EOF without closing delimiter
   return false;
 }
 
@@ -335,12 +334,18 @@ void tree_sitter_latex_external_scanner_deserialize(void *payload, const char *b
 }
 
 bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
-  // Check for \verb command FIRST - must take precedence over regular command tokens
-  if (valid_symbols[VERB_COMMAND] && lexer->lookahead == '\\') {
+  // PROACTIVE SCANNING: Always check for \verb at backslash, regardless of valid_symbols
+  // This is necessary because command_name token will match \verb before GLR can try VERB_COMMAND
+  // By scanning proactively, we claim the \verb pattern before tokenization completes
+  if (lexer->lookahead == '\\') {
+    // Try to scan verb command (it will advance and check for "verb...")
     if (scan_verb_command(lexer)) {
+      // Successfully matched \verb|...|, emit as VERB_COMMAND token
       lexer->result_symbol = VERB_COMMAND;
       return true;
     }
+    // If scan_verb_command returns false, it hasn't advanced the lexer
+    // (it checks lookahead == '\' and returns false immediately if no match)
   }
   
   // Check for \char command - must take precedence over regular command tokens
