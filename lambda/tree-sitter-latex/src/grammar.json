@@ -23,6 +23,22 @@
         },
         {
           "type": "SYMBOL",
+          "name": "verb_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "char_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "linebreak_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "control_symbol"
+        },
+        {
+          "type": "SYMBOL",
           "name": "command"
         },
         {
@@ -32,14 +48,6 @@
         {
           "type": "SYMBOL",
           "name": "brack_group"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "line_comment"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "control_symbol"
         },
         {
           "type": "SYMBOL",
@@ -211,6 +219,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "linebreak_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "command"
         },
         {
@@ -340,10 +352,47 @@
             },
             {
               "type": "PATTERN",
-              "value": "[$%#&{}_\\-,\\/@ !;:.'`^\"~=\\\\]"
+              "value": "[$%#&{}_\\-,\\/@ !;:.'`^\"~=]"
             }
           ]
         }
+      }
+    },
+    "linebreak_command": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "\\\\"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "*"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "brack_group"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
       }
     },
     "verb_command": {

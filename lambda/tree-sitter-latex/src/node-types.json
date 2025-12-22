@@ -373,6 +373,21 @@
     "fields": {}
   },
   {
+    "type": "linebreak_command",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "brack_group",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "math",
     "named": true,
     "fields": {},
@@ -433,6 +448,10 @@
         },
         {
           "type": "line_comment",
+          "named": true
+        },
+        {
+          "type": "linebreak_command",
           "named": true
         },
         {
@@ -516,6 +535,10 @@
           "named": true
         },
         {
+          "type": "char_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -536,7 +559,7 @@
           "named": true
         },
         {
-          "type": "line_comment",
+          "type": "linebreak_command",
           "named": true
         },
         {
@@ -554,9 +577,18 @@
         {
           "type": "text",
           "named": true
+        },
+        {
+          "type": "verb_command",
+          "named": true
         }
       ]
     }
+  },
+  {
+    "type": "star",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "subscript",
@@ -626,6 +658,10 @@
     "named": false
   },
   {
+    "type": "*",
+    "named": false
+  },
+  {
     "type": ",",
     "named": false
   },
@@ -667,6 +703,10 @@
   },
   {
     "type": "\\[",
+    "named": false
+  },
+  {
+    "type": "\\\\",
     "named": false
   },
   {
@@ -731,10 +771,6 @@
   },
   {
     "type": "space",
-    "named": true
-  },
-  {
-    "type": "star",
     "named": true
   },
   {

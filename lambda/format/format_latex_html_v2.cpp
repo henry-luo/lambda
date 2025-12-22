@@ -3001,6 +3001,11 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     // The AST builder stored it as a string child
     HtmlGenerator* gen = proc->generator();
     
+    log_debug("cmd_verb_command: CALLED");
+    
+    // Ensure we're in a paragraph (verb is inline content)
+    proc->ensureParagraph();
+    
     ElementReader elem_reader(elem);
     
     // Get the token string from the first child
@@ -3021,6 +3026,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
         return;
     }
     
+    log_debug("verb_command: processing text='%s'", text);
+    
     // Parse: "\verb<delim>content<delim>"
     // Skip "\verb" (5 chars)
     if (strlen(text) < 7) {  // Minimum: \verb||
@@ -3030,6 +3037,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     
     const char* delimiter_start = text + 5;  // After "\verb"
     char delim = *delimiter_start;
+    
+    log_debug("verb_command: delimiter='%c'", delim);
     
     // Find content between delimiters
     const char* content_start = delimiter_start + 1;
@@ -3042,6 +3051,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     
     size_t content_len = content_end - content_start;
     
+    log_debug("verb_command: content='%.*s' (len=%zu)", (int)content_len, content_start, content_len);
+    
     // Open <code class="latex-verbatim"> tag
     gen->writer()->openTagRaw("code", "class=\"latex-verbatim\"");
     
@@ -3050,6 +3061,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     gen->writer()->writeText(content.c_str());
     
     gen->writer()->closeTag("code");
+    
+    log_debug("verb_command: DONE");
 }
 
 static void cmd_verbatim(LatexProcessor* proc, Item elem) {
@@ -6212,7 +6225,33 @@ void LatexProcessor::processNode(Item node) {
         // Special handling for linebreak_command (\\)
         if (strcmp(tag, "linebreak_command") == 0) {
             ensureParagraph();
-            gen_->lineBreak(false);
+            
+            // Check for optional length attribute
+            if (elem_reader.has_attr("length")) {
+                String* length_str = elem_reader.get_string_attr("length");
+                if (length_str && length_str->len > 0) {
+                    // Convert to pixels
+                    double pixels = convertLatexLengthToPixels(length_str->chars);
+                    
+                    if (pixels != 0.0) {
+                        // Output: <span class="breakspace" style="margin-bottom:XXpx"></span>
+                        char style[128];
+                        snprintf(style, sizeof(style), "margin-bottom:%.3fpx", pixels);
+                        gen_->writer()->writeRawHtml("<span class=\"breakspace\" style=\"");
+                        gen_->writer()->writeRawHtml(style);
+                        gen_->writer()->writeRawHtml("\"></span>\n");
+                    } else {
+                        // No valid dimension, just output <br>
+                        gen_->lineBreak(false);
+                    }
+                } else {
+                    // No valid length string, just output <br>
+                    gen_->lineBreak(false);
+                }
+            } else {
+                // No length specified, just output <br>
+                gen_->lineBreak(false);
+            }
             return;
         }
         
@@ -6329,13 +6368,42 @@ void LatexProcessor::processChildren(Item elem) {
             
             if (tag && (strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0 ||
                         strcmp(tag, "newline") == 0)) {
-                // Check if next sibling is a brack_group (dimension argument)
                 bool has_dimension = false;
                 bool preserve_unit = false;
                 double dimension_px = 0;
                 const char* dimension_text = nullptr;
                 
-                if (i + 1 < count) {
+                // For linebreak_command (new grammar), check for length attribute
+                if (strcmp(tag, "linebreak_command") == 0 && child_elem.has_attr("length")) {
+                    String* length_str = child_elem.get_string_attr("length");
+                    if (length_str && length_str->len > 0) {
+                        const char* dim_text = length_str->chars;
+                        size_t dim_len = length_str->len;
+                        
+                        // Check if it's a relative unit (em, ex) - preserve as-is
+                        bool is_relative = false;
+                        if (dim_len >= 2) {
+                            const char* suffix = dim_text + dim_len - 2;
+                            if (strcmp(suffix, "em") == 0 || strcmp(suffix, "ex") == 0) {
+                                is_relative = true;
+                            }
+                        }
+                        
+                        if (is_relative) {
+                            has_dimension = true;
+                            preserve_unit = true;
+                            dimension_text = dim_text;
+                        } else {
+                            dimension_px = convertLatexLengthToPixels(dim_text);
+                            if (dimension_px > 0) {
+                                has_dimension = true;
+                                preserve_unit = false;
+                            }
+                        }
+                    }
+                } 
+                // For old linebreak/newline (old grammar), check if next sibling is a brack_group
+                else if (i + 1 < count) {
                     ItemReader next_reader = elem_reader.childAt(i + 1);
                     
                     if (next_reader.isElement()) {
