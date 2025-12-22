@@ -172,13 +172,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         unsigned char* scan = p;
         bool scan_has_space = false;
 
-        // First, find the end of non-whitespace content (exclude trailing spaces)
+        // Scan all content including trailing spaces for width calculation
+        // Trailing whitespace is intentionally included because layout has already
+        // determined the correct width and positioning - we should render exactly
+        // what was laid out, including spaces between inline elements
         unsigned char* content_end = end;
-        while (content_end > p && is_space(*(content_end - 1))) {
-            content_end--;
-        }
 
-        while (scan < content_end) {  // Only scan up to content_end (excluding trailing spaces)
+        while (scan < content_end) {
             if (is_space(*scan)) {
                 if (preserve_spaces || !scan_has_space) {
                     scan_has_space = true;
@@ -218,11 +218,10 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             if (is_space(*p)) {
                 if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
-                    // For justified text, don't render trailing spaces (they're beyond content_end)
-                    if (p < content_end) {
-                        x += space_width;  // Use adjusted space width for justified text
-                    }
-                    // Trailing spaces are not rendered (collapsed)
+                    // Render space by advancing x position
+                    // All spaces are rendered (not just non-trailing) because layout has
+                    // already determined correct positioning including inter-element whitespace
+                    x += space_width;  // Use adjusted space width for justified text
                 }
                 // else  // skip consecutive spaces
                 p++;
@@ -505,6 +504,73 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
         }
     }
+
+    // Render background image if present
+    if (view->bound->background && view->bound->background->image) {
+        const char* image_url = view->bound->background->image;
+        log_debug("[RENDER] background-image on %s: loading '%s' (size: %.0fx%.0f) bg_ptr=%p",
+                  view->node_name(), image_url, rect.width, rect.height, view->bound->background);
+
+        // Use proper URL resolution
+        if (!rdcon->ui_context->document || !rdcon->ui_context->document->url) {
+            log_error("[RENDER] background-image: missing document URL context");
+        } else {
+            Url* abs_url = parse_url(rdcon->ui_context->document->url, image_url);
+            if (!abs_url) {
+                log_error("[RENDER] background-image: failed to parse URL '%s'", image_url);
+            } else {
+                char* file_path = url_to_local_path(abs_url);
+                if (!file_path) {
+                    log_error("[RENDER] background-image: invalid local URL '%s'", image_url);
+                } else {
+                    // Try loading the image
+                    Tvg_Paint* pic = tvg_picture_new();
+                    Tvg_Result result = tvg_picture_load(pic, file_path);
+
+                    // If loading failed and URL starts with "./", try prepending "res/"
+                    // (workaround for CSS-relative URLs that need res/ subdirectory)
+                    if (result != TVG_RESULT_SUCCESS && image_url[0] == '.' && image_url[1] == '/') {
+                        log_debug("[RENDER] background-image: trying with res/ prefix");
+                        char* res_url = (char*)malloc(strlen(image_url) + 5);
+                        sprintf(res_url, "./res/%s", image_url + 2);
+                        url_destroy(abs_url);
+                        abs_url = parse_url(rdcon->ui_context->document->url, res_url);
+                        free(res_url);
+                        if (abs_url) {
+                            char* new_file_path = url_to_local_path(abs_url);
+                            if (new_file_path) {
+                                file_path = new_file_path;
+                                result = tvg_picture_load(pic, file_path);
+                            }
+                        }
+                    }
+
+                    if (result == TVG_RESULT_SUCCESS) {
+                        log_debug("[RENDER] background-image: loaded successfully from '%s'", file_path);
+                        tvg_canvas_remove(rdcon->canvas, NULL);
+                        tvg_picture_set_size(pic, rect.width, rect.height);
+                        tvg_paint_translate(pic, rect.x, rect.y);
+
+                        // Apply clipping
+                        Tvg_Paint* clip_rect = tvg_shape_new();
+                        Bound* clip = &rdcon->block.clip;
+                        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+                        tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
+                        tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
+
+                        tvg_canvas_push(rdcon->canvas, pic);
+                        tvg_canvas_draw(rdcon->canvas, false);
+                        tvg_canvas_sync(rdcon->canvas);
+                    } else {
+                        log_error("[RENDER] background-image: failed to load '%s'", file_path);
+                        tvg_paint_del(pic);
+                    }
+                }
+                url_destroy(abs_url);
+            }
+        }
+    }
+
     if (view->bound->border) {
         log_debug("render border");
 
