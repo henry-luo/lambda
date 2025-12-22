@@ -173,13 +173,13 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
         // fonts.tex: All tests pass! Tests 7, 8 moved to baseline (font class wrapper for breakspace)
         {"groups.tex", {2, 3}},
-        {"label-ref.tex", {7}},  // tests 1,2,3,6 moved to baseline (forward refs work with two-pass)
+        // label-ref.tex: All tests pass! Test 7 fixed (list item paragraph tracking)
         // layout-marginpar.tex: All tests pass! Moved to baseline
         {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
         {"text.tex", {10}},  // tests 4, 6 moved to baseline (typographic hyphen fix); test 5, 7, 8 baseline (PASS)
-        {"whitespace.tex", {1, 5, 6, 7, 8, 21}}  // test 6: \ignorespaces group boundary semantics
+        {"whitespace.tex", {1, 5, 7, 8, 21}}  // test 6 fixed: fixture typo (missing comma)
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
