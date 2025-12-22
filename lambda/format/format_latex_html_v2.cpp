@@ -322,8 +322,11 @@ static std::string processHatNotation(const char* text) {
 }
 
 // Convert ASCII apostrophe (') to right single quotation mark (')
-// Returns a new string with apostrophes converted to U+2019
-static std::string convertApostrophes(const char* text) {
+// Also handles dash ligatures: -- → en-dash, --- → em-dash
+// And single hyphen → Unicode hyphen (U+2010) when not in monospace mode
+// If in_monospace is true, skip all dash/ligature conversions (keep literal characters)
+// Returns a new string with conversions applied
+static std::string convertApostrophes(const char* text, bool in_monospace = false) {
     std::string result;
     result.reserve(strlen(text) * 3);  // Reserve space for potential UTF-8 expansion
     for (const char* p = text; *p; p++) {
@@ -346,18 +349,22 @@ static std::string convertApostrophes(const char* text) {
                 result += "\xE2\x80\x98";
             }
         } else if (*p == '-') {
-            // Check for --- (em-dash) or -- (en-dash)
-            if (*(p+1) == '-' && *(p+2) == '-') {
-                result += "\xE2\x80\x94";  // — (U+2014 = em-dash)
-                p += 2;  // Skip two more hyphens
-            } else if (*(p+1) == '-') {
-                result += "\xE2\x80\x93";  // – (U+2013 = en-dash)
-                p++;  // Skip second hyphen
-            } else {
-                // Single hyphen: keep as ASCII hyphen-minus (U+002D)
-                // Note: text.tex expects Unicode hyphen (U+2010) but basic_text.tex and spacing.tex expect ASCII
-                // This is inconsistent across test fixtures. Keep ASCII to maintain baseline compatibility.
+            if (in_monospace) {
+                // In monospace mode, keep all dashes as literal ASCII
                 result += '-';
+            } else {
+                // Check for --- (em-dash) or -- (en-dash)
+                if (*(p+1) == '-' && *(p+2) == '-') {
+                    result += "\xE2\x80\x94";  // — (U+2014 = em-dash)
+                    p += 2;  // Skip two more hyphens
+                } else if (*(p+1) == '-') {
+                    result += "\xE2\x80\x93";  // – (U+2013 = en-dash)
+                    p++;  // Skip second hyphen
+                } else {
+                    // Single hyphen → Unicode hyphen (U+2010)
+                    // LaTeX.js converts single hyphens to typographic hyphens
+                    result += "\xE2\x80\x90";  // ‐ (U+2010 = hyphen)
+                }
             }
         } else if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
             // !´ (exclamation + acute accent U+00B4) → ¡ (inverted exclamation U+00A1)
@@ -413,7 +420,7 @@ public:
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
           recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false),
           pending_zws_output_(false), pending_zws_had_trailing_space_(false),
-          group_suppresses_zws_(false) {}
+          group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -454,6 +461,11 @@ public:
     void exitItalicStyledSpan() { if (italic_styled_span_depth_ > 0) italic_styled_span_depth_--; }
     bool inItalicStyledSpan() const { return italic_styled_span_depth_ > 0; }
     
+    // Monospace mode tracking - inside \texttt or similar, suppress dash ligatures
+    void enterMonospaceMode() { monospace_depth_++; }
+    void exitMonospaceMode() { if (monospace_depth_ > 0) monospace_depth_--; }
+    bool inMonospaceMode() const { return monospace_depth_ > 0; }
+    
     // Restricted horizontal mode (inside \mbox, \fbox, etc.)
     // In this mode: \\ and \newline are ignored, \par becomes a space
     void enterRestrictedHMode() { restricted_h_mode_ = true; }
@@ -487,12 +499,22 @@ public:
     }
     void ensureParagraph();  // Start a paragraph if not already in one
     bool inParagraph() const { return in_paragraph_; }  // Check if currently in a paragraph
+    void setInParagraph(bool value) { in_paragraph_ = value; }  // Set paragraph state (for list items)
+    
+    // Inline mode management (to suppress paragraph creation)
+    void enterInlineMode() { inline_depth_++; }
+    void exitInlineMode() { inline_depth_--; }
     
     // Macro system functions (public so command handlers can access)
     void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
     bool isMacro(const std::string& name);
     MacroDefinition* getMacro(const std::string& name);
     Element* expandMacro(const std::string& name, const std::vector<Element*>& args);
+    
+    // Margin paragraph functions
+    int addMarginParagraph(const std::string& content);
+    bool hasMarginParagraphs() const;
+    void writeMarginParagraphs(HtmlWriter* writer);
     
 private:
     HtmlGenerator* gen_;
@@ -556,6 +578,19 @@ private:
     // If set, the current group contains only whitespace-controlling commands
     // and should not trigger ZWS output
     bool group_suppresses_zws_;
+    
+    // Monospace mode tracking - when > 0, we're inside \texttt or similar
+    // In monospace mode, dash ligatures (-- → en-dash, --- → em-dash) are suppressed
+    // and single hyphens are not converted to Unicode hyphen
+    int monospace_depth_;
+    
+    // Margin paragraph tracking
+    struct MarginParagraph {
+        int id;              // Unique ID (1-based)
+        std::string content; // Rendered HTML content of the marginpar
+    };
+    std::vector<MarginParagraph> margin_paragraphs_;
+    int margin_par_counter_;  // Counter for generating unique IDs
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -642,6 +677,46 @@ Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<
     }
     
     return expanded;
+}
+
+// =============================================================================
+// Margin Paragraph - Member Function Implementations
+// =============================================================================
+
+int LatexProcessor::addMarginParagraph(const std::string& content) {
+    margin_par_counter_++;
+    MarginParagraph mp;
+    mp.id = margin_par_counter_;
+    mp.content = content;
+    margin_paragraphs_.push_back(mp);
+    return margin_par_counter_;
+}
+
+bool LatexProcessor::hasMarginParagraphs() const {
+    return !margin_paragraphs_.empty();
+}
+
+void LatexProcessor::writeMarginParagraphs(HtmlWriter* writer) {
+    if (margin_paragraphs_.empty()) return;
+    
+    // Output: <div class="margin-right"><div class="marginpar">...content...</div></div>
+    writer->openTag("div", "margin-right");
+    writer->openTag("div", "marginpar");
+    
+    for (const auto& mp : margin_paragraphs_) {
+        // Each marginpar gets: <div id="N"><span class="mpbaseline"></span>content</div>
+        char id_str[32];
+        snprintf(id_str, sizeof(id_str), "%d", mp.id);
+        writer->writeRawHtml("<div id=\"");
+        writer->writeRawHtml(id_str);
+        writer->writeRawHtml("\">");
+        writer->writeRawHtml("<span class=\"mpbaseline\"></span>");
+        writer->writeRawHtml(mp.content.c_str());
+        writer->writeRawHtml("</div>");
+    }
+    
+    writer->closeTag("div");  // marginpar
+    writer->closeTag("div");  // margin-right
 }
 
 // =============================================================================
@@ -1169,10 +1244,12 @@ static void cmd_texttt(LatexProcessor* proc, Item elem) {
     
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
+    proc->enterMonospaceMode();  // Suppress dash ligatures and hyphen conversion
     gen->currentFont().family = FontFamily::Typewriter;
     gen->span("tt");
     proc->processChildren(elem);
     gen->closeElement();
+    proc->exitMonospaceMode();
     proc->exitStyledSpan();
     gen->exitGroup();
 }
@@ -1307,16 +1384,33 @@ static void cmd_textnormal(LatexProcessor* proc, Item elem) {
 
 // =============================================================================
 // Font Declaration Commands (bfseries, mdseries, rmfamily, etc.)
-// These set font state and mark that the following text should strip leading space
-// (LaTeX commands consume their trailing space)
+// These can operate in two modes:
+// 1. Declaration-style (no children): \bfseries sets font for subsequent text in current scope
+// 2. Environment-style (with children): \begin{bfseries}...\end{bfseries} wraps content in a span
+// Note: When the parser sees \begin{bfseries}, it creates an element with tag "bfseries"
+// and the environment content as children.
 // =============================================================================
 
 static void cmd_bfseries(LatexProcessor* proc, Item elem) {
-    // \bfseries - switch to bold (declaration)
+    // \bfseries - switch to bold
     HtmlGenerator* gen = proc->generator();
-    gen->currentFont().series = FontSeries::Bold;
-    proc->setStripNextLeadingSpace(true);
-    proc->processChildren(elem);
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        // Declaration-style: just set font state
+        gen->currentFont().series = FontSeries::Bold;
+        proc->setStripNextLeadingSpace(true);
+    } else {
+        // Environment-style: wrap content in a span
+        gen->enterGroup();
+        gen->currentFont().series = FontSeries::Bold;
+        proc->enterStyledSpan();
+        gen->span("bf");  // LaTeX.js uses "bf" not "bfseries"
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_mdseries(LatexProcessor* proc, Item elem) {
@@ -1347,8 +1441,10 @@ static void cmd_ttfamily(LatexProcessor* proc, Item elem) {
     // \ttfamily - switch to typewriter family (declaration)
     HtmlGenerator* gen = proc->generator();
     gen->currentFont().family = FontFamily::Typewriter;
+    proc->enterMonospaceMode();  // Suppress dash ligatures and hyphen conversion
     proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
+    proc->exitMonospaceMode();
 }
 
 static void cmd_itshape(LatexProcessor* proc, Item elem) {
@@ -1940,125 +2036,195 @@ static void cmd_def(LatexProcessor* proc, Item elem) {
 }
 
 // Font size commands
+// These commands can operate in two modes:
+// 1. Declaration-style (no children): \small sets font for subsequent text in current scope
+// 2. Argument-style (with children): {\small text} wraps children in a span
+// Note: In LaTeX, \small by itself is a declaration that affects all following text
+// until the end of the current group/scope. The span wrapping happens in processText()
+// based on the current font state.
 
 static void cmd_tiny(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Tiny;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("tiny");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    // Check if this is declaration-style (no children) or argument-style (with children)
+    if (reader.isEmpty()) {
+        // Declaration-style: just set font state, no span here
+        // The font state persists until group exit, and processText() will wrap text in spans
+        gen->currentFont().size = FontSize::Tiny;
+    } else {
+        // Argument-style: wrap children in a span
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Tiny;
+        proc->enterStyledSpan();
+        gen->span("tiny");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_scriptsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::ScriptSize;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("scriptsize");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::ScriptSize;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::ScriptSize;
+        proc->enterStyledSpan();
+        gen->span("scriptsize");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_footnotesize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::FootnoteSize;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("footnotesize");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::FootnoteSize;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::FootnoteSize;
+        proc->enterStyledSpan();
+        gen->span("footnotesize");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_small(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Small;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("small");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Small;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Small;
+        proc->enterStyledSpan();
+        gen->span("small");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_normalsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::NormalSize;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("normalsize");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::NormalSize;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::NormalSize;
+        proc->enterStyledSpan();
+        gen->span("normalsize");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Large;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("large");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Large;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Large;
+        proc->enterStyledSpan();
+        gen->span("large");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_Large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Large2;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("Large");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Large2;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Large2;
+        proc->enterStyledSpan();
+        gen->span("Large");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_LARGE(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Large3;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("LARGE");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Large3;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Large3;
+        proc->enterStyledSpan();
+        gen->span("LARGE");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Huge;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("huge");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Huge;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Huge;
+        proc->enterStyledSpan();
+        gen->span("huge");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 static void cmd_Huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    gen->enterGroup();
-    gen->currentFont().size = FontSize::Huge2;
-    proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    gen->span("Huge");
-    proc->processChildren(elem);
-    gen->closeElement();
-    proc->exitStyledSpan();
-    gen->exitGroup();
+    ElementReader reader(elem);
+    
+    if (reader.isEmpty()) {
+        gen->currentFont().size = FontSize::Huge2;
+    } else {
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Huge2;
+        proc->enterStyledSpan();
+        gen->span("Huge");
+        proc->processChildren(elem);
+        gen->closeElement();
+        proc->exitStyledSpan();
+        gen->exitGroup();
+    }
 }
 
 // =============================================================================
@@ -2288,6 +2454,20 @@ static void cmd_textellipsis(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("…");
+}
+
+static void cmd_textendash(LatexProcessor* proc, Item elem) {
+    // \textendash - Outputs an en-dash character (–)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("–");  // U+2013 EN DASH
+}
+
+static void cmd_textemdash(LatexProcessor* proc, Item elem) {
+    // \textemdash - Outputs an em-dash character (—)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("—");  // U+2014 EM DASH
 }
 
 static void cmd_ldots(LatexProcessor* proc, Item elem) {
@@ -2708,14 +2888,14 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
                             // Close previous item if open
                             if (in_item) {
+                                proc->setInParagraph(false);  // Reset paragraph state before closing item
                                 gen->endItem();  // Close li/dd with proper structure
                             }
                             
                             // Get optional label from item
                             // For description/itemize/enumerate lists, label is in brack_group child: \item[label]
-                            const char* label = nullptr;
-                            std::string label_buf;  // Buffer to hold extracted label
                             bool has_brack_group = false;  // Track if brack_group exists (for empty label)
+                            std::string html_label;  // Rendered HTML label content
                             
                             if (para_child_elem.childCount() > 0) {
                                 ItemReader first = para_child_elem.childAt(0);
@@ -2724,17 +2904,29 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     const char* first_tag = first_elem.tagName();
                                     if (first_tag && strcmp(first_tag, "brack_group") == 0) {
                                         has_brack_group = true;
-                                        // Extract label from brack_group using helper
-                                        label_buf = extractLabelFromBrackGroup(first_elem);
-                                        // Use empty string for empty brack_group, or the extracted text
-                                        label = label_buf.c_str();
+                                        // Render the brack_group contents to HTML using capture mode
+                                        // Enter group to isolate font changes from affecting later content
+                                        gen->enterGroup();
+                                        // Enter inline mode to suppress paragraph creation
+                                        proc->enterInlineMode();
+                                        gen->startCapture();
+                                        for (size_t k = 0; k < first_elem.childCount(); k++) {
+                                            ItemReader brack_child = first_elem.childAt(k);
+                                            proc->processNode(brack_child.item());
+                                        }
+                                        html_label = gen->endCapture();
+                                        proc->exitInlineMode();
+                                        gen->exitGroup();
                                     }
-                                } else if (first.isString()) {
-                                    label = first.cstring();
                                 }
                             }
                             
-                            gen->createItem(has_brack_group ? label : nullptr);
+                            if (has_brack_group) {
+                                gen->createItemWithHtmlLabel(html_label.c_str());
+                            } else {
+                                gen->createItem(nullptr);
+                            }
+                            proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
                             in_item = true;
                             at_item_start = true;  // Next text should be trimmed
                         } else {
@@ -2758,6 +2950,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     // Close <p> before block element
                                     gen->trimTrailingWhitespace();
                                     gen->closeElement();  // Close <p>
+                                    proc->setInParagraph(false);  // <p> is now closed
                                     proc->processNode(para_child.item());
                                     // DON'T open new <p> here - let endItem handle it
                                     // The <p> will be opened lazily when text content is encountered
@@ -2805,6 +2998,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
             // Direct item (not in paragraph wrapper)
             if (strcmp(tag, "item") == 0 || strcmp(tag, "enum_item") == 0) {
                 if (in_item) {
+                    proc->setInParagraph(false);  // Reset paragraph state before closing item
                     gen->endItem();  // Close previous item with proper structure
                 }
                 
@@ -2831,6 +3025,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                 }
                 
                 gen->createItem(has_brack_group2 ? label : nullptr);
+                proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
                 in_item = true;
                 at_item_start = true;  // Next text should be trimmed
             } else {
@@ -2863,6 +3058,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     
     // Close last item
     if (in_item) {
+        proc->setInParagraph(false);  // Reset paragraph state before closing item
         gen->endItem();  // Close last item with proper structure
     }
 }
@@ -2921,6 +3117,9 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
     // \begin{itemize} ... \end{itemize}
     HtmlGenerator* gen = proc->generator();
     
+    // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
+    bool saved_in_paragraph = proc->inParagraph();
+    
     // Scan for alignment declarations in list content
     const char* list_alignment = scanForListAlignment(elem);
     if (list_alignment) {
@@ -2938,6 +3137,9 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
         proc->setNextParagraphAlignment(nullptr);
     }
     
+    // Restore paragraph state
+    proc->setInParagraph(saved_in_paragraph);
+    
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
 }
@@ -2945,6 +3147,9 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
 static void cmd_enumerate(LatexProcessor* proc, Item elem) {
     // \begin{enumerate} ... \end{enumerate}
     HtmlGenerator* gen = proc->generator();
+    
+    // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
+    bool saved_in_paragraph = proc->inParagraph();
     
     // Scan for alignment declarations in list content
     const char* list_alignment = scanForListAlignment(elem);
@@ -2963,6 +3168,9 @@ static void cmd_enumerate(LatexProcessor* proc, Item elem) {
         proc->setNextParagraphAlignment(nullptr);
     }
     
+    // Restore paragraph state
+    proc->setInParagraph(saved_in_paragraph);
+    
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
 }
@@ -2971,9 +3179,15 @@ static void cmd_description(LatexProcessor* proc, Item elem) {
     // \begin{description} ... \end{description}
     HtmlGenerator* gen = proc->generator();
     
+    // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
+    bool saved_in_paragraph = proc->inParagraph();
+    
     gen->startDescription();
     processListItems(proc, elem, "description");
     gen->endDescription();
+    
+    // Restore paragraph state
+    proc->setInParagraph(saved_in_paragraph);
     
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
@@ -2996,7 +3210,9 @@ static void cmd_item(LatexProcessor* proc, Item elem) {
     }
     
     gen->createItem(label);
+    proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
     proc->processChildren(elem);
+    proc->setInParagraph(false);  // Reset before closing
     gen->closeElement();  // Close li/dd
 }
 
@@ -3114,20 +3330,34 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     
     log_debug("verb_command: processing text='%s'", text);
     
-    // Parse: "\verb<delim>content<delim>"
+    // Parse: "\verb<delim>content<delim>" or "\verb*<delim>content<delim>"
     // Skip "\verb" (5 chars)
     if (strlen(text) < 7) {  // Minimum: \verb||
         log_warn("verb_command: token too short: %s", text);
         return;
     }
     
-    const char* delimiter_start = text + 5;  // After "\verb"
-    char delim = *delimiter_start;
+    const char* ptr = text + 5;  // After "\verb"
+    
+    // Check for starred variant (\verb*)
+    bool starred = false;
+    if (*ptr == '*') {
+        starred = true;
+        ptr++;
+        log_debug("verb_command: starred variant detected");
+    }
+    
+    // Next character is the delimiter
+    char delim = *ptr;
+    if (delim == '\0') {
+        log_warn("verb_command: no delimiter after \\verb%s", starred ? "*" : "");
+        return;
+    }
     
     log_debug("verb_command: delimiter='%c'", delim);
     
     // Find content between delimiters
-    const char* content_start = delimiter_start + 1;
+    const char* content_start = ptr + 1;
     const char* content_end = strchr(content_start, delim);
     
     if (!content_end) {
@@ -3139,11 +3369,21 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     
     log_debug("verb_command: content='%.*s' (len=%zu)", (int)content_len, content_start, content_len);
     
-    // Open <code class="latex-verbatim"> tag
-    gen->writer()->openTagRaw("code", "class=\"latex-verbatim\"");
+    // Open <code class="tt"> tag (matches LaTeX.js)
+    gen->writer()->openTagRaw("code", "class=\"tt\"");
     
     // Output verbatim content (extract substring)
     std::string content(content_start, content_len);
+    
+    // For \verb*, replace spaces with visible space character (U+2423 OPEN BOX)
+    if (starred) {
+        for (size_t i = 0; i < content.length(); i++) {
+            if (content[i] == ' ') {
+                content.replace(i, 1, "␣");  // U+2423 OPEN BOX
+            }
+        }
+    }
+    
     gen->writer()->writeText(content.c_str());
     
     gen->writer()->closeTag("code");
@@ -3336,12 +3576,102 @@ static void cmd_echoO(LatexProcessor* proc, Item elem) {
 static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
     // \echoOGO[o1]{g}[o2] - from echo package for testing
     // latex.js: args.echoOGO = <[ H o? g o? ]>
-    // \echoOGO : (o1, g, o2) -> [] with optional parts
-    // Returns empty (just gobbles), used for testing arg parsing
+    // Pattern: -optional- for optional args, +mandatory+ for mandatory args
+    // For \echoOGO[o1]{g}[o2] -> outputs: -o1-+g+-o2-
+    // Note: The parser may put the mandatory arg as direct text child or in a group
     
-    // This command produces no output in latex.js
-    (void)proc;
-    (void)elem;
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    ElementReader reader(elem);
+    
+    bool found_mandatory = false;
+    
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional argument - output -content-
+                gen->text("-");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("-");
+            } else if (strcmp(tag, "group") == 0 && !found_mandatory) {
+                // Mandatory group argument - output +content+
+                found_mandatory = true;
+                gen->text("+");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("+");
+            }
+        } else if (child.isString() && !found_mandatory) {
+            // Text child as mandatory argument
+            found_mandatory = true;
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0) {
+                gen->text("+");
+                gen->text(text);
+                gen->text("+");
+            }
+        }
+    }
+}
+
+static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
+    // \echoGOG{g1}[o]{g2} - from echo package for testing
+    // latex.js: args.echoGOG = <[ H g o? g ]>
+    // Pattern: +g1+-o-+g2+ where optional is only if present
+    // Note: The parser may put mandatory args as direct text children or in groups
+    
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    ElementReader reader(elem);
+    
+    int mandatory_count = 0;
+    
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "group") == 0) {
+                // Mandatory group argument - output +content+
+                mandatory_count++;
+                gen->text("+");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("+");
+            } else if (strcmp(tag, "brack_group") == 0) {
+                // Optional argument - output -content-
+                gen->text("-");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("-");
+            }
+        } else if (child.isString() && mandatory_count < 2) {
+            // Text child as mandatory argument
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0) {
+                mandatory_count++;
+                gen->text("+");
+                gen->text(text);
+                gen->text("+");
+            }
+        }
+    }
 }
 
 static void cmd_newpage(LatexProcessor* proc, Item elem) {
@@ -3484,9 +3814,41 @@ static void cmd_bigbreak(LatexProcessor* proc, Item elem) {
 
 static void cmd_marginpar(LatexProcessor* proc, Item elem) {
     // \marginpar{text} - margin note
-    // In HTML text mode, this is a no-op (consume argument but don't output)
-    (void)proc;
-    (void)elem;
+    // 1. Output inline placeholder: <span class="mpbaseline" id="marginref-N"></span>
+    // 2. Capture marginpar content and store for later output after body div
+    
+    HtmlGenerator* gen = proc->generator();
+    ElementReader reader(elem);
+    
+    // Enter a new group to isolate font changes from the main document
+    gen->enterGroup();
+    
+    // Enter inline mode to prevent paragraph creation inside marginpar
+    proc->enterInlineMode();
+    
+    // Get the marginpar content by capturing output
+    gen->startCapture();
+    proc->processChildren(elem);
+    std::string content = gen->endCapture();
+    
+    // Exit inline mode
+    proc->exitInlineMode();
+    
+    // Exit group to restore font state
+    gen->exitGroup();
+    
+    // Add to margin paragraphs list and get unique ID
+    int id = proc->addMarginParagraph(content);
+    
+    // Ensure we're in a paragraph before outputting the placeholder
+    // This ensures the span appears inside <p> not before it
+    proc->ensureParagraph();
+    
+    // Output inline placeholder at current position
+    char id_attr[64];
+    snprintf(id_attr, sizeof(id_attr), "mpbaseline\" id=\"marginref-%d", id);
+    gen->span(id_attr);
+    gen->closeElement();
 }
 
 static void cmd_index(LatexProcessor* proc, Item elem) {
@@ -5887,6 +6249,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["gobbleO"] = cmd_gobbleO;
     command_table_["echoO"] = cmd_echoO;
     command_table_["echoOGO"] = cmd_echoOGO;
+    command_table_["echoGOG"] = cmd_echoGOG;
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
@@ -5898,6 +6261,8 @@ void LatexProcessor::initCommandTable() {
     command_table_["/"] = cmd_ligature_break;  // \/ ligature break
     command_table_["textbackslash"] = cmd_textbackslash;
     command_table_["textellipsis"] = cmd_textellipsis;
+    command_table_["textendash"] = cmd_textendash;
+    command_table_["textemdash"] = cmd_textemdash;
     command_table_["ldots"] = cmd_ldots;
     command_table_["dots"] = cmd_dots;
     command_table_["char"] = cmd_char;
@@ -6326,19 +6691,41 @@ void LatexProcessor::processNode(Item node) {
             if (elem_reader.has_attr("length")) {
                 String* length_str = elem_reader.get_string_attr("length");
                 if (length_str && length_str->len > 0) {
-                    // Convert to pixels
-                    double pixels = convertLatexLengthToPixels(length_str->chars);
+                    const char* dim_text = length_str->chars;
+                    size_t dim_len = length_str->len;
                     
-                    if (pixels != 0.0) {
-                        // Output: <span class="breakspace" style="margin-bottom:XXpx"></span>
-                        char style[128];
-                        snprintf(style, sizeof(style), "margin-bottom:%.3fpx", pixels);
-                        gen_->writer()->writeRawHtml("<span class=\"breakspace\" style=\"");
-                        gen_->writer()->writeRawHtml(style);
-                        gen_->writer()->writeRawHtml("\"></span>\n");
+                    // Check if it's a relative unit (em, ex) - preserve as-is
+                    bool is_relative = false;
+                    if (dim_len >= 2) {
+                        const char* suffix = dim_text + dim_len - 2;
+                        if (strcmp(suffix, "em") == 0 || strcmp(suffix, "ex") == 0) {
+                            is_relative = true;
+                        }
+                    }
+                    
+                    // Build the style string
+                    char style[128];
+                    if (is_relative) {
+                        snprintf(style, sizeof(style), "margin-bottom:%s", dim_text);
                     } else {
-                        // No valid dimension, just output <br>
-                        gen_->lineBreak(false);
+                        double pixels = convertLatexLengthToPixels(dim_text);
+                        if (pixels == 0.0) {
+                            gen_->lineBreak(false);
+                            return;
+                        }
+                        snprintf(style, sizeof(style), "margin-bottom:%.3fpx", pixels);
+                    }
+                    
+                    // Check if font styling is active - wrap breakspace in font class for em-relative sizing
+                    std::string font_class = gen_->getFontClass(gen_->currentFont());
+                    if (!font_class.empty()) {
+                        gen_->span(font_class.c_str());
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();  // close breakspace
+                        gen_->closeElement();  // close font class wrapper
+                    } else {
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();
                     }
                 } else {
                     // No valid length string, just output <br>
@@ -6635,14 +7022,25 @@ void LatexProcessor::processChildren(Item elem) {
                 ensureParagraph();;
                 if (has_dimension) {
                     // Output span with class and style: <span class="breakspace" style="margin-bottom:X"></span>
+                    // If font styling is active, wrap in font class span for proper em-unit sizing
                     char style[256];
                     if (preserve_unit) {
                         snprintf(style, sizeof(style), "margin-bottom:%s", dimension_text);
                     } else {
                         snprintf(style, sizeof(style), "margin-bottom:%.3fpx", dimension_px);
                     }
-                    gen_->spanWithClassAndStyle("breakspace", style);
-                    gen_->closeElement();
+                    
+                    // Check if font styling is active - wrap breakspace in font class for em-relative sizing
+                    std::string font_class = gen_->getFontClass(gen_->currentFont());
+                    if (!font_class.empty()) {
+                        gen_->span(font_class.c_str());
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();  // close breakspace
+                        gen_->closeElement();  // close font class wrapper
+                    } else {
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();
+                    }
                 } else {
                     gen_->lineBreak(false);
                 }
@@ -7359,14 +7757,10 @@ void LatexProcessor::processText(const char* text) {
     normalized = processHatNotation(normalized.c_str());
     
     // Convert ASCII apostrophe (') to right single quotation mark (')
-    // LaTeX uses ' for typographic apostrophes in running text
-    // Note: '' (two single quotes) is handled by the ligature parser as closing double quote
-    normalized = convertApostrophes(normalized.c_str());
-    
-    // Note: We do NOT convert ASCII hyphen-minus (U+002D) to Unicode hyphen (U+2010)
-    // because standard LaTeX behavior keeps single hyphens as-is in compound words
-    // like "daughter-in-law". Only -- (en-dash) and --- (em-dash) are converted,
-    // which is handled by the ligature parser in tree-sitter-latex.
+    // Also handles dash ligatures (-- → en-dash, --- → em-dash)
+    // And single hyphen → Unicode hyphen (U+2010)
+    // In monospace mode, dash/ligature conversions are skipped
+    normalized = convertApostrophes(normalized.c_str(), inMonospaceMode());
     
     // Check if result is pure whitespace (multiple spaces/newlines)
     // Don't skip single spaces - they're significant in inline content
@@ -7856,7 +8250,22 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     
     Pool* pool = input->pool;
     
-    // Create HTML writer
+    // ==========================================================================
+    // PASS 1: Label collection (forward reference resolution)
+    // Process the document with a null writer to collect all labels
+    // ==========================================================================
+    NullHtmlWriter null_writer;
+    HtmlGenerator label_gen(pool, &null_writer);
+    LatexProcessor label_proc(&label_gen, pool, input);
+    
+    // Process to collect labels (output is discarded)
+    label_proc.process(input->root);
+    
+    // ==========================================================================
+    // PASS 2: HTML generation with all labels available
+    // ==========================================================================
+    
+    // Create HTML writer for actual output
     HtmlWriter* writer = nullptr;
     if (text_mode) {
         // Text mode - generate HTML string
@@ -7867,8 +8276,9 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
         writer = new NodeHtmlWriter(input);
     }
     
-    // Create HTML generator
+    // Create HTML generator and copy labels from first pass
     HtmlGenerator gen(pool, writer);
+    gen.copyLabelsFrom(label_gen);
     
     // Create processor
     LatexProcessor proc(&gen, pool, input);
@@ -7881,6 +8291,11 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     
     // Close HTML document container
     writer->closeTag("div");
+    
+    // Output margin paragraphs if any were collected
+    if (proc.hasMarginParagraphs()) {
+        proc.writeMarginParagraphs(writer);
+    }
     
     // Get result
     Item result = writer->getResult();
