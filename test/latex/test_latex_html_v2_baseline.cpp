@@ -202,12 +202,12 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         // basic_text.tex: all tests pass!
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
         // counters.tex: All tests pass! Test 1 (counter arithmetic), Test 2 (moved from extended)
-        {"environments.tex", {7, 10, 14}},
+        {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
         {"fonts.tex", {7, 8}},  // test 6 passed: monospace ligature suppression
         {"groups.tex", {2, 3}},
-        {"label-ref.tex", {2, 3, 6, 7}},  // test 1 passed (moved from extended)
+        {"label-ref.tex", {7}},  // tests 2,3,6 now pass with two-pass forward ref resolution
         {"layout-marginpar.tex", {1, 2, 3}},
-        {"macros.tex", {2, 4, 5, 6}},
+        {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
         {"text.tex", {4, 6, 10}},  // test 5, 7, 8 passed; 8 = verb* fix

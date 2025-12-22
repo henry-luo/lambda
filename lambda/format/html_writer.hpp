@@ -142,6 +142,46 @@ private:
     bool hasOpenElements() const { return !stack_.empty(); }
 };
 
+// Null mode implementation: discards all output (for label collection pass)
+class NullHtmlWriter : public HtmlWriter {
+public:
+    NullHtmlWriter() = default;
+    ~NullHtmlWriter() override = default;
+    
+    void writeText(const char* text, size_t len = 0) override { (void)text; (void)len; }
+    void writeRawHtml(const char* html) override { (void)html; }
+    void trimTrailingWhitespace() override {}
+    bool hasTrailingWhitespace() const override { return false; }
+    bool removeLastOpenedTagIfEmpty(const char* tag) override { (void)tag; return false; }
+    bool isTagOpen(const char* tag) const override { (void)tag; return false; }
+    void openTag(const char* tag, const char* classes = nullptr,
+                const char* id = nullptr, const char* style = nullptr) override {
+        (void)tag; (void)classes; (void)id; (void)style;
+    }
+    void openTagRaw(const char* tag, const char* raw_attrs) override {
+        (void)tag; (void)raw_attrs;
+    }
+    void closeTag(const char* tag) override { (void)tag; }
+    void writeSelfClosingTag(const char* tag, const char* classes = nullptr,
+                            const char* attrs = nullptr) override {
+        (void)tag; (void)classes; (void)attrs;
+    }
+    void writeElement(const char* tag, const char* content,
+                     const char* classes = nullptr) override {
+        (void)tag; (void)content; (void)classes;
+    }
+    void writeAttribute(const char* name, const char* value) override {
+        (void)name; (void)value;
+    }
+    
+    void indent() override {}
+    void unindent() override {}
+    void newline() override {}
+    
+    Item getResult() override { Item result; result.item = ITEM_NULL; return result; }
+    const char* getHtml() override { return nullptr; }
+};
+
 } // namespace lambda
 
 #endif // HTML_WRITER_HPP

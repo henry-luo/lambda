@@ -111,7 +111,8 @@ static std::string processTypography(const char* input) {
 // =============================================================================
 
 HtmlGenerator::HtmlGenerator(Pool* pool, HtmlWriter* writer)
-    : LatexGenerator(pool, writer), math_mode_(false), verbatim_mode_(false) {
+    : LatexGenerator(pool, writer), math_mode_(false), verbatim_mode_(false),
+      capture_writer_(nullptr), original_writer_(nullptr) {
     
     log_debug("HtmlGenerator created");
 }
@@ -645,39 +646,50 @@ void HtmlGenerator::itemParagraphBreak() {
 std::string HtmlGenerator::getEnumerateLabel(int depth) const {
     // html-generator.ls getEnumerateLabel method
     // Get the label format for enumerate at given depth
-    
+    // Returns HTML with id and appropriate format matching LaTeX.js output
+    //
     // Default LaTeX enumerate labels:
-    // Level 1: 1., 2., 3., ... (arabic)
-    // Level 2: (a), (b), (c), ... (alph)
-    // Level 3: i., ii., iii., ... (roman)
-    // Level 4: A., B., C., ... (Alph)
+    // Level 1: <span id="item-1">1.</span> (arabic with dot)
+    // Level 2: <span id="item-2">(a)</span> (alph with parens)
+    // Level 3: <span id="item-3">i.</span> (roman with dot)
+    // Level 4: <span id="item-4">A.</span> (Alph with dot)
     
     std::string counter_name;
     std::string format;
+    std::string prefix = "";
+    std::string suffix = ".";
     
     switch (depth) {
         case 1:
             counter_name = "enumi";
             format = "arabic";
+            suffix = ".";
             break;
         case 2:
             counter_name = "enumii";
             format = "alph";
+            prefix = "(";
+            suffix = ")";
             break;
         case 3:
             counter_name = "enumiii";
             format = "roman";
+            suffix = ".";
             break;
         case 4:
             counter_name = "enumiv";
             format = "Alph";
+            suffix = ".";
             break;
         default:
             return "";
     }
     
     if (hasCounter(counter_name)) {
-        return formatCounter(counter_name, format);
+        int value = getCounter(counter_name);
+        std::string item_id = "item-" + std::to_string(value);
+        std::string formatted = formatCounter(counter_name, format);
+        return "<span id=\"" + item_id + "\">" + prefix + formatted + suffix + "</span>";
     }
     
     return "";
@@ -1303,6 +1315,104 @@ std::vector<std::string> HtmlGenerator::parseColumnSpec(const char* spec) {
     }
     
     return cols;
+}
+
+// =============================================================================
+// Capture Mode Methods
+// =============================================================================
+
+void HtmlGenerator::startCapture() {
+    // Save the original writer and create a temporary capture writer
+    if (capture_writer_ != nullptr) {
+        log_error("startCapture: already in capture mode");
+        return;
+    }
+    
+    original_writer_ = writer_;
+    capture_writer_ = new TextHtmlWriter(pool_, false);  // No pretty-printing
+    writer_ = capture_writer_;
+}
+
+std::string HtmlGenerator::endCapture() {
+    // Restore original writer and return captured content
+    if (original_writer_ == nullptr) {
+        log_error("endCapture: not in capture mode");
+        return "";
+    }
+    
+    const char* html = capture_writer_->getHtml();
+    std::string result = html ? html : "";
+    
+    // Restore original writer
+    writer_ = original_writer_;
+    original_writer_ = nullptr;
+    
+    // Clean up capture writer
+    delete capture_writer_;
+    capture_writer_ = nullptr;
+    
+    return result;
+}
+
+void HtmlGenerator::createItemWithHtmlLabel(const char* html_label) {
+    // Create list item with pre-rendered HTML as the custom label
+    // This is used for enumerate/itemize with \item[...] where the label contains formatting
+    
+    if (list_stack_.empty()) {
+        log_error("createItemWithHtmlLabel: not in a list environment");
+        return;
+    }
+    
+    ListState& state = currentList();
+    state.item_count++;
+    
+    if (state.type == "itemize") {
+        const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("li", li_class);
+        writer_->openTag("span", "itemlabel");
+        writer_->openTag("span", "hbox llap");
+        
+        // Write the pre-rendered HTML label directly (no extra wrapper for itemize)
+        if (html_label && html_label[0]) {
+            writer_->writeRawHtml(html_label);
+        }
+        
+        writer_->closeTag("span");  // close hbox llap
+        writer_->closeTag("span");  // close itemlabel
+        
+        const char* p_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("p", p_class);
+    } else if (state.type == "enumerate") {
+        // For enumerate with custom label, do NOT step the counter
+        // The custom label replaces the number but the next regular item continues the count
+        
+        const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("li", li_class);
+        writer_->openTag("span", "itemlabel");
+        writer_->openTag("span", "hbox llap");
+        
+        // Write the pre-rendered HTML label wrapped in a span (custom label replaces number)
+        writer_->openTag("span", nullptr);
+        if (html_label && html_label[0]) {
+            writer_->writeRawHtml(html_label);
+        }
+        writer_->closeTag("span");
+        
+        writer_->closeTag("span");  // close hbox llap
+        writer_->closeTag("span");  // close itemlabel
+        
+        const char* p_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
+        writer_->openTag("p", p_class);
+    } else if (state.type == "description") {
+        // For description, use the HTML label as the dt content
+        writer_->openTag("dt", nullptr);
+        if (html_label && html_label[0]) {
+            writer_->writeRawHtml(html_label);
+        }
+        writer_->closeTag("dt");
+        writer_->openTag("dd", nullptr);
+        writer_->openTag("p", nullptr);
+    }
 }
 
 } // namespace lambda
