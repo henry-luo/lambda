@@ -361,9 +361,9 @@ static std::string convertApostrophes(const char* text, bool in_monospace = fals
                     result += "\xE2\x80\x93";  // – (U+2013 = en-dash)
                     p++;  // Skip second hyphen
                 } else {
-                    // Single hyphen stays as ASCII hyphen-minus
-                    // LaTeX.js keeps single hyphens as ASCII (not U+2010)
-                    result += '-';
+                    // Single hyphen → Unicode hyphen (U+2010)
+                    // LaTeX.js converts single hyphens to typographic hyphens
+                    result += "\xE2\x80\x90";  // ‐ (U+2010 = hyphen)
                 }
             }
         } else if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
