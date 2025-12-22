@@ -71,7 +71,9 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
 
     // Copy inherited styles from parent
     pseudo_elem->font = parent->font;
-    pseudo_elem->bound = parent->bound;
+    // DON'T copy bound - pseudo-element should have its own BoundaryProp
+    // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
+    pseudo_elem->bound = nullptr;  // Will be allocated when CSS properties are applied
     pseudo_elem->in_line = parent->in_line;
 
     // Get display value from pseudo-element's styles (before_styles or after_styles)
