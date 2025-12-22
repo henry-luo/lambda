@@ -281,7 +281,7 @@ TEST_F(LatexHtmlV2FixtureTest, BasicTextFormatting) {
     run_fixture_test(fixture);
 }
 
-TEST_F(LatexHtmlV2FixtureTest, DISABLED_SectioningCommands) {
+TEST_F(LatexHtmlV2FixtureTest, SectioningCommands) {
     LatexHtmlFixture fixture;
     fixture.id = 2;
     fixture.header = "sectioning commands";
@@ -292,7 +292,7 @@ This is background information.)";
     fixture.expected_html = "<div class=\"body\">\n"
         "<h2 id=\"sec-1\">1\xE2\x80\x83Introduction</h2>\n"
         "<p>This is the introduction.</p>\n"
-        "<div class=\"latex-subsection\">Background</div>\n"
+        "<h3 id=\"sec-2\">1.1\xE2""\x80""\x83""Background</h3>\n"
         "<p>This is background information.</p>\n"
         "</div>";
     fixture.skip_test = false;
