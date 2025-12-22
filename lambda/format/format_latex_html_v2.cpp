@@ -19,11 +19,38 @@
 #include <map>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 // external function for evaluating LaTeX numeric expressions
 extern "C" int latex_eval_num_expr(const char* expr);
 
 namespace lambda {
+
+// =============================================================================
+// Space-Absorbing Commands - Commands that consume following whitespace
+// =============================================================================
+
+// LaTeX commands that absorb following whitespace per LaTeX semantics
+// After these commands, we need ZWS markers to preserve word boundaries in HTML
+static const std::unordered_set<std::string> SPACE_ABSORBING_COMMANDS = {
+    // Logo commands
+    "LaTeX", "TeX", "LaTeXe",
+    // Text styling commands
+    "textbf", "textit", "texttt", "textsc", "textsf", "textsl", "textrm", "textmd", "textup",
+    "emph", "underline",
+    // Font size commands
+    "tiny", "scriptsize", "footnotesize", "small", "normalsize",
+    "large", "Large", "LARGE", "huge", "Huge",
+    // Special commands
+    "empty",  // From whitespace_tex_15
+    // Add more as needed based on test failures
+};
+
+// Check if a command absorbs following whitespace
+static bool commandAbsorbsSpace(const char* cmd_name) {
+    if (!cmd_name) return false;
+    return SPACE_ABSORBING_COMMANDS.count(cmd_name) > 0;
+}
 
 // =============================================================================
 // Diacritic Support - Maps LaTeX diacritic commands + base char to Unicode
@@ -2070,14 +2097,14 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Three cases for \empty:
     // 1. \empty (no braces) - produces nothing (null command)
-    // 2. \empty{} (empty braces) - ZWS is output by general logic in processChildren
+    // 2. \empty{} (empty braces) - output ZWS
     // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at end
     
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
     
     // Check what kind of children we have
-    bool has_curly_group_only = false;
+    bool has_empty_curly_group = false;
     bool has_other_content = false;
     
     auto iter = reader.children();
@@ -2087,15 +2114,39 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             if (tag && strcmp(tag, "curly_group") == 0) {
-                has_curly_group_only = true;
+                // Check if the curly_group is empty
+                auto group_iter = child_elem.children();
+                ItemReader group_child;
+                bool group_has_content = false;
+                while (group_iter.next(&group_child)) {
+                    if (group_child.isElement()) {
+                        group_has_content = true;
+                        break;
+                    } else if (group_child.isString()) {
+                        const char* str = group_child.cstring();
+                        if (str && str[0] != '\0') {
+                            // Check if it's not just whitespace
+                            for (const char* p = str; *p; p++) {
+                                if (!isspace(*p)) {
+                                    group_has_content = true;
+                                    break;
+                                }
+                            }
+                            if (group_has_content) break;
+                        }
+                    }
+                }
+                if (!group_has_content) {
+                    has_empty_curly_group = true;
+                } else {
+                    has_other_content = true;
+                }
             } else {
                 // Has other content (e.g., paragraph from environment)
                 has_other_content = true;
-                has_curly_group_only = false;
             }
         } else if (child.isString()) {
             has_other_content = true;
-            has_curly_group_only = false;
         }
     }
     
@@ -2107,7 +2158,13 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
         return;
     }
     
-    // Case 2: Empty braces - ZWS will be output by processChildren, so do nothing here
+    // Case 2: Empty braces - output ZWS
+    if (has_empty_curly_group) {
+        proc->ensureParagraph();
+        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+        return;
+    }
+    
     // Case 1: No braces - output nothing (null command)
 }
 
@@ -6698,6 +6755,126 @@ void LatexProcessor::processChildren(Item elem) {
         // Normal processing for other nodes
         processNode(child_reader.item());
         
+        // =============================================================================
+        // Zero-Width Space (ZWS) Marker Logic
+        // =============================================================================
+        // LaTeX commands consume following whitespace, but HTML needs explicit markers
+        // to preserve word boundaries. Insert <span class="zws"> </span> after:
+        // 1. Commands that absorb space (\LaTeX, \textbf, etc.)
+        // 2. Empty curly groups {}
+        // 3. Commands with empty arguments
+        
+        if (child_reader.isElement()) {
+            ElementReader cmd_elem(child_reader.item());
+            const char* cmd_tag = cmd_elem.tagName();
+            
+            bool needs_zws = false;
+            
+            // Check if this is a curly_group with no content
+            if (cmd_tag && strcmp(cmd_tag, "curly_group") == 0) {
+                auto group_iter = cmd_elem.children();
+                ItemReader group_child;
+                bool has_content = false;
+                while (group_iter.next(&group_child)) {
+                    if (group_child.isElement()) {
+                        has_content = true;
+                        break;
+                    } else if (group_child.isString()) {
+                        const char* str = group_child.cstring();
+                        if (str && str[0] != '\0') {
+                            // Check if it's not just whitespace
+                            for (const char* p = str; *p; p++) {
+                                if (!isspace(*p)) {
+                                    has_content = true;
+                                    break;
+                                }
+                            }
+                            if (has_content) break;
+                        }
+                    }
+                }
+                if (!has_content) {
+                    needs_zws = true;
+                }
+            }
+            
+            // Check if this is a command that absorbs space
+            if (cmd_tag && strcmp(cmd_tag, "command") == 0) {
+                // Get command name
+                const char* cmd_name = nullptr;
+                auto cmd_iter = cmd_elem.children();
+                ItemReader cmd_child;
+                while (cmd_iter.next(&cmd_child)) {
+                    if (cmd_child.isElement()) {
+                        ElementReader cmd_child_elem(cmd_child.item());
+                        const char* child_tag = cmd_child_elem.tagName();
+                        if (child_tag && strcmp(child_tag, "command_name") == 0) {
+                            String* name_str = cmd_child_elem.get_string_attr("name");
+                            if (name_str) {
+                                cmd_name = name_str->chars;
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                if (cmd_name && commandAbsorbsSpace(cmd_name)) {
+                    // Check if next sibling is NOT a curly_group/brack_group (command arguments)
+                    // If it has arguments, they'll handle their own spacing
+                    bool has_following_arg = false;
+                    if (i + 1 < count) {
+                        ItemReader next_reader = elem_reader.childAt(i + 1);
+                        if (next_reader.isElement()) {
+                            ElementReader next_elem(next_reader.item());
+                            const char* next_tag = next_elem.tagName();
+                            if (next_tag && (strcmp(next_tag, "curly_group") == 0 || 
+                                           strcmp(next_tag, "brack_group") == 0)) {
+                                has_following_arg = true;
+                            }
+                        }
+                    }
+                    
+                    if (!has_following_arg) {
+                        needs_zws = true;
+                    }
+                }
+            }
+            
+            // Output ZWS marker if needed and next sibling is text or another command
+            if (needs_zws && i + 1 < count) {
+                ItemReader next_reader = elem_reader.childAt(i + 1);
+                bool next_is_text_or_cmd = false;
+                
+                if (next_reader.isString()) {
+                    const char* next_text = next_reader.cstring();
+                    // Only output ZWS if next text is not just whitespace
+                    if (next_text && next_text[0] != '\0') {
+                        bool has_non_ws = false;
+                        for (const char* p = next_text; *p; p++) {
+                            if (!isspace(*p)) {
+                                has_non_ws = true;
+                                break;
+                            }
+                        }
+                        if (has_non_ws) {
+                            next_is_text_or_cmd = true;
+                        }
+                    }
+                } else if (next_reader.isElement()) {
+                    // Next is another element - likely need ZWS
+                    next_is_text_or_cmd = true;
+                }
+                
+                if (next_is_text_or_cmd) {
+                    ensureParagraph();
+                    gen_->writeZWS();
+                }
+            }
+        }
+        
+        // =============================================================================
+        // Space Consumption Logic (Original)
+        // =============================================================================
         // LaTeX behavior: commands consume following space, but with exceptions:
         // - \macro{} with empty braces FOLLOWING: outputs ZWS, does NOT consume space
         // - \macro (no args): consumes space
