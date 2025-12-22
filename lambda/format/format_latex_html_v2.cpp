@@ -362,8 +362,7 @@ static std::string convertApostrophes(const char* text, bool in_monospace = fals
                     p++;  // Skip second hyphen
                 } else {
                     // Single hyphen stays as ASCII hyphen-minus
-                    // Note: Some LaTeX.js versions convert to Unicode hyphen (U+2010)
-                    // but baseline fixtures use ASCII, so we keep ASCII for compatibility
+                    // LaTeX.js keeps single hyphens as ASCII (not U+2010)
                     result += '-';
                 }
             }

@@ -557,6 +557,13 @@ void HtmlGenerator::createItem(const char* label) {
         }
         stepCounter(counter_name);
         
+        // Set current label for \label commands within this item
+        // The anchor is item-N where N is the counter value
+        int counter_value = getCounter(counter_name);
+        std::string item_anchor = "item-" + std::to_string(counter_value);
+        std::string item_text = std::to_string(counter_value);
+        setCurrentLabel(item_anchor, item_text);
+        
         // Check if we have an alignment class to add
         const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
         writer_->openTag("li", li_class);
