@@ -1062,6 +1062,12 @@ void HtmlGenerator::lineBreak(bool newpage) {
     }
 }
 
+void HtmlGenerator::writeZWS() {
+    // Output zero-width space character (U+200B) to preserve word boundaries
+    // This allows line breaking but doesn't collapse like regular spaces
+    text("\u200B");
+}
+
 // =============================================================================
 // Reference Methods (html-generator.ls lines 702-750)
 // =============================================================================
