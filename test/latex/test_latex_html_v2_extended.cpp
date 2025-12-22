@@ -174,7 +174,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"fonts.tex", {7, 8}},  // test 6 moved to baseline (monospace ligature suppression)
         {"groups.tex", {2, 3}},
         {"label-ref.tex", {7}},  // tests 1,2,3,6 moved to baseline (forward refs work with two-pass)
-        {"layout-marginpar.tex", {1, 2, 3}},
+        // layout-marginpar.tex: All tests pass! Moved to baseline
         {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
