@@ -183,6 +183,33 @@ static bool should_skip_comment_and_space(TSNode parent, uint32_t child_index) {
     return should_skip;
 }
 
+// Helper: Check if previous sibling was a line_comment
+// Used to strip leading whitespace from text nodes following comments
+static bool prev_sibling_is_comment(TSNode parent, uint32_t child_index) {
+    if (child_index == 0) {
+        return false;
+    }
+    
+    TSNode prev = ts_node_child(parent, child_index - 1);
+    const char* prev_type = ts_node_type(prev);
+    
+    // Check if previous sibling is a line_comment
+    if (strcmp(prev_type, "line_comment") == 0) {
+        return true;
+    }
+    
+    // Also check if previous-previous was comment (and previous was skipped space)
+    if (child_index >= 2) {
+        TSNode prev_prev = ts_node_child(parent, child_index - 2);
+        const char* prev_prev_type = ts_node_type(prev_prev);
+        if (strcmp(prev_prev_type, "line_comment") == 0 && strcmp(prev_type, "space") == 0) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 // Extract text from a tree-sitter node
 static String* extract_text(InputContext& ctx, TSNode node, const char* source) {
     uint32_t start = ts_node_start_byte(node);
@@ -194,6 +221,34 @@ static String* extract_text(InputContext& ctx, TSNode node, const char* source) 
     }
     
     const char* text = source + start;
+    return ctx.builder.createString(text, len);
+}
+
+// Extract text with optional leading whitespace stripping
+// Used for text nodes following line_comment nodes per LaTeX semantics
+static String* extract_text_strip_leading(InputContext& ctx, TSNode node, const char* source, bool strip_leading) {
+    uint32_t start = ts_node_start_byte(node);
+    uint32_t end = ts_node_end_byte(node);
+    size_t len = end - start;
+    
+    if (len == 0) {
+        return ctx.builder.createString("", 0);
+    }
+    
+    const char* text = source + start;
+    
+    if (strip_leading) {
+        // Skip leading whitespace (spaces, tabs, newlines)
+        while (len > 0 && (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r')) {
+            text++;
+            len--;
+        }
+        if (len == 0) {
+            return ctx.builder.createString("", 0);
+        }
+        log_debug("latex_ts: stripped leading whitespace, result='%.*s'", (int)len, text);
+    }
+    
     return ctx.builder.createString(text, len);
 }
 
@@ -364,24 +419,53 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
     return {.item = y2it(builder.createSymbol(node_type))};
 }
 
+// Helper: Check if previous sibling is a line_comment (directly or with space between)
+static bool has_prev_sibling_comment(TSNode node) {
+    TSNode prev = ts_node_prev_sibling(node);
+    if (ts_node_is_null(prev)) {
+        return false;
+    }
+    
+    const char* prev_type = ts_node_type(prev);
+    if (strcmp(prev_type, "line_comment") == 0) {
+        return true;
+    }
+    
+    // Check if prev is space and prev-prev is comment
+    if (strcmp(prev_type, "space") == 0) {
+        TSNode prev_prev = ts_node_prev_sibling(prev);
+        if (!ts_node_is_null(prev_prev)) {
+            const char* prev_prev_type = ts_node_type(prev_prev);
+            if (strcmp(prev_prev_type, "line_comment") == 0) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
 // Convert text node to String
 static Item convert_text_node(InputContext& ctx, TSNode node, const char* source) {
     const char* node_type = ts_node_type(node);
     
+    // Check if we should strip leading whitespace (after a line_comment)
+    bool strip_leading = has_prev_sibling_comment(node);
+    
     // For "word" nodes, extract and return as string
     if (strcmp(node_type, "word") == 0) {
-        return {.item = s2it(extract_text(ctx, node, source))};
+        return {.item = s2it(extract_text_strip_leading(ctx, node, source, strip_leading))};
     }
     
     // For "text" and "math_text" nodes in hybrid grammar - they are terminal nodes (no children)
     // Just extract the raw text directly
     if (strcmp(node_type, "text") == 0 || strcmp(node_type, "math_text") == 0 ||
         strcmp(node_type, "verbatim") == 0) {
-        return {.item = s2it(extract_text(ctx, node, source))};
+        return {.item = s2it(extract_text_strip_leading(ctx, node, source, strip_leading))};
     }
     
-    // Default: extract as string
-    return {.item = s2it(extract_text(ctx, node, source))};
+    // Default: extract as string (with potential strip)
+    return {.item = s2it(extract_text_strip_leading(ctx, node, source, strip_leading))};
 }
 
 // Main conversion dispatcher

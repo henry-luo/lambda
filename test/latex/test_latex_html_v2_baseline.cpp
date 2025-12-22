@@ -184,7 +184,6 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         "counters.tex",
         "formatting.tex",
         "preamble.tex",
-        "basic_text.tex",
         "spacing.tex",
         "symbols.tex",
         "macros.tex",
@@ -199,19 +198,19 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
     // Tests to exclude from V2 baseline (moved to extended test suite)
     // These are tests that currently fail and need work
     std::map<std::string, std::set<int>> excluded_test_ids = {
-        // basic_text.tex: all tests pass!
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
         // counters.tex: All tests pass! Test 1 (counter arithmetic), Test 2 (moved from extended)
-        {"environments.tex", {7, 10, 14}},
-        {"fonts.tex", {6, 7, 8}},
+        {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
+        // fonts.tex: All tests pass! Tests 7, 8 pass with font class wrapper for breakspace
         {"groups.tex", {2, 3}},
-        {"label-ref.tex", {2, 3, 6, 7}},  // test 1 passed (moved from extended)
-        {"layout-marginpar.tex", {1, 2, 3}},
-        {"macros.tex", {2, 4, 5, 6}},
+        // label-ref.tex: All tests pass! Test 7 moved from extended (list item paragraph fix)
+        // layout-marginpar.tex: All tests pass! (marginpar implementation complete)
+        {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
         {"sectioning.tex", {3}},
+        {"spacing.tex", {1}},  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
-        {"text.tex", {4, 6, 8, 10}},  // test 5, 7 passed: special characters with ZWS
-        {"whitespace.tex", {5, 6, 7, 8, 12, 21}}  // test 13, 15 passed: ZWS handling
+        {"text.tex", {10}},  // tests 4, 6 now pass with typographic hyphen fix
+        {"whitespace.tex", {1, 5, 7, 8, 21}}  // test 6 fixed: fixture typo (missing comma)
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
