@@ -132,14 +132,45 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         block->bound->margin.top = block->bound->margin.bottom = heading_font_size * margin_em;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
+        {
+            const char* align_attr = elmt->get_attribute("align");
+            if (align_attr) {
+                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                if (strcasecmp(align_attr, "left") == 0) {
+                    block->blk->text_align = CSS_VALUE_LEFT;
+                } else if (strcasecmp(align_attr, "right") == 0) {
+                    block->blk->text_align = CSS_VALUE_RIGHT;
+                } else if (strcasecmp(align_attr, "center") == 0) {
+                    block->blk->text_align = CSS_VALUE_CENTER;
+                } else if (strcasecmp(align_attr, "justify") == 0) {
+                    block->blk->text_align = CSS_VALUE_JUSTIFY;
+                }
+            }
+        }
         break;
     }
-    case HTM_TAG_P:
+    case HTM_TAG_P: {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         // margin: 1em 0;
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+        // Handle HTML align attribute (e.g., align="left", align="right", align="center")
+        const char* align_attr = elmt->get_attribute("align");
+        if (align_attr) {
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            if (strcasecmp(align_attr, "left") == 0) {
+                block->blk->text_align = CSS_VALUE_LEFT;
+            } else if (strcasecmp(align_attr, "right") == 0) {
+                block->blk->text_align = CSS_VALUE_RIGHT;
+            } else if (strcasecmp(align_attr, "center") == 0) {
+                block->blk->text_align = CSS_VALUE_CENTER;
+            } else if (strcasecmp(align_attr, "justify") == 0) {
+                block->blk->text_align = CSS_VALUE_JUSTIFY;
+            }
+        }
         break;
+    }
     case HTM_TAG_UL:  case HTM_TAG_OL:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->list_style_type = elmt_name == HTM_TAG_UL ? CSS_VALUE_DISC : CSS_VALUE_DECIMAL;
