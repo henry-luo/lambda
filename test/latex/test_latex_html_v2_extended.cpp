@@ -179,7 +179,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
         {"text.tex", {10}},  // tests 4, 6 moved to baseline (typographic hyphen fix); test 5, 7, 8 baseline (PASS)
-        {"whitespace.tex", {5, 6, 7, 8, 21}}  // test 12 moved to baseline (comment line-joining PASS); test 13, 15 baseline
+        {"whitespace.tex", {1, 5, 6, 7, 8, 21}}  // test 6: \ignorespaces group boundary semantics
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {

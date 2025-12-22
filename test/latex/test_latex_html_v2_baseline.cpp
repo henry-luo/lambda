@@ -210,7 +210,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         {"spacing.tex", {1}},  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
         {"text.tex", {10}},  // tests 4, 6 now pass with typographic hyphen fix
-        {"whitespace.tex", {5, 6, 7, 8, 21}}  // test 12 now passes: comment line-joining; test 13, 15 passed: ZWS handling
+        {"whitespace.tex", {1, 5, 6, 7, 8, 21}}  // test 6: \ignorespaces group boundary semantics
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
