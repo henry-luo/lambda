@@ -201,7 +201,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
         // counters.tex: All tests pass! Test 1 (counter arithmetic), Test 2 (moved from extended)
         {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
-        {"fonts.tex", {7, 8}},  // test 6 passed: monospace ligature suppression
+        // fonts.tex: All tests pass! Tests 7, 8 pass with font class wrapper for breakspace
         {"groups.tex", {2, 3}},
         {"label-ref.tex", {7}},  // tests 2,3,6 now pass with two-pass forward ref resolution
         // layout-marginpar.tex: All tests pass! (marginpar implementation complete)
