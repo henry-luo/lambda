@@ -1716,15 +1716,16 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
     FontFamily search_key = {.family_name = criteria->family_name};
     FontFamily* family = (FontFamily*)hashmap_get(db->families, &search_key);
 
-    // If family not found, try lazy loading some placeholder fonts
+    // If family not found, try lazy loading ALL placeholder fonts that match
     if (!family && db->all_fonts->length > 0) {
         #ifdef FONT_DEBUG_VERBOSE
         printf("DEBUG: Family '%s' not found, attempting lazy loading\n", criteria->family_name);
         #endif
 
-        // Load a few placeholder fonts to see if we can find the requested family
+        // Parse ALL placeholder fonts matching the requested family to get all variants
         int parsed_count = 0;
-        for (size_t i = 0; i < db->all_fonts->length && parsed_count < 10; i++) {
+        bool found_any = false;
+        for (size_t i = 0; i < db->all_fonts->length; i++) {
             FontEntry* placeholder = (FontEntry*)db->all_fonts->data[i];
             if (placeholder && placeholder->is_placeholder) {
                 // Check if placeholder family name matches what we're looking for
@@ -1733,38 +1734,39 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
                     potential_match = string_match_ignore_case(placeholder->family_name, criteria->family_name);
                 }
 
+                if (!potential_match) continue;
+
                 // For TTC files, trigger full lazy loading which parses all fonts in the collection
                 FontFormat format = detect_font_format(placeholder->file_path);
-                if (format == FONT_FORMAT_TTC && potential_match) {
+                if (format == FONT_FORMAT_TTC) {
                     #ifdef FONT_DEBUG_VERBOSE
                     log_debug("Lazy loading TTC placeholder: %s", placeholder->file_path);
                     #endif
                     FontEntry* loaded = lazy_load_font(db, placeholder->file_path);
                     if (loaded) {
-                        // TTC files add multiple entries, reorganize families
-                        organize_fonts_into_families(db);
+                        found_any = true;
                         parsed_count += 5;  // Count as multiple fonts
-                        break;  // Found matching TTC, stop searching
                     }
-                } else if (format != FONT_FORMAT_TTC) {
+                } else {
                     // For single-font files, parse in-place
                     if (parse_placeholder_font(placeholder, db->string_arena)) {
                         parsed_count++;
-
-                        // Check if this font matches what we're looking for
-                        if (placeholder->family_name &&
-                            string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
-                            // Found matching family, organize it and break
-                            organize_fonts_into_families(db);
-                            break;
-                        }
+                        found_any = true;
                     }
                 }
             }
         }
+
+        // Organize all newly parsed fonts into families
+        if (found_any) {
+            organize_fonts_into_families(db);
+            #ifdef FONT_DEBUG_VERBOSE
+            log_debug("Lazy loaded %d fonts for family '%s'", parsed_count, criteria->family_name);
+            #endif
+        }
     }
 
-    // Search through all fonts
+    // First pass: Search through all fonts to find best match
     for (size_t i = 0; i < db->all_fonts->length; i++) {
         FontEntry* font = (FontEntry*)db->all_fonts->data[i];
         if (!font) continue;
@@ -1774,6 +1776,42 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
             best_score = score;
             best_font = font;
             exact_family = string_match_ignore_case(font->family_name, criteria->family_name);
+        }
+    }
+
+    // If we found a family match but style/weight is wrong, try lazy loading more variants
+    // This handles cases where only some variants were loaded during priority scan
+    const float STYLE_WEIGHT_PENALTY = 20.0f;  // penalty from calculate_match_score
+    if (best_font && exact_family && best_score < (100.0f - STYLE_WEIGHT_PENALTY)) {
+        // Poor style/weight match - try lazy loading more variants
+        bool loaded_more = false;
+        for (size_t i = 0; i < db->all_fonts->length; i++) {
+            FontEntry* placeholder = (FontEntry*)db->all_fonts->data[i];
+            if (placeholder && placeholder->is_placeholder && placeholder->family_name &&
+                string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
+                
+                if (parse_placeholder_font(placeholder, db->string_arena)) {
+                    loaded_more = true;
+                }
+            }
+        }
+
+        if (loaded_more) {
+            organize_fonts_into_families(db);
+            
+            // Re-search for better match
+            best_score = 0.0f;
+            best_font = NULL;
+            for (size_t i = 0; i < db->all_fonts->length; i++) {
+                FontEntry* font = (FontEntry*)db->all_fonts->data[i];
+                if (!font) continue;
+
+                float score = calculate_match_score(font, criteria);
+                if (score > best_score && score >= FONT_MATCH_SCORE_THRESHOLD) {
+                    best_score = score;
+                    best_font = font;
+                }
+            }
         }
     }
 
