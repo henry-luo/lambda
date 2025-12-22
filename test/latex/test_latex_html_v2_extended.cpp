@@ -168,7 +168,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
 
     // Specific test IDs to include in extended (failing tests only)
     std::map<std::string, std::set<int>> extended_test_ids = {
-        {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 moved to baseline; tex_4 has \noindent issue
+        // boxes.tex: All tests pass! tex_4 fixed with lazy paragraph opening
         // counters.tex test 2 moved to baseline (PASSES)
         {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
         // fonts.tex: All tests pass! Tests 7, 8 moved to baseline (font class wrapper for breakspace)
@@ -179,7 +179,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
         {"text.tex", {10}},  // tests 4, 6 moved to baseline (typographic hyphen fix); test 5, 7, 8 baseline (PASS)
-        {"whitespace.tex", {1, 5, 7, 8, 21}}  // test 6 fixed: fixture typo (missing comma)
+        {"whitespace.tex", {5, 7, 8, 21}}  // test 1 passes, test 6 fixed: fixture typo (missing comma)
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
