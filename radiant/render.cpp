@@ -172,13 +172,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         unsigned char* scan = p;
         bool scan_has_space = false;
 
-        // First, find the end of non-whitespace content (exclude trailing spaces)
+        // Scan all content including trailing spaces for width calculation
+        // Trailing whitespace is intentionally included because layout has already
+        // determined the correct width and positioning - we should render exactly
+        // what was laid out, including spaces between inline elements
         unsigned char* content_end = end;
-        while (content_end > p && is_space(*(content_end - 1))) {
-            content_end--;
-        }
 
-        while (scan < content_end) {  // Only scan up to content_end (excluding trailing spaces)
+        while (scan < content_end) {
             if (is_space(*scan)) {
                 if (preserve_spaces || !scan_has_space) {
                     scan_has_space = true;
@@ -218,11 +218,10 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             if (is_space(*p)) {
                 if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
-                    // For justified text, don't render trailing spaces (they're beyond content_end)
-                    if (p < content_end) {
-                        x += space_width;  // Use adjusted space width for justified text
-                    }
-                    // Trailing spaces are not rendered (collapsed)
+                    // Render space by advancing x position
+                    // All spaces are rendered (not just non-trailing) because layout has
+                    // already determined correct positioning including inter-element whitespace
+                    x += space_width;  // Use adjusted space width for justified text
                 }
                 // else  // skip consecutive spaces
                 p++;

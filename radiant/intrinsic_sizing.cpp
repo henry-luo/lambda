@@ -380,20 +380,71 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // Add padding and border
     ViewBlock* view = (ViewBlock*)element;
-    if (view->bound) {
-        int horiz_padding = 0;
-        if (view->bound->padding.left >= 0) horiz_padding += (int)view->bound->padding.left;
-        if (view->bound->padding.right >= 0) horiz_padding += (int)view->bound->padding.right;
-        sizes.min_content += horiz_padding;
-        sizes.max_content += horiz_padding;
+    float pad_left = 0, pad_right = 0;
+    float border_left = 0, border_right = 0;
 
+    if (view->bound) {
+        log_debug("measure_element_intrinsic: %s has bound allocated", element->node_name());
+        if (view->bound->padding.left >= 0) pad_left = view->bound->padding.left;
+        if (view->bound->padding.right >= 0) pad_right = view->bound->padding.right;
         if (view->bound->border) {
-            int horiz_border = (int)(view->bound->border->width.left +
-                                     view->bound->border->width.right);
-            sizes.min_content += horiz_border;
-            sizes.max_content += horiz_border;
+            border_left = view->bound->border->width.left;
+            border_right = view->bound->border->width.right;
+        }
+    } else if (element->specified_style) {
+        log_debug("measure_element_intrinsic: %s NO bound, using CSS fallback", element->node_name());
+        // Fallback: read padding from CSS styles if bound hasn't been allocated yet
+        CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
+        if (pad_decl && pad_decl->value) {
+            if (pad_decl->value->type == CSS_VALUE_TYPE_LIST && pad_decl->value->data.list.count >= 2) {
+                // Multi-value padding: top right [bottom] [left]
+                CssValue** values = pad_decl->value->data.list.values;
+                pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING, values[1]);
+                pad_left = (pad_decl->value->data.list.count >= 4) ?
+                    resolve_length_value(lycon, CSS_PROPERTY_PADDING, values[3]) : pad_right;
+                log_debug("  -> multi-value padding: left=%.1f, right=%.1f", pad_left, pad_right);
+            } else if (pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                // Single padding value (shorthand)
+                float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+                pad_left = pad_right = pad;
+                log_debug("  -> single padding value: %.1f", pad);
+            }
+        }
+
+        // If no shorthand, check individual properties
+        if (pad_left == 0 && pad_right == 0) {
+            // Check individual padding properties
+            CssDeclaration* pl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_LEFT);
+            if (pl && pl->value && pl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl->value);
+            }
+            CssDeclaration* pr = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+            if (pr && pr->value && pr->value->type == CSS_VALUE_TYPE_LENGTH) {
+                pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr->value);
+            }
+        }
+
+        // Also check for border
+        CssDeclaration* border_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+        if (border_decl && border_decl->value && border_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float border_width = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, border_decl->value);
+            border_left = border_right = border_width;
+        } else {
+            CssDeclaration* bl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_LEFT_WIDTH);
+            if (bl && bl->value && bl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, bl->value);
+            }
+            CssDeclaration* br = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
+            if (br && br->value && br->value->type == CSS_VALUE_TYPE_LENGTH) {
+                border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, br->value);
+            }
         }
     }
+
+    int horiz_padding = (int)(pad_left + pad_right);
+    int horiz_border = (int)(border_left + border_right);
+    sizes.min_content += horiz_padding + horiz_border;
+    sizes.max_content += horiz_padding + horiz_border;
 
     return sizes;
 }
