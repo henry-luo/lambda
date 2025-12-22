@@ -2584,8 +2584,12 @@ static void cmd_makeatother(LatexProcessor* proc, Item elem) {
 static void cmd_section(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
-    // End any open paragraph before section heading
-    proc->endParagraph();
+    // Only end paragraph if we're NOT inside a styled span (inline context)
+    // When section appears inside \emph{} or similar, keep inline flow
+    // and let CSS handle the visual appearance (per LaTeX.js behavior)
+    if (!proc->inStyledSpan()) {
+        proc->endParagraph();
+    }
     
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
@@ -7261,6 +7265,67 @@ void LatexProcessor::processChildren(Item elem) {
             
         }
         
+        // Check if this is a text node containing an embedded command followed by curly_group
+        // This handles cases like \emph{text} where parser produces: ["\x1bmph", curly_group{text}]
+        // The parser encodes \cmd as ESC (0x1B) + cmdname (e.g., \emph → 0x1B + "mph")
+        // We need to combine them so the command handler can process the argument
+        if (child_reader.isString()) {
+            String* str = child_reader.asString();
+            if (str && str->len > 0) {
+                const char* text = str->chars;
+                // Check if text contains an ESC byte (0x1B) indicating embedded command
+                // The parser uses ESC to mark LaTeX commands
+                const char* esc = strchr(text, '\x1b');
+                if (esc && esc[1] != '\0') {
+                    const char* cmd_start = esc + 1;
+                    size_t cmd_len = 0;
+                    while (cmd_start[cmd_len] && isalpha((unsigned char)cmd_start[cmd_len])) {
+                        cmd_len++;
+                    }
+                    
+                    // Check if command ends at end of string (no trailing text after command name)
+                    if (cmd_len > 0 && cmd_start[cmd_len] == '\0') {
+                        // Text ends with a command - check if next sibling is curly_group
+                        if (i + 1 < count) {
+                            ItemReader next_reader = elem_reader.childAt(i + 1);
+                            if (next_reader.isElement()) {
+                                ElementReader next_elem(next_reader.item());
+                                const char* next_tag = next_elem.tagName();
+                                
+                                if (next_tag && strcmp(next_tag, "curly_group") == 0) {
+                                    // Found command + curly_group pattern
+                                    // Process text before command (if any)
+                                    if (esc > text) {
+                                        size_t prefix_len = esc - text;
+                                        char* prefix = (char*)alloca(prefix_len + 1);
+                                        memcpy(prefix, text, prefix_len);
+                                        prefix[prefix_len] = '\0';
+                                        processText(prefix);
+                                    }
+                                    
+                                    // The command name after ESC might be missing the first letter
+                                    // For \emph, we get ESC + "mph", but need to look up "emph"
+                                    // Prepend 'e' to handle common \e... commands (\e → ESC)
+                                    char* cmd_name_with_e = (char*)alloca(cmd_len + 2);
+                                    cmd_name_with_e[0] = 'e';
+                                    memcpy(cmd_name_with_e + 1, cmd_start, cmd_len);
+                                    cmd_name_with_e[cmd_len + 1] = '\0';
+                                    
+                                    // Pass the curly_group as the command's element
+                                    // This allows cmd_emph etc to call processChildren on it
+                                    processCommand(cmd_name_with_e, next_reader.item());
+                                    
+                                    // Skip the curly_group sibling
+                                    i++;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         // Normal processing for other nodes
         processNode(child_reader.item());
         
@@ -8234,8 +8299,10 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     
     // Handle block vs inline commands differently
     // In restricted horizontal mode (inside \mbox), block commands should NOT close paragraph
-    if (isBlockCommand(cmd_name) && !restricted_h_mode_) {
-        // Close paragraph before block commands
+    // Also, when inside a styled span (like \emph{}), block commands should stay inline
+    // to allow CSS to handle the visual appearance (per LaTeX.js behavior)
+    if (isBlockCommand(cmd_name) && !restricted_h_mode_ && !inStyledSpan()) {
+        // Close paragraph before block commands (only when not in inline context)
         closeParagraphIfOpen();
     } else if (isInlineCommand(cmd_name)) {
         // Ensure paragraph is open before inline commands
