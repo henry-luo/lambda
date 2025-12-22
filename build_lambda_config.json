@@ -388,7 +388,6 @@
         "multichar"
     ],
     "flags": [
-        "fms-extensions",
         "pedantic",
         "fdiagnostics-color=auto",
         "fno-omit-frame-pointer",
@@ -401,7 +400,6 @@
             "output": "lambda_release.exe",
             "flags": [
                 "std=c++17",
-                "fms-extensions",
                 "DNDEBUG",
                 "fdiagnostics-color=auto",
                 "fno-omit-frame-pointer",
@@ -420,7 +418,6 @@
             "output": "lambda_debug.exe",
             "flags": [
                 "std=c++17",
-                "fms-extensions",
                 "pedantic",
                 "fdiagnostics-color=auto",
                 "fsanitize=address",
@@ -649,7 +646,6 @@
             ],
             "flags": [
                 "std=c++17",
-                "fms-extensions",
                 "DCROSS_COMPILE",
                 "D_WIN32",
                 "DWINVER=0x0601",
@@ -2123,7 +2119,6 @@
                     }
                 ],
                 "type": "input",
-                "special_flags": "-fms-extensions",
                 "parallel": true
             },
             {
@@ -2284,7 +2279,6 @@
                     }
                 ],
                 "type": "extended",
-                "special_flags": "-fms-extensions",
                 "uses_build_config": true,
                 "requires_lambda_exe": true,
                 "parallel": true

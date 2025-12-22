@@ -1578,7 +1578,6 @@ project "test_mime_detect_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -1681,7 +1680,6 @@ project "test_mark_builder_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -1784,7 +1782,6 @@ project "test_mark_builder_deepcopy_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -1887,7 +1884,6 @@ project "test_mark_editor_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -1990,7 +1986,6 @@ project "test_name_pool_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2093,7 +2088,6 @@ project "test_mark_reader_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2196,7 +2190,6 @@ project "test_error_tracking"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2299,7 +2292,6 @@ project "test_math_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2402,7 +2394,6 @@ project "test_math_ascii_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2505,7 +2496,6 @@ project "test_markup_roundtrip_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2608,7 +2598,6 @@ project "test_entity_emoji_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2711,7 +2700,6 @@ project "test_input_roundtrip_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2815,7 +2803,6 @@ project "test_latex_ts_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -2918,7 +2905,6 @@ project "test_html_roundtrip_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3021,7 +3007,6 @@ project "test_html_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3124,7 +3109,6 @@ project "test_html_negative_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3233,7 +3217,6 @@ project "test_lambda_domnode_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3335,7 +3318,6 @@ project "test_dir_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3438,7 +3420,6 @@ project "test_graph_parser_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3541,7 +3522,6 @@ project "test_validator_input_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3644,7 +3624,6 @@ project "test_validator_features_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3747,7 +3726,6 @@ project "test_null_vs_missing_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3850,7 +3828,6 @@ project "test_enhanced_errors"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -3953,7 +3930,6 @@ project "test_validation_options"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4056,7 +4032,6 @@ project "test_format_validation"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4159,7 +4134,6 @@ project "test_validator_integration"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4262,7 +4236,6 @@ project "test_type_references_simple"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4365,7 +4338,6 @@ project "test_graph_formatter_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4468,7 +4440,6 @@ project "test_sysinfo_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4571,7 +4542,6 @@ project "test_jsx_roundtrip_new_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4673,7 +4643,6 @@ project "test_mdx_roundtrip_new_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -4751,7 +4720,6 @@ project "test_css_style_node"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     -- AddressSanitizer for test projects only
@@ -4824,7 +4792,6 @@ project "test_css_system"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     -- AddressSanitizer for test projects only
@@ -4933,7 +4900,6 @@ project "test_css_dom_integration"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5048,7 +5014,6 @@ project "test_css_dom_crud"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5163,7 +5128,6 @@ project "test_css_style_application_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5271,7 +5235,6 @@ project "test_html_css_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5374,7 +5337,6 @@ project "test_css_tokenizer_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5477,7 +5439,6 @@ project "test_css_tokenizer_unit"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5580,7 +5541,6 @@ project "test_css_parser_unit"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5683,7 +5643,6 @@ project "test_css_engine_unit"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5786,7 +5745,6 @@ project "test_css_engine_negative"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5889,7 +5847,6 @@ project "test_css_formatter_unit"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -5992,7 +5949,6 @@ project "test_css_roundtrip_unit"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6095,7 +6051,6 @@ project "test_compound_descendant_selectors"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6198,7 +6153,6 @@ project "test_selector_groups"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6301,7 +6255,6 @@ project "test_css_parser_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6404,7 +6357,6 @@ project "test_css_integration_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6507,7 +6459,6 @@ project "test_css_files_safe_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6610,7 +6561,6 @@ project "test_css_frameworks_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6713,7 +6663,6 @@ project "test_css_to_mark_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6815,7 +6764,6 @@ project "test_mdx_roundtrip_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -6917,7 +6865,6 @@ project "test_jsx_roundtrip_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -7019,7 +6966,6 @@ project "test_latex_parser_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -7121,7 +7067,6 @@ project "test_latex_treesitter"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -7190,7 +7135,6 @@ project "test_html_encoder_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     -- AddressSanitizer for test projects only
@@ -7498,7 +7442,6 @@ project "test_latex_html_v2_lists_envs"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -7600,7 +7543,6 @@ project "test_latex_html_v2_tables"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -7702,7 +7644,6 @@ project "test_latex_html_v2_floats"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -7804,7 +7745,6 @@ project "test_latex_html_v2_special_chars"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -7906,7 +7846,6 @@ project "test_latex_html_v2_bibliography"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -8008,7 +7947,6 @@ project "test_latex_html_v2_graphics_color"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -8110,7 +8048,6 @@ project "test_latex_html_v2_macros"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -8212,7 +8149,6 @@ project "test_latex_html_v2_new_commands"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -8924,7 +8860,6 @@ project "test_http_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     filter {}
@@ -8992,7 +8927,6 @@ project "test_lambda_proc_extended_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-        "-fms-extensions",
     }
     
     -- AddressSanitizer for test projects only
