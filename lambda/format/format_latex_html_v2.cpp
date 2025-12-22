@@ -412,7 +412,8 @@ public:
           next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
           recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false),
-          pending_zws_output_(false), pending_zws_had_trailing_space_(false) {}
+          pending_zws_output_(false), pending_zws_had_trailing_space_(false),
+          group_suppresses_zws_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -462,6 +463,10 @@ public:
     // Frame class flag - when true, next box command should add "frame" class
     void set_next_box_frame(bool frame) { next_box_frame_ = frame; }
     bool get_next_box_frame() const { return next_box_frame_; }
+    
+    // Group ZWS suppression - when true, the containing group won't output ZWS
+    void setSuppressGroupZWS(bool suppress) { group_suppresses_zws_ = suppress; }
+    bool getSuppressGroupZWS() const { return group_suppresses_zws_; }
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
@@ -545,6 +550,9 @@ private:
     bool pending_zws_output_;
     // If the curly group that set pending_zws_output_ had trailing whitespace
     bool pending_zws_had_trailing_space_;
+    // If set, the current group contains only whitespace-controlling commands
+    // and should not trigger ZWS output
+    bool group_suppresses_zws_;
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -2227,6 +2235,10 @@ static void cmd_unskip(LatexProcessor* proc, Item elem) {
     (void)elem;
     HtmlGenerator* gen = proc->generator();
     gen->trimTrailingWhitespace();
+    
+    // Mark that the containing group should not output ZWS
+    LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
+    mutable_proc->setSuppressGroupZWS(true);
 }
 
 static void cmd_ignorespaces(LatexProcessor* proc, Item elem) {
@@ -2236,6 +2248,9 @@ static void cmd_ignorespaces(LatexProcessor* proc, Item elem) {
     (void)elem;
     LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
     mutable_proc->setStripNextLeadingSpace(true);
+    
+    // Mark that the containing group should not output ZWS
+    mutable_proc->setSuppressGroupZWS(true);
 }
 
 static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
@@ -7337,6 +7352,9 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         bool saved_strip_flag = strip_next_leading_space_;
         strip_next_leading_space_ = false;  // Reset for group content
         
+        // Reset the group ZWS suppression flag for this group
+        group_suppresses_zws_ = false;
+        
         // Check if group is empty (has no children or only whitespace)
         ElementReader reader(elem);
         bool is_empty_group = true;
@@ -7450,10 +7468,14 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         // Don't output ZWS if we're at paragraph end or if paragraph is about to close
         // Signal to processChildren that ZWS should be output after this node
         // if there's more contentful siblings
-        if (should_output_zws) {
+        // ALSO don't output ZWS if group contains whitespace-control commands
+        if (should_output_zws && !group_suppresses_zws_) {
             pending_zws_output_ = true;
             pending_zws_had_trailing_space_ = has_trailing_space;
         }
+        
+        // Reset the flag for next group
+        group_suppresses_zws_ = false;
         
         return;
     }
