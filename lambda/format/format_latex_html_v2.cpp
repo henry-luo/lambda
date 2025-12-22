@@ -33,16 +33,15 @@ namespace lambda {
 // LaTeX commands that absorb following whitespace per LaTeX semantics
 // After these commands, we need ZWS markers to preserve word boundaries in HTML
 static const std::unordered_set<std::string> SPACE_ABSORBING_COMMANDS = {
-    // Logo commands
+    // Logo commands (no arguments)
     "LaTeX", "TeX", "LaTeXe",
-    // Text styling commands
-    "textbf", "textit", "texttt", "textsc", "textsf", "textsl", "textrm", "textmd", "textup",
-    "emph", "underline",
-    // Font size commands
+    // Font size commands (no arguments when used as declarations)
     "tiny", "scriptsize", "footnotesize", "small", "normalsize",
     "large", "Large", "LARGE", "huge", "Huge",
     // Special commands
     "empty",  // From whitespace_tex_15
+    // Note: text styling commands like \textbf, \emph, etc. are NOT included
+    // because they take arguments and the argument handling prevents space absorption
     // Add more as needed based on test failures
 };
 
@@ -7263,7 +7262,36 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
         }
         
-        processChildren(elem);
+        // For empty groups with only spaces, convert spaces alternating ZWS/space pattern
+        // e.g., {  } → ZWS + space, {   } → ZWS + space + ZWS
+        if (is_empty_group && (has_leading_space || has_trailing_space)) {
+            // Count spaces and output alternating ZWS/space pattern
+            auto space_iter = reader.children();
+            ItemReader space_child;
+            bool output_zws = true;  // Start with ZWS
+            while (space_iter.next(&space_child)) {
+                if (space_child.isString()) {
+                    String* str = space_child.asString();
+                    if (str && str->len > 0) {
+                        ensureParagraph();
+                        // Output alternating ZWS and space for each space character
+                        for (int64_t i = 0; i < str->len; i++) {
+                            if (str->chars[i] == ' ' || str->chars[i] == '\t') {
+                                if (output_zws) {
+                                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                                } else {
+                                    gen_->text(" ");  // Regular space
+                                }
+                                output_zws = !output_zws;  // Alternate
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Normal processing for non-empty groups or truly empty groups
+            processChildren(elem);
+        }
         gen_->exitGroup();
         
         // Restore alignment state after exiting group
@@ -7273,9 +7301,11 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         strip_next_leading_space_ = saved_strip_flag;
         
         // ZWS at exit for certain depths
+        // LaTeX groups break word concatenation, so output ZWS at boundaries
         // - depth 1 (document level): 
-        //   - non-empty groups: only output if trailing space (more content follows)
-        //   - empty groups: output ZWS (they serve as terminators, e.g., \^{})
+        //   - non-empty groups with content: output ZWS if not end of paragraph
+        //   - empty groups with spaces: already handled above, skip ZWS
+        //   - truly empty groups (no content): output ZWS (they serve as terminators)
         // - depth 2 (inside one group): output ZWS for visual separation
         // - depth 3+: deeply nested, no ZWS needed
         int depth_after_exit = gen_->groupDepth();
@@ -7283,18 +7313,22 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         
         if (depth_after_exit == 1) {
             // At document level
-            if (is_empty_group) {
-                // Empty groups at doc level serve as terminators (e.g., \^{}, \~{})
+            if (is_empty_group && (has_leading_space || has_trailing_space)) {
+                // Empty groups with spaces were already handled above
+                should_output_zws = false;
+            } else if (is_empty_group) {
+                // Truly empty groups serve as terminators (e.g., \^{})
                 should_output_zws = true;
-            } else{
-                // Non-empty groups: only output if trailing space indicates more content
-                should_output_zws = has_trailing_space;
+            } else {
+                // Non-empty groups: always output ZWS to prevent word concatenation
+                // e.g., "{a group} and" should be "a group​ and", not "a groupand"
+                should_output_zws = true;
             }
         } else if (depth_after_exit == 2 && !is_empty_group) {
             // At depth 2 (inside one group) - output ZWS for visual separation
             should_output_zws = true;
         }
-        // depth >= 3 or empty groups at depth 2+: no ZWS needed
+        // depth >= 3: deeply nested, no ZWS needed
         
         if (should_output_zws) {
             ensureParagraph();
