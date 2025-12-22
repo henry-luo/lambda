@@ -411,7 +411,8 @@ public:
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false) {}
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false),
+          pending_zws_output_(false), pending_zws_had_trailing_space_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -538,6 +539,12 @@ private:
     bool next_box_frame_;
     // In this mode, linebreaks (\\, \newline) are ignored and \par becomes a space
     bool restricted_h_mode_;
+    
+    // Pending ZWS output - when true, a ZWS should be output if there's more content
+    // Set by curly_group handler when a group at document level closes
+    bool pending_zws_output_;
+    // If the curly group that set pending_zws_output_ had trailing whitespace
+    bool pending_zws_had_trailing_space_;
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -6754,6 +6761,98 @@ void LatexProcessor::processChildren(Item elem) {
         // Normal processing for other nodes
         processNode(child_reader.item());
         
+        // Check if previous node set pending ZWS output flag (curly_group at document level)
+        if (pending_zws_output_) {
+            bool had_trailing_space = pending_zws_had_trailing_space_;
+            pending_zws_output_ = false;  // Clear flags
+            pending_zws_had_trailing_space_ = false;
+            
+            // Only output ZWS if there's more contentful siblings after this
+            // BUT not if there's a paragraph break (double newline) before the next content
+            // ALSO not if group had trailing space AND next non-whitespace starts immediately
+            bool has_following_content = false;
+            bool next_is_plain_text = false;
+            bool found_first_content = false;
+            int consecutive_newlines = 0;  // Track newlines across siblings
+            
+            for (int64_t j = i + 1; j < count; j++) {
+                ItemReader next_reader = elem_reader.childAt(j);
+                
+                // Check for paragraph break symbol
+                if (next_reader.isSymbol()) {
+                    const char* sym = next_reader.asSymbol()->chars;
+                    if (strcmp(sym, "parbreak") == 0) {
+                        // Paragraph break symbol - suppress ZWS
+                        has_following_content = false;
+                        goto done_checking_siblings;
+                    }
+                }
+                
+                if (next_reader.isString() || next_reader.isSymbol()) {
+                    // Check strings and symbols (whitespace may be stored as symbols)
+                    const char* next_text = next_reader.isString() ? next_reader.cstring() : (next_reader.isSymbol() ? next_reader.asSymbol()->chars : nullptr);
+                    if (next_text && next_text[0] != '\0') {
+                        // Count consecutive newlines to detect paragraph break
+                        for (const char* p = next_text; *p; p++) {
+                            if (*p == '\n') {
+                                consecutive_newlines++;
+                                if (consecutive_newlines >= 2) {
+                                    // Found paragraph break - stop here, no ZWS needed
+                                    has_following_content = false;
+                                    goto done_checking_siblings;
+                                }
+                            } else if (*p != ' ' && *p != '\t' && *p != '\r') {
+                                // Non-whitespace content found in string
+                                has_following_content = true;
+                                // Check if this is the first non-whitespace AND starts immediately
+                                if (!found_first_content) {
+                                    found_first_content = true;
+                                    // Only "plain text" if it starts at string beginning (no leading space)
+                                    if (p == next_text) {
+                                        next_is_plain_text = true;
+                                    }
+                                }
+                                goto done_checking_siblings;
+                            } else {
+                                // Space/tab/CR resets newline count (but not to zero if we had 1)
+                                if (*p != '\r') {
+                                    consecutive_newlines = 0;
+                                }
+                            }
+                        }
+                        // Continue to next sibling to keep checking
+                    }
+                } else if (next_reader.isElement()) {
+                    // Element found - only output ZWS if no paragraph break seen
+                    if (consecutive_newlines < 2) {
+                        has_following_content = true;
+                        next_is_plain_text = false;
+                    }
+                    break;
+                }
+            }
+            done_checking_siblings:
+            
+            // Suppress ZWS if: group had trailing space AND next is plain text
+            // (the trailing space already provides word separation)
+            if (had_trailing_space && next_is_plain_text) {
+                has_following_content = false;
+            }
+            
+            if (has_following_content) {
+                ensureParagraph();
+                // Output ZWS with current font styling (if any)
+                std::string font_class = gen_->getFontClass(gen_->currentFont());
+                if (!font_class.empty() && !inStyledSpan()) {
+                    gen_->span(font_class.c_str());
+                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                    gen_->closeElement();
+                } else {
+                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                }
+            }
+        }
+        
         // =============================================================================
         // Zero-Width Space (ZWS) Marker Logic
         // =============================================================================
@@ -6889,9 +6988,38 @@ void LatexProcessor::processChildren(Item elem) {
             
             bool is_empty_cmd = (cmd_name && strcmp(cmd_name, "empty") == 0);
             bool is_curly_group = (cmd_name && strcmp(cmd_name, "curly_group") == 0);
-            // Also skip space consumption if the command has an empty curly_group child (e.g., \textbackslash{})
-            bool has_empty_curly_child = hasEmptyCurlyGroupChild(child_reader.item());
-            bool skip_space_consumption = is_empty_cmd || is_curly_group || has_empty_curly_child;
+            
+            // Commands with arguments should not consume following space
+            // Check if this command has any non-whitespace children
+            bool has_content_child = false;
+            auto child_iter = cmd_elem.children();
+            ItemReader cmd_child;
+            while (child_iter.next(&cmd_child)) {
+                TypeId child_type = cmd_child.getType();
+                if (child_type == LMD_TYPE_STRING) {
+                    const char* str = cmd_child.cstring();
+                    // Check if non-whitespace string
+                    if (str && str[0] != '\0') {
+                        bool is_whitespace_only = true;
+                        for (const char* p = str; *p; p++) {
+                            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                                is_whitespace_only = false;
+                                break;
+                            }
+                        }
+                        if (!is_whitespace_only) {
+                            has_content_child = true;
+                            break;
+                        }
+                    }
+                } else if (child_type == LMD_TYPE_ELEMENT || child_type == LMD_TYPE_LIST) {
+                    // Has element or list child - consider it a content child
+                    has_content_child = true;
+                    break;
+                }
+            }
+            
+            bool skip_space_consumption = is_empty_cmd || is_curly_group || has_content_child;
             
             // Check if NEXT sibling is an empty curly_group (e.g., "\empty {}")
             bool next_is_empty_curly = false;
@@ -7300,48 +7428,33 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         // Restore strip_next_leading_space_ flag after group
         strip_next_leading_space_ = saved_strip_flag;
         
-        // ZWS at exit for certain depths
+        // ZWS at exit for all curly groups
         // LaTeX groups break word concatenation, so output ZWS at boundaries
-        // - depth 1 (document level): 
-        //   - non-empty groups with content: output ZWS if not end of paragraph
-        //   - empty groups with spaces: already handled above, skip ZWS
-        //   - truly empty groups (no content): output ZWS (they serve as terminators)
-        // - depth 2 (inside one group): output ZWS for visual separation
-        // - depth 3+: deeply nested, no ZWS needed
+        // processChildren will check for paragraph breaks and suppress if needed
         int depth_after_exit = gen_->groupDepth();
         bool should_output_zws = false;
         
-        if (depth_after_exit == 1) {
-            // At document level
-            if (is_empty_group && (has_leading_space || has_trailing_space)) {
-                // Empty groups with spaces were already handled above
-                should_output_zws = false;
-            } else if (is_empty_group) {
-                // Truly empty groups serve as terminators (e.g., \^{})
-                should_output_zws = true;
-            } else {
-                // Non-empty groups: always output ZWS to prevent word concatenation
-                // e.g., "{a group} and" should be "a group​ and", not "a groupand"
-                should_output_zws = true;
-            }
-        } else if (depth_after_exit == 2 && !is_empty_group) {
-            // At depth 2 (inside one group) - output ZWS for visual separation
+        // At any depth, curly groups should output ZWS to preserve word boundaries
+        if (is_empty_group && (has_leading_space || has_trailing_space)) {
+            // Empty groups with spaces were already handled above
+            should_output_zws = false;
+        } else if (is_empty_group) {
+            // Truly empty groups serve as terminators (e.g., \^{})
+            should_output_zws = true;
+        } else {
+            // Non-empty groups: output ZWS to mark word boundary
+            // processChildren will check for paragraph breaks
             should_output_zws = true;
         }
-        // depth >= 3: deeply nested, no ZWS needed
         
+        // Don't output ZWS if we're at paragraph end or if paragraph is about to close
+        // Signal to processChildren that ZWS should be output after this node
+        // if there's more contentful siblings
         if (should_output_zws) {
-            ensureParagraph();
-            // Output ZWS with current font styling (if any)
-            std::string font_class = gen_->getFontClass(gen_->currentFont());
-            if (!font_class.empty() && !inStyledSpan()) {
-                gen_->span(font_class.c_str());
-                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
-                gen_->closeElement();
-            } else {
-                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
-            }
+            pending_zws_output_ = true;
+            pending_zws_had_trailing_space_ = has_trailing_space;
         }
+        
         return;
     }
     
