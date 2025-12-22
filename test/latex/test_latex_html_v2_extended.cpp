@@ -173,14 +173,14 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 moved to baseline; tex_4 has \noindent issue
         // counters.tex test 2 moved to baseline (PASSES)
         {"environments.tex", {7, 10, 14}},
-        {"fonts.tex", {6, 7, 8}},
+        {"fonts.tex", {7, 8}},  // test 6 moved to baseline (monospace ligature suppression)
         {"groups.tex", {2, 3}},
         {"label-ref.tex", {2, 3, 6, 7}},  // test 1 moved to baseline (PASSES)
         {"layout-marginpar.tex", {1, 2, 3}},
         {"macros.tex", {2, 4, 5, 6}},
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
-        {"text.tex", {4, 6, 8, 10}},  // test 5, 7 moved to baseline (PASS)
+        {"text.tex", {4, 6, 10}},  // test 5, 7, 8 moved to baseline (PASS); 8 = verb* fix
         {"whitespace.tex", {5, 6, 7, 8, 12, 21}}  // test 13, 15 moved to baseline (PASS)
     };
 
