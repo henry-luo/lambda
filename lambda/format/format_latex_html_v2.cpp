@@ -2287,7 +2287,7 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Three cases for \empty:
     // 1. \empty (no braces) - produces nothing (null command)
     // 2. \empty{} (empty braces) - output ZWS
-    // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at end
+    // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at boundaries
     
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
@@ -2339,10 +2339,53 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
         }
     }
     
-    // Case 3: Environment with content - ZWS at end only
+    // Case 3: Environment with content - ZWS at start (if leading whitespace) and end
     // ZWS at end prevents space after environment content from collapsing
-    // with following content. No ZWS at start (would break baseline tests).
+    // with following content. ZWS at start (before leading whitespace) preserves
+    // the boundary when there's whitespace before the environment content.
     if (has_other_content) {
+        // Check if content starts with whitespace
+        // The empty element may contain a 'paragraph' wrapper, so we need to look inside
+        auto first_iter = reader.children();
+        ItemReader first_child;
+        bool has_leading_whitespace = false;
+        while (first_iter.next(&first_child)) {
+            if (first_child.isString()) {
+                const char* str = first_child.cstring();
+                if (str && str[0] != '\0' && isspace(str[0])) {
+                    has_leading_whitespace = true;
+                }
+                break;
+            } else if (first_child.isElement()) {
+                // If first child is a paragraph element, look inside it
+                ElementReader child_elem(first_child.item());
+                const char* tag = child_elem.tagName();
+                if (tag && strcmp(tag, "paragraph") == 0) {
+                    // Look at the paragraph's first child
+                    auto para_iter = child_elem.children();
+                    ItemReader para_child;
+                    while (para_iter.next(&para_child)) {
+                        if (para_child.isString()) {
+                            const char* str = para_child.cstring();
+                            if (str && str[0] != '\0' && isspace(str[0])) {
+                                has_leading_whitespace = true;
+                            }
+                            break;
+                        } else if (para_child.isElement()) {
+                            break;  // Non-string first child means no leading whitespace
+                        }
+                    }
+                }
+                break;  // First child is element, done checking
+            }
+        }
+        
+        // Output ZWS at start if there's leading whitespace in content
+        if (has_leading_whitespace) {
+            proc->ensureParagraph();
+            gen->text("\xE2\x80\x8B");  // ZWS at start
+        }
+        
         proc->processChildren(elem);
         gen->text("\xE2\x80\x8B");  // ZWS at end
         return;
