@@ -499,6 +499,7 @@ public:
     }
     void ensureParagraph();  // Start a paragraph if not already in one
     bool inParagraph() const { return in_paragraph_; }  // Check if currently in a paragraph
+    void setInParagraph(bool value) { in_paragraph_ = value; }  // Set paragraph state (for list items)
     
     // Inline mode management (to suppress paragraph creation)
     void enterInlineMode() { inline_depth_++; }
@@ -2887,6 +2888,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
                             // Close previous item if open
                             if (in_item) {
+                                proc->setInParagraph(false);  // Reset paragraph state before closing item
                                 gen->endItem();  // Close li/dd with proper structure
                             }
                             
@@ -2924,6 +2926,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             } else {
                                 gen->createItem(nullptr);
                             }
+                            proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
                             in_item = true;
                             at_item_start = true;  // Next text should be trimmed
                         } else {
@@ -2947,6 +2950,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     // Close <p> before block element
                                     gen->trimTrailingWhitespace();
                                     gen->closeElement();  // Close <p>
+                                    proc->setInParagraph(false);  // <p> is now closed
                                     proc->processNode(para_child.item());
                                     // DON'T open new <p> here - let endItem handle it
                                     // The <p> will be opened lazily when text content is encountered
@@ -2994,6 +2998,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
             // Direct item (not in paragraph wrapper)
             if (strcmp(tag, "item") == 0 || strcmp(tag, "enum_item") == 0) {
                 if (in_item) {
+                    proc->setInParagraph(false);  // Reset paragraph state before closing item
                     gen->endItem();  // Close previous item with proper structure
                 }
                 
@@ -3020,6 +3025,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                 }
                 
                 gen->createItem(has_brack_group2 ? label : nullptr);
+                proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
                 in_item = true;
                 at_item_start = true;  // Next text should be trimmed
             } else {
@@ -3052,6 +3058,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     
     // Close last item
     if (in_item) {
+        proc->setInParagraph(false);  // Reset paragraph state before closing item
         gen->endItem();  // Close last item with proper structure
     }
 }
@@ -3110,6 +3117,9 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
     // \begin{itemize} ... \end{itemize}
     HtmlGenerator* gen = proc->generator();
     
+    // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
+    bool saved_in_paragraph = proc->inParagraph();
+    
     // Scan for alignment declarations in list content
     const char* list_alignment = scanForListAlignment(elem);
     if (list_alignment) {
@@ -3127,6 +3137,9 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
         proc->setNextParagraphAlignment(nullptr);
     }
     
+    // Restore paragraph state
+    proc->setInParagraph(saved_in_paragraph);
+    
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
 }
@@ -3134,6 +3147,9 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
 static void cmd_enumerate(LatexProcessor* proc, Item elem) {
     // \begin{enumerate} ... \end{enumerate}
     HtmlGenerator* gen = proc->generator();
+    
+    // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
+    bool saved_in_paragraph = proc->inParagraph();
     
     // Scan for alignment declarations in list content
     const char* list_alignment = scanForListAlignment(elem);
@@ -3152,6 +3168,9 @@ static void cmd_enumerate(LatexProcessor* proc, Item elem) {
         proc->setNextParagraphAlignment(nullptr);
     }
     
+    // Restore paragraph state
+    proc->setInParagraph(saved_in_paragraph);
+    
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
 }
@@ -3160,9 +3179,15 @@ static void cmd_description(LatexProcessor* proc, Item elem) {
     // \begin{description} ... \end{description}
     HtmlGenerator* gen = proc->generator();
     
+    // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
+    bool saved_in_paragraph = proc->inParagraph();
+    
     gen->startDescription();
     processListItems(proc, elem, "description");
     gen->endDescription();
+    
+    // Restore paragraph state
+    proc->setInParagraph(saved_in_paragraph);
     
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
@@ -3185,7 +3210,9 @@ static void cmd_item(LatexProcessor* proc, Item elem) {
     }
     
     gen->createItem(label);
+    proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
     proc->processChildren(elem);
+    proc->setInParagraph(false);  // Reset before closing
     gen->closeElement();  // Close li/dd
 }
 
