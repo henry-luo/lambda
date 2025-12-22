@@ -179,7 +179,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         // sectioning.tex: All tests pass! test 3 fixed with inStyledSpan() check - moved to baseline
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
         {"text.tex", {10}},  // tests 4, 6 moved to baseline (typographic hyphen fix); test 5, 7, 8 baseline (PASS)
-        {"whitespace.tex", {5, 7, 8, 21}}  // test 1 passes, test 6 fixed: fixture typo (missing comma)
+        {"whitespace.tex", {5, 7, 8}}  // test 21 fixed (ZWS at horizontal env boundaries) - moved to baseline
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
