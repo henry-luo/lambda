@@ -468,6 +468,9 @@ public:
     void setSuppressGroupZWS(bool suppress) { group_suppresses_zws_ = suppress; }
     bool getSuppressGroupZWS() const { return group_suppresses_zws_; }
     
+    // Pending ZWS output - set by space-absorbing commands like \LaTeX
+    void setPendingZWSOutput(bool pending) { pending_zws_output_ = pending; }
+    
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
     void closeParagraphIfOpen();  // Alias for endParagraph
@@ -2074,6 +2077,9 @@ static void cmd_TeX(LatexProcessor* proc, Item elem) {
     gen->closeElement();  // close inner span
     gen->text("X");
     gen->closeElement();  // close outer span
+    
+    // \TeX is a space-absorbing command - set flag for ZWS output
+    proc->setPendingZWSOutput(true);
 }
 
 static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
@@ -2092,6 +2098,9 @@ static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
     gen->closeElement();  // close inner span
     gen->text("X");
     gen->closeElement();  // close outer span
+    
+    // \LaTeX is a space-absorbing command - set flag for ZWS output
+    proc->setPendingZWSOutput(true);
 }
 
 static void cmd_today(LatexProcessor* proc, Item elem) {
@@ -2265,13 +2274,12 @@ static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
 
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
-    // The {} serves as word terminator and produces ZWS for visual separation
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("\\");
-    // Output ZWS if empty curly group (e.g., \textbackslash{} produces \​)
+    // If followed by empty curly group, add ZWS
     if (hasEmptyCurlyGroupChild(elem)) {
-        gen->text("\xe2\x80\x8b");  // U+200B zero-width space
+        gen->text("\xe2\x80\x8b");  // ZWS
     }
 }
 
@@ -6677,6 +6685,7 @@ void LatexProcessor::processChildren(Item elem) {
                                 gen_->text(result.c_str());
                             } else {
                                 // Empty curly_group (like \^{}) - output diacritic char + ZWS
+                                // ZWS after empty curly groups is part of LaTeX formatting
                                 ensureParagraph();
                                 gen_->text(tag);
                                 gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
@@ -7212,6 +7221,13 @@ void LatexProcessor::processText(const char* text) {
     // Debug: log text content to see what's being processed
     log_debug("processText: '%s' (len=%zu, in_paragraph=%d)", text, strlen(text), in_paragraph_ ? 1 : 0);
     
+    // Output pending ZWS if flag is set (from space-absorbing commands like \LaTeX)
+    if (pending_zws_output_) {
+        ensureParagraph();
+        gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+        pending_zws_output_ = false;
+    }
+    
     // Normalize whitespace: collapse multiple spaces/newlines/tabs to single space
     // This matches LaTeX behavior where whitespace is collapsed
     std::string normalized;
@@ -7696,8 +7712,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         
         // Call command handler
         it->second(this, elem);
-        
-        // Exit inline element tracking
+
         if (isInlineCommand(cmd_name)) {
             inline_depth_--;
         }
