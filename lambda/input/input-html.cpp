@@ -780,6 +780,28 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
                     }
                 }
                 else {
+                    // Before parsing text content, check if we have whitespace-only content
+                    // followed by an auto-closing tag (e.g., "\n<li>" after "</a>" in a li element)
+                    // This prevents whitespace from being added between auto-closed elements
+                    const char* text_start = *html;
+                    const char* scan = text_start;
+
+                    // Scan forward through whitespace
+                    while (*scan && (*scan == ' ' || *scan == '\t' || *scan == '\n' || *scan == '\r')) {
+                        scan++;
+                    }
+
+                    // If we hit '<' after whitespace-only, check if next tag auto-closes current
+                    if (*scan == '<') {
+                        const char* next_tag = peek_next_tag_name(scan);
+                        if (next_tag && html_tag_closes_parent(tag_name->chars, next_tag)) {
+                            // Skip the whitespace - the next tag will close this element
+                            log_debug("Skipping whitespace before auto-closing tag <%s>", next_tag);
+                            *html = scan;
+                            continue;  // Go back to top of loop to process the closing tag
+                        }
+                    }
+
                     // Parse text content including whitespace, with HTML entity handling
                     // Use html_parse_mixed_content which:
                     // - Decodes ASCII escapes (&lt; &gt; &amp; &quot; &apos;) inline

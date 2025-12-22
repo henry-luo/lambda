@@ -110,10 +110,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     }
 
     // set default fonts
-    // most browsers use a generic sans-serif font as the default
+    // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
-    uicon->default_font = (FontProp){"Arial", (float)(16 * uicon->pixel_ratio), // 16px
+    uicon->default_font = (FontProp){"Times New Roman", (float)(16 * uicon->pixel_ratio), // 16px
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->legacy_default_font = (FontProp){"Times", (float)(16 * uicon->pixel_ratio), // 16px
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
@@ -121,8 +121,11 @@ int ui_context_init(UiContext* uicon, bool headless) {
 
     // init ThorVG engine
     tvg_engine_init(TVG_ENGINE_SW, 1);
-    // load font for tvg to render text later
-    char* font_path = load_font_path(uicon->font_db, "Arial");
+    // load default font for tvg to render text later
+    char* font_path = load_font_path(uicon->font_db, "Times New Roman");
+    if (!font_path) {
+        font_path = load_font_path(uicon->font_db, "Times");  // Fallback to Times if Times New Roman not found
+    }
     if (font_path) {
         tvg_font_load(font_path);  free(font_path);
     }
@@ -144,7 +147,7 @@ void free_document(DomDocument* doc) {
     if (doc->url) {
         url_destroy(doc->url);
     }
-    
+
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
 }
