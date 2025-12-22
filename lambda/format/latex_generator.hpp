@@ -198,6 +198,12 @@ public:
     // Check if label exists
     bool hasLabel(const std::string& name) const;
     
+    // Get all labels (for two-pass forward reference resolution)
+    const std::map<std::string, LabelInfo>& getLabels() const { return labels_; }
+    
+    // Copy labels from another generator (for two-pass forward reference resolution)
+    void copyLabelsFrom(const LatexGenerator& other) { labels_ = other.getLabels(); }
+    
     // Set current label context (called by \refstepcounter, sections)
     // latex.js: currentlabel property
     void setCurrentLabel(const std::string& anchor, const std::string& text);
