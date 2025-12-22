@@ -33,6 +33,157 @@ int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_coun
 // Forward declaration
 static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool);
 
+/**
+ * Parse font-family value list with special handling for unquoted multi-word font names.
+ * CSS font-family names like "Times New Roman" can be unquoted, so consecutive IDENT tokens
+ * between commas should be combined into a single font family name.
+ *
+ * Example: font-family: Charter, Linux Libertine, Times New Roman, serif;
+ * Should parse as: ["Charter", "Linux Libertine", "Times New Roman", "serif"]
+ *
+ * @param tokens Array of CSS tokens starting at the value
+ * @param value_start Start index of values
+ * @param value_end End index (exclusive)
+ * @param pool Memory pool for allocation
+ * @return CssValue of type LIST containing the font family names
+ */
+static CssValue* css_parse_font_family_values(const CssToken* tokens, int value_start, int value_end, Pool* pool) {
+    // First pass: count actual font families (comma-separated groups)
+    int family_count = 0;
+    int i = value_start;
+    bool has_value = false;
+
+    while (i < value_end) {
+        if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
+            i++;
+            continue;
+        }
+        if (tokens[i].type == CSS_TOKEN_COMMA) {
+            if (has_value) {
+                family_count++;
+                has_value = false;
+            }
+            i++;
+            continue;
+        }
+        // Any non-whitespace, non-comma token starts/continues a value
+        has_value = true;
+        i++;
+    }
+    if (has_value) family_count++;
+
+    if (family_count == 0) return NULL;
+
+    // Create list value
+    CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!list_value) return NULL;
+
+    list_value->type = CSS_VALUE_TYPE_LIST;
+    list_value->data.list.count = family_count;
+    list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * family_count);
+    if (!list_value->data.list.values) return NULL;
+
+    // Second pass: parse each font family
+    int list_idx = 0;
+    i = value_start;
+
+    while (i < value_end && list_idx < family_count) {
+        // Skip leading whitespace
+        while (i < value_end && tokens[i].type == CSS_TOKEN_WHITESPACE) {
+            i++;
+        }
+        if (i >= value_end) break;
+
+        // Skip commas
+        if (tokens[i].type == CSS_TOKEN_COMMA) {
+            i++;
+            continue;
+        }
+
+        // Handle quoted strings directly
+        if (tokens[i].type == CSS_TOKEN_STRING) {
+            list_value->data.list.values[list_idx++] = css_parse_token_to_value(&tokens[i], pool);
+            i++;
+            continue;
+        }
+
+        // For IDENT tokens, collect consecutive identifiers until comma or end
+        if (tokens[i].type == CSS_TOKEN_IDENT) {
+            int start_idx = i;
+            int word_count = 0;
+            size_t total_len = 0;
+
+            // Collect all IDENT tokens until comma or end
+            while (i < value_end) {
+                if (tokens[i].type == CSS_TOKEN_IDENT) {
+                    total_len += strlen(tokens[i].value);
+                    word_count++;
+                    i++;
+                } else if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
+                    // Look ahead to see if there's another IDENT after whitespace
+                    int next = i + 1;
+                    while (next < value_end && tokens[next].type == CSS_TOKEN_WHITESPACE) {
+                        next++;
+                    }
+                    if (next < value_end && tokens[next].type == CSS_TOKEN_IDENT) {
+                        // There's another word, continue collecting
+                        total_len++; // for the space
+                        i = next;
+                    } else {
+                        // No more IDENT after whitespace, stop
+                        break;
+                    }
+                } else {
+                    // Comma or other token, stop
+                    break;
+                }
+            }
+
+            // Create value for this font family
+            if (word_count == 1) {
+                // Single word - use standard parsing (handles keywords like serif)
+                list_value->data.list.values[list_idx++] = css_parse_token_to_value(&tokens[start_idx], pool);
+            } else {
+                // Multiple words - combine them
+                char* combined = (char*)pool_alloc(pool, total_len + word_count);
+                if (combined) {
+                    combined[0] = '\0';
+                    int j = start_idx;
+                    bool first = true;
+                    while (j < i) {
+                        if (tokens[j].type == CSS_TOKEN_IDENT) {
+                            if (!first) {
+                                strcat(combined, " ");
+                            }
+                            strcat(combined, tokens[j].value);
+                            first = false;
+                        }
+                        j++;
+                    }
+
+                    CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+                    if (value) {
+                        value->type = CSS_VALUE_TYPE_CUSTOM;
+                        value->data.custom_property.name = combined;
+                        value->data.custom_property.fallback = NULL;
+                        list_value->data.list.values[list_idx++] = value;
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Other token types - parse normally
+        list_value->data.list.values[list_idx++] = css_parse_token_to_value(&tokens[i], pool);
+        i++;
+    }
+
+    // Update actual count in case it differs
+    list_value->data.list.count = list_idx;
+
+    return list_value;
+}
+
 // Helper: Parse a CSS function with its arguments from tokens
 // Returns a CssValue of type CSS_VALUE_TYPE_FUNCTION
 // *pos should point to the CSS_TOKEN_FUNCTION token; on return, *pos points past the closing paren
@@ -1408,8 +1559,12 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     decl->valid = true;
     decl->ref_count = 1;
 
+    // Special handling for font-family: combine multi-word font names
+    if (decl->property_id == CSS_PROPERTY_FONT_FAMILY && value_count > 1) {
+        decl->value = css_parse_font_family_values(tokens, value_start, *pos, pool);
+    }
     // Create value(s) from tokens
-    if (value_count == 1) {
+    else if (value_count == 1) {
         // Single value - create directly
         int i = value_start;
         while (i < *pos) {
