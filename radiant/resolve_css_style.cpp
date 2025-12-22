@@ -2182,6 +2182,57 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_BACKGROUND_IMAGE: {
+            ViewSpan* span = (ViewSpan*)lycon->view;
+            const char* elem_name = span && span->tag_name ? span->tag_name : "unknown";
+            log_debug("[CSS] Processing background-image property on <%s> (value type=%d)", elem_name, value->type);
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                // url() is parsed as a function
+                CssFunction* func = value->data.function;
+                if (func && func->name && strcmp(func->name, "url") == 0) {
+                    // Get the first argument of url() function
+                    if (func->args && func->arg_count > 0) {
+                        CssValue* arg = func->args[0];
+                        const char* url = (arg->type == CSS_VALUE_TYPE_STRING) ? arg->data.string :
+                                         (arg->type == CSS_VALUE_TYPE_URL) ? arg->data.url : nullptr;
+                        if (url) {
+                            // Allocate and copy the URL string
+                            size_t url_len = strlen(url);
+                            char* image_path = (char*)alloc_prop(lycon, url_len + 1);
+                            if (image_path) {
+                                strcpy(image_path, url);
+                                span->bound->background->image = image_path;
+                                log_debug("[CSS] background-image stored: '%s'", image_path);
+                            }
+                        }
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_STRING) {
+                // Direct URL/string value (non-function form)
+                const char* url = (value->type == CSS_VALUE_TYPE_URL) ? value->data.url : value->data.string;
+                if (url) {
+                    size_t url_len = strlen(url);
+                    char* image_path = (char*)alloc_prop(lycon, url_len + 1);
+                    if (image_path) {
+                        strcpy(image_path, url);
+                        span->bound->background->image = image_path;
+                        log_debug("[CSS] background-image stored: '%s'", image_path);
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->bound->background->image = nullptr;
+                log_debug("[CSS] background-image: none");
+            }
+            break;
+        }
+
         // ===== GROUP 16: Background Advanced Properties =====
         case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
             log_debug("[CSS] Processing background-attachment property");
