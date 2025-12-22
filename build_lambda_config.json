@@ -1606,7 +1606,7 @@
                     },
                     {
                         "source": "test/css/test_css_dom_crud.cpp",
-                        "name": "DOM Element CRUD Tests - EXPECTED TO FAIL",
+                        "name": "DOM Element CRUD Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
