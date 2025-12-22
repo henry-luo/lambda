@@ -1516,6 +1516,17 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 continue;
             }
 
+            // Special case: font shorthand sets font-family directly on span->font
+            // without creating a CssDeclaration, so also check if font->family is set
+            if (prop_id == CSS_PROPERTY_FONT_FAMILY) {
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (span->font && span->font->family) {
+                    log_debug("[FONT INHERIT] Skipping inheritance - font-family already set via shorthand: %s",
+                             span->font->family);
+                    continue;
+                }
+            }
+
             // Property not set, check parent chain for inherited declaration
             // Walk up the parent chain until we find a declaration
             DomElement* ancestor = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
@@ -1525,9 +1536,14 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 if (ancestor->specified_style) {
                     inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);
                     if (inherited_decl && inherited_decl->value) {
+                        if (prop_id == CSS_PROPERTY_FONT_FAMILY) {
+                            log_debug("[FONT INHERIT] Found font-family in ancestor <%s>, value_type=%d",
+                                ancestor->tag_name ? ancestor->tag_name : "?", inherited_decl->value->type);
+                        }
                         break; // Found it!
                     }
                 }
+                // BUG FIX: Was using dom_elem->parent instead of ancestor->parent!
                 ancestor = ancestor->parent ? static_cast<DomElement*>(ancestor->parent) : nullptr;
             }
 
@@ -1778,17 +1794,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                 // Apply font-family
                 if (family_value) {
+                    log_debug("[CSS] Font shorthand: applying font-family, value type=%d", family_value->type);
                     if (family_value->type == CSS_VALUE_TYPE_STRING) {
                         span->font->family = (char*)family_value->data.string;
-                        log_debug("[CSS] Font shorthand: set font-family = '%s'", span->font->family);
+                        log_debug("[CSS] Font shorthand: set font-family from STRING = '%s'", span->font->family);
                     } else if (family_value->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* info = css_enum_info(family_value->data.keyword);
                         span->font->family = info ? (char*)info->name : nullptr;
-                        log_debug("[CSS] Font shorthand: set font-family keyword = '%s'", span->font->family);
+                        log_debug("[CSS] Font shorthand: set font-family from KEYWORD = '%s'", span->font->family);
                     } else if (family_value->type == CSS_VALUE_TYPE_CUSTOM && family_value->data.custom_property.name) {
                         span->font->family = (char*)family_value->data.custom_property.name;
-                        log_debug("[CSS] Font shorthand: set font-family custom = '%s'", span->font->family);
+                        log_debug("[CSS] Font shorthand: set font-family from CUSTOM = '%s'", span->font->family);
                     }
+
+                } else {
+                    log_debug("[CSS] Font shorthand: NO font-family found!");
                 }
 
                 // Apply font-weight if specified

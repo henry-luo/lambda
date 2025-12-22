@@ -399,7 +399,15 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
     }
 
     if (view_span->in_line && view_span->in_line->color.c) {
+        log_debug("[SVG COLOR] element=%s has color set: #%02x%02x%02x (was #%02x%02x%02x from parent)",
+                  view_span->node_name(),
+                  view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
+                  pa_color.r, pa_color.g, pa_color.b);
         ctx->color = view_span->in_line->color;
+    } else {
+        log_debug("[SVG COLOR] element=%s inheriting color #%02x%02x%02x from parent (in_line=%p, color.c=%u)",
+                  view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
+                  view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
     }
 
     // Render children
