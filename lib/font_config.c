@@ -897,8 +897,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
 
         TTF_Table_Directory *name_table = find_ttf_table(tables, header.num_tables, TTF_TAG_NAME);
         if (name_table) {
-            // Adjust table offset to be relative to start of file
-            name_table->offset += font_offsets[i];
+            // TTC table offsets are already absolute from file start (per OpenType spec)
             #ifdef FONT_DEBUG_VERBOSE
             log_debug("TTC font %u: parsing name table at offset %u", i, name_table->offset);
             #endif
@@ -915,13 +914,13 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
 
         TTF_Table_Directory *os2_table = find_ttf_table(tables, header.num_tables, TTF_TAG_OS2);
         if (os2_table) {
-            os2_table->offset += font_offsets[i];
+            // TTC table offsets are already absolute from file start
             parse_os2_table(file, os2_table, entry);
         }
 
         TTF_Table_Directory *cmap_table = find_ttf_table(tables, header.num_tables, TTF_TAG_CMAP);
         if (cmap_table) {
-            cmap_table->offset += font_offsets[i];
+            // TTC table offsets are already absolute from file start
             parse_cmap_table(file, cmap_table, entry, arena);
         }
 
@@ -1790,8 +1789,17 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
             if (placeholder && placeholder->is_placeholder && placeholder->family_name &&
                 string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
 
-                if (parse_placeholder_font(placeholder, db->string_arena)) {
-                    loaded_more = true;
+                // For TTC files, use lazy_load_font which handles TTC properly
+                FontFormat format = detect_font_format(placeholder->file_path);
+                if (format == FONT_FORMAT_TTC) {
+                    if (lazy_load_font(db, placeholder->file_path)) {
+                        loaded_more = true;
+                    }
+                } else {
+                    // For single-font files, parse in-place
+                    if (parse_placeholder_font(placeholder, db->string_arena)) {
+                        loaded_more = true;
+                    }
                 }
             }
         }
