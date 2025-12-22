@@ -2339,11 +2339,12 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
         }
     }
     
-    // Case 3: Environment with content - process children + ZWS at end
-    // The ZWS at the end prevents the following space from being consumed
+    // Case 3: Environment with content - ZWS at end only
+    // ZWS at end prevents space after environment content from collapsing
+    // with following content. No ZWS at start (would break baseline tests).
     if (has_other_content) {
         proc->processChildren(elem);
-        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+        gen->text("\xE2\x80\x8B");  // ZWS at end
         return;
     }
     
@@ -2865,6 +2866,8 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     
     bool in_item = false;
     bool at_item_start = false;  // Track if we're at the very start of an item (for whitespace trimming)
+    bool item_paragraph_open = false;  // Track if we have an open <p> inside item
+    bool next_paragraph_noindent = false;  // Track if next paragraph should have noindent class
     
     for (size_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
@@ -2889,6 +2892,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             // Close previous item if open
                             if (in_item) {
                                 proc->setInParagraph(false);  // Reset paragraph state before closing item
+                                item_paragraph_open = false;  // Reset paragraph tracking
                                 gen->endItem();  // Close li/dd with proper structure
                             }
                             
@@ -2927,12 +2931,29 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                 gen->createItem(nullptr);
                             }
                             proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
+                            item_paragraph_open = true;  // <p> is now open
                             in_item = true;
                             at_item_start = true;  // Next text should be trimmed
+                            next_paragraph_noindent = false;  // Reset noindent flag for new item
                         } else {
                             // Other element within paragraph
                             if (in_item) {
                                 const char* elem_tag = para_child_elem.tagName();
+                                
+                                // Check if this is the noindent command
+                                if (elem_tag && strcmp(elem_tag, "noindent") == 0) {
+                                    // \noindent - close current paragraph and set flag for next
+                                    if (item_paragraph_open) {
+                                        gen->trimTrailingWhitespace();
+                                        gen->closeElement();  // Close <p>
+                                        proc->setInParagraph(false);
+                                        item_paragraph_open = false;
+                                    }
+                                    next_paragraph_noindent = true;
+                                    at_item_start = true;  // Trim leading whitespace
+                                    continue;
+                                }
+                                
                                 // Check if this is a block element (list, etc.)
                                 bool is_block = elem_tag && (
                                     strcmp(elem_tag, "itemize") == 0 ||
@@ -2948,9 +2969,12 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                 
                                 if (is_block) {
                                     // Close <p> before block element
-                                    gen->trimTrailingWhitespace();
-                                    gen->closeElement();  // Close <p>
-                                    proc->setInParagraph(false);  // <p> is now closed
+                                    if (item_paragraph_open) {
+                                        gen->trimTrailingWhitespace();
+                                        gen->closeElement();  // Close <p>
+                                        proc->setInParagraph(false);  // <p> is now closed
+                                        item_paragraph_open = false;
+                                    }
                                     proc->processNode(para_child.item());
                                     // DON'T open new <p> here - let endItem handle it
                                     // The <p> will be opened lazily when text content is encountered
@@ -2965,26 +2989,43 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         // Symbol - check for parbreak
                         String* sym = para_child.asSymbol();
                         if (sym && strcmp(sym->chars, "parbreak") == 0) {
-                            // Paragraph break within list item - close </p> and open <p>
-                            if (in_item) {
+                            // Paragraph break within list item - close </p> only
+                            if (in_item && item_paragraph_open) {
                                 gen->itemParagraphBreak();
+                                item_paragraph_open = false;
+                                proc->setInParagraph(false);
                                 at_item_start = true;  // Trim leading whitespace in new paragraph
                             }
                         }
                     } else if (para_child.isString()) {
                         // Text content
                         const char* text = para_child.cstring();
+                        log_debug("processListItems: text child '%s', at_item_start=%d, item_paragraph_open=%d", 
+                                  text, at_item_start ? 1 : 0, item_paragraph_open ? 1 : 0);
                         if (in_item && text && text[0] != '\0') {
                             // Trim leading whitespace at start of item or after paragraph break
                             if (at_item_start) {
                                 while (*text && isspace((unsigned char)*text)) {
                                     text++;
                                 }
-                                at_item_start = false;
+                                // Only reset at_item_start when we have actual content
+                                // This way multiple whitespace-only text nodes are all skipped
                             }
                             
                             // Skip if now empty after trimming
                             if (text[0] != '\0') {
+                                // Reset at_item_start now that we have actual content
+                                at_item_start = false;
+                                
+                                // Open paragraph if needed (lazy paragraph opening)
+                                if (!item_paragraph_open) {
+                                    log_debug("processListItems: lazy opening p for text '%s'", text);
+                                    const char* p_class = next_paragraph_noindent ? "noindent" : nullptr;
+                                    gen->writer()->openTag("p", p_class);
+                                    item_paragraph_open = true;
+                                    proc->setInParagraph(true);
+                                    next_paragraph_noindent = false;  // Reset flag after use
+                                }
                                 // Convert apostrophes and output text
                                 std::string converted = convertApostrophes(text);
                                 gen->text(converted.c_str());
@@ -6541,6 +6582,12 @@ void LatexProcessor::processNode(Item node) {
         if (str && str->len > 0) {
             const char* text = str->chars;
             
+            // Skip EMPTY_STRING sentinel (which has content "lambda.nil")
+            if (str == &EMPTY_STRING || 
+                (str->len == 10 && strncmp(text, "lambda.nil", 10) == 0)) {
+                return;  // skip the empty string sentinel
+            }
+            
             // Debug: log "document" string to track where it's coming from
             if (strcmp(text, "document") == 0) {
                 log_debug("processNode: found 'document' string - context unknown");
@@ -7726,6 +7773,11 @@ void LatexProcessor::outputTextWithSpecialChars(const char* text) {
 void LatexProcessor::processText(const char* text) {
     if (!text) return;
     
+    // Skip EMPTY_STRING sentinel ("lambda.nil")
+    if (strlen(text) == 10 && strncmp(text, "lambda.nil", 10) == 0) {
+        return;
+    }
+    
     // Debug: log text content to see what's being processed
     log_debug("processText: '%s' (len=%zu, in_paragraph=%d)", text, strlen(text), in_paragraph_ ? 1 : 0);
     
@@ -7796,6 +7848,13 @@ void LatexProcessor::processText(const char* text) {
     // or special character command should have its leading space stripped
     bool should_strip_leading = strip_next_leading_space_;
     strip_next_leading_space_ = false;  // Reset flag after checking
+    
+    // Also strip leading space if the output already ends with whitespace
+    // This prevents consecutive spaces from adjacent text nodes
+    if (!should_strip_leading && gen_->hasTrailingWhitespace() && 
+        !normalized.empty() && normalized[0] == ' ') {
+        should_strip_leading = true;
+    }
     
     // Strip leading space if flagged (applies to all text, not just font-styled)
     if (should_strip_leading && !normalized.empty() && normalized[0] == ' ') {

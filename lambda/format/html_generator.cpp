@@ -197,6 +197,12 @@ void HtmlGenerator::text(const char* content) {
     // html-generator.ls text method
     if (!content) return;
     
+    // Skip EMPTY_STRING sentinel ("lambda.nil")
+    size_t len = strlen(content);
+    if (len == 10 && strncmp(content, "lambda.nil", 10) == 0) {
+        return;
+    }
+    
     // In verbatim mode or monospace font, preserve all and don't process typography
     // Monospace fonts (like \texttt) should not use ligatures or dash conversion
     if (verbatim_mode_ || currentFont().family == FontFamily::Typewriter) {
@@ -604,10 +610,14 @@ void HtmlGenerator::endItem() {
     if (state.type == "itemize" || state.type == "enumerate") {
         // Check if there's an empty <p> tag at the end (from paragraph break before end of item)
         // If so, remove it instead of closing it
-        if (!writer_->removeLastOpenedTagIfEmpty("p")) {
+        bool removed = writer_->removeLastOpenedTagIfEmpty("p");
+        log_debug("endItem: removeLastOpenedTagIfEmpty(p) = %d", removed ? 1 : 0);
+        if (!removed) {
             // Check if a <p> is actually open before trying to close it
             // After nested block elements (like nested lists), there may be no <p> to close
-            if (writer_->isTagOpen("p")) {
+            bool p_open = writer_->isTagOpen("p");
+            log_debug("endItem: isTagOpen(p) = %d", p_open ? 1 : 0);
+            if (p_open) {
                 // <p> is open, trim whitespace and close it
                 writer_->trimTrailingWhitespace();
                 writer_->closeTag("p");
@@ -630,7 +640,8 @@ void HtmlGenerator::endItem() {
 }
 
 void HtmlGenerator::itemParagraphBreak() {
-    // Handle paragraph break within list item - closes </p> and opens <p>
+    // Handle paragraph break within list item - closes </p> only
+    // A new <p> is opened lazily when content is encountered
     // This is used when parbreak appears inside list item content
     
     if (list_stack_.empty()) {
@@ -643,10 +654,8 @@ void HtmlGenerator::itemParagraphBreak() {
     if (state.type == "itemize" || state.type == "enumerate" || state.type == "description") {
         // Trim trailing whitespace before closing paragraph
         writer_->trimTrailingWhitespace();
-        // Close current <p>
+        // Close current <p> - new one will be opened lazily
         writer_->closeTag("p");
-        // Open new <p>
-        writer_->openTag("p", nullptr);
     }
 }
 
