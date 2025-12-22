@@ -22,7 +22,7 @@ module.exports = grammar({
     $._comment_env_content,   // For comment environment
     $._begin_document,        // \begin{document} - higher priority than command
     $._end_document,          // \end{document} - higher priority than command
-    $._verb_command,          // \verb<delim>text<delim> - context-gated external token
+    $._verb_command,          // \verb<delim>text<delim> - must use external to override command_name token
     $._char_command,          // \char<number> - decimal/hex/octal number token
   ],
 
@@ -51,11 +51,13 @@ module.exports = grammar({
     _top_level_item: $ => choice(
       $.document,       // Full document with \begin{document}...\end{document}
       $.environment,    // Environments can appear at top level (e.g., in fragments)
-      $.command,
-      $.curly_group,
-      $.brack_group,
-      $.line_comment,
+      $.verb_command,   // \verb can appear at top level
+      $.char_command,   // \char can appear at top level
+      $.linebreak_command, // \\ with optional [<length>]
       $.control_symbol, // Escape sequences like \%, \& 
+      $.command,        // Commands can appear at top level (e.g., \textellipsis)
+      $.curly_group,    // Curly braces can appear at top level
+      $.brack_group,    // Brackets can appear at top level
       $.space,
       $.text,
       $.paragraph_break,  // Blank lines are allowed in preamble
@@ -114,6 +116,7 @@ module.exports = grammar({
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
       $.verb_command,   // \verb|text| - must be before command (context-gated)
       $.char_command,   // \char<number> - must be before command (context-gated)
+      $.linebreak_command, // \\ with optional [<length>]
       $.command,
       $.curly_group,
       $.brack_group,
@@ -158,17 +161,30 @@ module.exports = grammar({
     // Control symbols (matches LaTeX.js: ctrl_sym) 
     // High precedence to match before line_comment sees the %
     // Includes: escape chars ($%#&{}_-), spacing (\! \, \; \: \/ \@), 
-    // punctuation (\. \' \` \^ \" \~ \=), control space (\ ), and line break (\\)
+    // punctuation (\. \' \` \^ \" \~ \=), control space (\ )
     // Note: \<tab> and \<newline> are handled by external scanner (controlspace_command)
-    control_symbol: $ => token(prec(2, seq('\\', /[$%#&{}_\-,\/@ !;:.'`^"~=\\]/))),
+    // Note: line break (\\) is handled by linebreak_command to capture optional [<length>]
+    control_symbol: $ => token(prec(2, seq('\\', /[$%#&{}_\-,\/@ !;:.'`^"~=]/))),
+
+    // ========================================================================
+    // Line break command - \\ with optional [<length>] argument
+    // ========================================================================
+    
+    // Matches: \\, \\*, \\[<length>], \\*[<length>]
+    // LaTeX.js: nl = escape escape_char opt_star opt_length
+    // Use prec.right to greedily consume optional brack_group
+    linebreak_command: $ => prec.right(seq(
+      '\\\\',
+      optional('*'),
+      optional($.brack_group)
+    )),
 
     // ========================================================================
     // Verb command - inline verbatim with arbitrary delimiter
     // ========================================================================
     
-    // Context-gated external token (Pattern 1)
-    // The external scanner will only emit this token when valid_symbols[VERB_COMMAND] is true
-    // This happens when the parser is in _inline context and hasn't yet committed to command
+    // External scanner token - required because command_name token would match \verb first
+    // The external scanner runs before tokenization and can claim \verb pattern
     verb_command: $ => $._verb_command,
 
     // ========================================================================
