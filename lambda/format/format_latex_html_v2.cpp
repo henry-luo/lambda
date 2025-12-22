@@ -19,11 +19,37 @@
 #include <map>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 // external function for evaluating LaTeX numeric expressions
 extern "C" int latex_eval_num_expr(const char* expr);
 
 namespace lambda {
+
+// =============================================================================
+// Space-Absorbing Commands - Commands that consume following whitespace
+// =============================================================================
+
+// LaTeX commands that absorb following whitespace per LaTeX semantics
+// After these commands, we need ZWS markers to preserve word boundaries in HTML
+static const std::unordered_set<std::string> SPACE_ABSORBING_COMMANDS = {
+    // Logo commands (no arguments)
+    "LaTeX", "TeX", "LaTeXe",
+    // Font size commands (no arguments when used as declarations)
+    "tiny", "scriptsize", "footnotesize", "small", "normalsize",
+    "large", "Large", "LARGE", "huge", "Huge",
+    // Special commands
+    "empty",  // From whitespace_tex_15
+    // Note: text styling commands like \textbf, \emph, etc. are NOT included
+    // because they take arguments and the argument handling prevents space absorption
+    // Add more as needed based on test failures
+};
+
+// Check if a command absorbs following whitespace
+static bool commandAbsorbsSpace(const char* cmd_name) {
+    if (!cmd_name) return false;
+    return SPACE_ABSORBING_COMMANDS.count(cmd_name) > 0;
+}
 
 // =============================================================================
 // Diacritic Support - Maps LaTeX diacritic commands + base char to Unicode
@@ -385,7 +411,9 @@ public:
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false) {}
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false),
+          pending_zws_output_(false), pending_zws_had_trailing_space_(false),
+          group_suppresses_zws_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -435,6 +463,13 @@ public:
     // Frame class flag - when true, next box command should add "frame" class
     void set_next_box_frame(bool frame) { next_box_frame_ = frame; }
     bool get_next_box_frame() const { return next_box_frame_; }
+    
+    // Group ZWS suppression - when true, the containing group won't output ZWS
+    void setSuppressGroupZWS(bool suppress) { group_suppresses_zws_ = suppress; }
+    bool getSuppressGroupZWS() const { return group_suppresses_zws_; }
+    
+    // Pending ZWS output - set by space-absorbing commands like \LaTeX
+    void setPendingZWSOutput(bool pending) { pending_zws_output_ = pending; }
     
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
@@ -512,6 +547,15 @@ private:
     bool next_box_frame_;
     // In this mode, linebreaks (\\, \newline) are ignored and \par becomes a space
     bool restricted_h_mode_;
+    
+    // Pending ZWS output - when true, a ZWS should be output if there's more content
+    // Set by curly_group handler when a group at document level closes
+    bool pending_zws_output_;
+    // If the curly group that set pending_zws_output_ had trailing whitespace
+    bool pending_zws_had_trailing_space_;
+    // If set, the current group contains only whitespace-controlling commands
+    // and should not trigger ZWS output
+    bool group_suppresses_zws_;
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -2033,6 +2077,9 @@ static void cmd_TeX(LatexProcessor* proc, Item elem) {
     gen->closeElement();  // close inner span
     gen->text("X");
     gen->closeElement();  // close outer span
+    
+    // \TeX is a space-absorbing command - set flag for ZWS output
+    proc->setPendingZWSOutput(true);
 }
 
 static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
@@ -2051,6 +2098,9 @@ static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
     gen->closeElement();  // close inner span
     gen->text("X");
     gen->closeElement();  // close outer span
+    
+    // \LaTeX is a space-absorbing command - set flag for ZWS output
+    proc->setPendingZWSOutput(true);
 }
 
 static void cmd_today(LatexProcessor* proc, Item elem) {
@@ -2070,14 +2120,14 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Three cases for \empty:
     // 1. \empty (no braces) - produces nothing (null command)
-    // 2. \empty{} (empty braces) - ZWS is output by general logic in processChildren
+    // 2. \empty{} (empty braces) - output ZWS
     // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at end
     
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
     
     // Check what kind of children we have
-    bool has_curly_group_only = false;
+    bool has_empty_curly_group = false;
     bool has_other_content = false;
     
     auto iter = reader.children();
@@ -2087,15 +2137,39 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             if (tag && strcmp(tag, "curly_group") == 0) {
-                has_curly_group_only = true;
+                // Check if the curly_group is empty
+                auto group_iter = child_elem.children();
+                ItemReader group_child;
+                bool group_has_content = false;
+                while (group_iter.next(&group_child)) {
+                    if (group_child.isElement()) {
+                        group_has_content = true;
+                        break;
+                    } else if (group_child.isString()) {
+                        const char* str = group_child.cstring();
+                        if (str && str[0] != '\0') {
+                            // Check if it's not just whitespace
+                            for (const char* p = str; *p; p++) {
+                                if (!isspace(*p)) {
+                                    group_has_content = true;
+                                    break;
+                                }
+                            }
+                            if (group_has_content) break;
+                        }
+                    }
+                }
+                if (!group_has_content) {
+                    has_empty_curly_group = true;
+                } else {
+                    has_other_content = true;
+                }
             } else {
                 // Has other content (e.g., paragraph from environment)
                 has_other_content = true;
-                has_curly_group_only = false;
             }
         } else if (child.isString()) {
             has_other_content = true;
-            has_curly_group_only = false;
         }
     }
     
@@ -2107,7 +2181,13 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
         return;
     }
     
-    // Case 2: Empty braces - ZWS will be output by processChildren, so do nothing here
+    // Case 2: Empty braces - output ZWS
+    if (has_empty_curly_group) {
+        proc->ensureParagraph();
+        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+        return;
+    }
+    
     // Case 1: No braces - output nothing (null command)
 }
 
@@ -2164,6 +2244,10 @@ static void cmd_unskip(LatexProcessor* proc, Item elem) {
     (void)elem;
     HtmlGenerator* gen = proc->generator();
     gen->trimTrailingWhitespace();
+    
+    // Mark that the containing group should not output ZWS
+    LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
+    mutable_proc->setSuppressGroupZWS(true);
 }
 
 static void cmd_ignorespaces(LatexProcessor* proc, Item elem) {
@@ -2173,6 +2257,9 @@ static void cmd_ignorespaces(LatexProcessor* proc, Item elem) {
     (void)elem;
     LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
     mutable_proc->setStripNextLeadingSpace(true);
+    
+    // Mark that the containing group should not output ZWS
+    mutable_proc->setSuppressGroupZWS(true);
 }
 
 static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
@@ -2187,13 +2274,12 @@ static void cmd_ligature_break(LatexProcessor* proc, Item elem) {
 
 static void cmd_textbackslash(LatexProcessor* proc, Item elem) {
     // \textbackslash - Outputs a backslash character
-    // The {} serves as word terminator and produces ZWS for visual separation
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
     gen->text("\\");
-    // Output ZWS if empty curly group (e.g., \textbackslash{} produces \​)
+    // If followed by empty curly group, add ZWS
     if (hasEmptyCurlyGroupChild(elem)) {
-        gen->text("\xe2\x80\x8b");  // U+200B zero-width space
+        gen->text("\xe2\x80\x8b");  // ZWS
     }
 }
 
@@ -3001,6 +3087,11 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     // The AST builder stored it as a string child
     HtmlGenerator* gen = proc->generator();
     
+    log_debug("cmd_verb_command: CALLED");
+    
+    // Ensure we're in a paragraph (verb is inline content)
+    proc->ensureParagraph();
+    
     ElementReader elem_reader(elem);
     
     // Get the token string from the first child
@@ -3021,6 +3112,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
         return;
     }
     
+    log_debug("verb_command: processing text='%s'", text);
+    
     // Parse: "\verb<delim>content<delim>"
     // Skip "\verb" (5 chars)
     if (strlen(text) < 7) {  // Minimum: \verb||
@@ -3030,6 +3123,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     
     const char* delimiter_start = text + 5;  // After "\verb"
     char delim = *delimiter_start;
+    
+    log_debug("verb_command: delimiter='%c'", delim);
     
     // Find content between delimiters
     const char* content_start = delimiter_start + 1;
@@ -3042,6 +3137,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     
     size_t content_len = content_end - content_start;
     
+    log_debug("verb_command: content='%.*s' (len=%zu)", (int)content_len, content_start, content_len);
+    
     // Open <code class="latex-verbatim"> tag
     gen->writer()->openTagRaw("code", "class=\"latex-verbatim\"");
     
@@ -3050,6 +3147,8 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     gen->writer()->writeText(content.c_str());
     
     gen->writer()->closeTag("code");
+    
+    log_debug("verb_command: DONE");
 }
 
 static void cmd_verbatim(LatexProcessor* proc, Item elem) {
@@ -6212,7 +6311,33 @@ void LatexProcessor::processNode(Item node) {
         // Special handling for linebreak_command (\\)
         if (strcmp(tag, "linebreak_command") == 0) {
             ensureParagraph();
-            gen_->lineBreak(false);
+            
+            // Check for optional length attribute
+            if (elem_reader.has_attr("length")) {
+                String* length_str = elem_reader.get_string_attr("length");
+                if (length_str && length_str->len > 0) {
+                    // Convert to pixels
+                    double pixels = convertLatexLengthToPixels(length_str->chars);
+                    
+                    if (pixels != 0.0) {
+                        // Output: <span class="breakspace" style="margin-bottom:XXpx"></span>
+                        char style[128];
+                        snprintf(style, sizeof(style), "margin-bottom:%.3fpx", pixels);
+                        gen_->writer()->writeRawHtml("<span class=\"breakspace\" style=\"");
+                        gen_->writer()->writeRawHtml(style);
+                        gen_->writer()->writeRawHtml("\"></span>\n");
+                    } else {
+                        // No valid dimension, just output <br>
+                        gen_->lineBreak(false);
+                    }
+                } else {
+                    // No valid length string, just output <br>
+                    gen_->lineBreak(false);
+                }
+            } else {
+                // No length specified, just output <br>
+                gen_->lineBreak(false);
+            }
             return;
         }
         
@@ -6329,13 +6454,42 @@ void LatexProcessor::processChildren(Item elem) {
             
             if (tag && (strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0 ||
                         strcmp(tag, "newline") == 0)) {
-                // Check if next sibling is a brack_group (dimension argument)
                 bool has_dimension = false;
                 bool preserve_unit = false;
                 double dimension_px = 0;
                 const char* dimension_text = nullptr;
                 
-                if (i + 1 < count) {
+                // For linebreak_command (new grammar), check for length attribute
+                if (strcmp(tag, "linebreak_command") == 0 && child_elem.has_attr("length")) {
+                    String* length_str = child_elem.get_string_attr("length");
+                    if (length_str && length_str->len > 0) {
+                        const char* dim_text = length_str->chars;
+                        size_t dim_len = length_str->len;
+                        
+                        // Check if it's a relative unit (em, ex) - preserve as-is
+                        bool is_relative = false;
+                        if (dim_len >= 2) {
+                            const char* suffix = dim_text + dim_len - 2;
+                            if (strcmp(suffix, "em") == 0 || strcmp(suffix, "ex") == 0) {
+                                is_relative = true;
+                            }
+                        }
+                        
+                        if (is_relative) {
+                            has_dimension = true;
+                            preserve_unit = true;
+                            dimension_text = dim_text;
+                        } else {
+                            dimension_px = convertLatexLengthToPixels(dim_text);
+                            if (dimension_px > 0) {
+                                has_dimension = true;
+                                preserve_unit = false;
+                            }
+                        }
+                    }
+                } 
+                // For old linebreak/newline (old grammar), check if next sibling is a brack_group
+                else if (i + 1 < count) {
                     ItemReader next_reader = elem_reader.childAt(i + 1);
                     
                     if (next_reader.isElement()) {
@@ -6531,6 +6685,7 @@ void LatexProcessor::processChildren(Item elem) {
                                 gen_->text(result.c_str());
                             } else {
                                 // Empty curly_group (like \^{}) - output diacritic char + ZWS
+                                // ZWS after empty curly groups is part of LaTeX formatting
                                 ensureParagraph();
                                 gen_->text(tag);
                                 gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
@@ -6630,6 +6785,220 @@ void LatexProcessor::processChildren(Item elem) {
         // Normal processing for other nodes
         processNode(child_reader.item());
         
+        // Check if previous node set pending ZWS output flag (curly_group at document level)
+        if (pending_zws_output_) {
+            bool had_trailing_space = pending_zws_had_trailing_space_;
+            pending_zws_output_ = false;  // Clear flags
+            pending_zws_had_trailing_space_ = false;
+            
+            // Only output ZWS if there's more contentful siblings after this
+            // BUT not if there's a paragraph break (double newline) before the next content
+            // ALSO not if group had trailing space AND next non-whitespace starts immediately
+            bool has_following_content = false;
+            bool next_is_plain_text = false;
+            bool found_first_content = false;
+            int consecutive_newlines = 0;  // Track newlines across siblings
+            
+            for (int64_t j = i + 1; j < count; j++) {
+                ItemReader next_reader = elem_reader.childAt(j);
+                
+                // Check for paragraph break symbol
+                if (next_reader.isSymbol()) {
+                    const char* sym = next_reader.asSymbol()->chars;
+                    if (strcmp(sym, "parbreak") == 0) {
+                        // Paragraph break symbol - suppress ZWS
+                        has_following_content = false;
+                        goto done_checking_siblings;
+                    }
+                }
+                
+                if (next_reader.isString() || next_reader.isSymbol()) {
+                    // Check strings and symbols (whitespace may be stored as symbols)
+                    const char* next_text = next_reader.isString() ? next_reader.cstring() : (next_reader.isSymbol() ? next_reader.asSymbol()->chars : nullptr);
+                    if (next_text && next_text[0] != '\0') {
+                        // Count consecutive newlines to detect paragraph break
+                        for (const char* p = next_text; *p; p++) {
+                            if (*p == '\n') {
+                                consecutive_newlines++;
+                                if (consecutive_newlines >= 2) {
+                                    // Found paragraph break - stop here, no ZWS needed
+                                    has_following_content = false;
+                                    goto done_checking_siblings;
+                                }
+                            } else if (*p != ' ' && *p != '\t' && *p != '\r') {
+                                // Non-whitespace content found in string
+                                has_following_content = true;
+                                // Check if this is the first non-whitespace AND starts immediately
+                                if (!found_first_content) {
+                                    found_first_content = true;
+                                    // Only "plain text" if it starts at string beginning (no leading space)
+                                    if (p == next_text) {
+                                        next_is_plain_text = true;
+                                    }
+                                }
+                                goto done_checking_siblings;
+                            } else {
+                                // Space/tab/CR resets newline count (but not to zero if we had 1)
+                                if (*p != '\r') {
+                                    consecutive_newlines = 0;
+                                }
+                            }
+                        }
+                        // Continue to next sibling to keep checking
+                    }
+                } else if (next_reader.isElement()) {
+                    // Element found - only output ZWS if no paragraph break seen
+                    if (consecutive_newlines < 2) {
+                        has_following_content = true;
+                        next_is_plain_text = false;
+                    }
+                    break;
+                }
+            }
+            done_checking_siblings:
+            
+            // Suppress ZWS if: group had trailing space AND next is plain text
+            // (the trailing space already provides word separation)
+            if (had_trailing_space && next_is_plain_text) {
+                has_following_content = false;
+            }
+            
+            if (has_following_content) {
+                ensureParagraph();
+                // Output ZWS with current font styling (if any)
+                std::string font_class = gen_->getFontClass(gen_->currentFont());
+                if (!font_class.empty() && !inStyledSpan()) {
+                    gen_->span(font_class.c_str());
+                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                    gen_->closeElement();
+                } else {
+                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                }
+            }
+        }
+        
+        // =============================================================================
+        // Zero-Width Space (ZWS) Marker Logic
+        // =============================================================================
+        // LaTeX commands consume following whitespace, but HTML needs explicit markers
+        // to preserve word boundaries. Insert <span class="zws"> </span> after:
+        // 1. Commands that absorb space (\LaTeX, \textbf, etc.)
+        // 2. Empty curly groups {}
+        // 3. Commands with empty arguments
+        
+        if (child_reader.isElement()) {
+            ElementReader cmd_elem(child_reader.item());
+            const char* cmd_tag = cmd_elem.tagName();
+            
+            bool needs_zws = false;
+            
+            // Check if this is a curly_group with no content
+            if (cmd_tag && strcmp(cmd_tag, "curly_group") == 0) {
+                auto group_iter = cmd_elem.children();
+                ItemReader group_child;
+                bool has_content = false;
+                while (group_iter.next(&group_child)) {
+                    if (group_child.isElement()) {
+                        has_content = true;
+                        break;
+                    } else if (group_child.isString()) {
+                        const char* str = group_child.cstring();
+                        if (str && str[0] != '\0') {
+                            // Check if it's not just whitespace
+                            for (const char* p = str; *p; p++) {
+                                if (!isspace(*p)) {
+                                    has_content = true;
+                                    break;
+                                }
+                            }
+                            if (has_content) break;
+                        }
+                    }
+                }
+                if (!has_content) {
+                    needs_zws = true;
+                }
+            }
+            
+            // Check if this is a command that absorbs space
+            if (cmd_tag && strcmp(cmd_tag, "command") == 0) {
+                // Get command name
+                const char* cmd_name = nullptr;
+                auto cmd_iter = cmd_elem.children();
+                ItemReader cmd_child;
+                while (cmd_iter.next(&cmd_child)) {
+                    if (cmd_child.isElement()) {
+                        ElementReader cmd_child_elem(cmd_child.item());
+                        const char* child_tag = cmd_child_elem.tagName();
+                        if (child_tag && strcmp(child_tag, "command_name") == 0) {
+                            String* name_str = cmd_child_elem.get_string_attr("name");
+                            if (name_str) {
+                                cmd_name = name_str->chars;
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                if (cmd_name && commandAbsorbsSpace(cmd_name)) {
+                    // Check if next sibling is NOT a curly_group/brack_group (command arguments)
+                    // If it has arguments, they'll handle their own spacing
+                    bool has_following_arg = false;
+                    if (i + 1 < count) {
+                        ItemReader next_reader = elem_reader.childAt(i + 1);
+                        if (next_reader.isElement()) {
+                            ElementReader next_elem(next_reader.item());
+                            const char* next_tag = next_elem.tagName();
+                            if (next_tag && (strcmp(next_tag, "curly_group") == 0 || 
+                                           strcmp(next_tag, "brack_group") == 0)) {
+                                has_following_arg = true;
+                            }
+                        }
+                    }
+                    
+                    if (!has_following_arg) {
+                        needs_zws = true;
+                    }
+                }
+            }
+            
+            // Output ZWS marker if needed and next sibling is text or another command
+            if (needs_zws && i + 1 < count) {
+                ItemReader next_reader = elem_reader.childAt(i + 1);
+                bool next_is_text_or_cmd = false;
+                
+                if (next_reader.isString()) {
+                    const char* next_text = next_reader.cstring();
+                    // Only output ZWS if next text is not just whitespace
+                    if (next_text && next_text[0] != '\0') {
+                        bool has_non_ws = false;
+                        for (const char* p = next_text; *p; p++) {
+                            if (!isspace(*p)) {
+                                has_non_ws = true;
+                                break;
+                            }
+                        }
+                        if (has_non_ws) {
+                            next_is_text_or_cmd = true;
+                        }
+                    }
+                } else if (next_reader.isElement()) {
+                    // Next is another element - likely need ZWS
+                    next_is_text_or_cmd = true;
+                }
+                
+                if (next_is_text_or_cmd) {
+                    ensureParagraph();
+                    // NOTE: ZWS output disabled here - now handled by flag-based logic above
+                    // which properly checks for paragraph breaks before outputting ZWS
+                    // gen_->writeZWS();
+                }
+            }
+        }
+        
+        // =============================================================================
+        // Space Consumption Logic (Original)
+        // =============================================================================
         // LaTeX behavior: commands consume following space, but with exceptions:
         // - \macro{} with empty braces FOLLOWING: outputs ZWS, does NOT consume space
         // - \macro (no args): consumes space
@@ -6645,9 +7014,38 @@ void LatexProcessor::processChildren(Item elem) {
             
             bool is_empty_cmd = (cmd_name && strcmp(cmd_name, "empty") == 0);
             bool is_curly_group = (cmd_name && strcmp(cmd_name, "curly_group") == 0);
-            // Also skip space consumption if the command has an empty curly_group child (e.g., \textbackslash{})
-            bool has_empty_curly_child = hasEmptyCurlyGroupChild(child_reader.item());
-            bool skip_space_consumption = is_empty_cmd || is_curly_group || has_empty_curly_child;
+            
+            // Commands with arguments should not consume following space
+            // Check if this command has any non-whitespace children
+            bool has_content_child = false;
+            auto child_iter = cmd_elem.children();
+            ItemReader cmd_child;
+            while (child_iter.next(&cmd_child)) {
+                TypeId child_type = cmd_child.getType();
+                if (child_type == LMD_TYPE_STRING) {
+                    const char* str = cmd_child.cstring();
+                    // Check if non-whitespace string
+                    if (str && str[0] != '\0') {
+                        bool is_whitespace_only = true;
+                        for (const char* p = str; *p; p++) {
+                            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                                is_whitespace_only = false;
+                                break;
+                            }
+                        }
+                        if (!is_whitespace_only) {
+                            has_content_child = true;
+                            break;
+                        }
+                    }
+                } else if (child_type == LMD_TYPE_ELEMENT || child_type == LMD_TYPE_LIST) {
+                    // Has element or list child - consider it a content child
+                    has_content_child = true;
+                    break;
+                }
+            }
+            
+            bool skip_space_consumption = is_empty_cmd || is_curly_group || has_content_child;
             
             // Check if NEXT sibling is an empty curly_group (e.g., "\empty {}")
             bool next_is_empty_curly = false;
@@ -6825,6 +7223,9 @@ void LatexProcessor::processText(const char* text) {
     // Debug: log text content to see what's being processed
     log_debug("processText: '%s' (len=%zu, in_paragraph=%d)", text, strlen(text), in_paragraph_ ? 1 : 0);
     
+    // Note: ZWS output is handled by processChildren() which checks for following content
+    // Don't output ZWS here - let the sibling loop decide based on context
+    
     // Normalize whitespace: collapse multiple spaces/newlines/tabs to single space
     // This matches LaTeX behavior where whitespace is collapsed
     std::string normalized;
@@ -6965,6 +7366,9 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         bool saved_strip_flag = strip_next_leading_space_;
         strip_next_leading_space_ = false;  // Reset for group content
         
+        // Reset the group ZWS suppression flag for this group
+        group_suppresses_zws_ = false;
+        
         // Check if group is empty (has no children or only whitespace)
         ElementReader reader(elem);
         bool is_empty_group = true;
@@ -7018,7 +7422,36 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
         }
         
-        processChildren(elem);
+        // For empty groups with only spaces, convert spaces alternating ZWS/space pattern
+        // e.g., {  } → ZWS + space, {   } → ZWS + space + ZWS
+        if (is_empty_group && (has_leading_space || has_trailing_space)) {
+            // Count spaces and output alternating ZWS/space pattern
+            auto space_iter = reader.children();
+            ItemReader space_child;
+            bool output_zws = true;  // Start with ZWS
+            while (space_iter.next(&space_child)) {
+                if (space_child.isString()) {
+                    String* str = space_child.asString();
+                    if (str && str->len > 0) {
+                        ensureParagraph();
+                        // Output alternating ZWS and space for each space character
+                        for (int64_t i = 0; i < str->len; i++) {
+                            if (str->chars[i] == ' ' || str->chars[i] == '\t') {
+                                if (output_zws) {
+                                    gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+                                } else {
+                                    gen_->text(" ");  // Regular space
+                                }
+                                output_zws = !output_zws;  // Alternate
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Normal processing for non-empty groups or truly empty groups
+            processChildren(elem);
+        }
         gen_->exitGroup();
         
         // Restore alignment state after exiting group
@@ -7027,42 +7460,37 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         // Restore strip_next_leading_space_ flag after group
         strip_next_leading_space_ = saved_strip_flag;
         
-        // ZWS at exit for certain depths
-        // - depth 1 (document level): 
-        //   - non-empty groups: only output if trailing space (more content follows)
-        //   - empty groups: output ZWS (they serve as terminators, e.g., \^{})
-        // - depth 2 (inside one group): output ZWS for visual separation
-        // - depth 3+: deeply nested, no ZWS needed
+        // ZWS at exit for all curly groups
+        // LaTeX groups break word concatenation, so output ZWS at boundaries
+        // processChildren will check for paragraph breaks and suppress if needed
         int depth_after_exit = gen_->groupDepth();
         bool should_output_zws = false;
         
-        if (depth_after_exit == 1) {
-            // At document level
-            if (is_empty_group) {
-                // Empty groups at doc level serve as terminators (e.g., \^{}, \~{})
-                should_output_zws = true;
-            } else{
-                // Non-empty groups: only output if trailing space indicates more content
-                should_output_zws = has_trailing_space;
-            }
-        } else if (depth_after_exit == 2 && !is_empty_group) {
-            // At depth 2 (inside one group) - output ZWS for visual separation
+        // At any depth, curly groups should output ZWS to preserve word boundaries
+        if (is_empty_group && (has_leading_space || has_trailing_space)) {
+            // Empty groups with spaces were already handled above
+            should_output_zws = false;
+        } else if (is_empty_group) {
+            // Truly empty groups serve as terminators (e.g., \^{})
+            should_output_zws = true;
+        } else {
+            // Non-empty groups: output ZWS to mark word boundary
+            // processChildren will check for paragraph breaks
             should_output_zws = true;
         }
-        // depth >= 3 or empty groups at depth 2+: no ZWS needed
         
-        if (should_output_zws) {
-            ensureParagraph();
-            // Output ZWS with current font styling (if any)
-            std::string font_class = gen_->getFontClass(gen_->currentFont());
-            if (!font_class.empty() && !inStyledSpan()) {
-                gen_->span(font_class.c_str());
-                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
-                gen_->closeElement();
-            } else {
-                gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
-            }
+        // Don't output ZWS if we're at paragraph end or if paragraph is about to close
+        // Signal to processChildren that ZWS should be output after this node
+        // if there's more contentful siblings
+        // ALSO don't output ZWS if group contains whitespace-control commands
+        if (should_output_zws && !group_suppresses_zws_) {
+            pending_zws_output_ = true;
+            pending_zws_had_trailing_space_ = has_trailing_space;
         }
+        
+        // Reset the flag for next group
+        group_suppresses_zws_ = false;
+        
         return;
     }
     
@@ -7282,8 +7710,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         
         // Call command handler
         it->second(this, elem);
-        
-        // Exit inline element tracking
+
         if (isInlineCommand(cmd_name)) {
             inline_depth_--;
         }
