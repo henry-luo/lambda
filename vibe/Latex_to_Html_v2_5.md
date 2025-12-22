@@ -1,7 +1,7 @@
 # LaTeX to HTML V2 - Improvement Proposal (Phase 5)
 
 **Date**: December 22, 2025  
-**Status**: Baseline 84/84 (100%), Extended 7/31 (23%)  
+**Status**: Baseline 86/86 (100%), Extended 9/31 (29%)  
 **Previous Phase**: Phase 4 - ZWS Implementation Complete  
 **Objective**: Systematic analysis of extended test failures with prioritized implementation roadmap
 
@@ -15,9 +15,9 @@ Analysis of extended test failures reveals **8 major functional categories** req
 
 | Category | Tests | Status |
 |----------|-------|--------|
-| **Baseline** | 84/84 | ✅ 100% |
-| **Extended** | 7/31 | 🟡 23% |
-| **Total** | 91/115 | 79% |
+| **Baseline** | 86/86 | ✅ 100% |
+| **Extended** | 9/31 | 🟡 29% |
+| **Total** | 95/117 | 81% |
 
 ### Recent Progress (Dec 22, 2025)
 
@@ -27,8 +27,10 @@ Analysis of extended test failures reveals **8 major functional categories** req
 | `\echoOGO` / `\echoGOG` handlers | macros_tex_2 | Echo package mandatory/optional arg output |
 | Custom enumerate labels `\item[\itshape label]` | environments_tex_7 | Capture mode for rendering label HTML |
 | **Two-pass forward reference resolution** | label_ref_tex_2,3,6 | First pass collects labels, second pass resolves |
+| **Item label context for \ref** | label_ref_tex_7 (partial) | `setCurrentLabel` called in `createItem` for enumerate |
+| **Hyphen U+2010 conversion** | text_tex_4, text_tex_6 | Single hyphens converted to Unicode hyphen U+2010 |
 
-**Moved to Baseline**: `macros_tex_2`, `environments_tex_6`, `environments_tex_7`, `environments_tex_12`, `label_ref_tex_2`, `label_ref_tex_3`, `label_ref_tex_6`
+**Moved to Baseline**: `macros_tex_2`, `environments_tex_6`, `environments_tex_7`, `environments_tex_12`, `label_ref_tex_2`, `label_ref_tex_3`, `label_ref_tex_6`, `text_tex_4`, `text_tex_6`
 
 ---
 

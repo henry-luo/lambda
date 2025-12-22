@@ -152,7 +152,6 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
 
     // Extended test files - tests that currently fail but are work-in-progress
     std::set<std::string> extended_files = {
-        "basic_text.tex",
         "boxes.tex",
         "counters.tex",
         "environments.tex",
@@ -169,7 +168,6 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
 
     // Specific test IDs to include in extended (failing tests only)
     std::map<std::string, std::set<int>> extended_test_ids = {
-        // basic_text.tex test 4 moved to baseline (PASSES after ZWS fixture correction)
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 moved to baseline; tex_4 has \noindent issue
         // counters.tex test 2 moved to baseline (PASSES)
         {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
