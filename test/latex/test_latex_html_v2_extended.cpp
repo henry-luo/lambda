@@ -155,7 +155,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         "boxes.tex",
         "counters.tex",
         "environments.tex",
-        "fonts.tex",
+        // fonts.tex: All tests pass! Moved to baseline
         "groups.tex",
         "label-ref.tex",
         "layout-marginpar.tex",
@@ -171,7 +171,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 moved to baseline; tex_4 has \noindent issue
         // counters.tex test 2 moved to baseline (PASSES)
         {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
-        {"fonts.tex", {7, 8}},  // test 6 moved to baseline (monospace ligature suppression)
+        // fonts.tex: All tests pass! Tests 7, 8 moved to baseline (font class wrapper for breakspace)
         {"groups.tex", {2, 3}},
         {"label-ref.tex", {7}},  // tests 1,2,3,6 moved to baseline (forward refs work with two-pass)
         // layout-marginpar.tex: All tests pass! Moved to baseline
