@@ -511,11 +511,135 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
     value->data.function->arg_count = 0;
 
     return value;
-}CssValue* css_parse_value_list(CssPropertyValueParser* parser,
+}
+
+// Helper to check if property is font-family
+static bool is_font_family_property(const char* property_name) {
+    return property_name && strcmp(property_name, "font-family") == 0;
+}
+
+// Parse font-family value list with special handling for unquoted multi-word names
+static CssValue* css_parse_font_family_list(CssPropertyValueParser* parser,
+                                            const CssToken* tokens,
+                                            int token_count) {
+    if (!parser || !tokens || token_count <= 0) return NULL;
+
+    CssValue* list = css_value_list_create(parser->pool);
+    if (!list) return NULL;
+
+    int i = 0;
+    while (i < token_count) {
+        // Skip leading whitespace
+        while (i < token_count && tokens[i].type == CSS_TOKEN_WHITESPACE) {
+            i++;
+        }
+        if (i >= token_count) break;
+
+        // Skip commas (separators between font families)
+        if (tokens[i].type == CSS_TOKEN_COMMA) {
+            i++;
+            continue;
+        }
+
+        // If it's a string token, use it directly (quoted font name)
+        if (tokens[i].type == CSS_TOKEN_STRING) {
+            CssValue* value = css_parse_single_value(parser, &tokens[i], "font-family");
+            if (value) {
+                css_value_list_add(list, value);
+            }
+            i++;
+            continue;
+        }
+
+        // For IDENT tokens, collect consecutive identifiers until comma or end
+        // This handles unquoted multi-word font names like "Times New Roman"
+        if (tokens[i].type == CSS_TOKEN_IDENT) {
+            // Calculate total length needed for combined name
+            int start_idx = i;
+            size_t total_len = 0;
+            int word_count = 0;
+
+            while (i < token_count) {
+                if (tokens[i].type == CSS_TOKEN_IDENT) {
+                    total_len += strlen(tokens[i].value);
+                    word_count++;
+                    i++;
+                } else if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
+                    // Check if there's another IDENT after whitespace
+                    int next = i + 1;
+                    while (next < token_count && tokens[next].type == CSS_TOKEN_WHITESPACE) {
+                        next++;
+                    }
+                    if (next < token_count && tokens[next].type == CSS_TOKEN_IDENT) {
+                        total_len++; // for the space
+                        i = next;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Build the combined font name
+            if (word_count == 1) {
+                // Single word - use standard parsing (handles keywords like serif)
+                CssValue* value = css_parse_single_value(parser, &tokens[start_idx], "font-family");
+                if (value) {
+                    css_value_list_add(list, value);
+                }
+            } else {
+                // Multiple words - combine them
+                char* combined = (char*)pool_alloc(parser->pool, total_len + word_count);
+                if (combined) {
+                    combined[0] = '\0';
+                    int j = start_idx;
+                    bool first = true;
+                    while (j < i) {
+                        if (tokens[j].type == CSS_TOKEN_IDENT) {
+                            if (!first) {
+                                strcat(combined, " ");
+                            }
+                            strcat(combined, tokens[j].value);
+                            first = false;
+                        }
+                        j++;
+                    }
+
+                    // Create a custom value for the combined font name
+                    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+                    if (value) {
+                        value->type = CSS_VALUE_TYPE_CUSTOM;
+                        value->data.custom_property.name = combined;
+                        value->data.custom_property.fallback = NULL;
+                        css_value_list_add(list, value);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Other token types - parse normally
+        CssValue* value = css_parse_single_value(parser, &tokens[i], "font-family");
+        if (value) {
+            css_value_list_add(list, value);
+        }
+        i++;
+    }
+
+    return list;
+}
+
+CssValue* css_parse_value_list(CssPropertyValueParser* parser,
                                       const CssToken* tokens,
                                       int token_count,
                                       const char* property_name) {
     if (!parser || !tokens || token_count <= 0) return NULL;
+
+    // Special handling for font-family to support unquoted multi-word font names
+    if (is_font_family_property(property_name)) {
+        return css_parse_font_family_list(parser, tokens, token_count);
+    }
 
     // Create a list value
     CssValue* list = css_value_list_create(parser->pool);
