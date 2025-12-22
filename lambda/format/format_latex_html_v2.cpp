@@ -6989,7 +6989,9 @@ void LatexProcessor::processChildren(Item elem) {
                 
                 if (next_is_text_or_cmd) {
                     ensureParagraph();
-                    gen_->writeZWS();
+                    // NOTE: ZWS output disabled here - now handled by flag-based logic above
+                    // which properly checks for paragraph breaks before outputting ZWS
+                    // gen_->writeZWS();
                 }
             }
         }
@@ -7221,12 +7223,8 @@ void LatexProcessor::processText(const char* text) {
     // Debug: log text content to see what's being processed
     log_debug("processText: '%s' (len=%zu, in_paragraph=%d)", text, strlen(text), in_paragraph_ ? 1 : 0);
     
-    // Output pending ZWS if flag is set (from space-absorbing commands like \LaTeX)
-    if (pending_zws_output_) {
-        ensureParagraph();
-        gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
-        pending_zws_output_ = false;
-    }
+    // Note: ZWS output is handled by processChildren() which checks for following content
+    // Don't output ZWS here - let the sibling loop decide based on context
     
     // Normalize whitespace: collapse multiple spaces/newlines/tabs to single space
     // This matches LaTeX behavior where whitespace is collapsed
