@@ -985,6 +985,13 @@ static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *
     entry->collection_index = 0;
     entry->is_collection = (entry->format == FONT_FORMAT_TTC);
 
+    // Clear placeholder family_name so parse_name_table() reads actual font metadata
+    // Placeholders may have guessed family names from filename which can be incorrect
+    // (e.g., "Arial Narrow" files guessed as "Arial")
+    entry->family_name = NULL;
+    entry->subfamily_name = NULL;
+    entry->postscript_name = NULL;
+
     // Get file metadata
     struct stat file_stat;
     if (stat(file_path, &file_stat) == 0) {
