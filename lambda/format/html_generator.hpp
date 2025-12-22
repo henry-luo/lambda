@@ -123,6 +123,9 @@ public:
     // Create list item
     void createItem(const char* label = nullptr);
     
+    // Create list item with pre-rendered HTML label (for custom labels with formatting)
+    void createItemWithHtmlLabel(const char* html_label);
+    
     // End list item (closes <p> and <li> for itemize/enumerate)
     void endItem();
     
@@ -276,10 +279,24 @@ public:
     // Check if in verbatim mode
     bool inVerbatimMode() const { return verbatim_mode_; }
     
+    // =============================================================================
+    // Capture Mode (for rendering content to a string)
+    // =============================================================================
+    
+    // Start capturing output to a string buffer
+    void startCapture();
+    
+    // Stop capturing and return the captured HTML string
+    std::string endCapture();
+    
 protected:
     // State tracking
     bool math_mode_;
     bool verbatim_mode_;
+    
+    // Capture mode state
+    HtmlWriter* capture_writer_;      // Temporary writer for capture mode
+    HtmlWriter* original_writer_;     // Saved writer during capture
     
     // Table state
     struct TableState {

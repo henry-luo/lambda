@@ -152,11 +152,10 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
 
     // Extended test files - tests that currently fail but are work-in-progress
     std::set<std::string> extended_files = {
-        "basic_text.tex",
         "boxes.tex",
         "counters.tex",
         "environments.tex",
-        "fonts.tex",
+        // fonts.tex: All tests pass! Moved to baseline
         "groups.tex",
         "label-ref.tex",
         "layout-marginpar.tex",
@@ -169,19 +168,18 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
 
     // Specific test IDs to include in extended (failing tests only)
     std::map<std::string, std::set<int>> extended_test_ids = {
-        // basic_text.tex test 4 moved to baseline (PASSES after ZWS fixture correction)
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 moved to baseline; tex_4 has \noindent issue
         // counters.tex test 2 moved to baseline (PASSES)
-        {"environments.tex", {7, 10, 14}},
-        {"fonts.tex", {6, 7, 8}},
+        {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
+        // fonts.tex: All tests pass! Tests 7, 8 moved to baseline (font class wrapper for breakspace)
         {"groups.tex", {2, 3}},
-        {"label-ref.tex", {2, 3, 6, 7}},  // test 1 moved to baseline (PASSES)
-        {"layout-marginpar.tex", {1, 2, 3}},
-        {"macros.tex", {2, 4, 5, 6}},
+        // label-ref.tex: All tests pass! Test 7 fixed (list item paragraph tracking)
+        // layout-marginpar.tex: All tests pass! Moved to baseline
+        {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
-        {"text.tex", {4, 6, 8, 10}},  // test 5, 7 moved to baseline (PASS)
-        {"whitespace.tex", {5, 6, 7, 8, 12, 21}}  // test 13, 15 moved to baseline (PASS)
+        {"text.tex", {10}},  // tests 4, 6 moved to baseline (typographic hyphen fix); test 5, 7, 8 baseline (PASS)
+        {"whitespace.tex", {1, 5, 7, 8, 21}}  // test 6 fixed: fixture typo (missing comma)
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
