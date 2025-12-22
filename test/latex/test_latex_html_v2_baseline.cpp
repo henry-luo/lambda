@@ -203,14 +203,14 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
         // counters.tex: All tests pass! Test 1 (counter arithmetic), Test 2 (moved from extended)
         {"environments.tex", {7, 10, 14}},
-        {"fonts.tex", {6, 7, 8}},
+        {"fonts.tex", {7, 8}},  // test 6 passed: monospace ligature suppression
         {"groups.tex", {2, 3}},
         {"label-ref.tex", {2, 3, 6, 7}},  // test 1 passed (moved from extended)
         {"layout-marginpar.tex", {1, 2, 3}},
         {"macros.tex", {2, 4, 5, 6}},
         {"sectioning.tex", {3}},
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
-        {"text.tex", {4, 6, 8, 10}},  // test 5, 7 passed: special characters with ZWS
+        {"text.tex", {4, 6, 10}},  // test 5, 7, 8 passed; 8 = verb* fix
         {"whitespace.tex", {5, 6, 7, 8, 12, 21}}  // test 13, 15 passed: ZWS handling
     };
 
