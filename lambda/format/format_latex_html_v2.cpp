@@ -6664,19 +6664,41 @@ void LatexProcessor::processNode(Item node) {
             if (elem_reader.has_attr("length")) {
                 String* length_str = elem_reader.get_string_attr("length");
                 if (length_str && length_str->len > 0) {
-                    // Convert to pixels
-                    double pixels = convertLatexLengthToPixels(length_str->chars);
+                    const char* dim_text = length_str->chars;
+                    size_t dim_len = length_str->len;
                     
-                    if (pixels != 0.0) {
-                        // Output: <span class="breakspace" style="margin-bottom:XXpx"></span>
-                        char style[128];
-                        snprintf(style, sizeof(style), "margin-bottom:%.3fpx", pixels);
-                        gen_->writer()->writeRawHtml("<span class=\"breakspace\" style=\"");
-                        gen_->writer()->writeRawHtml(style);
-                        gen_->writer()->writeRawHtml("\"></span>\n");
+                    // Check if it's a relative unit (em, ex) - preserve as-is
+                    bool is_relative = false;
+                    if (dim_len >= 2) {
+                        const char* suffix = dim_text + dim_len - 2;
+                        if (strcmp(suffix, "em") == 0 || strcmp(suffix, "ex") == 0) {
+                            is_relative = true;
+                        }
+                    }
+                    
+                    // Build the style string
+                    char style[128];
+                    if (is_relative) {
+                        snprintf(style, sizeof(style), "margin-bottom:%s", dim_text);
                     } else {
-                        // No valid dimension, just output <br>
-                        gen_->lineBreak(false);
+                        double pixels = convertLatexLengthToPixels(dim_text);
+                        if (pixels == 0.0) {
+                            gen_->lineBreak(false);
+                            return;
+                        }
+                        snprintf(style, sizeof(style), "margin-bottom:%.3fpx", pixels);
+                    }
+                    
+                    // Check if font styling is active - wrap breakspace in font class for em-relative sizing
+                    std::string font_class = gen_->getFontClass(gen_->currentFont());
+                    if (!font_class.empty()) {
+                        gen_->span(font_class.c_str());
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();  // close breakspace
+                        gen_->closeElement();  // close font class wrapper
+                    } else {
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();
                     }
                 } else {
                     // No valid length string, just output <br>
@@ -6973,14 +6995,25 @@ void LatexProcessor::processChildren(Item elem) {
                 ensureParagraph();;
                 if (has_dimension) {
                     // Output span with class and style: <span class="breakspace" style="margin-bottom:X"></span>
+                    // If font styling is active, wrap in font class span for proper em-unit sizing
                     char style[256];
                     if (preserve_unit) {
                         snprintf(style, sizeof(style), "margin-bottom:%s", dimension_text);
                     } else {
                         snprintf(style, sizeof(style), "margin-bottom:%.3fpx", dimension_px);
                     }
-                    gen_->spanWithClassAndStyle("breakspace", style);
-                    gen_->closeElement();
+                    
+                    // Check if font styling is active - wrap breakspace in font class for em-relative sizing
+                    std::string font_class = gen_->getFontClass(gen_->currentFont());
+                    if (!font_class.empty()) {
+                        gen_->span(font_class.c_str());
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();  // close breakspace
+                        gen_->closeElement();  // close font class wrapper
+                    } else {
+                        gen_->spanWithClassAndStyle("breakspace", style);
+                        gen_->closeElement();
+                    }
                 } else {
                     gen_->lineBreak(false);
                 }
