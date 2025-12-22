@@ -204,7 +204,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         {"fonts.tex", {7, 8}},  // test 6 passed: monospace ligature suppression
         {"groups.tex", {2, 3}},
         {"label-ref.tex", {7}},  // tests 2,3,6 now pass with two-pass forward ref resolution
-        {"layout-marginpar.tex", {1, 2, 3}},
+        // layout-marginpar.tex: All tests pass! (marginpar implementation complete)
         {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
         {"sectioning.tex", {3}},
         {"spacing.tex", {1}},  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
