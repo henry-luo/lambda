@@ -2,6 +2,7 @@
 #include "grid.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lib/font_config.h"
 #include <string.h>
 #include FT_TRUETYPE_TABLES_H
 
@@ -38,6 +39,23 @@ static float get_font_x_height_ratio(FT_Face face) {
     return 0.5f;
 }
 
+// Helper: extract a numeric value from a CssValue (number, percentage, length)
+// For colors, percentages are relative to 255 (for RGB) or 1.0 (for alpha)
+static double resolve_color_component(const CssValue* v, bool is_alpha = false) {
+    if (!v) return 0.0;
+    switch (v->type) {
+    case CSS_VALUE_TYPE_NUMBER:
+        return v->data.number.value;
+    case CSS_VALUE_TYPE_PERCENTAGE:
+        // For alpha, 100% = 1.0; for RGB, 100% = 255
+        return is_alpha ? v->data.percentage.value / 100.0 : (v->data.percentage.value * 255.0 / 100.0);
+    case CSS_VALUE_TYPE_LENGTH:
+        return v->data.length.value;
+    default:
+        return 0.0;
+    }
+}
+
 Color resolve_color_value(const CssValue* value) {
     Color result;
     result.r = 0;
@@ -65,6 +83,101 @@ Color resolve_color_value(const CssValue* value) {
     case CSS_VALUE_TYPE_KEYWORD: {
         // map color keyword to RGB
         result = color_name_to_rgb(value->data.keyword);
+        break;
+    }
+    case CSS_VALUE_TYPE_FUNCTION: {
+        // Handle rgb(), rgba(), hsl(), hsla() color functions
+        const CssFunction* func = value->data.function;
+        if (!func || !func->name) break;
+
+        log_debug("[CSS] resolve_color_value: function=%s, arg_count=%d", func->name, func->arg_count);
+
+        // rgb() and rgba() functions
+        // Modern syntax: rgb(r g b) or rgb(r g b / alpha) - parsed as 1 arg (list)
+        // Legacy syntax: rgb(r, g, b) or rgba(r, g, b, a) - parsed as 3-4 args
+        if (strcasecmp(func->name, "rgb") == 0 || strcasecmp(func->name, "rgba") == 0) {
+            // Check for modern syntax: single list argument with space-separated values
+            if (func->arg_count == 1 && func->args[0] && func->args[0]->type == CSS_VALUE_TYPE_LIST) {
+                const CssValue* list = func->args[0];
+                // Modern syntax: list contains R, G, B [, '/', alpha]
+                // Find numeric values (skip '/' delimiter if present)
+                double r = 0, g = 0, b = 0, a = 255;
+                int num_idx = 0;
+                bool found_slash = false;
+
+                for (size_t i = 0; i < list->data.list.count && num_idx < 4; i++) {
+                    const CssValue* v = list->data.list.values[i];
+                    if (!v) continue;
+
+                    // Check for '/' delimiter (CUSTOM type with "/" or DELIM)
+                    if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
+                        strcmp(v->data.custom_property.name, "/") == 0) {
+                        found_slash = true;
+                        continue;
+                    }
+                    // Skip var() functions (for opacity like var(--tw-text-opacity))
+                    if (v->type == CSS_VALUE_TYPE_FUNCTION || v->type == CSS_VALUE_TYPE_VAR) {
+                        // If we've seen slash, this is alpha - default to 1 (fully opaque)
+                        if (found_slash && num_idx == 3) {
+                            a = 255;  // default opaque
+                        }
+                        continue;
+                    }
+
+                    double val = resolve_color_component(v, found_slash);
+                    if (num_idx == 0) r = val;
+                    else if (num_idx == 1) g = val;
+                    else if (num_idx == 2) b = val;
+                    else if (num_idx == 3) {
+                        // Alpha value
+                        if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                            a = val * 255.0;  // 0-1 scale
+                        } else {
+                            a = val;  // percentage already converted
+                        }
+                    }
+                    num_idx++;
+                }
+
+                // Clamp to valid range
+                result.r = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
+                result.g = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
+                result.b = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
+                result.a = (uint8_t)(a < 0 ? 0 : (a > 255 ? 255 : a));
+
+                log_debug("[CSS] resolve_color_value: rgb modern syntax -> (%d, %d, %d, %d)", result.r, result.g, result.b, result.a);
+            }
+            else if (func->arg_count >= 3) {
+                // Legacy syntax: separate arguments
+                double r = resolve_color_component(func->args[0]);
+                double g = resolve_color_component(func->args[1]);
+                double b = resolve_color_component(func->args[2]);
+
+                // Clamp to valid range
+                result.r = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
+                result.g = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
+                result.b = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
+
+                // Check for alpha value
+                if (func->arg_count >= 4) {
+                    double a = resolve_color_component(func->args[3], true);
+                    // Alpha can be a number (0-1) or percentage
+                    if (func->args[3] && func->args[3]->type == CSS_VALUE_TYPE_NUMBER) {
+                        // Number format: 0 to 1
+                        a = a * 255.0;
+                    }
+                    result.a = (uint8_t)(a < 0 ? 0 : (a > 255 ? 255 : a));
+                }
+
+                log_debug("[CSS] resolve_color_value: rgb legacy syntax -> (%d, %d, %d, %d)", result.r, result.g, result.b, result.a);
+            }
+        }
+        // hsl() and hsla() functions - TODO: implement HSL to RGB conversion
+        else if (strcasecmp(func->name, "hsl") == 0 || strcasecmp(func->name, "hsla") == 0) {
+            // TODO: implement HSL to RGB conversion
+            log_debug("[CSS] resolve_color_value: hsl() not yet implemented");
+        }
+        break;
     }
     default:
         break;
@@ -1771,6 +1884,33 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
+
+            // Helper lambda to check if a font family exists in the database or is a generic family
+            auto is_font_available = [&](const char* family) -> bool {
+                if (!family) return false;
+                // Generic font families are always "available" (resolved later)
+                if (strcmp(family, "serif") == 0 ||
+                    strcmp(family, "sans-serif") == 0 ||
+                    strcmp(family, "monospace") == 0 ||
+                    strcmp(family, "cursive") == 0 ||
+                    strcmp(family, "fantasy") == 0 ||
+                    strcmp(family, "system-ui") == 0 ||
+                    strcmp(family, "ui-serif") == 0 ||
+                    strcmp(family, "ui-sans-serif") == 0 ||
+                    strcmp(family, "ui-monospace") == 0 ||
+                    strcmp(family, "ui-rounded") == 0) {
+                    return true;
+                }
+                // Check font database
+                if (lycon->ui_context && lycon->ui_context->font_db) {
+                    ArrayList* matches = font_database_find_all_matches(lycon->ui_context->font_db, family);
+                    bool exists = (matches && matches->length > 0);
+                    if (matches) arraylist_free(matches);
+                    return exists;
+                }
+                return false;  // No database available, can't verify
+            };
+
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
                 span->font->family = (char*)value->data.string;
@@ -1788,13 +1928,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] Set font-family from KEYWORD: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                // List of font families (e.g., "Arial, sans-serif")
-                // Use the first available font family
+                // List of font families (e.g., "Charter, Linux Libertine, Times New Roman, serif")
+                // Try each font in order until we find one that's available
                 for (size_t i = 0; i < value->data.list.count; i++) {
                     CssValue* item = value->data.list.values[i];
                     if (!item) continue;
                     const char* family = NULL;
-                    log_debug("[CSS] Font family list item type: %d", item->type);
+                    log_debug("[CSS] Font family list item[%zu] type: %d", i, item->type);
                     if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
                         family = item->data.string;
                         log_debug("[CSS] Font family STRING value: '%s'", family);
@@ -1809,10 +1949,29 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         log_debug("[CSS] Font family CUSTOM value: '%s'", family);
                     }
                     if (family) {
-                        // Quotes already stripped during parsing
-                        span->font->family = (char*)family;
-                        log_debug("[CSS] Font family from list[%zu]: %s", i, family);
-                        break; // Use first font in the list
+                        // Check if this font is available
+                        if (is_font_available(family)) {
+                            span->font->family = (char*)family;
+                            log_debug("[CSS] Font family from list[%zu]: %s (available)", i, family);
+                            break;
+                        } else {
+                            log_debug("[CSS] Font family '%s' not available, trying next", family);
+                        }
+                    }
+                }
+                // If no font was found, use the last one (usually a generic family)
+                if (!span->font->family && value->data.list.count > 0) {
+                    CssValue* last = value->data.list.values[value->data.list.count - 1];
+                    if (last) {
+                        if (last->type == CSS_VALUE_TYPE_STRING) {
+                            span->font->family = (char*)last->data.string;
+                        } else if (last->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(last->data.keyword);
+                            span->font->family = info ? (char*)info->name : NULL;
+                        } else if (last->type == CSS_VALUE_TYPE_CUSTOM) {
+                            span->font->family = (char*)last->data.custom_property.name;
+                        }
+                        log_debug("[CSS] Using last font in list as fallback: %s", span->font->family);
                     }
                 }
             }

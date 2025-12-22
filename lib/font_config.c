@@ -1308,6 +1308,10 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
         font->family_name = arena_strdup(arena, "Times New Roman");
     } else if (strstr(filename, "Times") || strstr(filename, "times")) {
         font->family_name = arena_strdup(arena, "Times");
+    } else if (strstr(filename, "HelveticaNeue") || strstr(filename, "Helvetica Neue") ||
+               strstr(filename, "helveticaneue") || strstr(filename, "helvetica neue")) {
+        // Must check "Helvetica Neue" before "Helvetica"
+        font->family_name = arena_strdup(arena, "Helvetica Neue");
     } else if (strstr(filename, "Helvetica") || strstr(filename, "helvetica")) {
         font->family_name = arena_strdup(arena, "Helvetica");
     } else if (strstr(filename, "Courier New") || strstr(filename, "courier new")) {
@@ -1568,14 +1572,27 @@ bool font_database_scan(FontDatabase* db) {
         if (font && font->is_placeholder && font->family_name &&
             is_priority_font_family(font->family_name)) {
 
-            // Parse priority font fully
-            if (parse_placeholder_font(font, db->string_arena)) {
-                priority_fonts_parsed++;
+            // Check if TTC file - needs special handling
+            FontFormat format = detect_font_format(font->file_path);
+            if (format == FONT_FORMAT_TTC) {
+                // Parse TTC file and add all fonts to database
+                log_debug("Parsing priority TTC font: %s (family: %s)", font->file_path, font->family_name);
+                if (parse_ttc_font_metadata(font->file_path, db, db->string_arena)) {
+                    priority_fonts_parsed++;
+                    // Mark the placeholder as processed
+                    font->is_placeholder = false;
+                    font->family_name = arena_strdup(db->string_arena, "TTC-Parsed");
+                }
+            } else {
+                // Parse single-font file fully
+                if (parse_placeholder_font(font, db->string_arena)) {
+                    priority_fonts_parsed++;
 
-                #ifdef FONT_DEBUG_VERBOSE
-                log_debug("Parsed priority font: %s (%s)",
-                          font->family_name, font->file_path);
-                #endif
+                    #ifdef FONT_DEBUG_VERBOSE
+                    log_debug("Parsed priority font: %s (%s)",
+                              font->family_name, font->file_path);
+                    #endif
+                }
             }
 
             if (priority_fonts_parsed >= 20) {  // Reasonable limit for priority fonts
