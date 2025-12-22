@@ -199,7 +199,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
     // Tests to exclude from V2 baseline (moved to extended test suite)
     // These are tests that currently fail and need work
     std::map<std::string, std::set<int>> excluded_test_ids = {
-        {"basic_text.tex", {4}},  // test 4 expects no ZWS (older test); test 6 PASSES (verb command fixed)
+        // basic_text.tex: all tests pass!
         {"boxes.tex", {4}},  // boxes_tex_2, 3, 5 pass; tex_4 has paragraph nesting issue
         // counters.tex: All tests pass! Test 1 (counter arithmetic), Test 2 (moved from extended)
         {"environments.tex", {7, 10, 14}},
