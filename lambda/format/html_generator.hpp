@@ -237,6 +237,9 @@ public:
     // Line break
     void lineBreak(bool newpage = false);
     
+    // Zero-width space marker (for proper word boundaries after commands/groups)
+    void writeZWS();
+    
     // =============================================================================
     // Reference Methods (html-generator.ls lines 702-750)
     // =============================================================================

@@ -83,6 +83,7 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"line_comment", NODE_LEAF},
     {"ligature", NODE_LEAF},
     {"control_symbol", NODE_CONTAINER},
+    {"linebreak_command", NODE_CONTAINER},  // \\ with optional [<length>]
     
     // Special tokens
     {"nbsp", NODE_LEAF},
@@ -386,6 +387,22 @@ static Item convert_text_node(InputContext& ctx, TSNode node, const char* source
 // Main conversion dispatcher
 static Item convert_latex_node(InputContext& ctx, TSNode node, const char* source) {
     const char* node_type = ts_node_type(node);
+    uint32_t start = ts_node_start_byte(node);
+    uint32_t end = ts_node_end_byte(node);
+    
+    // Get the actual text content for debugging
+    uint32_t len = end - start;
+    char text_preview[51] = {0};
+    if (len > 0 && len < 50) {
+        memcpy(text_preview, source + start, len);
+        text_preview[len] = '\0';
+    } else if (len > 0) {
+        memcpy(text_preview, source + start, 50);
+        text_preview[50] = '\0';
+    }
+    
+    log_debug("convert_latex_node: type='%s', start=%u, end=%u, text='%s'", 
+              node_type, start, end, text_preview);
     
     // Skip certain node types
     if (strcmp(node_type, "ERROR") == 0) {
@@ -402,6 +419,9 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
         uint32_t end = ts_node_end_byte(node);
         const char* text = source + start;
         size_t len = end - start;
+        
+        log_debug("verb_command token: start=%u, end=%u, len=%zu, text='%.*s'", 
+                  start, end, len, (int)len, text);
         
         ElementBuilder elem = builder.element("verb_command");
         
@@ -459,6 +479,9 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
                     
                     TSNode child = ts_node_child(node, i);
+                    
+                    // Scanner now handles \verb properly, no special workarounds needed
+                    
                     Item child_item = convert_latex_node(ctx, child, source);
                     if (child_item.item != ITEM_NULL) {
                         root_builder.child(child_item);
@@ -602,7 +625,36 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 return {.item = y2it(builder.createSymbol(source + start, len))};
             }
             
-            // Special case: control_symbol (\%, \&, \#, \\, etc.)
+            // Special case: linebreak_command (\\ with optional [<length>])
+            if (strcmp(node_type, "linebreak_command") == 0) {
+                MarkBuilder& builder = ctx.builder;
+                ElementBuilder elem_builder = builder.element("linebreak_command");
+                
+                // Check for optional brack_group (length argument)
+                uint32_t child_count = ts_node_child_count(node);
+                
+                for (uint32_t i = 0; i < child_count; i++) {
+                    TSNode child = ts_node_child(node, i);
+                    const char* child_type = ts_node_type(child);
+                    
+                    // If there's a brack_group, extract and store the length
+                    if (strcmp(child_type, "brack_group") == 0) {
+                        // Get the text inside the brackets
+                        uint32_t start = ts_node_start_byte(child);
+                        uint32_t end = ts_node_end_byte(child);
+                        if (end > start + 2) {  // Skip '[' and ']'
+                            String* length_str = builder.createString(source + start + 1, end - start - 2);
+                            Item length_item = {.item = s2it(length_str)};
+                            elem_builder.attr("length", length_item);
+                        }
+                        break;
+                    }
+                }
+                
+                return elem_builder.final();
+            }
+            
+            // Special case: control_symbol (\%, \&, \#, etc.)
             if (strcmp(node_type, "control_symbol") == 0) {
                 uint32_t start = ts_node_start_byte(node);
                 uint32_t end = ts_node_end_byte(node);
@@ -610,11 +662,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     MarkBuilder& builder = ctx.builder;
                     char escaped_char = source[start + 1];
                     
-                    // Special case: \\ is a line break command, create element
-                    if (escaped_char == '\\') {
-                        ElementBuilder elem_builder = builder.element("linebreak");
-                        return elem_builder.final();
-                    }
+                    // Note: \\ is now handled by linebreak_command, not here
                     
                     // Spacing commands: \, \! \; \: \/ \@ \space \<tab> \<newline> - preserve as space_cmd element
                     // These need special handling in the formatter
