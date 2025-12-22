@@ -17,7 +17,9 @@ char *fallback_fonts[] = {
     "Apple Color Emoji", // Emoji - macOS native (must be first for color emoji support)
     "PingFang SC", // Chinese (Simplified), partial Japanese and Korean - macOS native
     "Heiti SC", // Chinese (Simplified) additional fallback
+    "Hiragino Sans", // Japanese font with good Unicode coverage
     "Helvetica Neue", // Latin, Cyrillic, Greek, Vietnamese, Turkish
+    "Arial Unicode MS", // Broad Unicode coverage including checkmarks, crosses, etc. (late fallback)
     "Times New Roman", // for Arabic
     NULL
 };
