@@ -3580,10 +3580,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_STYLE: {
             log_debug("[CSS] Processing font-style property");
-            if (!span->font) {
-                log_debug("[CSS] font-style: FontProp is NULL");
-                break;
-            }
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
+
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
