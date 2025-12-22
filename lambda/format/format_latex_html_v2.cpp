@@ -501,6 +501,10 @@ public:
     void ensureParagraph();  // Start a paragraph if not already in one
     bool inParagraph() const { return in_paragraph_; }  // Check if currently in a paragraph
     
+    // Inline mode management (to suppress paragraph creation)
+    void enterInlineMode() { inline_depth_++; }
+    void exitInlineMode() { inline_depth_--; }
+    
     // Macro system functions (public so command handlers can access)
     void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
     bool isMacro(const std::string& name);
@@ -2312,6 +2316,20 @@ static void cmd_textellipsis(LatexProcessor* proc, Item elem) {
     gen->text("…");
 }
 
+static void cmd_textendash(LatexProcessor* proc, Item elem) {
+    // \textendash - Outputs an en-dash character (–)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("–");  // U+2013 EN DASH
+}
+
+static void cmd_textemdash(LatexProcessor* proc, Item elem) {
+    // \textemdash - Outputs an em-dash character (—)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->text("—");  // U+2014 EM DASH
+}
+
 static void cmd_ldots(LatexProcessor* proc, Item elem) {
     // \ldots - Outputs an ellipsis character (…) - alias for \textellipsis
     HtmlGenerator* gen = proc->generator();
@@ -2735,9 +2753,8 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             
                             // Get optional label from item
                             // For description/itemize/enumerate lists, label is in brack_group child: \item[label]
-                            const char* label = nullptr;
-                            std::string label_buf;  // Buffer to hold extracted label
                             bool has_brack_group = false;  // Track if brack_group exists (for empty label)
+                            std::string html_label;  // Rendered HTML label content
                             
                             if (para_child_elem.childCount() > 0) {
                                 ItemReader first = para_child_elem.childAt(0);
@@ -2746,17 +2763,28 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     const char* first_tag = first_elem.tagName();
                                     if (first_tag && strcmp(first_tag, "brack_group") == 0) {
                                         has_brack_group = true;
-                                        // Extract label from brack_group using helper
-                                        label_buf = extractLabelFromBrackGroup(first_elem);
-                                        // Use empty string for empty brack_group, or the extracted text
-                                        label = label_buf.c_str();
+                                        // Render the brack_group contents to HTML using capture mode
+                                        // Enter group to isolate font changes from affecting later content
+                                        gen->enterGroup();
+                                        // Enter inline mode to suppress paragraph creation
+                                        proc->enterInlineMode();
+                                        gen->startCapture();
+                                        for (size_t k = 0; k < first_elem.childCount(); k++) {
+                                            ItemReader brack_child = first_elem.childAt(k);
+                                            proc->processNode(brack_child.item());
+                                        }
+                                        html_label = gen->endCapture();
+                                        proc->exitInlineMode();
+                                        gen->exitGroup();
                                     }
-                                } else if (first.isString()) {
-                                    label = first.cstring();
                                 }
                             }
                             
-                            gen->createItem(has_brack_group ? label : nullptr);
+                            if (has_brack_group) {
+                                gen->createItemWithHtmlLabel(html_label.c_str());
+                            } else {
+                                gen->createItem(nullptr);
+                            }
                             in_item = true;
                             at_item_start = true;  // Next text should be trimmed
                         } else {
@@ -3382,12 +3410,102 @@ static void cmd_echoO(LatexProcessor* proc, Item elem) {
 static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
     // \echoOGO[o1]{g}[o2] - from echo package for testing
     // latex.js: args.echoOGO = <[ H o? g o? ]>
-    // \echoOGO : (o1, g, o2) -> [] with optional parts
-    // Returns empty (just gobbles), used for testing arg parsing
+    // Pattern: -optional- for optional args, +mandatory+ for mandatory args
+    // For \echoOGO[o1]{g}[o2] -> outputs: -o1-+g+-o2-
+    // Note: The parser may put the mandatory arg as direct text child or in a group
     
-    // This command produces no output in latex.js
-    (void)proc;
-    (void)elem;
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    ElementReader reader(elem);
+    
+    bool found_mandatory = false;
+    
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional argument - output -content-
+                gen->text("-");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("-");
+            } else if (strcmp(tag, "group") == 0 && !found_mandatory) {
+                // Mandatory group argument - output +content+
+                found_mandatory = true;
+                gen->text("+");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("+");
+            }
+        } else if (child.isString() && !found_mandatory) {
+            // Text child as mandatory argument
+            found_mandatory = true;
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0) {
+                gen->text("+");
+                gen->text(text);
+                gen->text("+");
+            }
+        }
+    }
+}
+
+static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
+    // \echoGOG{g1}[o]{g2} - from echo package for testing
+    // latex.js: args.echoGOG = <[ H g o? g ]>
+    // Pattern: +g1+-o-+g2+ where optional is only if present
+    // Note: The parser may put mandatory args as direct text children or in groups
+    
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    ElementReader reader(elem);
+    
+    int mandatory_count = 0;
+    
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "group") == 0) {
+                // Mandatory group argument - output +content+
+                mandatory_count++;
+                gen->text("+");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("+");
+            } else if (strcmp(tag, "brack_group") == 0) {
+                // Optional argument - output -content-
+                gen->text("-");
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                gen->text(str->chars);
+                gen->text("-");
+            }
+        } else if (child.isString() && mandatory_count < 2) {
+            // Text child as mandatory argument
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0) {
+                mandatory_count++;
+                gen->text("+");
+                gen->text(text);
+                gen->text("+");
+            }
+        }
+    }
 }
 
 static void cmd_newpage(LatexProcessor* proc, Item elem) {
@@ -5933,6 +6051,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["gobbleO"] = cmd_gobbleO;
     command_table_["echoO"] = cmd_echoO;
     command_table_["echoOGO"] = cmd_echoOGO;
+    command_table_["echoGOG"] = cmd_echoGOG;
     
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
@@ -5944,6 +6063,8 @@ void LatexProcessor::initCommandTable() {
     command_table_["/"] = cmd_ligature_break;  // \/ ligature break
     command_table_["textbackslash"] = cmd_textbackslash;
     command_table_["textellipsis"] = cmd_textellipsis;
+    command_table_["textendash"] = cmd_textendash;
+    command_table_["textemdash"] = cmd_textemdash;
     command_table_["ldots"] = cmd_ldots;
     command_table_["dots"] = cmd_dots;
     command_table_["char"] = cmd_char;
@@ -7898,7 +8019,22 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     
     Pool* pool = input->pool;
     
-    // Create HTML writer
+    // ==========================================================================
+    // PASS 1: Label collection (forward reference resolution)
+    // Process the document with a null writer to collect all labels
+    // ==========================================================================
+    NullHtmlWriter null_writer;
+    HtmlGenerator label_gen(pool, &null_writer);
+    LatexProcessor label_proc(&label_gen, pool, input);
+    
+    // Process to collect labels (output is discarded)
+    label_proc.process(input->root);
+    
+    // ==========================================================================
+    // PASS 2: HTML generation with all labels available
+    // ==========================================================================
+    
+    // Create HTML writer for actual output
     HtmlWriter* writer = nullptr;
     if (text_mode) {
         // Text mode - generate HTML string
@@ -7909,8 +8045,9 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
         writer = new NodeHtmlWriter(input);
     }
     
-    // Create HTML generator
+    // Create HTML generator and copy labels from first pass
     HtmlGenerator gen(pool, writer);
+    gen.copyLabelsFrom(label_gen);
     
     // Create processor
     LatexProcessor proc(&gen, pool, input);
