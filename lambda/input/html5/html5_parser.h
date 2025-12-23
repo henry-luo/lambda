@@ -84,7 +84,7 @@ typedef struct Html5Parser {
     // Text content buffering (for efficient text node creation)
     StringBuf* text_buffer;
     Element* pending_text_parent;  // parent element for buffered text
-    
+
     // Foster parent text buffering
     StringBuf* foster_text_buffer;
     Element* foster_table_element;   // the table element we're foster parenting for
