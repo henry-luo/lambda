@@ -372,7 +372,19 @@ bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, cons
     }
   }
   
-  // DISABLED: verbatim/comment scanning causes issues with GLR conflicts
+  // DISABLED: Comment environment scanning interferes with line_comment parsing
+  // The external scanner is called at every position where external tokens are valid,
+  // which includes all inline positions since comment_environment is part of environment.
+  // This causes the scanner to consume % line comments as comment content.
+  // TODO: Implement state tracking to fix this
+  /*
+  if (valid_symbols[COMMENT_ENV_CONTENT]) {
+    lexer->result_symbol = COMMENT_ENV_CONTENT;
+    return scan_comment(lexer);
+  }
+  */
+  
+  // DISABLED: verbatim scanning causes issues with GLR conflicts
   // The scanner can't know if we're actually inside a verbatim environment
   // TODO: Implement proper state tracking to fix this
   /*
@@ -382,11 +394,6 @@ bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, cons
   if (valid_symbols[VERBATIM_CONTENT]) {
     lexer->result_symbol = VERBATIM_CONTENT;
     return scan_verbatim(lexer);
-  }
-  
-  if (valid_symbols[COMMENT_ENV_CONTENT]) {
-    lexer->result_symbol = COMMENT_ENV_CONTENT;
-    return scan_comment(lexer);
   }
   */
   

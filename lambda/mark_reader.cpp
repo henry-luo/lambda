@@ -175,6 +175,9 @@ ArrayReader ItemReader::asArray() const {
 
 const char* ItemReader::cstring() const {
     String* str = asString();
+    if (!str) {
+        str = asSymbol();  // Also check for symbol type
+    }
     return str ? str->chars : nullptr;
 }
 
