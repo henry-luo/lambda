@@ -99,14 +99,14 @@ static void html5_commit_attribute(Html5Parser* parser) {
         log_debug("html5: commit_attribute - skipping (no token or no attr name)");
         return;
     }
-    
-    log_debug("html5: commit_attribute - name='%s' value_len=%zu", 
+
+    log_debug("html5: commit_attribute - name='%s' value_len=%zu",
               parser->current_attr_name, parser->temp_buffer_len);
-    
+
     // Create String for attribute name
     MarkBuilder builder(parser->input);
     String* attr_name = builder.createString(parser->current_attr_name, parser->current_attr_name_len);
-    
+
     // Create String for attribute value (empty or from temp buffer)
     String* attr_value;
     if (parser->temp_buffer_len > 0) {
@@ -115,10 +115,10 @@ static void html5_commit_attribute(Html5Parser* parser) {
     } else {
         attr_value = builder.createString("");
     }
-    
+
     // Add attribute to token
     html5_token_add_attribute(parser->current_token, attr_name, attr_value, parser->input);
-    
+
     // Clear for next attribute
     html5_clear_attr_name(parser);
     html5_clear_temp_buffer(parser);
@@ -441,7 +441,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             case HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED: {
                 // commit the attribute that was just finished
                 html5_commit_attribute(parser);
-                
+
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                 } else if (c == '/') {
