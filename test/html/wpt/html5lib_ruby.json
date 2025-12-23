@@ -1,0 +1,128 @@
+[
+  {
+    "test_id": "6ee9e8955aa3a8a3af1838c1b728d8392e1cccca",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rb>b<rb></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rb>\n|         \"b\"\n|       <rb>"
+  },
+  {
+    "test_id": "03bbba49b30ec908e06e3c84e1fcede1ac7508ff",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rb>b<rt></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rb>\n|         \"b\"\n|       <rt>"
+  },
+  {
+    "test_id": "de7c3ce0c3484dc3a111d00c34c68f7dea8a013a",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rb>b<rtc></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rb>\n|         \"b\"\n|       <rtc>"
+  },
+  {
+    "test_id": "720c6bad03d4e4fd5ec7cb06bf4ec8ba5f277486",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rb>b<rp></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rb>\n|         \"b\"\n|       <rp>"
+  },
+  {
+    "test_id": "b3640f1eae210be30f138bbc6dc71e0864240224",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rb>b<span></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rb>\n|         \"b\"\n|         <span>"
+  },
+  {
+    "test_id": "3179776aceeadf1740d71e2d2e6385bb84ab97c0",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rt>b<rb></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rt>\n|         \"b\"\n|       <rb>"
+  },
+  {
+    "test_id": "d26f2542fc6fcee4e737b578c8db716a96a22ade",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rt>b<rt></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rt>\n|         \"b\"\n|       <rt>"
+  },
+  {
+    "test_id": "17d5c46418a50b35d893516440b0e091c31bd581",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rt>b<rtc></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rt>\n|         \"b\"\n|       <rtc>"
+  },
+  {
+    "test_id": "da1e119d0642e3b82a3537326a3fbc3b8c4e9706",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rt>b<rp></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rt>\n|         \"b\"\n|       <rp>"
+  },
+  {
+    "test_id": "bb2028f026500e8f77bd3b8e1f906c28045e6f20",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rt>b<span></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rt>\n|         \"b\"\n|         <span>"
+  },
+  {
+    "test_id": "c78f8740b860a39eb27035e19e29b240d0bfa4a8",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rtc>b<rb></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rtc>\n|         \"b\"\n|       <rb>"
+  },
+  {
+    "test_id": "9e880cf547d015ef52c3377064a9afd92ba26afe",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rtc>b<rt>c<rt>d</ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rtc>\n|         \"b\"\n|         <rt>\n|           \"c\"\n|         <rt>\n|           \"d\""
+  },
+  {
+    "test_id": "9ed529d1072800af3fcccf268b41d6594480b749",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rtc>b<rtc></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rtc>\n|         \"b\"\n|       <rtc>"
+  },
+  {
+    "test_id": "42a6c56b0abc484cbc3d2b7517551c4aa3efc5d3",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rtc>b<rp></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rtc>\n|         \"b\"\n|         <rp>"
+  },
+  {
+    "test_id": "139a1e8af17546b7964354779331960096481b3c",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rtc>b<span></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rtc>\n|         \"b\"\n|         <span>"
+  },
+  {
+    "test_id": "0050f08d71e8dd050d8129afe674b580387468d9",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rp>b<rb></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rp>\n|         \"b\"\n|       <rb>"
+  },
+  {
+    "test_id": "5f9f25a089e72b4a4e5d7ebbacb440349c53f52f",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rp>b<rt></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rp>\n|         \"b\"\n|       <rt>"
+  },
+  {
+    "test_id": "099a0a617119e858c8e716e0ea9854ed1198ccf1",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rp>b<rtc></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rp>\n|         \"b\"\n|       <rtc>"
+  },
+  {
+    "test_id": "2cca13809bffb5fa34d03ad73d5727b75d2f96b5",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rp>b<rp></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rp>\n|         \"b\"\n|       <rp>"
+  },
+  {
+    "test_id": "f08a5ba63069cc6eb3804d94ec59b8b33e6f9b91",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby>a<rp>b<span></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       \"a\"\n|       <rp>\n|         \"b\"\n|         <span>"
+  },
+  {
+    "test_id": "606924ac3b043141563d94141973a11eda8015ab",
+    "file": "html5lib_ruby.html",
+    "input": "<html><ruby><rtc><ruby>a<rb>b<rt></ruby></ruby></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ruby>\n|       <rtc>\n|         <ruby>\n|           \"a\"\n|           <rb>\n|             \"b\"\n|           <rt>"
+  }
+]
