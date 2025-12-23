@@ -202,10 +202,10 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         // counters.tex: All tests pass! Test 1 (counter arithmetic), Test 2 (moved from extended)
         {"environments.tex", {10, 14}},  // test 7 moved to baseline (custom enumerate labels PASSES)
         // fonts.tex: All tests pass! Tests 7, 8 pass with font class wrapper for breakspace
-        {"groups.tex", {2, 3}},
+        // groups.tex: All tests pass! Tests 2, 3 fixed (error brack_group + paragraph_break in groups)
         // label-ref.tex: All tests pass! Test 7 moved from extended (list item paragraph fix)
         // layout-marginpar.tex: All tests pass! (marginpar implementation complete)
-        {"macros.tex", {4, 5, 6}},  // test 2 moved to baseline (echoOGO simple case PASSES)
+        // macros.tex: Tests 4, 5, 6 pass! (sibling lookahead + parbreak->br + cstring() fix)
         // sectioning.tex: All tests pass! test 3 fixed with inStyledSpan() check
         {"spacing.tex", {1}},  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
