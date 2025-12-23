@@ -2022,6 +2022,7 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
         if (!proc->isMacro(macro_name)) {
             log_info("Macro \\%s not previously defined (\\renewcommand used anyway)", macro_name.c_str());
         }
+        fprintf(stderr, "DEBUG: renewcommand parsed: name='%s', num_params=%d, definition=%p\n", macro_name.c_str(), num_params, definition);
         proc->registerMacro(macro_name, num_params, definition);
     }
 }
@@ -9765,12 +9766,9 @@ void LatexProcessor::processText(const char* text) {
     // In monospace mode, dash/ligature conversions are skipped
     normalized = convertApostrophes(normalized.c_str(), inMonospaceMode());
     
-    // Apply hyphenation - insert soft hyphens (U+00AD) at valid break points
-    // This allows the browser to break long words for better text justification
-    // Skip hyphenation in monospace mode (verbatim, code, etc.)
-    if (!inMonospaceMode()) {
-        normalized = Hyphenator::instance().hyphenateText(normalized);
-    }
+    // Note: Automatic hyphenation (soft hyphen insertion) is disabled
+    // Tests expect exact text without soft hyphens (U+00AD)
+    // Hyphenation can be manually added with \- command if needed
     
     // Check if result is pure whitespace (multiple spaces/newlines)
     // Don't skip single spaces - they're significant in inline content
@@ -10061,7 +10059,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     }
     
     // Handle macro definition elements specially (from Tree-sitter)
-    if (strcmp(cmd_name, "new_command_definition") == 0) {
+    if (strcmp(cmd_name, "new_command_definition") == 0 || strcmp(cmd_name, "newcommand") == 0) {
         cmd_newcommand(this, elem);
         return;
     }
@@ -10071,11 +10069,11 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         processChildren(elem);
         return;
     }
-    if (strcmp(cmd_name, "renew_command_definition") == 0) {
+    if (strcmp(cmd_name, "renew_command_definition") == 0 || strcmp(cmd_name, "renewcommand") == 0) {
         cmd_renewcommand(this, elem);
         return;
     }
-    if (strcmp(cmd_name, "provide_command_definition") == 0) {
+    if (strcmp(cmd_name, "provide_command_definition") == 0 || strcmp(cmd_name, "providecommand") == 0) {
         cmd_providecommand(this, elem);
         return;
     }
