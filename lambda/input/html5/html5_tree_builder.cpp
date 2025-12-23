@@ -371,17 +371,28 @@ void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token) {
 static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_CHARACTER) {
         if (token->data && token->data->len > 0) {
-            char c = token->data->chars[0];
-            if (c == '\0') {
-                log_error("html5: null character in body");
-                return;
-            }
             // Reconstruct active formatting elements before inserting text
             // (but not for whitespace-only text)
-            if (c != '\t' && c != '\n' && c != '\f' && c != '\r' && c != ' ') {
+            bool has_non_whitespace = false;
+            for (uint32_t i = 0; i < token->data->len; i++) {
+                char c = token->data->chars[i];
+                if (c != '\t' && c != '\n' && c != '\f' && c != '\r' && c != ' ') {
+                    has_non_whitespace = true;
+                    break;
+                }
+            }
+            if (has_non_whitespace) {
                 html5_reconstruct_active_formatting_elements(parser);
             }
-            html5_insert_character(parser, c);
+            // Insert all characters from the token
+            for (uint32_t i = 0; i < token->data->len; i++) {
+                char c = token->data->chars[i];
+                if (c == '\0') {
+                    log_error("html5: null character in body");
+                    continue;  // skip null, process rest
+                }
+                html5_insert_character(parser, c);
+            }
         }
         return;
     }
