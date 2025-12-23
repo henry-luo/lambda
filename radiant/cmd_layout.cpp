@@ -35,9 +35,15 @@ extern "C" {
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/format/format.h"
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
+
+// Forward declaration of format_latex_html_v2 in lambda namespace
+namespace lambda {
+    Item format_latex_html_v2(Input* input, bool text_mode);
+}
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -58,6 +64,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
+DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
@@ -1265,7 +1272,20 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         pool_destroy(pool);
         return NULL;
     }
-    DomDocument* doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    
+    // Detect file type by extension
+    const char* ext = strrchr(doc_url, '.');
+    DomDocument* doc = nullptr;
+    
+    if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
+        // Load LaTeX document: parse LaTeX → convert to HTML → layout
+        log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
+        doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
+    } else {
+        // Load HTML document with Lambda CSS system
+        doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    }
+    
     return doc;
 }
 
@@ -1407,6 +1427,190 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 }
 
 /**
+ * Load LaTeX document with Lambda CSS system
+ * Parses LaTeX, converts to HTML, applies CSS, builds DOM tree, returns DomDocument for layout
+ *
+ * @param latex_url URL to LaTeX file
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure with Lambda CSS DOM, ready for layout
+ */
+DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {
+    if (!latex_url || !pool) {
+        log_error("load_latex_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* latex_filepath = url_to_local_path(latex_url);
+    log_debug("[Lambda LaTeX] Loading LaTeX document: %s", latex_filepath);
+
+    // Step 1: Parse LaTeX with Lambda parser (Tree-sitter based)
+    char* latex_content = read_text_file(latex_filepath);
+    if (!latex_content) {
+        log_error("Failed to read LaTeX file: %s", latex_filepath);
+        return nullptr;
+    }
+
+    // Create type string for LaTeX
+    String* type_str = (String*)malloc(sizeof(String) + 6);
+    type_str->len = 5;
+    strcpy(type_str->chars, "latex");
+
+    // Parse LaTeX to Lambda Element tree using input_from_source
+    Input* latex_input = input_from_source(latex_content, latex_url, type_str, nullptr);
+    free(latex_content);
+
+    if (!latex_input || !latex_input->root.item) {
+        log_error("Failed to parse LaTeX file: %s", latex_filepath);
+        return nullptr;
+    }
+
+    log_debug("[Lambda LaTeX] Parsed LaTeX document to Lambda Element tree");
+    
+    // DEBUG: Dump the LaTeX tree
+    log_debug("[Lambda LaTeX] Dumping LaTeX input tree:");
+    log_root_item(latex_input->root);
+
+    // Step 2: Convert LaTeX Element tree to HTML using format_latex_html_v2
+    // Note: format_latex_html_v2 returns HTML as Element tree (not string)
+    log_debug("[Lambda LaTeX] Converting LaTeX to HTML using format_latex_html_v2...");
+    // TEMPORARY: Use text mode to test
+    Item html_item = lambda::format_latex_html_v2(latex_input, true);  // true = return HTML string for debugging
+    
+    if (!html_item.item) {
+        log_error("Failed to convert LaTeX to HTML");
+        return nullptr;
+    }
+
+    // Get HTML root element from converted output
+    Element* html_root = nullptr;
+    TypeId html_type = get_type_id(html_item);
+    if (html_type == LMD_TYPE_ELEMENT) {
+        html_root = html_item.element;
+    } else if (html_type == LMD_TYPE_STRING) {
+        // If format_latex_html_v2 returned string instead of Element tree,
+        // we need to parse the HTML string
+        log_debug("[Lambda LaTeX] format_latex_html_v2 returned string, parsing HTML...");
+        String* html_string = html_item.get_string();
+        
+        // Create new input for HTML parsing
+        String* type_str = (String*)malloc(sizeof(String) + 5);
+        type_str->len = 4;
+        strcpy(type_str->chars, "html");
+        
+        Input* html_input = input_from_source(html_string->chars, latex_url, type_str, nullptr);
+        if (!html_input) {
+            log_error("Failed to parse generated HTML");
+            return nullptr;
+        }
+        
+        html_root = get_html_root_element(html_input);
+        // Replace latex_input with html_input since we need the HTML tree
+        latex_input = html_input;
+    }
+
+    if (!html_root) {
+        log_error("Failed to get HTML root element from LaTeX conversion");
+        return nullptr;
+    }
+
+    log_debug("[Lambda LaTeX] Converted LaTeX to HTML Element tree");
+
+    // Step 3: Create DomDocument and build DomElement tree from HTML Element tree
+    log_debug("[Lambda LaTeX] Building DomElement tree from HTML");
+    DomDocument* dom_doc = dom_document_create(latex_input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument");
+        return nullptr;
+    }
+
+    DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DomElement tree from HTML");
+        dom_document_destroy(dom_doc);
+        return nullptr;
+    }
+
+    log_debug("[Lambda LaTeX] Built DomElement tree: root=%p", (void*)dom_root);
+
+    // Step 4: Initialize CSS engine
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("Failed to create CSS engine");
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Step 5: Load LaTeX.css stylesheet (if it exists)
+    // LaTeX to HTML conversion may embed styles, but we can provide default styling
+    const char* css_filename = "lambda/format/latex.css";
+    log_debug("[Lambda LaTeX] Loading default LaTeX stylesheet: %s", css_filename);
+
+    CssStylesheet* latex_stylesheet = nullptr;
+    char* css_content = read_text_file(css_filename);
+    if (css_content) {
+        size_t css_len = strlen(css_content);
+        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+        if (css_pool_copy) {
+            strcpy(css_pool_copy, css_content);
+            free(css_content);
+            latex_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+            if (latex_stylesheet) {
+                log_debug("[Lambda LaTeX] Loaded LaTeX stylesheet with %zu rules",
+                        latex_stylesheet->rule_count);
+            } else {
+                log_warn("Failed to parse latex.css");
+            }
+        } else {
+            free(css_content);
+        }
+    } else {
+        log_debug("No latex.css file found, LaTeX HTML will use embedded and inline styles");
+    }
+
+    // Step 6: Extract and parse any inline <style> elements from HTML
+    log_debug("[Lambda LaTeX] Extracting inline <style> elements from LaTeX-generated HTML...");
+    int inline_stylesheet_count = 0;
+    CssStylesheet** inline_stylesheets = extract_and_collect_css(
+        html_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
+
+    // Step 7: Apply CSS cascade to DOM tree
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    
+    // Apply LaTeX stylesheet first if available
+    if (latex_stylesheet && latex_stylesheet->rule_count > 0) {
+        log_debug("[Lambda LaTeX] Applying LaTeX stylesheet...");
+        apply_stylesheet_to_dom_tree_fast(dom_root, latex_stylesheet, matcher, pool, css_engine);
+    }
+    
+    // Apply inline stylesheets from LaTeX-generated HTML
+    for (int i = 0; i < inline_stylesheet_count; i++) {
+        if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
+            log_debug("[Lambda LaTeX] Applying inline stylesheet %d with %zu rules", 
+                     i, inline_stylesheets[i]->rule_count);
+            apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+        }
+    }
+    
+    // Apply inline style="" attributes (highest priority)
+    apply_inline_styles_to_tree(dom_root, html_root, pool);
+    
+    log_debug("[Lambda LaTeX] CSS cascade complete");
+
+    // Step 8: Populate DomDocument structure
+    dom_doc->root = dom_root;
+    dom_doc->html_root = html_root;
+    dom_doc->html_version = HTML5;  // Treat LaTeX-generated HTML as HTML5
+    dom_doc->url = latex_url;
+    dom_doc->view_tree = nullptr;  // Will be created during layout
+    dom_doc->state = nullptr;
+
+    log_debug("[Lambda LaTeX] LaTeX document loaded, converted to HTML, and styled");
+    return dom_doc;
+}
+
+/**
  * Parse command-line arguments
  */
 struct LayoutOptions {
@@ -1519,17 +1723,28 @@ int cmd_layout(int argc, char** argv) {
     // get cwd
     Url* cwd = get_current_dir();
     Url* input_url = url_parse_with_base(opts.input_file, cwd);
-    // Load HTML document with Lambda CSS system
-    DomDocument* doc = load_lambda_html_doc(
-        input_url,
-        opts.css_file,
-        opts.viewport_width,
-        opts.viewport_height,
-        pool
-    );
+    
+    // Detect file type by extension and load appropriate document
+    DomDocument* doc = nullptr;
+    const char* ext = strrchr(opts.input_file, '.');
+    
+    if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
+        // Load LaTeX document: parse LaTeX → convert to HTML → layout
+        log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
+        doc = load_latex_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
+    } else {
+        // Load HTML document with Lambda CSS system
+        doc = load_lambda_html_doc(
+            input_url,
+            opts.css_file,
+            opts.viewport_width,
+            opts.viewport_height,
+            pool
+        );
+    }
 
     if (!doc) {
-        log_error("Failed to load HTML document");
+        log_error("Failed to load document");
         pool_destroy(pool);
         return 1;
     }
