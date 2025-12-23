@@ -3534,41 +3534,85 @@ static void cmd_comment(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_multicols(LatexProcessor* proc, Item elem) {
-    // \begin{multicols}{n} ... \end{multicols}
+    // \begin{multicols}{n}[pretext] ... \end{multicols}
     // Multi-column layout using CSS columns
+    // n = number of columns
+    // [pretext] = optional text to span all columns before the multi-column content
     HtmlGenerator* gen = proc->generator();
     
     proc->closeParagraphIfOpen();
     
     ElementReader reader(elem);
     int num_cols = 2;  // Default to 2 columns
+    int first_content_idx = 0;  // Index of first content child (after column count)
+    Item pretext_item = ItemNull;  // Optional pretext before multicol div
     
-    // First child should be the number of columns
+    // First child should be the number of columns (wrapped in curly_group)
     if (reader.childCount() > 0) {
         ItemReader first_child = reader.childAt(0);
-        if (first_child.isString()) {
+        // Check if it's a curly_group containing the column count
+        if (first_child.isElement()) {
+            ElementReader elem_reader = first_child.asElement();
+            const char* tag = elem_reader.tagName();
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                // Extract number from inside curly_group
+                if (elem_reader.childCount() > 0) {
+                    ItemReader num_child = elem_reader.childAt(0);
+                    if (num_child.isString()) {
+                        const char* num_str = num_child.cstring();
+                        if (num_str) {
+                            num_cols = atoi(num_str);
+                            if (num_cols < 1) num_cols = 1;
+                            if (num_cols > 10) num_cols = 10;
+                        }
+                    }
+                }
+                first_content_idx = 1;  // Skip the curly_group
+            }
+        } else if (first_child.isString()) {
+            // Direct string (backward compatibility)
             const char* num_str = first_child.cstring();
             if (num_str) {
                 num_cols = atoi(num_str);
                 if (num_cols < 1) num_cols = 1;
-                if (num_cols > 10) num_cols = 10;  // Reasonable limit
+                if (num_cols > 10) num_cols = 10;
+            }
+            first_content_idx = 1;
+        }
+    }
+    
+    // Check for optional pretext (second argument in brackets)
+    if (first_content_idx < reader.childCount()) {
+        ItemReader second_child = reader.childAt(first_content_idx);
+        if (second_child.isElement()) {
+            ElementReader second_elem = second_child.asElement();
+            const char* tag = second_elem.tagName();
+            if (tag && strcmp(tag, "brack_group") == 0) {
+                pretext_item = second_child.item();
+                first_content_idx++;  // Skip the brack_group too
             }
         }
     }
     
-    // Build style string for CSS columns
-    char style[128];
-    snprintf(style, sizeof(style), "column-count:%d", num_cols);
+    // Process pretext before the multicols div (spans all columns)
+    if (pretext_item.map != nullptr) {
+        ElementReader pretext_reader(pretext_item);
+        for (int64_t i = 0; i < pretext_reader.childCount(); i++) {
+            proc->processNode(pretext_reader.childAt(i).item());
+        }
+    }
     
-    // Open multicols container
-    gen->writer()->openTagRaw("div", nullptr);
-    gen->writer()->writeRawHtml(" class=\"multicols\"");
-    gen->writer()->writeRawHtml(" style=\"");
-    gen->writer()->writeRawHtml(style);
-    gen->writer()->writeRawHtml("\">");
+    proc->closeParagraphIfOpen();
+    
+    // Build attributes string including class and style
+    char attrs[256];
+    snprintf(attrs, sizeof(attrs), "class=\"multicols\" style=\"column-count:%d\"", num_cols);
+    
+    // Open multicols container with all attributes
+    gen->writer()->openTagRaw("div", attrs);
     
     // Process content (skip first child which is the column count)
-    for (int64_t i = 1; i < reader.childCount(); i++) {
+    for (int64_t i = first_content_idx; i < reader.childCount(); i++) {
         proc->processNode(reader.childAt(i).item());
     }
     
@@ -4557,9 +4601,12 @@ static void _box(LatexProcessor* proc, Item elem, const char* classes,
     // Inner span for content (pass nullptr to get <span> without class)
     gen->span(nullptr);
     
-    // Process content in restricted horizontal mode
+    // Process content in restricted horizontal mode AND inline mode
+    // Inline mode prevents paragraph creation inside the box
     proc->enterRestrictedHMode();
+    proc->enterInlineMode();
     proc->processChildren(elem);
+    proc->exitInlineMode();
     proc->exitRestrictedHMode();
     
     gen->closeElement(); // close inner span
@@ -4624,9 +4671,97 @@ static void cmd_fbox(LatexProcessor* proc, Item elem) {
 
 static void cmd_framebox(LatexProcessor* proc, Item elem) {
     // \framebox[width][pos]{text} - framed box with options
+    // Same as makebox but with frame class
     // latex.js: @_box width, pos, txt, "hbox frame"
-    // TODO: Parse width and position parameters
-    _box(proc, elem, "hbox frame");
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    
+    // Default values
+    std::string width = "";
+    std::string pos = "";
+    
+    // Collect bracket groups and content children
+    std::vector<std::string> brack_params;
+    std::vector<Item> content_items;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                brack_params.push_back(std::string(str->chars, str->len));
+            } else {
+                // Content elements (curly_group, etc.)
+                content_items.push_back(child.item());
+            }
+        } else if (child.isString()) {
+            // Text content
+            content_items.push_back(child.item());
+        }
+    }
+    
+    // Parse bracket parameters
+    if (brack_params.size() >= 1) {
+        width = brack_params[0];  // Width
+    }
+    if (brack_params.size() >= 2) {
+        pos = brack_params[1];  // Position: l, c, r, s
+    }
+    
+    // Build CSS classes - include frame
+    std::string classes = "hbox frame";
+    
+    // Position classes
+    if (!pos.empty() && !width.empty()) {
+        switch (pos[0]) {
+        case 's': classes += " stretch"; break;
+        case 'c': classes += " clap"; break;
+        case 'l': classes += " rlap"; break;
+        case 'r': classes += " llap"; break;
+        }
+    }
+    
+    proc->ensureParagraph();
+    
+    // Build style attribute
+    std::stringstream style;
+    style << std::fixed << std::setprecision(3);
+    if (!width.empty()) {
+        double width_px = convert_length_to_px(width.c_str());
+        if (width_px >= 0) {
+            style << "width:" << width_px << "px";
+        }
+    }
+    
+    // Generate HTML
+    std::stringstream attrs;
+    attrs << "class=\"" << classes << "\"";
+    if (!style.str().empty()) {
+        attrs << " style=\"" << style.str() << "\"";
+    }
+    
+    gen->writer()->openTagRaw("span", attrs.str().c_str());
+    gen->span(nullptr);  // inner span for content
+    
+    // Process content in restricted horizontal and inline mode
+    proc->enterRestrictedHMode();
+    proc->enterInlineMode();
+    for (const Item& item : content_items) {
+        proc->processNode(item);
+    }
+    proc->exitInlineMode();
+    proc->exitRestrictedHMode();
+    
+    gen->closeElement();  // close inner span
+    gen->closeElement();  // close outer span
 }
 
 static void cmd_frame(LatexProcessor* proc, Item elem) {
@@ -4774,8 +4909,105 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
 static void cmd_makebox(LatexProcessor* proc, Item elem) {
     // \makebox[width][pos]{text} - make box with size
     // latex.js: @_box width, pos, txt, "hbox"
-    // TODO: Parse width and position
-    _box(proc, elem, "hbox");
+    // width: optional length
+    // pos: l (left/flush-right), c (center), r (right/flush-left), s (spread)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    
+    // Default values
+    std::string width = "";
+    std::string pos = "";
+    
+    // Collect bracket groups and content children
+    std::vector<std::string> brack_params;
+    std::vector<Item> content_items;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                brack_params.push_back(std::string(str->chars, str->len));
+            } else {
+                // Content elements (curly_group, etc.)
+                content_items.push_back(child.item());
+            }
+        } else if (child.isString()) {
+            // Text content
+            content_items.push_back(child.item());
+        }
+    }
+    
+    // Parse bracket parameters
+    if (brack_params.size() >= 1) {
+        width = brack_params[0];  // Width
+    }
+    if (brack_params.size() >= 2) {
+        pos = brack_params[1];  // Position: l, c, r, s
+    }
+    
+    // Build CSS classes
+    std::string classes = "hbox";
+    
+    // Position classes
+    // l = left (content appears at left, box extends right = rlap)
+    // c = center (content centered, box extends both ways = clap)
+    // r = right (content at right, box extends left = llap)
+    if (!pos.empty() && !width.empty()) {
+        switch (pos[0]) {
+        case 's': classes += " stretch"; break;
+        case 'c': classes += " clap"; break;
+        case 'l': classes += " rlap"; break;
+        case 'r': classes += " llap"; break;
+        }
+    }
+    
+    // Add frame class if requested by \framebox
+    if (proc->get_next_box_frame()) {
+        classes += " frame";
+    }
+    
+    proc->ensureParagraph();
+    
+    // Build style attribute
+    std::stringstream style;
+    style << std::fixed << std::setprecision(3);  // 3 decimal places
+    if (!width.empty()) {
+        double width_px = convert_length_to_px(width.c_str());
+        if (width_px >= 0) {
+            style << "width:" << width_px << "px";
+        }
+    }
+    
+    // Generate HTML: <span class="classes" style="width:..."><span>content</span></span>
+    std::stringstream attrs;
+    attrs << "class=\"" << classes << "\"";
+    if (!style.str().empty()) {
+        attrs << " style=\"" << style.str() << "\"";
+    }
+    
+    gen->writer()->openTagRaw("span", attrs.str().c_str());
+    gen->span(nullptr);  // inner span for content
+    
+    // Process content in restricted horizontal and inline mode
+    proc->enterRestrictedHMode();
+    proc->enterInlineMode();
+    for (const Item& item : content_items) {
+        proc->processNode(item);
+    }
+    proc->exitInlineMode();
+    proc->exitRestrictedHMode();
+    
+    gen->closeElement();  // close inner span
+    gen->closeElement();  // close outer span
 }
 
 static void cmd_phantom(LatexProcessor* proc, Item elem) {
@@ -5396,6 +5628,10 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
 // Picture environment state - per-processor instance
 static thread_local PictureContext g_picture_ctx;
 static thread_local PictureRenderer* g_picture_renderer = nullptr;
+
+// Global unitlength in pixels (default: 1pt = 1.333px)
+// This is set by \setlength{\unitlength}{...} and used when starting picture environments
+static thread_local double g_unitlength_px = 1.333;  // 1pt default
 
 // Helper: Parse coordinate pair from string like "(60,50)" or "(60, 50)"
 // Returns pointer to character after closing paren, or nullptr on failure
@@ -6048,8 +6284,9 @@ static void cmd_picture(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     
-    // Initialize picture context
+    // Initialize picture context with current unitlength
     g_picture_ctx = PictureContext();
+    g_picture_ctx.unitlength_px = g_unitlength_px;
     g_picture_renderer = new PictureRenderer(g_picture_ctx);
     
     // Flatten picture children into sequential list
@@ -6072,7 +6309,8 @@ static void cmd_picture(LatexProcessor* proc, Item elem) {
         }
     }
     
-    log_debug("cmd_picture: size=(%.2f,%.2f) offset=(%.2f,%.2f)", width, height, x_off, y_off);
+    log_debug("cmd_picture: size=(%.2f,%.2f) offset=(%.2f,%.2f) unitlength=%.3fpx",
+              width, height, x_off, y_off, g_unitlength_px);
     
     // Begin picture with parsed dimensions
     g_picture_renderer->beginPicture(width, height, x_off, y_off);
@@ -7483,8 +7721,45 @@ static void cmd_newlength(LatexProcessor* proc, Item elem) {
 static void cmd_setlength(LatexProcessor* proc, Item elem) {
     // \setlength{\lengthcmd}{value}
     // Sets a length to a specific value
-    // In HTML, no output
-    // TODO: Length state tracking
+    // Currently only unitlength is tracked (for picture environment)
+    ElementReader elem_reader(elem);
+    
+    std::string length_name;
+    std::string length_value;
+    
+    // Parse children to get length name and value
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            // First element child is the length name (e.g., "unitlength")
+            // The tag name IS the length name
+            if (length_name.empty()) {
+                if (tag) {
+                    length_name = tag;
+                }
+            }
+        } else if (child.isString()) {
+            String* str = child.asString();
+            if (str && str->len > 0) {
+                // This is the length value
+                length_value = std::string(str->chars, str->len);
+            }
+        }
+    }
+    
+    // Handle unitlength specially for picture environment
+    if (length_name == "unitlength" && !length_value.empty()) {
+        double px = convert_length_to_px(length_value.c_str());
+        if (px > 0) {
+            g_unitlength_px = px;
+        }
+    }
+    
+    // No HTML output
 }
 
 // =============================================================================
@@ -10057,6 +10332,9 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     // Process LaTeX tree
     proc.process(input->root);
     
+    // Close any open paragraph at end of document
+    proc.closeParagraphIfOpen();
+    
     // Close HTML document container
     writer->closeTag("div");
     
@@ -10103,6 +10381,38 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
     String* body_str = (String*)body_content.item;
     std::string body_html(body_str->chars, body_str->len);
     
+    // Extract document title from the body content
+    // Look for <div class="title">...</div> and extract plain text
+    std::string doc_title = "LaTeX Document";  // Default title
+    {
+        size_t title_start = body_html.find("<div class=\"title\">");
+        if (title_start != std::string::npos) {
+            title_start += 19;  // Skip past the opening tag
+            size_t title_end = body_html.find("</div>", title_start);
+            if (title_end != std::string::npos) {
+                std::string title_html = body_html.substr(title_start, title_end - title_start);
+                // Strip HTML tags to get plain text
+                std::string plain_title;
+                bool in_tag = false;
+                for (char c : title_html) {
+                    if (c == '<') {
+                        in_tag = true;
+                    } else if (c == '>') {
+                        in_tag = false;
+                    } else if (!in_tag) {
+                        plain_title += c;
+                    }
+                }
+                // Trim whitespace
+                size_t start = plain_title.find_first_not_of(" \t\n\r");
+                size_t end = plain_title.find_last_not_of(" \t\n\r");
+                if (start != std::string::npos && end != std::string::npos) {
+                    doc_title = plain_title.substr(start, end - start + 1);
+                }
+            }
+        }
+    }
+    
     // Configure asset loading
     LatexAssetConfig config;
     if (asset_base_url && *asset_base_url) {
@@ -10128,7 +10438,7 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
     oss << "<head>\n";
     oss << "  <meta charset=\"UTF-8\">\n";
     oss << "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
-    oss << "  <title>LaTeX Document</title>\n";
+    oss << "  <title>" << doc_title << "</title>\n";
     oss << head_content;
     oss << "</head>\n";
     oss << "<body>\n";
