@@ -12,6 +12,7 @@ static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_after_body_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token);
 
 // main entry point for parsing HTML
 Element* html5_parse(Input* input, const char* html) {
@@ -105,6 +106,9 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
             break;
         case HTML5_MODE_AFTER_AFTER_BODY:
             html5_process_in_after_after_body_mode(parser, token);
+            break;
+        case HTML5_MODE_TEXT:
+            html5_process_in_text_mode(parser, token);
             break;
         default:
             log_error("html5: unimplemented insertion mode: %d", parser->mode);
@@ -260,11 +264,22 @@ static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_START_TAG) {
         const char* tag = token->tag_name->chars;
 
-        if (strcmp(tag, "title") == 0 || strcmp(tag, "style") == 0 ||
-            strcmp(tag, "script") == 0 || strcmp(tag, "noscript") == 0 ||
-            strcmp(tag, "noframes") == 0) {
-            // insert element (for now, simple insertion)
+        // RCDATA elements (title, textarea) - content is parsed as text, only end tag recognized
+        if (strcmp(tag, "title") == 0) {
             html5_insert_html_element(parser, token);
+            html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
+            parser->original_insertion_mode = parser->mode;
+            parser->mode = HTML5_MODE_TEXT;
+            return;
+        }
+
+        // RAWTEXT elements in head (style, script, noscript, noframes)
+        if (strcmp(tag, "style") == 0 || strcmp(tag, "script") == 0 ||
+            strcmp(tag, "noscript") == 0 || strcmp(tag, "noframes") == 0) {
+            html5_insert_html_element(parser, token);
+            html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
+            parser->original_insertion_mode = parser->mode;
+            parser->mode = HTML5_MODE_TEXT;
             return;
         }
 
@@ -343,6 +358,30 @@ void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token) {
             log_error("html5: unexpected <head> in after head mode");
             return;
         }
+
+        // Per spec: base, basefont, bgsound, link, meta, noframes, script, style, template, title
+        // should be processed using in-head rules, with head temporarily pushed
+        if (strcmp(tag, "base") == 0 || strcmp(tag, "basefont") == 0 ||
+            strcmp(tag, "bgsound") == 0 || strcmp(tag, "link") == 0 ||
+            strcmp(tag, "meta") == 0 || strcmp(tag, "noframes") == 0 ||
+            strcmp(tag, "script") == 0 || strcmp(tag, "style") == 0 ||
+            strcmp(tag, "template") == 0 || strcmp(tag, "title") == 0) {
+            log_error("html5: processing head element %s after </head>", tag);
+            // Push head element back on stack
+            if (parser->head_element) {
+                html5_push_element(parser, parser->head_element);
+            }
+            // Process using in-head rules
+            html5_process_in_head_mode(parser, token);
+            // Remove head from stack (it was pushed, now remove it)
+            if (parser->head_element) {
+                int head_idx = html5_find_element_in_stack(parser, parser->head_element);
+                if (head_idx >= 0) {
+                    html5_remove_from_stack(parser, head_idx);
+                }
+            }
+            return;
+        }
     }
 
     if (token->type == HTML5_TOKEN_END_TAG) {
@@ -365,6 +404,42 @@ void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token) {
 
     parser->mode = HTML5_MODE_IN_BODY;
     html5_process_token(parser, token);  // reprocess
+}
+
+// ===== TEXT MODE =====
+// Handles raw text content for elements like <title>, <textarea>, <style>, <script>
+static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
+    if (token->type == HTML5_TOKEN_CHARACTER) {
+        // Insert the character into current element
+        if (token->data && token->data->len > 0) {
+            for (uint32_t i = 0; i < token->data->len; i++) {
+                html5_insert_character(parser, token->data->chars[i]);
+            }
+        }
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_EOF) {
+        log_error("html5: unexpected EOF in text mode");
+        // Pop current element and switch back to original mode
+        html5_pop_element(parser);
+        parser->mode = parser->original_insertion_mode;
+        html5_process_token(parser, token);  // reprocess EOF
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        // End tag closes the raw text element (title, textarea, style, script, etc.)
+        // Pop the element and switch back to original insertion mode
+        html5_flush_pending_text(parser);  // flush any buffered text
+        html5_pop_element(parser);
+        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+        parser->mode = parser->original_insertion_mode;
+        return;
+    }
+
+    // Any other token (shouldn't happen in proper implementation)
+    log_error("html5: unexpected token type %d in text mode", token->type);
 }
 
 // ===== IN BODY MODE =====
@@ -571,6 +646,28 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             }
             html5_insert_html_element(parser, token);
             html5_pop_element(parser);  // immediately pop void element
+            return;
+        }
+
+        // <image> is converted to <img> per HTML5 spec
+        if (strcmp(tag, "image") == 0) {
+            log_error("html5: converting <image> to <img>");
+            // Create a new token with tag name "img" and same attributes
+            MarkBuilder builder(parser->input);
+            String* img_name = builder.createString("img");
+            token->tag_name = img_name;
+            // Fall through to handle as void element
+            tag = "img";
+        }
+
+        // <textarea> uses RCDATA mode - content is parsed as text
+        if (strcmp(tag, "textarea") == 0) {
+            html5_insert_html_element(parser, token);
+            // Set ignore_next_lf to skip leading newline per spec
+            parser->ignore_next_lf = true;
+            html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
+            parser->original_insertion_mode = parser->mode;
+            parser->mode = HTML5_MODE_TEXT;
             return;
         }
 
