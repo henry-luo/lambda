@@ -795,11 +795,12 @@ void HtmlGenerator::verbatimText(const char* text) {
 
 void HtmlGenerator::startTable(const char* position) {
     pushFloatState("table", position);
-    writer_->openTag("div", "table-float");
+    // Use HTML5 figure tag for table floats (matches LaTeX.js behavior)
+    writer_->openTag("figure", "table-float");
 }
 
 void HtmlGenerator::endTable() {
-    writer_->closeTag("div");
+    writer_->closeTag("figure");
     popFloatState();
 }
 
@@ -883,11 +884,12 @@ void HtmlGenerator::hline() {
 void HtmlGenerator::startFigure(const char* position) {
     pushFloatState("figure", position);
     // Note: ID will be added by caption if present
-    writer_->openTag("div", "figure-float");
+    // Use HTML5 figure tag for semantic structure (matches LaTeX.js)
+    writer_->openTag("figure", "figure-float");
 }
 
 void HtmlGenerator::endFigure() {
-    writer_->closeTag("div");
+    writer_->closeTag("figure");
     popFloatState();
 }
 
