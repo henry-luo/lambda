@@ -337,18 +337,18 @@ static uint32_t html5_windows1252_replacement(uint32_t codepoint) {
 static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars, int* out_len) {
     size_t start_pos = parser->pos;
     char c = html5_peek_char(parser, 0);
-    
+
     // Numeric reference: &#
     if (c == '#') {
         parser->pos++;  // consume '#'
         c = html5_peek_char(parser, 0);
-        
+
         bool is_hex = false;
         if (c == 'x' || c == 'X') {
             is_hex = true;
             parser->pos++;  // consume 'x'
         }
-        
+
         // Parse digits
         uint32_t codepoint = 0;
         int digits = 0;
@@ -382,31 +382,31 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
             // Prevent overflow
             if (codepoint > 0x10FFFF) codepoint = 0xFFFD;
         }
-        
+
         if (digits == 0) {
             // No digits found, not a valid reference
             parser->pos = start_pos;
             return 0;
         }
-        
+
         // Check for optional semicolon
         if (html5_peek_char(parser, 0) == ';') {
             parser->pos++;  // consume ';'
         }
-        
+
         // Validate and convert codepoint
         // Replace null and surrogate codepoints
         if (codepoint == 0 || (codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint > 0x10FFFF) {
             codepoint = 0xFFFD;  // replacement character
         }
-        
+
         // Apply Windows-1252 replacements per HTML5 spec
         codepoint = html5_windows1252_replacement(codepoint);
-        
+
         *out_len = html5_encode_utf8(codepoint, out_chars);
         return 1;
     }
-    
+
     // Named reference
     char entity_name[32];
     size_t name_len = 0;
@@ -420,19 +420,19 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
         }
     }
     entity_name[name_len] = '\0';
-    
+
     if (name_len == 0) {
         // No name found
         parser->pos = start_pos;
         return 0;
     }
-    
+
     // Check for optional semicolon
     bool has_semicolon = (html5_peek_char(parser, 0) == ';');
     if (has_semicolon) {
         parser->pos++;  // consume ';'
     }
-    
+
     // Look up entity
     const char* replacement = html5_lookup_named_entity(entity_name, name_len);
     if (replacement != nullptr) {
@@ -441,7 +441,7 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
         *out_len = (int)rep_len;
         return 1;
     }
-    
+
     // Entity not found - restore position and emit '&' as literal
     parser->pos = start_pos;
     return 0;
