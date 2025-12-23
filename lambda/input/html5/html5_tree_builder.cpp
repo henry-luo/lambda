@@ -427,15 +427,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
 
             // Close any <p> element in button scope per spec
             if (html5_has_element_in_button_scope(parser, "p")) {
-                // Pop elements until we pop the <p> element
-                while (parser->open_elements->length > 0) {
-                    Element* current = html5_current_node(parser);
-                    const char* current_tag = ((TypeElmt*)current->type)->name.str;
-                    html5_pop_element(parser);
-                    if (strcmp(current_tag, "p") == 0) {
-                        break;
-                    }
-                }
+                html5_close_p_element(parser);
             }
 
             html5_insert_html_element(parser, token);
@@ -456,8 +448,18 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // void elements
-        if (strcmp(tag, "img") == 0 || strcmp(tag, "br") == 0 || strcmp(tag, "hr") == 0 ||
+        // <hr> is special: it closes <p> in button scope, then inserts as void
+        if (strcmp(tag, "hr") == 0) {
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                html5_close_p_element(parser);
+            }
+            html5_insert_html_element(parser, token);
+            html5_pop_element(parser);  // immediately pop void element
+            return;
+        }
+
+        // void elements (do NOT close <p>)
+        if (strcmp(tag, "img") == 0 || strcmp(tag, "br") == 0 ||
             strcmp(tag, "input") == 0 || strcmp(tag, "meta") == 0 || strcmp(tag, "link") == 0 ||
             strcmp(tag, "area") == 0 || strcmp(tag, "base") == 0 || strcmp(tag, "col") == 0 ||
             strcmp(tag, "embed") == 0 || strcmp(tag, "param") == 0 || strcmp(tag, "source") == 0 ||
@@ -502,6 +504,19 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         // Formatting elements use the Adoption Agency Algorithm
         if (html5_is_formatting_element(tag)) {
             html5_run_adoption_agency(parser, token);
+            return;
+        }
+
+        // Special handling for </p> - per WHATWG spec 12.2.6.4.7
+        if (strcmp(tag, "p") == 0) {
+            if (!html5_has_element_in_button_scope(parser, "p")) {
+                // No <p> in scope: create an empty <p> element and insert it
+                MarkBuilder builder(parser->input);
+                String* p_name = builder.createString("p");
+                Html5Token* fake_p_token = html5_token_create_start_tag(parser->pool, parser->arena, p_name);
+                html5_insert_html_element(parser, fake_p_token);
+            }
+            html5_close_p_element(parser);
             return;
         }
 

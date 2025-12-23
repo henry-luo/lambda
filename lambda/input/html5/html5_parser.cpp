@@ -1,6 +1,7 @@
 #include "html5_parser.h"
 #include "../../../lib/log.h"
 #include "../../mark_builder.hpp"
+#include "../../mark_reader.hpp"
 #include <string.h>
 #include <assert.h>
 
@@ -201,6 +202,21 @@ void html5_generate_implied_end_tags_except(Html5Parser* parser, const char* exc
     }
 }
 
+// close a <p> element in button scope - implements "close a p element" from WHATWG spec
+void html5_close_p_element(Html5Parser* parser) {
+    // generate implied end tags except for p
+    html5_generate_implied_end_tags_except(parser, "p");
+    // pop elements until we pop a p element
+    while (parser->open_elements->length > 0) {
+        Element* current = html5_current_node(parser);
+        const char* tag_name = ((TypeElmt*)current->type)->name.str;
+        html5_pop_element(parser);
+        if (strcmp(tag_name, "p") == 0) {
+            break;
+        }
+    }
+}
+
 // active formatting elements - implements "reconstruct the active formatting elements" from WHATWG spec
 void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
     // step 1: if there are no entries in the list, stop
@@ -288,9 +304,8 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
     // Flush any pending text before inserting element
     html5_flush_pending_text(parser);
 
-    MarkBuilder builder(parser->input);
-    // TODO: properly handle attributes from token->attributes map
-    Element* elem = builder.element(token->tag_name->chars).final().element;
+    // Create element with attributes from token
+    Element* elem = html5_create_element_for_token(parser, token);
 
     // insert into tree
     Element* parent = html5_current_node(parser);
@@ -435,8 +450,22 @@ bool html5_is_special_element(const char* tag_name) {
 // Create element for token (without inserting into tree)
 Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) {
     MarkBuilder builder(parser->input);
-    // TODO: properly handle attributes from token->attributes map
-    Element* elem = builder.element(token->tag_name->chars).final().element;
+    ElementBuilder eb = builder.element(token->tag_name->chars);
+
+    // Copy attributes from token to element
+    if (token->attributes != nullptr) {
+        MapReader reader(token->attributes);
+        MapReader::EntryIterator it = reader.entries();
+        const char* key;
+        ItemReader value;
+        while (it.next(&key, &value)) {
+            if (key && value.isString()) {
+                eb.attr(key, value.cstring());
+            }
+        }
+    }
+
+    Element* elem = eb.final().element;
     return elem;
 }
 
