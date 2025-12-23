@@ -905,13 +905,13 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                         parser->active_formatting->items[i] = parser->active_formatting->items[i + 1];
                     }
                     parser->active_formatting->length--;
-                    
+
                     // If we're in foster parenting mode, we need to keep the <a> temporarily
                     // to find the correct foster parent (table's DOM parent)
                     // After insertion, we'll remove it
                     Element* elem_to_remove = nullptr;
                     size_t elem_to_remove_idx = 0;
-                    
+
                     if (parser->foster_parenting) {
                         // Find the <a> element but don't remove it yet
                         for (size_t i = 0; i < parser->open_elements->length; i++) {
@@ -923,12 +923,12 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                             }
                         }
                     }
-                    
+
                     // Insert the new element (will use foster parenting if enabled)
                     html5_reconstruct_active_formatting_elements(parser);
                     Element* new_elem = html5_insert_html_element(parser, token);
                     html5_push_active_formatting_element(parser, new_elem, token);
-                    
+
                     // Now remove the old <a> from open elements if we were in foster parenting mode
                     if (parser->foster_parenting && elem_to_remove != nullptr) {
                         for (size_t j = elem_to_remove_idx; j < parser->open_elements->length - 1; j++) {
