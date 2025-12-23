@@ -1,0 +1,452 @@
+[
+  {
+    "test_id": "16c694bcf0b3ff3723fa070eea7e1e82ef12a337",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&gt;BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO>BAR\""
+  },
+  {
+    "test_id": "05e04b39ef06e2367a33326f5dd566913aa6628f",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&gtBAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO>BAR\""
+  },
+  {
+    "test_id": "fbf7d9fec595585869c5c595d5588b34fd175278",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&gt BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO> BAR\""
+  },
+  {
+    "test_id": "e59b0a76d7bcfb429b27e00e469f35e08a9bdd1a",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&gt;;;BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO>;;BAR\""
+  },
+  {
+    "test_id": "5ea854d6ecd4d6dd459cb36d4faf3ed36e11c073",
+    "file": "html5lib_entities01.html",
+    "input": "I'm &notit; I tell you",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"I'm ¬it; I tell you\""
+  },
+  {
+    "test_id": "119cd15b852615cd0fce759769b4a3788595e3bb",
+    "file": "html5lib_entities01.html",
+    "input": "I'm &notin; I tell you",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"I'm ∉ I tell you\""
+  },
+  {
+    "test_id": "903cefcfae1125cb71fc77f4a6b7d3546e8f4020",
+    "file": "html5lib_entities01.html",
+    "input": "&ammmp;",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"&ammmp;\""
+  },
+  {
+    "test_id": "69f08b40c7506153e809415ca98e2ed98992216b",
+    "file": "html5lib_entities01.html",
+    "input": "&ammmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmp;",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"&ammmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmp;\""
+  },
+  {
+    "test_id": "9c00a1833e8cf4af28c8bd94902412ad7052b4b0",
+    "file": "html5lib_entities01.html",
+    "input": "FOO& BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO& BAR\""
+  },
+  {
+    "test_id": "b5bcdcbc6e88b380be0e48ca2620fbbb8e92e497",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&<BAR>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO&\"\n|     <bar>"
+  },
+  {
+    "test_id": "bf6c90305b2856c2d9c9a146dfff867fe7a5e0f3",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&&&&gt;BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO&&&>BAR\""
+  },
+  {
+    "test_id": "6b9c8d175a3d7b6cf04ffd72e44a7dc88686460f",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#41;BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO)BAR\""
+  },
+  {
+    "test_id": "76c184d9ce64b8a52c2e67eafeb8d332c096f2be",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x41;BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOABAR\""
+  },
+  {
+    "test_id": "4c30f8f931eb44c2f208e837555c0cc444dd4612",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#X41;BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOABAR\""
+  },
+  {
+    "test_id": "1db77ef761092d65ce847c0bcd6e7cb892db754d",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO&#BAR\""
+  },
+  {
+    "test_id": "284c18aa40a73e4052525a9ffb30b23182f237ea",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO&#ZOO\""
+  },
+  {
+    "test_id": "6b336a43e394d3ab7ceb2ab54c63409e8a27aded",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xBAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOºR\""
+  },
+  {
+    "test_id": "436c30dd76bf9b5c2b29a181d9a9412ec0ab4bdf",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO&#xZOO\""
+  },
+  {
+    "test_id": "1373a52ddcb71f20f29d92abb6714eaabeba7424",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#XZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO&#XZOO\""
+  },
+  {
+    "test_id": "d60f4f324a1ad9c09c4d3590c8c537af2852eeb4",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#41BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO)BAR\""
+  },
+  {
+    "test_id": "d21511e2df56c306c78e1449c960c66e565e016e",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x41BAR",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO䆺R\""
+  },
+  {
+    "test_id": "39107d16f24d4c7bcd40ad1239b5f4f677877ee8",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x41ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOAZOO\""
+  },
+  {
+    "test_id": "a44b740e8b2349e75c9eb0376f665eab13ff821d",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0000;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "a0e38b1c19eba037b34c68864634cff032f0b892",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0078;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOxZOO\""
+  },
+  {
+    "test_id": "390d9571a24be0961c8fcd78c69eea16a6414246",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0079;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOyZOO\""
+  },
+  {
+    "test_id": "ceba8404405dd3b3b423c45411bde15bf72a846d",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0080;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO€ZOO\""
+  },
+  {
+    "test_id": "f8dd2fccc21d3a08790a7877186840a692adf111",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0081;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOZOO\""
+  },
+  {
+    "test_id": "d526830d439d3c4e966b22fbedf819d465d3107b",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0082;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO‚ZOO\""
+  },
+  {
+    "test_id": "240af7bacbfecce6e2a973de9c89fad817fb8d42",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0083;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOƒZOO\""
+  },
+  {
+    "test_id": "d657585ca1df5b86693fca8a0a2eae76bd9b1c2b",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0084;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO„ZOO\""
+  },
+  {
+    "test_id": "b508fcffb2d9f2424c7837270e51824321fb4570",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0085;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO…ZOO\""
+  },
+  {
+    "test_id": "897ab551df27df14418a46ff1c3acef8338c53f3",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0086;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO†ZOO\""
+  },
+  {
+    "test_id": "493a472ccf903088c813ff6874d54482a161df8f",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0087;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO‡ZOO\""
+  },
+  {
+    "test_id": "67d19edb1f6ecbbb6ccb90df2345e52e5c58efc3",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0088;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOˆZOO\""
+  },
+  {
+    "test_id": "dded422b7406c966c944555f220d7d3dfcf2a143",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0089;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO‰ZOO\""
+  },
+  {
+    "test_id": "60a76c9e10e4ac53f836f9e45eb0518dd0b7b73b",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x008A;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOŠZOO\""
+  },
+  {
+    "test_id": "b47fcc6a614247319908b00935f10ec134399917",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x008B;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO‹ZOO\""
+  },
+  {
+    "test_id": "3b5c7d0331ae900e1179eaf3545c78d147434fbf",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x008C;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOŒZOO\""
+  },
+  {
+    "test_id": "a0f119508046dbb4f8059232f6e99f66c1e8e7a6",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x008D;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOZOO\""
+  },
+  {
+    "test_id": "daab384be8471edeb755353c5dccaad0c415dac5",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x008E;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOŽZOO\""
+  },
+  {
+    "test_id": "8485e4d103a517615f39c0d0b71fe5065c5437db",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x008F;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOZOO\""
+  },
+  {
+    "test_id": "4c28749faddb096d1f04792b7daf039268c43181",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0090;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOZOO\""
+  },
+  {
+    "test_id": "c84c576954c4c493528eaa34233c926653152be5",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0091;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO‘ZOO\""
+  },
+  {
+    "test_id": "b2797e18c499df32296545225c259dbf4bea2908",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0092;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO’ZOO\""
+  },
+  {
+    "test_id": "5b2dfe6f187413faecd91336bd353c05768ea722",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0093;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO“ZOO\""
+  },
+  {
+    "test_id": "34af7be5bcff18ec869a306b19daea70f61f7088",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0094;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO”ZOO\""
+  },
+  {
+    "test_id": "8f2e74688427858fc1a895fc472d074a0528a7ae",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0095;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO•ZOO\""
+  },
+  {
+    "test_id": "530d6251a43d688e69959237e519812585de8266",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0096;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO–ZOO\""
+  },
+  {
+    "test_id": "bced9b8c339d0d2838ea0fffe9a64027b4f3a877",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0097;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO—ZOO\""
+  },
+  {
+    "test_id": "9c9e8079df25999c606bc84f46b348544a23b9b4",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0098;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO˜ZOO\""
+  },
+  {
+    "test_id": "ec61d22b3bc6f93e54bbff964311bba9a3a06b21",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x0099;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO™ZOO\""
+  },
+  {
+    "test_id": "391f0136aebdd0e874c8eb85651ffda7e9f86f24",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x009A;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOšZOO\""
+  },
+  {
+    "test_id": "e2974e7029b008539aacc1ee885705764f8c53f4",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x009B;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO›ZOO\""
+  },
+  {
+    "test_id": "23e105ca5329cc0338a96fe7e088ba9b319c46d1",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x009C;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOœZOO\""
+  },
+  {
+    "test_id": "87af28752724c400edef3970e52440639be5b1a8",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x009D;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOZOO\""
+  },
+  {
+    "test_id": "f50d9e39e2bda3d8c0b1c69d1f1e4e86c4b39ac3",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x009E;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOžZOO\""
+  },
+  {
+    "test_id": "12827fadb8d36b829e9c2c7315e0848d2d7ef278",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x009F;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOŸZOO\""
+  },
+  {
+    "test_id": "f603997321070e6ccada6fefe4240a9e6c7e870a",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x00A0;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO ZOO\""
+  },
+  {
+    "test_id": "a88e381bf36e74aaa8ac5b0877153b7158bae579",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xD7FF;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO퟿ZOO\""
+  },
+  {
+    "test_id": "11019fa64a25748a5bfb864fc200ec2710b54aa3",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xD800;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "3d238b9146102bd11e898ff4913f86e8ded65be4",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xD801;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "a1375bfde7be56e514471700e030b1c7e7090e2f",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xDFFE;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "7936b73efa385d183e93453bea24fd0c4dff4742",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xDFFF;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "41cdf6978b0c48e7044d5e4534fc8bb08de4cdf2",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xE000;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOOZOO\""
+  },
+  {
+    "test_id": "5138f572a4db2e2edc2d723e1bb87af72ab501f4",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x10FFFE;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO􏿾ZOO\""
+  },
+  {
+    "test_id": "f30757617b6df330deba1cb607e8d47f71bda13f",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x1087D4;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO􈟔ZOO\""
+  },
+  {
+    "test_id": "a6fd8cdca1fa8cf07519d9a0c5b779eafa438b70",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x10FFFF;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO􏿿ZOO\""
+  },
+  {
+    "test_id": "ada342466887e85d89c3b815b127bfced036ac76",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#x110000;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "74bd99a9263f0b8e8a5fac4d2684fe37d5a1a9cc",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#xFFFFFF;ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "bffe7b00046407080251ab6bf58cb97ce2a34893",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#11111111111",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�\""
+  },
+  {
+    "test_id": "5aef37f1f2b9ac45adfade044c882eb09a297569",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#1111111111",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�\""
+  },
+  {
+    "test_id": "6e2d817539fb3b2023c7bcb88ad220c136f70cf0",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#111111111111",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�\""
+  },
+  {
+    "test_id": "d4ac52727ff405f61a1d878a0aa1951ae5264c80",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#11111111111ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "d2584faaa4dda5283955b2dc22812a018d04a72d",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#1111111111ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  },
+  {
+    "test_id": "56dc3e612fbfa06cfeb26957e357defcf73aa220",
+    "file": "html5lib_entities01.html",
+    "input": "FOO&#111111111111ZOO",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"FOO�ZOO\""
+  }
+]

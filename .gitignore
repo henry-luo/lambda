@@ -123,5 +123,6 @@ test.history
 test_output/
 test/venv/
 test/layout/data/css2.1
+test/wpt
 
 analysis-results*/

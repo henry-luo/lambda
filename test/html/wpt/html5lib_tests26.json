@@ -1,0 +1,122 @@
+[
+  {
+    "test_id": "6232bd8c710002d3b3c375903a712d05163a821d",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><a href='#1'><nobr>1<nobr></a><br><a href='#2'><nobr>2<nobr></a><br><a href='#3'><nobr>3<nobr></a>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       href=\"#1\"\n|       <nobr>\n|         \"1\"\n|       <nobr>\n|     <nobr>\n|       <br>\n|       <a>\n|         href=\"#2\"\n|     <a>\n|       href=\"#2\"\n|       <nobr>\n|         \"2\"\n|       <nobr>\n|     <nobr>\n|       <br>\n|       <a>\n|         href=\"#3\"\n|     <a>\n|       href=\"#3\"\n|       <nobr>\n|         \"3\"\n|       <nobr>"
+  },
+  {
+    "test_id": "5e4fff339b6d191d80311bfa258a9b62e063c6aa",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b><nobr>1<nobr></b><i><nobr>2<nobr></i>3",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <nobr>\n|         \"1\"\n|       <nobr>\n|     <nobr>\n|       <i>\n|     <i>\n|       <nobr>\n|         \"2\"\n|       <nobr>\n|     <nobr>\n|       \"3\""
+  },
+  {
+    "test_id": "8695403efa4e413a1ad1f99984a8c0ecba379698",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b><nobr>1<table><nobr></b><i><nobr>2<nobr></i>3",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <nobr>\n|         \"1\"\n|         <nobr>\n|           <i>\n|         <i>\n|           <nobr>\n|             \"2\"\n|           <nobr>\n|         <nobr>\n|           \"3\"\n|         <table>"
+  },
+  {
+    "test_id": "c3aa0a4f4e81fa4a2fd398c7a7a090d2c3f955f4",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b><nobr>1<table><tr><td><nobr></b><i><nobr>2<nobr></i>3",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <nobr>\n|         \"1\"\n|         <table>\n|           <tbody>\n|             <tr>\n|               <td>\n|                 <nobr>\n|                   <i>\n|                 <i>\n|                   <nobr>\n|                     \"2\"\n|                   <nobr>\n|                 <nobr>\n|                   \"3\""
+  },
+  {
+    "test_id": "167bc3c289b234ab99fe96eaa0845682345de48c",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b><nobr>1<div><nobr></b><i><nobr>2<nobr></i>3",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <nobr>\n|         \"1\"\n|     <div>\n|       <b>\n|         <nobr>\n|         <nobr>\n|       <nobr>\n|         <i>\n|       <i>\n|         <nobr>\n|           \"2\"\n|         <nobr>\n|       <nobr>\n|         \"3\""
+  },
+  {
+    "test_id": "3dacba9a76b8c454b42b9868252bbb6b68327184",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b><nobr>1<nobr></b><div><i><nobr>2<nobr></i>3",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <nobr>\n|         \"1\"\n|       <nobr>\n|     <div>\n|       <nobr>\n|         <i>\n|       <i>\n|         <nobr>\n|           \"2\"\n|         <nobr>\n|       <nobr>\n|         \"3\""
+  },
+  {
+    "test_id": "8f1c4c0f0eee7b8136934ee18bd3beffbc7f2fe0",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b><nobr>1<nobr><ins></b><i><nobr>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <nobr>\n|         \"1\"\n|       <nobr>\n|         <ins>\n|     <nobr>\n|       <i>\n|     <i>\n|       <nobr>"
+  },
+  {
+    "test_id": "7369c472433b6dd76585b797fd3708e474601ecc",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b><nobr>1<ins><nobr></b><i>2",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <nobr>\n|         \"1\"\n|         <ins>\n|       <nobr>\n|     <nobr>\n|       <i>\n|         \"2\""
+  },
+  {
+    "test_id": "c085683feffd9da64f8782545042884173a1d1e3",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><b>1<nobr></b><i><nobr>2</i>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       \"1\"\n|       <nobr>\n|     <nobr>\n|       <i>\n|     <i>\n|       <nobr>\n|         \"2\""
+  },
+  {
+    "test_id": "be84971ac4a451e91099d225d0315dd17a88b830",
+    "file": "html5lib_tests26.html",
+    "input": "<p><code x</code></p>\n",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <code>\n|         code=\"\"\n|         x<=\"\"\n|     <code>\n|       code=\"\"\n|       x<=\"\"\n|       \"\n\""
+  },
+  {
+    "test_id": "9d63346ca23dc3ee41e29fe7d8403934bce8c610",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><svg><foreignObject><p><i></p>a",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <svg svg>\n|       <svg foreignObject>\n|         <p>\n|           <i>\n|         <i>\n|           \"a\""
+  },
+  {
+    "test_id": "8434eb9c0c3daf656b3158f5955d07e39ddc6444",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><table><tr><td><svg><foreignObject><p><i></p>a",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <tbody>\n|         <tr>\n|           <td>\n|             <svg svg>\n|               <svg foreignObject>\n|                 <p>\n|                   <i>\n|                 <i>\n|                   \"a\""
+  },
+  {
+    "test_id": "6c95a99290e309b638b958272686a21486fa561e",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><math><mtext><p><i></p>a",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math mtext>\n|         <p>\n|           <i>\n|         <i>\n|           \"a\""
+  },
+  {
+    "test_id": "37d360649a2b092ad05e1be1c9ea65bfec83ca6d",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><table><tr><td><math><mtext><p><i></p>a",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <tbody>\n|         <tr>\n|           <td>\n|             <math math>\n|               <math mtext>\n|                 <p>\n|                   <i>\n|                 <i>\n|                   \"a\""
+  },
+  {
+    "test_id": "8919621ebbd1f4df0fdaacee3e53dc959a2d9235",
+    "file": "html5lib_tests26.html",
+    "input": "<!DOCTYPE html><body><div><!/div>a",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       <!-- /div -->\n|       \"a\""
+  },
+  {
+    "test_id": "3723d028349cbbc1a5c3f014987bb11c8ba804d0",
+    "file": "html5lib_tests26.html",
+    "input": "<button><p><button>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <button>\n|       <p>\n|     <button>"
+  },
+  {
+    "test_id": "e370b3102af9ba28e24f5c41a08443cdd9dd6d25",
+    "file": "html5lib_tests26.html",
+    "input": "<svg></p><foo>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <svg svg>\n|     <p>\n|     <foo>"
+  },
+  {
+    "test_id": "d89064b85cdb1cf0d9e01b0d4618f6f5901533e1",
+    "file": "html5lib_tests26.html",
+    "input": "<svg></br><foo>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <svg svg>\n|     <br>\n|     <foo>"
+  },
+  {
+    "test_id": "d22b654495ccbf7ca93f5356e93c828ba65b00dd",
+    "file": "html5lib_tests26.html",
+    "input": "<math></p><foo>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|     <p>\n|     <foo>"
+  },
+  {
+    "test_id": "ce65a73998345e8be4da9bccfe2cec9fab57c3be",
+    "file": "html5lib_tests26.html",
+    "input": "<math></br><foo>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|     <br>\n|     <foo>"
+  }
+]
