@@ -517,6 +517,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "linebreak_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "command"
         },
         {
