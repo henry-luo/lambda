@@ -139,7 +139,7 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
     if (token->type == HTML5_TOKEN_DOCTYPE) {
         // insert DOCTYPE node as child of document
         log_debug("html5: doctype name=%s", token->doctype_name ? token->doctype_name->chars : "null");
-        
+
         MarkBuilder builder(parser->input);
         ElementBuilder eb = builder.element("#doctype");
         if (token->doctype_name) {
@@ -147,7 +147,7 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
         }
         Element* doctype = eb.final().element;
         array_append(parser->document, Item{.element = doctype}, parser->pool, parser->arena);
-        
+
         parser->mode = HTML5_MODE_BEFORE_HTML;
         return;
     }
