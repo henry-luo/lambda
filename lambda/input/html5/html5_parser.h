@@ -104,8 +104,22 @@ void html5_clear_active_formatting_to_marker(Html5Parser* parser);
 
 // Element insertion
 Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token);
+Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token);
 void html5_insert_character(Html5Parser* parser, char c);
 void html5_insert_comment(Html5Parser* parser, Html5Token* token);
+
+// Active formatting elements
+void html5_push_active_formatting_element(Html5Parser* parser, Element* elem, Html5Token* token);
+void html5_push_active_formatting_marker(Html5Parser* parser);
+bool html5_is_formatting_element(const char* tag_name);
+bool html5_is_special_element(const char* tag_name);
+
+// Adoption Agency Algorithm
+void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token);
+int html5_find_formatting_element(Html5Parser* parser, const char* tag_name);
+int html5_find_element_in_stack(Html5Parser* parser, Element* elem);
+void html5_remove_from_active_formatting(Html5Parser* parser, int index);
+void html5_remove_from_stack(Html5Parser* parser, int index);
 void html5_flush_pending_text(Html5Parser* parser);
 
 // Tokenizer (defined in html5_tokenizer.cpp)
