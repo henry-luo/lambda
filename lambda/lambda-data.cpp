@@ -427,11 +427,11 @@ void list_push(List *list, Item item) {
     // 3. need to merge with previous string if any (unless disabled)
     if (type_id == LMD_TYPE_STRING) {
         // Only attempt string merging if input_context is available and merging is enabled
-        bool should_merge = input_context != NULL && 
+        bool should_merge = input_context != NULL &&
                            !input_context->disable_string_merging &&
-                           list->length > 0 && 
+                           list->length > 0 &&
                            list->items != NULL;
-        
+
         if (should_merge) {
             log_debug("list_push: checking for string merging, list length: %ld", list->length);
             Item prev_item = list->items[list->length - 1];
