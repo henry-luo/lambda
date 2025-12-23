@@ -464,7 +464,12 @@ Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) 
         ItemReader value;
         while (it.next(&key, &value)) {
             if (key && value.isString()) {
-                eb.attr(key, value.cstring());
+                // Get the actual String* pointer to preserve empty strings properly
+                // (going through cstring() would cause empty strings to be recreated as EMPTY_STRING)
+                String* str_value = value.asString();
+                if (str_value) {
+                    eb.attr(key, Item{.item = s2it(str_value)});
+                }
             }
         }
     }
