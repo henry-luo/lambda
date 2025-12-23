@@ -99,6 +99,10 @@
         {
           "type": "text",
           "named": true
+        },
+        {
+          "type": "verb_command",
+          "named": true
         }
       ]
     }
@@ -205,6 +209,10 @@
         },
         {
           "type": "text",
+          "named": true
+        },
+        {
+          "type": "verb_command",
           "named": true
         }
       ]

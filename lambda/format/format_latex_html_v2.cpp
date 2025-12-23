@@ -4,6 +4,11 @@
 #include "format.h"
 #include "html_writer.hpp"
 #include "html_generator.hpp"
+#include "latex_packages.hpp"
+#include "latex_docclass.hpp"
+#include "latex_assets.hpp"
+#include "latex_picture.hpp"
+#include "latex_hyphenation.hpp"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 #include "../input/input.hpp"
@@ -15,6 +20,7 @@
 #include <iomanip>
 #include <cstring>
 #include <cstdlib>
+#include <ctime>
 #include <strings.h>
 #include <map>
 #include <vector>
@@ -421,7 +427,9 @@ public:
           recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), 
           restricted_h_mode_first_text_(false), next_box_frame_(false),
           pending_zws_output_(false), pending_zws_had_trailing_space_(false),
-          group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0) {}
+          group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0),
+          stored_title_({0}), stored_author_({0}), stored_date_({0}),
+          has_title_(false), has_author_(false), has_date_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -528,6 +536,17 @@ public:
     MacroDefinition* getMacro(const std::string& name);
     Element* expandMacro(const std::string& name, const std::vector<Element*>& args);
     
+    // Document metadata storage for \title, \author, \date, \maketitle
+    void storeTitle(Item elem) { stored_title_ = elem; has_title_ = true; }
+    void storeAuthor(Item elem) { stored_author_ = elem; has_author_ = true; }
+    void storeDate(Item elem) { stored_date_ = elem; has_date_ = true; }
+    bool hasTitle() const { return has_title_; }
+    bool hasAuthor() const { return has_author_; }
+    bool hasDate() const { return has_date_; }
+    Item getStoredTitle() const { return stored_title_; }
+    Item getStoredAuthor() const { return stored_author_; }
+    Item getStoredDate() const { return stored_date_; }
+    
     // Margin paragraph functions
     int addMarginParagraph(const std::string& content);
     bool hasMarginParagraphs() const;
@@ -543,6 +562,13 @@ public:
     
     // Helper to output the content of a group with parbreak -> <br> conversion
     void outputGroupContent(Item group_item);
+    
+    // Sibling context accessors for \begin{...} handling
+    ElementReader* getSiblingParent() { return sibling_ctx_.parent_reader; }
+    int64_t getSiblingCurrentIndex() { return sibling_ctx_.current_index; }
+    void setSiblingConsumed(int64_t count) { 
+        if (sibling_ctx_.consumed_count) *sibling_ctx_.consumed_count = count; 
+    }
     
 private:
     HtmlGenerator* gen_;
@@ -628,6 +654,15 @@ private:
     };
     std::vector<MarginParagraph> margin_paragraphs_;
     int margin_par_counter_;  // Counter for generating unique IDs
+    
+    // Document metadata storage for \maketitle
+    // Stores element references so content can be rendered later
+    Item stored_title_;       // Content from \title{}
+    Item stored_author_;      // Content from \author{}
+    Item stored_date_;        // Content from \date{}
+    bool has_title_;
+    bool has_author_;
+    bool has_date_;
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -3498,6 +3533,162 @@ static void cmd_comment(LatexProcessor* proc, Item elem) {
     (void)elem;
 }
 
+static void cmd_multicols(LatexProcessor* proc, Item elem) {
+    // \begin{multicols}{n}[pretext] ... \end{multicols}
+    // Multi-column layout using CSS columns
+    // n = number of columns
+    // [pretext] = optional text to span all columns before the multi-column content
+    HtmlGenerator* gen = proc->generator();
+    
+    proc->closeParagraphIfOpen();
+    
+    ElementReader reader(elem);
+    int num_cols = 2;  // Default to 2 columns
+    int first_content_idx = 0;  // Index of first content child (after column count)
+    Item pretext_item = ItemNull;  // Optional pretext before multicol div
+    
+    // First child should be the number of columns (wrapped in curly_group)
+    if (reader.childCount() > 0) {
+        ItemReader first_child = reader.childAt(0);
+        // Check if it's a curly_group containing the column count
+        if (first_child.isElement()) {
+            ElementReader elem_reader = first_child.asElement();
+            const char* tag = elem_reader.tagName();
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                // Extract number from inside curly_group
+                if (elem_reader.childCount() > 0) {
+                    ItemReader num_child = elem_reader.childAt(0);
+                    if (num_child.isString()) {
+                        const char* num_str = num_child.cstring();
+                        if (num_str) {
+                            num_cols = atoi(num_str);
+                            if (num_cols < 1) num_cols = 1;
+                            if (num_cols > 10) num_cols = 10;
+                        }
+                    }
+                }
+                first_content_idx = 1;  // Skip the curly_group
+            }
+        } else if (first_child.isString()) {
+            // Direct string (backward compatibility)
+            const char* num_str = first_child.cstring();
+            if (num_str) {
+                num_cols = atoi(num_str);
+                if (num_cols < 1) num_cols = 1;
+                if (num_cols > 10) num_cols = 10;
+            }
+            first_content_idx = 1;
+        }
+    }
+    
+    // Check for optional pretext (second argument in brackets)
+    if (first_content_idx < reader.childCount()) {
+        ItemReader second_child = reader.childAt(first_content_idx);
+        if (second_child.isElement()) {
+            ElementReader second_elem = second_child.asElement();
+            const char* tag = second_elem.tagName();
+            if (tag && strcmp(tag, "brack_group") == 0) {
+                pretext_item = second_child.item();
+                first_content_idx++;  // Skip the brack_group too
+            }
+        }
+    }
+    
+    // Process pretext before the multicols div (spans all columns)
+    if (pretext_item.map != nullptr) {
+        ElementReader pretext_reader(pretext_item);
+        for (int64_t i = 0; i < pretext_reader.childCount(); i++) {
+            proc->processNode(pretext_reader.childAt(i).item());
+        }
+    }
+    
+    proc->closeParagraphIfOpen();
+    
+    // Build attributes string including class and style
+    char attrs[256];
+    snprintf(attrs, sizeof(attrs), "class=\"multicols\" style=\"column-count:%d\"", num_cols);
+    
+    // Open multicols container with all attributes
+    gen->writer()->openTagRaw("div", attrs);
+    
+    // Process content (skip first child which is the column count)
+    for (int64_t i = first_content_idx; i < reader.childCount(); i++) {
+        proc->processNode(reader.childAt(i).item());
+    }
+    
+    proc->closeParagraphIfOpen();
+    gen->writer()->closeTag("div");
+    
+    proc->setNextParagraphIsContinue();
+}
+
+// Forward declaration
+static void cmd_verb_command(LatexProcessor* proc, Item elem);
+
+static void cmd_verb(LatexProcessor* proc, Item elem) {
+    // \verb|text| when parsed as a regular command (scanner fallback)
+    // In this case, the children contain the verbatim content
+    // This happens when the scanner doesn't recognize the \verb pattern
+    HtmlGenerator* gen = proc->generator();
+    
+    proc->ensureParagraph();
+    
+    ElementReader reader(elem);
+    int64_t child_count = reader.childCount();
+    
+    if (child_count == 0) {
+        // No content - just output empty code block
+        gen->writer()->openTagRaw("code", "class=\"tt\"");
+        gen->writer()->closeTag("code");
+        return;
+    }
+    
+    // Check if first child is a string that looks like the full \verb token
+    // (scanner format: "\verb|content|")
+    ItemReader first_child = reader.childAt(0);
+    if (first_child.isString()) {
+        const char* text = first_child.cstring();
+        if (text && strncmp(text, "\\verb", 5) == 0) {
+            // This is actually a verb_command format - delegate to that handler
+            cmd_verb_command(proc, elem);
+            return;
+        }
+    }
+    
+    // Regular command form - extract content from children
+    gen->writer()->openTagRaw("code", "class=\"tt\"");
+    
+    // Collect all text content from children
+    for (int64_t i = 0; i < child_count; i++) {
+        ItemReader child = reader.childAt(i);
+        if (child.isString()) {
+            String* str = child.asString();
+            if (str && str->chars && str->len > 0) {
+                // Output verbatim - don't process special characters
+                std::string content(str->chars, str->len);
+                gen->writer()->writeText(content.c_str());
+            }
+        } else if (child.isElement()) {
+            // Process child elements (might be nested commands)
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            // For curly groups, extract their text content
+            if (tag && (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_text") == 0)) {
+                StringBuf* sb = stringbuf_new(proc->pool());
+                child_elem.textContent(sb);
+                if (sb->str && sb->length > 0) {
+                    std::string content(sb->str->chars, sb->length);
+                    gen->writer()->writeText(content.c_str());
+                }
+                stringbuf_free(sb);
+            }
+        }
+    }
+    
+    gen->writer()->closeTag("code");
+}
+
 static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     // \verb|text| inline verbatim with delimiter
     // The external scanner matched the full \verb<delim>text<delim> pattern
@@ -3622,13 +3813,33 @@ static void cmd_math(LatexProcessor* proc, Item elem) {
     gen->endInlineMath();
 }
 
+// Alias for inline_math (tree-sitter grammar node type)
+static void cmd_inline_math(LatexProcessor* proc, Item elem) {
+    cmd_math(proc, elem);
+}
+
 static void cmd_displaymath(LatexProcessor* proc, Item elem) {
-    // Display math: \[...\]
+    // Display math: \[...\] or $$...$$
     HtmlGenerator* gen = proc->generator();
     
     gen->startDisplayMath();
     proc->processChildren(elem);
     gen->endDisplayMath();
+}
+
+// Alias for display_math (tree-sitter grammar node type)
+static void cmd_display_math(LatexProcessor* proc, Item elem) {
+    cmd_displaymath(proc, elem);
+}
+
+// Handler for $$ delimiter token
+static void cmd_dollar_dollar(LatexProcessor* proc, Item elem) {
+    // This is a standalone $$ token - typically start/end of display math
+    // In tree-sitter parsing, display math should be wrapped in display_math element
+    // If we get a bare $$, treat it as displaymath content marker
+    (void)proc;
+    (void)elem;
+    // Nothing to output - $$ is just a delimiter
 }
 
 static void cmd_math_environment(LatexProcessor* proc, Item elem) {
@@ -3652,6 +3863,105 @@ static void cmd_equation_star(LatexProcessor* proc, Item elem) {
     gen->startEquation(true);  // unnumbered
     proc->processChildren(elem);
     gen->endEquation(true);
+}
+
+// Math-mode text command
+static void cmd_text(LatexProcessor* proc, Item elem) {
+    // \text{...} - text inside math mode (or standalone)
+    // Output as regular text (not math font)
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->span("text");  // Use text class for Roman font in math
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+// Math-mode symbols (Greek letters, operators, etc.)
+static void cmd_xi(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("ξ");
+    (void)elem;
+}
+
+static void cmd_pi(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("π");
+    (void)elem;
+}
+
+static void cmd_infty(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("∞");
+    (void)elem;
+}
+
+static void cmd_int_sym(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("∫");
+    (void)elem;
+}
+
+static void cmd_frac(LatexProcessor* proc, Item elem) {
+    // \frac{numerator}{denominator}
+    // Output as inline fraction: (num)/(denom) or use MathML-like structure
+    HtmlGenerator* gen = proc->generator();
+    ElementReader reader(elem);
+    
+    proc->ensureParagraph();
+    
+    // Get numerator and denominator from children
+    int64_t count = reader.childCount();
+    if (count >= 2) {
+        // Open fraction container
+        gen->writer()->openTagRaw("span", "class=\"frac\"");
+        
+        // Numerator
+        gen->writer()->openTagRaw("span", "class=\"numer\"");
+        ItemReader num = reader.childAt(0);
+        proc->processNode(num.item());
+        gen->writer()->closeTag("span");
+        
+        // Fraction bar is CSS
+        gen->writer()->openTagRaw("span", "class=\"frac-line\"");
+        gen->writer()->closeTag("span");
+        
+        // Denominator
+        gen->writer()->openTagRaw("span", "class=\"denom\"");
+        ItemReader denom = reader.childAt(1);
+        proc->processNode(denom.item());
+        gen->writer()->closeTag("span");
+        
+        gen->writer()->closeTag("span");
+    } else if (count >= 1) {
+        // Only numerator
+        proc->processChildren(elem);
+    }
+}
+
+static void cmd_superscript(LatexProcessor* proc, Item elem) {
+    // Superscript: x^{y}
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->writer()->openTagRaw("sup", nullptr);
+    proc->processChildren(elem);
+    gen->writer()->closeTag("sup");
+}
+
+static void cmd_subscript(LatexProcessor* proc, Item elem) {
+    // Subscript: x_{y}
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->writer()->openTagRaw("sub", nullptr);
+    proc->processChildren(elem);
+    gen->writer()->closeTag("sub");
+}
+
+static void cmd_hat(LatexProcessor* proc, Item elem) {
+    // \hat{x} - hat accent (caret)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    proc->processChildren(elem);
+    gen->text("̂");  // U+0302 combining circumflex accent
 }
 
 // Line break commands
@@ -4291,9 +4601,12 @@ static void _box(LatexProcessor* proc, Item elem, const char* classes,
     // Inner span for content (pass nullptr to get <span> without class)
     gen->span(nullptr);
     
-    // Process content in restricted horizontal mode
+    // Process content in restricted horizontal mode AND inline mode
+    // Inline mode prevents paragraph creation inside the box
     proc->enterRestrictedHMode();
+    proc->enterInlineMode();
     proc->processChildren(elem);
+    proc->exitInlineMode();
     proc->exitRestrictedHMode();
     
     gen->closeElement(); // close inner span
@@ -4358,9 +4671,97 @@ static void cmd_fbox(LatexProcessor* proc, Item elem) {
 
 static void cmd_framebox(LatexProcessor* proc, Item elem) {
     // \framebox[width][pos]{text} - framed box with options
+    // Same as makebox but with frame class
     // latex.js: @_box width, pos, txt, "hbox frame"
-    // TODO: Parse width and position parameters
-    _box(proc, elem, "hbox frame");
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    
+    // Default values
+    std::string width = "";
+    std::string pos = "";
+    
+    // Collect bracket groups and content children
+    std::vector<std::string> brack_params;
+    std::vector<Item> content_items;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                brack_params.push_back(std::string(str->chars, str->len));
+            } else {
+                // Content elements (curly_group, etc.)
+                content_items.push_back(child.item());
+            }
+        } else if (child.isString()) {
+            // Text content
+            content_items.push_back(child.item());
+        }
+    }
+    
+    // Parse bracket parameters
+    if (brack_params.size() >= 1) {
+        width = brack_params[0];  // Width
+    }
+    if (brack_params.size() >= 2) {
+        pos = brack_params[1];  // Position: l, c, r, s
+    }
+    
+    // Build CSS classes - include frame
+    std::string classes = "hbox frame";
+    
+    // Position classes
+    if (!pos.empty() && !width.empty()) {
+        switch (pos[0]) {
+        case 's': classes += " stretch"; break;
+        case 'c': classes += " clap"; break;
+        case 'l': classes += " rlap"; break;
+        case 'r': classes += " llap"; break;
+        }
+    }
+    
+    proc->ensureParagraph();
+    
+    // Build style attribute
+    std::stringstream style;
+    style << std::fixed << std::setprecision(3);
+    if (!width.empty()) {
+        double width_px = convert_length_to_px(width.c_str());
+        if (width_px >= 0) {
+            style << "width:" << width_px << "px";
+        }
+    }
+    
+    // Generate HTML
+    std::stringstream attrs;
+    attrs << "class=\"" << classes << "\"";
+    if (!style.str().empty()) {
+        attrs << " style=\"" << style.str() << "\"";
+    }
+    
+    gen->writer()->openTagRaw("span", attrs.str().c_str());
+    gen->span(nullptr);  // inner span for content
+    
+    // Process content in restricted horizontal and inline mode
+    proc->enterRestrictedHMode();
+    proc->enterInlineMode();
+    for (const Item& item : content_items) {
+        proc->processNode(item);
+    }
+    proc->exitInlineMode();
+    proc->exitRestrictedHMode();
+    
+    gen->closeElement();  // close inner span
+    gen->closeElement();  // close outer span
 }
 
 static void cmd_frame(LatexProcessor* proc, Item elem) {
@@ -4508,8 +4909,105 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
 static void cmd_makebox(LatexProcessor* proc, Item elem) {
     // \makebox[width][pos]{text} - make box with size
     // latex.js: @_box width, pos, txt, "hbox"
-    // TODO: Parse width and position
-    _box(proc, elem, "hbox");
+    // width: optional length
+    // pos: l (left/flush-right), c (center), r (right/flush-left), s (spread)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    
+    // Default values
+    std::string width = "";
+    std::string pos = "";
+    
+    // Collect bracket groups and content children
+    std::vector<std::string> brack_params;
+    std::vector<Item> content_items;
+    
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional parameter
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* str = stringbuf_to_string(sb);
+                brack_params.push_back(std::string(str->chars, str->len));
+            } else {
+                // Content elements (curly_group, etc.)
+                content_items.push_back(child.item());
+            }
+        } else if (child.isString()) {
+            // Text content
+            content_items.push_back(child.item());
+        }
+    }
+    
+    // Parse bracket parameters
+    if (brack_params.size() >= 1) {
+        width = brack_params[0];  // Width
+    }
+    if (brack_params.size() >= 2) {
+        pos = brack_params[1];  // Position: l, c, r, s
+    }
+    
+    // Build CSS classes
+    std::string classes = "hbox";
+    
+    // Position classes
+    // l = left (content appears at left, box extends right = rlap)
+    // c = center (content centered, box extends both ways = clap)
+    // r = right (content at right, box extends left = llap)
+    if (!pos.empty() && !width.empty()) {
+        switch (pos[0]) {
+        case 's': classes += " stretch"; break;
+        case 'c': classes += " clap"; break;
+        case 'l': classes += " rlap"; break;
+        case 'r': classes += " llap"; break;
+        }
+    }
+    
+    // Add frame class if requested by \framebox
+    if (proc->get_next_box_frame()) {
+        classes += " frame";
+    }
+    
+    proc->ensureParagraph();
+    
+    // Build style attribute
+    std::stringstream style;
+    style << std::fixed << std::setprecision(3);  // 3 decimal places
+    if (!width.empty()) {
+        double width_px = convert_length_to_px(width.c_str());
+        if (width_px >= 0) {
+            style << "width:" << width_px << "px";
+        }
+    }
+    
+    // Generate HTML: <span class="classes" style="width:..."><span>content</span></span>
+    std::stringstream attrs;
+    attrs << "class=\"" << classes << "\"";
+    if (!style.str().empty()) {
+        attrs << " style=\"" << style.str() << "\"";
+    }
+    
+    gen->writer()->openTagRaw("span", attrs.str().c_str());
+    gen->span(nullptr);  // inner span for content
+    
+    // Process content in restricted horizontal and inline mode
+    proc->enterRestrictedHMode();
+    proc->enterInlineMode();
+    for (const Item& item : content_items) {
+        proc->processNode(item);
+    }
+    proc->exitInlineMode();
+    proc->exitRestrictedHMode();
+    
+    gen->closeElement();  // close inner span
+    gen->closeElement();  // close outer span
 }
 
 static void cmd_phantom(LatexProcessor* proc, Item elem) {
@@ -4615,33 +5113,24 @@ static void cmd_raggedleft(LatexProcessor* proc, Item elem) {
 // =============================================================================
 
 static void cmd_author(LatexProcessor* proc, Item elem) {
-    // \author{name} - set document author
-    HtmlGenerator* gen = proc->generator();
-    // Store author for \maketitle
-    // For now, just output inline with span - \maketitle will format properly later
-    gen->span("latex-author");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \author{name} - store author content for \maketitle
+    // LaTeX.js stores these and renders them in \maketitle
+    proc->storeAuthor(elem);
+    // Don't output anything - \maketitle will render
 }
 
 static void cmd_title(LatexProcessor* proc, Item elem) {
-    // \title{text} - set document title
-    HtmlGenerator* gen = proc->generator();
-    // Store title for \maketitle  
-    // For now, just output inline with span - \maketitle will format properly later
-    gen->span("latex-title");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \title{text} - store title content for \maketitle
+    // LaTeX.js stores these and renders them in \maketitle
+    proc->storeTitle(elem);
+    // Don't output anything - \maketitle will render
 }
 
 static void cmd_date(LatexProcessor* proc, Item elem) {
-    // \date{text} - set document date
-    HtmlGenerator* gen = proc->generator();
-    // Store date for \maketitle
-    // For now, just output inline with span - \maketitle will format properly later
-    gen->span("latex-date");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \date{text} - store date content for \maketitle
+    // LaTeX.js stores these and renders them in \maketitle
+    proc->storeDate(elem);
+    // Don't output anything - \maketitle will render
 }
 
 static void cmd_thanks(LatexProcessor* proc, Item elem) {
@@ -4653,12 +5142,79 @@ static void cmd_thanks(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_maketitle(LatexProcessor* proc, Item elem) {
-    // \maketitle - generate title page
+    // \maketitle - generate title block matching LaTeX.js structure
+    // Structure: div.list.center containing:
+    //   - vspace 2em
+    //   - div.title (inline content only, no <p> tags)
+    //   - vspace 1.5em  
+    //   - div.author (inline content only)
+    //   - vspace 1em
+    //   - div.date (inline content only)
+    //   - vspace 1.5em
+    (void)elem;
     HtmlGenerator* gen = proc->generator();
-    gen->div("maketitle");
-    // TODO: Combine stored title, author, date
-    // For now, just create a placeholder
+    
+    // Close any open paragraph before title block
+    proc->closeParagraphIfOpen();
+    
+    // Start the centered title block container
+    // Use raw HTML since we need class="list center" (two classes)
+    gen->writer()->writeRawHtml("<div class=\"list center\">");
+    gen->enterGroup();  // Track element depth
+    
+    // Vertical space before title (2em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:2em");
     gen->closeElement();
+    
+    // Title - enter inline mode to suppress <p> creation
+    if (proc->hasTitle()) {
+        gen->div("title");
+        proc->enterInlineMode();
+        proc->processChildren(proc->getStoredTitle());
+        proc->exitInlineMode();
+        gen->closeElement();
+    }
+    
+    // Vertical space after title (1.5em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:1.5em");
+    gen->closeElement();
+    
+    // Author - enter inline mode to suppress <p> creation
+    if (proc->hasAuthor()) {
+        gen->div("author");
+        proc->enterInlineMode();
+        proc->processChildren(proc->getStoredAuthor());
+        proc->exitInlineMode();
+        gen->closeElement();
+    }
+    
+    // Vertical space after author (1em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:1em");
+    gen->closeElement();
+    
+    // Date (or today's date if not set) - enter inline mode
+    gen->div("date");
+    proc->enterInlineMode();
+    if (proc->hasDate()) {
+        proc->processChildren(proc->getStoredDate());
+    } else {
+        // Default to current date like LaTeX.js \today
+        time_t now = time(nullptr);
+        struct tm* tm_info = localtime(&now);
+        char date_buf[64];
+        strftime(date_buf, sizeof(date_buf), "%B %d, %Y", tm_info);
+        gen->text(date_buf);
+    }
+    proc->exitInlineMode();
+    gen->closeElement();
+    
+    // Vertical space after date (1.5em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:1.5em");
+    gen->closeElement();
+    
+    // Close the container
+    gen->writer()->writeRawHtml("</div>");
+    gen->exitGroup();
 }
 
 // =============================================================================
@@ -5062,6 +5618,728 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
     
     if (filename) {
         gen->includegraphics(filename, options);
+    }
+}
+
+// =============================================================================
+// Picture Environment - SVG graphics rendering
+// =============================================================================
+
+// Picture environment state - per-processor instance
+static thread_local PictureContext g_picture_ctx;
+static thread_local PictureRenderer* g_picture_renderer = nullptr;
+
+// Global unitlength in pixels (default: 1pt = 1.333px)
+// This is set by \setlength{\unitlength}{...} and used when starting picture environments
+static thread_local double g_unitlength_px = 1.333;  // 1pt default
+
+// Helper: Parse coordinate pair from string like "(60,50)" or "(60, 50)"
+// Returns pointer to character after closing paren, or nullptr on failure
+static const char* parsePicCoordAdvance(const char* str, double* x, double* y) {
+    if (!str || !x || !y) return nullptr;
+    
+    // skip leading whitespace
+    while (*str && (*str == ' ' || *str == '\t' || *str == '\n')) str++;
+    if (*str != '(') return nullptr;
+    str++;
+    
+    char* end;
+    *x = strtod(str, &end);
+    if (end == str) return nullptr;
+    str = end;
+    
+    // skip comma and whitespace
+    while (*str && (*str == ' ' || *str == '\t' || *str == ',')) str++;
+    
+    *y = strtod(str, &end);
+    if (end == str) return nullptr;
+    str = end;
+    
+    // skip to closing paren
+    while (*str && *str != ')') str++;
+    if (*str == ')') str++;
+    
+    return str;
+}
+
+static bool parsePicCoord(const char* str, double* x, double* y) {
+    return parsePicCoordAdvance(str, x, y) != nullptr;
+}
+
+// Forward declaration for cmd_picture (used by cmd_begin)
+static void cmd_picture(LatexProcessor* proc, Item elem);
+
+// Structure to hold parsed picture items for sequential processing
+struct PictureItem {
+    enum Type { TEXT, PUT, LINE, VECTOR, CIRCLE, CIRCLE_FILLED, OVAL, QBEZIER, 
+                MULTIPUT, THICKLINES, THINLINES, LINETHICKNESS, CURLY_GROUP, BRACK_GROUP, UNKNOWN };
+    Type type;
+    std::string text;
+    Item elem;
+    
+    PictureItem() : type(UNKNOWN), elem(ItemNull) {}
+    PictureItem(Type t, const std::string& txt = "") : type(t), text(txt), elem(ItemNull) {}
+    PictureItem(Type t, Item e) : type(t), elem(e) {}
+};
+
+// Flatten picture children into a sequential list
+static void flattenPictureChildren(Item elem, std::vector<PictureItem>& items, Pool* pool) {
+    ElementReader elem_reader(elem);
+    
+    auto iter = elem_reader.children();
+    ItemReader child;
+    
+    while (iter.next(&child)) {
+        TypeId type = child.getType();
+        
+        if (type == LMD_TYPE_STRING) {
+            String* str = (String*)child.item().string_ptr;
+            items.push_back(PictureItem(PictureItem::TEXT, str->chars));
+            continue;
+        }
+        
+        if (type != LMD_TYPE_ELEMENT) continue;
+        
+        ElementReader child_elem(child.item());
+        const char* tag = child_elem.tagName();
+        
+        if (!tag) continue;
+        
+        if (strcmp(tag, "paragraph") == 0) {
+            // Recurse into paragraphs
+            flattenPictureChildren(child.item(), items, pool);
+        }
+        else if (strcmp(tag, "put") == 0) {
+            items.push_back(PictureItem(PictureItem::PUT, child.item()));
+        }
+        else if (strcmp(tag, "line") == 0) {
+            items.push_back(PictureItem(PictureItem::LINE, child.item()));
+        }
+        else if (strcmp(tag, "vector") == 0) {
+            items.push_back(PictureItem(PictureItem::VECTOR, child.item()));
+        }
+        else if (strcmp(tag, "circle") == 0) {
+            items.push_back(PictureItem(PictureItem::CIRCLE, child.item()));
+        }
+        else if (strcmp(tag, "circle*") == 0) {
+            items.push_back(PictureItem(PictureItem::CIRCLE_FILLED, child.item()));
+        }
+        else if (strcmp(tag, "oval") == 0) {
+            items.push_back(PictureItem(PictureItem::OVAL, child.item()));
+        }
+        else if (strcmp(tag, "qbezier") == 0) {
+            items.push_back(PictureItem(PictureItem::QBEZIER, child.item()));
+        }
+        else if (strcmp(tag, "multiput") == 0) {
+            items.push_back(PictureItem(PictureItem::MULTIPUT, child.item()));
+        }
+        else if (strcmp(tag, "thicklines") == 0) {
+            items.push_back(PictureItem(PictureItem::THICKLINES));
+        }
+        else if (strcmp(tag, "thinlines") == 0) {
+            items.push_back(PictureItem(PictureItem::THINLINES));
+        }
+        else if (strcmp(tag, "linethickness") == 0) {
+            items.push_back(PictureItem(PictureItem::LINETHICKNESS, child.item()));
+        }
+        else if (strcmp(tag, "curly_group") == 0) {
+            items.push_back(PictureItem(PictureItem::CURLY_GROUP, child.item()));
+        }
+        else if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "bracket_group") == 0) {
+            items.push_back(PictureItem(PictureItem::BRACK_GROUP, child.item()));
+        }
+        else {
+            log_debug("picture flatten: unknown '%s'", tag);
+            items.push_back(PictureItem(PictureItem::UNKNOWN, child.item()));
+        }
+    }
+}
+
+// Process flattened picture items
+static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& items) {
+    Pool* pool = proc->pool();
+    size_t i = 0;
+    
+    while (i < items.size()) {
+        PictureItem& item = items[i];
+        
+        switch (item.type) {
+            case PictureItem::THICKLINES:
+                if (g_picture_renderer) g_picture_renderer->thicklines();
+                i++;
+                break;
+                
+            case PictureItem::THINLINES:
+                if (g_picture_renderer) g_picture_renderer->thinlines();
+                i++;
+                break;
+                
+            case PictureItem::LINETHICKNESS: {
+                // \linethickness{value}
+                // The value is in the element's children or next curly_group
+                double thickness = 0.4;  // default in pt
+                
+                if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
+                    ElementReader lt_elem(item.elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    lt_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        char* end;
+                        thickness = strtod(str->chars, &end);
+                    }
+                }
+                
+                // Also check for next curly_group
+                if (thickness <= 0 && i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        char* end;
+                        thickness = strtod(str->chars, &end);
+                    }
+                    i++;
+                }
+                
+                if (g_picture_renderer && thickness > 0) {
+                    g_picture_renderer->linethickness(thickness);
+                }
+                log_debug("linethickness: %.2fpt", thickness);
+                i++;
+                break;
+            }
+                
+            case PictureItem::PUT: {
+                // \put(x,y){content}
+                // Next items should be: TEXT with "(x,y)", then CURLY_GROUP with content
+                double x = 0, y = 0;
+                
+                // Look for coordinates in next TEXT item
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &x, &y)) {
+                        i++;  // consume the coord text
+                    }
+                }
+                
+                // Set the current position for nested commands
+                if (g_picture_renderer) {
+                    g_picture_renderer->setPosition(x, y);
+                }
+                
+                // Look for content in next CURLY_GROUP
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    // Check if curly_group contains picture commands
+                    ElementReader grp(items[i+1].elem);
+                    std::vector<PictureItem> nested_items;
+                    flattenPictureChildren(items[i+1].elem, nested_items, pool);
+                    
+                    bool has_nested_commands = false;
+                    for (const auto& ni : nested_items) {
+                        if (ni.type == PictureItem::LINE || ni.type == PictureItem::VECTOR ||
+                            ni.type == PictureItem::CIRCLE || ni.type == PictureItem::CIRCLE_FILLED ||
+                            ni.type == PictureItem::OVAL || ni.type == PictureItem::QBEZIER) {
+                            has_nested_commands = true;
+                            break;
+                        }
+                    }
+                    
+                    if (has_nested_commands) {
+                        // Process nested picture commands at position (x, y)
+                        log_debug("put: (%.2f,%.2f) processing nested commands", x, y);
+                        processPictureItems(proc, nested_items);
+                    } else {
+                        // Just text content
+                        StringBuf* sb = stringbuf_new(pool);
+                        grp.textContent(sb);
+                        String* str = stringbuf_to_string(sb);
+                        std::string content = str->chars;
+                        if (g_picture_renderer && !content.empty()) {
+                            g_picture_renderer->put(x, y, content);
+                        }
+                        log_debug("put: (%.2f,%.2f) text='%s'", x, y, content.c_str());
+                    }
+                    i++;  // consume the curly group
+                }
+                
+                i++;
+                break;
+            }
+            
+            case PictureItem::LINE: {
+                // \line(slope_x,slope_y){length}
+                double sx = 0, sy = 0, len = 0;
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &sx, &sy)) {
+                        i++;
+                    }
+                }
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    char* end;
+                    len = strtod(str->chars, &end);
+                    i++;
+                }
+                
+                if (g_picture_renderer) {
+                    g_picture_renderer->line(sx, sy, len);
+                }
+                log_debug("line: slope=(%.2f,%.2f) len=%.2f", sx, sy, len);
+                i++;
+                break;
+            }
+            
+            case PictureItem::VECTOR: {
+                // \vector(slope_x,slope_y){length}
+                double sx = 0, sy = 0, len = 0;
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &sx, &sy)) {
+                        i++;
+                    }
+                }
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    char* end;
+                    len = strtod(str->chars, &end);
+                    i++;
+                }
+                
+                if (g_picture_renderer) {
+                    g_picture_renderer->vector(sx, sy, len);
+                }
+                log_debug("vector: slope=(%.2f,%.2f) len=%.2f", sx, sy, len);
+                i++;
+                break;
+            }
+            
+            case PictureItem::CIRCLE: {
+                // \circle{diameter} or \circle*{diameter}
+                // The diameter might be:
+                // 1. A child of the circle element itself (when parsed as {$: "circle", _: ["10"]})
+                // 2. A sibling curly_group (when parsed separately)
+                double diameter = 0;
+                bool filled = false;
+                
+                // First, check if the circle element has children with the diameter
+                if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
+                    ElementReader circle_elem(item.elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    circle_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        const char* txt = str->chars;
+                        // Check for * prefix
+                        while (*txt == ' ' || *txt == '\t' || *txt == '\n') txt++;
+                        if (*txt == '*') {
+                            filled = true;
+                            txt++;
+                        }
+                        char* end;
+                        diameter = strtod(txt, &end);
+                    }
+                }
+                
+                // If diameter still 0, check for sibling items
+                if (diameter == 0) {
+                    // Check for * in next text
+                    if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                        const char* txt = items[i+1].text.c_str();
+                        while (*txt == ' ' || *txt == '\t' || *txt == '\n') txt++;
+                        if (*txt == '*') {
+                            filled = true;
+                            i++;  // consume the *
+                        }
+                    }
+                    
+                    if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                        ElementReader grp(items[i+1].elem);
+                        StringBuf* sb = stringbuf_new(pool);
+                        grp.textContent(sb);
+                        String* str = stringbuf_to_string(sb);
+                        char* end;
+                        diameter = strtod(str->chars, &end);
+                        i++;
+                    }
+                }
+                
+                if (g_picture_renderer && diameter > 0) {
+                    g_picture_renderer->circle(diameter, filled);
+                }
+                log_debug("circle: diameter=%.2f filled=%d", diameter, filled);
+                i++;
+                break;
+            }
+            
+            case PictureItem::CIRCLE_FILLED: {
+                // \circle*{diameter} - filled circle (parsed as separate command)
+                double diameter = 0;
+                
+                // Check if the circle* element has children with the diameter
+                if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
+                    ElementReader circle_elem(item.elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    circle_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        char* end;
+                        diameter = strtod(str->chars, &end);
+                    }
+                }
+                
+                // If diameter still 0, check for sibling curly_group
+                if (diameter == 0 && i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    char* end;
+                    diameter = strtod(str->chars, &end);
+                    i++;
+                }
+                
+                if (g_picture_renderer && diameter > 0) {
+                    g_picture_renderer->circle(diameter, true);  // always filled
+                }
+                log_debug("circle* (filled): diameter=%.2f", diameter);
+                i++;
+                break;
+            }
+            
+            case PictureItem::OVAL: {
+                // \oval(width,height)[portion]
+                double w = 0, h = 0;
+                std::string portion;
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &w, &h)) {
+                        i++;
+                    }
+                }
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::BRACK_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    portion = str->chars;
+                    i++;
+                }
+                
+                if (g_picture_renderer && (w > 0 || h > 0)) {
+                    g_picture_renderer->oval(w, h, portion);
+                }
+                log_debug("oval: (%.2f,%.2f) portion='%s'", w, h, portion.c_str());
+                i++;
+                break;
+            }
+            
+            case PictureItem::QBEZIER: {
+                // \qbezier(x1,y1)(cx,cy)(x2,y2)
+                double x1 = 0, y1 = 0, cx = 0, cy = 0, x2 = 0, y2 = 0;
+                int coords = 0;
+                
+                // Look for three coordinate pairs in following TEXT items
+                while (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT && coords < 3) {
+                    double tx, ty;
+                    if (parsePicCoord(items[i+1].text.c_str(), &tx, &ty)) {
+                        if (coords == 0) { x1 = tx; y1 = ty; }
+                        else if (coords == 1) { cx = tx; cy = ty; }
+                        else { x2 = tx; y2 = ty; }
+                        coords++;
+                        i++;
+                    } else {
+                        break;
+                    }
+                }
+                
+                if (g_picture_renderer && coords >= 3) {
+                    g_picture_renderer->qbezier(x1, y1, cx, cy, x2, y2);
+                }
+                log_debug("qbezier: (%f,%f)-(%f,%f)-(%f,%f)", x1, y1, cx, cy, x2, y2);
+                i++;
+                break;
+            }
+            
+            case PictureItem::MULTIPUT: {
+                // \multiput(x,y)(dx,dy){n}{object}
+                double x = 0, y = 0, dx = 0, dy = 0;
+                int n = 0;
+                
+                // Parse coordinates from following TEXT items
+                // The text might contain both coordinates like "(0,0)(1,0)"
+                while (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    const char* text = items[i+1].text.c_str();
+                    
+                    // Try to parse first coordinate pair
+                    const char* after_first = parsePicCoordAdvance(text, &x, &y);
+                    if (after_first) {
+                        // Try to parse second coordinate pair from remainder
+                        const char* after_second = parsePicCoordAdvance(after_first, &dx, &dy);
+                        if (after_second) {
+                            // Successfully parsed both coordinates
+                            i++;
+                            break;
+                        }
+                    }
+                    
+                    // If we can't parse anything, stop
+                    if (after_first == nullptr) break;
+                    i++;
+                }
+                
+                // Get n from first curly group
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    n = atoi(str->chars);
+                    i++;
+                }
+                
+                // Get object from second curly group - process nested picture commands
+                std::vector<PictureItem> nested_items;
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    flattenPictureChildren(items[i+1].elem, nested_items, pool);
+                    i++;
+                }
+                
+                log_debug("multiput: start=(%.2f,%.2f) delta=(%.2f,%.2f) n=%d nested=%zu", 
+                         x, y, dx, dy, n, nested_items.size());
+                
+                // Process n copies of the nested content with position offset
+                if (g_picture_renderer && n > 0) {
+                    for (int copy = 0; copy < n; copy++) {
+                        double pos_x = x + copy * dx;
+                        double pos_y = y + copy * dy;
+                        g_picture_renderer->setPosition(pos_x, pos_y);
+                        
+                        // Process nested items (similar to main loop)
+                        for (size_t ni = 0; ni < nested_items.size(); ni++) {
+                            const auto& item = nested_items[ni];
+                            
+                            if (item.type == PictureItem::LINE) {
+                                // Process nested line: LINE, TEXT(slope), CURLY_GROUP(length)
+                                double sx = 0, sy = 0, len = 0;
+                                
+                                // Check next item for slope text
+                                if (ni + 1 < nested_items.size() && nested_items[ni+1].type == PictureItem::TEXT) {
+                                    parsePicCoord(nested_items[ni+1].text.c_str(), &sx, &sy);
+                                    ni++;
+                                }
+                                
+                                // Check next item for length curly_group
+                                if (ni + 1 < nested_items.size() && nested_items[ni+1].type == PictureItem::CURLY_GROUP) {
+                                    ElementReader grp(nested_items[ni+1].elem);
+                                    StringBuf* sb = stringbuf_new(pool);
+                                    grp.textContent(sb);
+                                    String* str = stringbuf_to_string(sb);
+                                    char* end;
+                                    len = strtod(str->chars, &end);
+                                    ni++;
+                                }
+                                
+                                if (len > 0) {
+                                    g_picture_renderer->line(sx, sy, len);
+                                }
+                            } else if (item.type == PictureItem::CIRCLE || item.type == PictureItem::CIRCLE_FILLED) {
+                                // Process nested circle
+                                double diameter = 0;
+                                
+                                // Diameter might be in element content or following curly_group
+                                ElementReader circ_elem(item.elem);
+                                StringBuf* sb = stringbuf_new(pool);
+                                circ_elem.textContent(sb);
+                                String* str = stringbuf_to_string(sb);
+                                if (str && strlen(str->chars) > 0) {
+                                    char* end;
+                                    diameter = strtod(str->chars, &end);
+                                }
+                                
+                                if (diameter == 0 && ni + 1 < nested_items.size() && 
+                                    nested_items[ni+1].type == PictureItem::CURLY_GROUP) {
+                                    ElementReader grp(nested_items[ni+1].elem);
+                                    StringBuf* sb2 = stringbuf_new(pool);
+                                    grp.textContent(sb2);
+                                    String* str2 = stringbuf_to_string(sb2);
+                                    char* end;
+                                    diameter = strtod(str2->chars, &end);
+                                    ni++;
+                                }
+                                
+                                if (diameter > 0) {
+                                    g_picture_renderer->circle(diameter, item.type == PictureItem::CIRCLE_FILLED);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                i++;
+                break;
+            }
+            
+            case PictureItem::TEXT:
+            case PictureItem::CURLY_GROUP:
+            case PictureItem::BRACK_GROUP:
+            case PictureItem::UNKNOWN:
+            default:
+                // Skip text and orphaned groups
+                i++;
+                break;
+        }
+    }
+}
+
+// Handler for \begin{...} when parsed as a standalone command (inside curly groups)
+// This collects siblings until matching \end{...} and dispatches to appropriate handler
+static void cmd_begin(LatexProcessor* proc, Item elem) {
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    
+    // Extract environment name from \begin element content
+    ElementReader elem_reader(elem);
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* str = stringbuf_to_string(sb);
+    const char* env_name = str ? str->chars : "";
+    
+    log_debug("cmd_begin: environment='%s'", env_name);
+    
+    // Only handle picture environment specially
+    if (strcmp(env_name, "picture") != 0) {
+        // For other environments, just process children
+        proc->processChildren(elem);
+        return;
+    }
+    
+    // For picture environment, we need to collect siblings until \end{picture}
+    // Use sibling context to consume following elements
+    
+    // Create a synthetic element to hold the picture content
+    MarkBuilder builder(proc->input());
+    ElementBuilder pic_elem = builder.element("picture");
+    
+    // Consume following siblings until \end{picture}
+    int64_t consumed = 0;
+    bool found_end = false;
+    
+    // Access sibling context through proc's internal method
+    ElementReader* parent = proc->getSiblingParent();
+    int64_t current_idx = proc->getSiblingCurrentIndex();
+    
+    if (parent) {
+        int64_t count = parent->childCount();
+        for (int64_t i = current_idx + 1; i < count; i++) {
+            ItemReader sibling = parent->childAt(i);
+            consumed++;
+            
+            // Check if this is \end{picture}
+            if (sibling.isElement()) {
+                ElementReader sib_elem = sibling.asElement();
+                const char* tag = sib_elem.tagName();
+                if (tag && strcmp(tag, "end") == 0) {
+                    // Check if it's \end{picture}
+                    StringBuf* end_sb = stringbuf_new(pool);
+                    sib_elem.textContent(end_sb);
+                    String* end_str = stringbuf_to_string(end_sb);
+                    if (end_str && strcmp(end_str->chars, "picture") == 0) {
+                        found_end = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Add this sibling to the picture element
+            pic_elem.child(sibling.item());
+        }
+    }
+    
+    if (!found_end) {
+        log_warn("cmd_begin: no matching \\end{picture} found");
+    }
+    
+    // Tell processChildren how many siblings we consumed
+    proc->setSiblingConsumed(consumed);
+    
+    // Create the picture element and process it
+    Item picture_item = pic_elem.final();
+    cmd_picture(proc, picture_item);
+}
+
+static void cmd_picture(LatexProcessor* proc, Item elem) {
+    // \begin{picture}(width,height)(x_offset,y_offset)
+    // Parser gives: {"$":"picture", "_":[paragraph with coords and commands]}
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    
+    // Initialize picture context with current unitlength
+    g_picture_ctx = PictureContext();
+    g_picture_ctx.unitlength_px = g_unitlength_px;
+    g_picture_renderer = new PictureRenderer(g_picture_ctx);
+    
+    // Flatten picture children into sequential list
+    std::vector<PictureItem> items;
+    flattenPictureChildren(elem, items, pool);
+    
+    // Parse picture dimensions from first text content
+    double width = 100, height = 100;  // default
+    double x_off = 0, y_off = 0;
+    
+    for (size_t i = 0; i < items.size(); i++) {
+        if (items[i].type == PictureItem::TEXT) {
+            const char* text = items[i].text.c_str();
+            const char* next = parsePicCoordAdvance(text, &width, &height);
+            if (next) {
+                // Check for offset
+                parsePicCoord(next, &x_off, &y_off);
+                break;
+            }
+        }
+    }
+    
+    log_debug("cmd_picture: size=(%.2f,%.2f) offset=(%.2f,%.2f) unitlength=%.3fpx",
+              width, height, x_off, y_off, g_unitlength_px);
+    
+    // Begin picture with parsed dimensions
+    g_picture_renderer->beginPicture(width, height, x_off, y_off);
+    
+    // Process picture items
+    processPictureItems(proc, items);
+    
+    // End picture and get HTML output
+    std::string html = g_picture_renderer->endPicture();
+    
+    // Output directly as raw HTML
+    gen->rawHtml(html.c_str());
+    
+    // Cleanup
+    delete g_picture_renderer;
+    g_picture_renderer = nullptr;
+}
+
+static void cmd_thicklines(LatexProcessor* proc, Item elem) {
+    // \thicklines - set thick line mode for picture
+    if (g_picture_renderer) {
+        g_picture_renderer->thicklines();
+    }
+}
+
+static void cmd_thinlines(LatexProcessor* proc, Item elem) {
+    // \thinlines - set thin line mode for picture
+    if (g_picture_renderer) {
+        g_picture_renderer->thinlines();
     }
 }
 
@@ -5783,9 +7061,72 @@ static void cmd_documentclass(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_usepackage(LatexProcessor* proc, Item elem) {
-    // \usepackage[options]{package}
-    // Store package name for reference but no HTML output
-    // Package-specific commands should already be implemented individually
+    // \usepackage[options]{package1,package2,...}
+    // Parse options and package names, then load them via PackageRegistry
+    // 
+    // AST structure: <usepackage "package1,package2,...">
+    // - The curly group content is unwrapped to a direct string child
+    // - Optional bracket_group for options
+    
+    ElementReader reader(elem);
+    std::vector<std::string> options;
+    std::vector<std::string> package_names;
+    Pool* pool = proc->pool();
+    
+    int64_t child_count = reader.childCount();
+    for (int64_t i = 0; i < child_count; i++) {
+        ItemReader child = reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (tag && (strcmp(tag, "bracket_group") == 0 || strcmp(tag, "brack_group") == 0)) {
+                // Parse options (comma-separated in brackets)
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                std::string opt_text(sb->str ? sb->str->chars : "", sb->length);
+                stringbuf_free(sb);
+                
+                // Split by comma
+                std::istringstream iss(opt_text);
+                std::string opt;
+                while (std::getline(iss, opt, ',')) {
+                    size_t start = opt.find_first_not_of(" \t\n\r");
+                    size_t end = opt.find_last_not_of(" \t\n\r");
+                    if (start != std::string::npos) {
+                        options.push_back(opt.substr(start, end - start + 1));
+                    }
+                }
+            }
+        } else if (child.isString()) {
+            // Package names are stored as direct string children (curly group is unwrapped)
+            String* str = child.asString();
+            if (str && str->chars) {
+                std::string pkg_text(str->chars, str->len);
+                
+                // Split by comma
+                std::istringstream iss(pkg_text);
+                std::string pkg;
+                while (std::getline(iss, pkg, ',')) {
+                    size_t start = pkg.find_first_not_of(" \t\n\r");
+                    size_t end = pkg.find_last_not_of(" \t\n\r");
+                    if (start != std::string::npos) {
+                        package_names.push_back(pkg.substr(start, end - start + 1));
+                    }
+                }
+            }
+        }
+    }
+    
+    // Load each package via the registry
+    PackageRegistry& registry = PackageRegistry::instance();
+    for (const auto& pkg_name : package_names) {
+        if (!pkg_name.empty()) {
+            registry.loadPackage(pkg_name.c_str(), options);
+            log_debug("usepackage: loaded package '%s'", pkg_name.c_str());
+        }
+    }
 }
 
 static void cmd_include(LatexProcessor* proc, Item elem) {
@@ -6380,8 +7721,45 @@ static void cmd_newlength(LatexProcessor* proc, Item elem) {
 static void cmd_setlength(LatexProcessor* proc, Item elem) {
     // \setlength{\lengthcmd}{value}
     // Sets a length to a specific value
-    // In HTML, no output
-    // TODO: Length state tracking
+    // Currently only unitlength is tracked (for picture environment)
+    ElementReader elem_reader(elem);
+    
+    std::string length_name;
+    std::string length_value;
+    
+    // Parse children to get length name and value
+    for (int64_t i = 0; i < elem_reader.childCount(); i++) {
+        ItemReader child = elem_reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            // First element child is the length name (e.g., "unitlength")
+            // The tag name IS the length name
+            if (length_name.empty()) {
+                if (tag) {
+                    length_name = tag;
+                }
+            }
+        } else if (child.isString()) {
+            String* str = child.asString();
+            if (str && str->len > 0) {
+                // This is the length value
+                length_value = std::string(str->chars, str->len);
+            }
+        }
+    }
+    
+    // Handle unitlength specially for picture environment
+    if (length_name == "unitlength" && !length_value.empty()) {
+        double px = convert_length_to_px(length_value.c_str());
+        if (px > 0) {
+            g_unitlength_px = px;
+        }
+    }
+    
+    // No HTML output
 }
 
 // =============================================================================
@@ -6489,16 +7867,32 @@ void LatexProcessor::initCommandTable() {
     command_table_["flushleft"] = cmd_flushleft;
     command_table_["flushright"] = cmd_flushright;
     command_table_["comment"] = cmd_comment;
+    command_table_["multicols"] = cmd_multicols;  // Multi-column layout
     command_table_["verbatim"] = cmd_verbatim;
-    command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim
+    command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim (scanner)
+    command_table_["verb"] = cmd_verb;  // \verb fallback when scanner doesn't recognize
     
     // Math environments
     command_table_["math"] = cmd_math;
+    command_table_["inline_math"] = cmd_inline_math;  // Tree-sitter node for $...$
     command_table_["displaymath"] = cmd_displaymath;
+    command_table_["display_math"] = cmd_display_math;  // Tree-sitter node for $$...$$
+    command_table_["$$"] = cmd_dollar_dollar;  // $$ delimiter token
     command_table_["math_environment"] = cmd_math_environment;  // Tree-sitter node for \[...\]
     command_table_["displayed_equation"] = cmd_displaymath;  // Tree-sitter node for \[...\]
     command_table_["equation"] = cmd_equation;
     command_table_["equation*"] = cmd_equation_star;
+    
+    // Math-mode commands
+    command_table_["text"] = cmd_text;  // \text{...} inside math
+    command_table_["xi"] = cmd_xi;
+    command_table_["pi"] = cmd_pi;
+    command_table_["infty"] = cmd_infty;
+    command_table_["int"] = cmd_int_sym;
+    command_table_["frac"] = cmd_frac;
+    command_table_["superscript"] = cmd_superscript;
+    command_table_["subscript"] = cmd_subscript;
+    command_table_["hat"] = cmd_hat;
     
     // Line breaks
     command_table_["\\"] = cmd_newline;
@@ -6615,6 +8009,16 @@ void LatexProcessor::initCommandTable() {
     command_table_["graphics_include"] = cmd_includegraphics;
     command_table_["includegraphics"] = cmd_includegraphics;
     
+    // Picture environment (LaTeX picture graphics)
+    command_table_["picture"] = cmd_picture;
+    command_table_["begin"] = cmd_begin;  // Handle \begin{picture} inside curly groups
+    command_table_["end"] = [](LatexProcessor* proc, Item elem) {
+        // \end{...} is consumed by cmd_begin, skip orphaned ones
+        (void)proc; (void)elem;
+    };
+    command_table_["thicklines"] = cmd_thicklines;
+    command_table_["thinlines"] = cmd_thinlines;
+    
     // Color commands
     command_table_["color_reference"] = cmd_color_reference;  // Tree-sitter node for \textcolor and \colorbox
     command_table_["textcolor"] = cmd_textcolor;
@@ -6694,6 +8098,7 @@ bool LatexProcessor::isBlockCommand(const char* cmd_name) {
             strcmp(cmd_name, "tabular") == 0 ||
             strcmp(cmd_name, "equation") == 0 ||
             strcmp(cmd_name, "displaymath") == 0 ||
+            strcmp(cmd_name, "picture") == 0 ||
             strcmp(cmd_name, "par") == 0 ||
             strcmp(cmd_name, "newpage") == 0 ||
             strcmp(cmd_name, "maketitle") == 0 ||
@@ -8360,6 +9765,13 @@ void LatexProcessor::processText(const char* text) {
     // In monospace mode, dash/ligature conversions are skipped
     normalized = convertApostrophes(normalized.c_str(), inMonospaceMode());
     
+    // Apply hyphenation - insert soft hyphens (U+00AD) at valid break points
+    // This allows the browser to break long words for better text justification
+    // Skip hyphenation in monospace mode (verbatim, code, etc.)
+    if (!inMonospaceMode()) {
+        normalized = Hyphenator::instance().hyphenateText(normalized);
+    }
+    
     // Check if result is pure whitespace (multiple spaces/newlines)
     // Don't skip single spaces - they're significant in inline content
     bool all_whitespace = true;
@@ -8846,6 +10258,15 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         return;
     }
     
+    // Look up symbol in package registry (for symbols from textgreek, textcomp, gensymb, etc.)
+    const char* symbol = PackageRegistry::instance().lookupSymbol(cmd_name);
+    if (symbol && *symbol) {
+        log_debug("Symbol lookup: %s -> %s", cmd_name, symbol);
+        ensureParagraph();
+        gen_->text(symbol);
+        return;
+    }
+    
     // Unknown command - just output children
     log_debug("Unknown command: %s - processing children", cmd_name);  // DEBUG
     processChildren(elem);
@@ -8911,6 +10332,9 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     // Process LaTeX tree
     proc.process(input->root);
     
+    // Close any open paragraph at end of document
+    proc.closeParagraphIfOpen();
+    
     // Close HTML document container
     writer->closeTag("div");
     
@@ -8928,6 +10352,103 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     return result;
 }
 
+// =============================================================================
+// Full HTML Document Generation (with CSS and fonts)
+// =============================================================================
+
+std::string format_latex_html_v2_document(Input* input, const char* doc_class, 
+                                           const char* asset_base_url, bool embed_css) {
+    // Generate complete HTML document with CSS and fonts
+    // asset_base_url: base URL for CSS/font files (e.g., "https://cdn.example.com/latex-assets/")
+    // embed_css: if true, embed CSS inline; if false, use <link> tags
+    
+    if (!input || !input->root.item) {
+        log_error("format_latex_html_v2_document: invalid input");
+        return "";
+    }
+    
+    // Reset package registry for fresh document processing
+    PackageRegistry::instance().reset();
+    
+    // Get HTML body content
+    Item body_content = format_latex_html_v2(input, true);
+    TypeId body_type = get_type_id(body_content);
+    if (body_type != LMD_TYPE_STRING) {
+        log_error("format_latex_html_v2_document: failed to generate body content, got type %d", body_type);
+        return "";
+    }
+    
+    String* body_str = (String*)body_content.item;
+    std::string body_html(body_str->chars, body_str->len);
+    
+    // Extract document title from the body content
+    // Look for <div class="title">...</div> and extract plain text
+    std::string doc_title = "LaTeX Document";  // Default title
+    {
+        size_t title_start = body_html.find("<div class=\"title\">");
+        if (title_start != std::string::npos) {
+            title_start += 19;  // Skip past the opening tag
+            size_t title_end = body_html.find("</div>", title_start);
+            if (title_end != std::string::npos) {
+                std::string title_html = body_html.substr(title_start, title_end - title_start);
+                // Strip HTML tags to get plain text
+                std::string plain_title;
+                bool in_tag = false;
+                for (char c : title_html) {
+                    if (c == '<') {
+                        in_tag = true;
+                    } else if (c == '>') {
+                        in_tag = false;
+                    } else if (!in_tag) {
+                        plain_title += c;
+                    }
+                }
+                // Trim whitespace
+                size_t start = plain_title.find_first_not_of(" \t\n\r");
+                size_t end = plain_title.find_last_not_of(" \t\n\r");
+                if (start != std::string::npos && end != std::string::npos) {
+                    doc_title = plain_title.substr(start, end - start + 1);
+                }
+            }
+        }
+    }
+    
+    // Configure asset loading
+    LatexAssetConfig config;
+    if (asset_base_url && *asset_base_url) {
+        config.mode = AssetMode::LINK;
+        config.base_url = asset_base_url;
+    } else if (embed_css) {
+        config.mode = AssetMode::EMBED;
+    } else {
+        config.mode = AssetMode::LINK;
+    }
+    config.asset_dir = LatexAssets::getDefaultAssetDir();
+    
+    // Determine document class
+    std::string docclass = doc_class ? doc_class : "article";
+    
+    // Get head content
+    std::string head_content = LatexAssets::generateHeadContent(docclass.c_str(), config);
+    
+    // Build complete HTML document
+    std::ostringstream oss;
+    oss << "<!DOCTYPE html>\n";
+    oss << "<html lang=\"en\">\n";
+    oss << "<head>\n";
+    oss << "  <meta charset=\"UTF-8\">\n";
+    oss << "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
+    oss << "  <title>" << doc_title << "</title>\n";
+    oss << head_content;
+    oss << "</head>\n";
+    oss << "<body>\n";
+    oss << body_html;
+    oss << "</body>\n";
+    oss << "</html>\n";
+    
+    return oss.str();
+}
+
 } // namespace lambda
 
 // C API for compatibility with existing code
@@ -8937,6 +10458,20 @@ extern "C" {
 Item format_latex_html_v2_c(Input* input, int text_mode) {
     log_debug("format_latex_html_v2_c called, text_mode=%d", text_mode);
     return lambda::format_latex_html_v2(input, text_mode != 0);
+}
+
+// Generate complete HTML document with CSS - returns allocated C string (caller must free)
+const char* format_latex_html_v2_document_c(Input* input, const char* doc_class,
+                                             const char* asset_base_url, int embed_css) {
+    std::string result = lambda::format_latex_html_v2_document(input, doc_class, 
+                                                                 asset_base_url, embed_css != 0);
+    if (result.empty()) {
+        return nullptr;
+    }
+    // Allocate copy in input's arena for memory management
+    char* copy = (char*)arena_alloc(input->arena, result.size() + 1);
+    memcpy(copy, result.c_str(), result.size() + 1);
+    return copy;
 }
 
 } // extern "C"
