@@ -1,0 +1,86 @@
+[
+  {
+    "test_id": "6b53427ced5c2da3830c5053af874df81b59f4dc",
+    "file": "html5lib_tests15.html",
+    "input": "<!DOCTYPE html><p><b><i><u></p> <p>X",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <b>\n|         <i>\n|           <u>\n|     <b>\n|       <i>\n|         <u>\n|           \" \"\n|           <p>\n|             \"X\""
+  },
+  {
+    "test_id": "e4719f96139431e67dc783631eb1b3b25e0e62e8",
+    "file": "html5lib_tests15.html",
+    "input": "<p><b><i><u></p>\n<p>X",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <b>\n|         <i>\n|           <u>\n|     <b>\n|       <i>\n|         <u>\n|           \"\n\"\n|           <p>\n|             \"X\""
+  },
+  {
+    "test_id": "6c880904728529240130ab72c30a1f800502e1fc",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html></html> <head>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \" \""
+  },
+  {
+    "test_id": "59cae979c2d8110a1015fd401afb42d1015e2c05",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html></body><meta>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <meta>"
+  },
+  {
+    "test_id": "fdac591df8c2ff9db7bdd63adee17e002a620ea1",
+    "file": "html5lib_tests15.html",
+    "input": "<html></html><!-- foo -->",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n| <!--  foo  -->"
+  },
+  {
+    "test_id": "72352f74535e62a2b0623446073f3edb7698bcf3",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html></body><title>X</title>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <title>\n|       \"X\""
+  },
+  {
+    "test_id": "93c2841d64ce8d4745de6a0fbd28ddba273fd3d0",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html><table> X<meta></table>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \" X\"\n|     <meta>\n|     <table>"
+  },
+  {
+    "test_id": "e83c7f01a04d3ff180019d1578cc666f67ea71eb",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html><table> x</table>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \" x\"\n|     <table>"
+  },
+  {
+    "test_id": "8ed7e05d49dfc6701ef8325a5d9504d596d8d083",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html><table> x </table>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \" x \"\n|     <table>"
+  },
+  {
+    "test_id": "938af694979b4eae59e7bd3ab71d76e5254192a0",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html><table><tr> x</table>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \" x\"\n|     <table>\n|       <tbody>\n|         <tr>"
+  },
+  {
+    "test_id": "e7bba1876ae72e36eb68142d21f64fee1043cff6",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html><table>X<style> <tr>x </style> </table>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \"X\"\n|     <table>\n|       <style>\n|         \" <tr>x \"\n|       \" \""
+  },
+  {
+    "test_id": "fc3373f9cb00e32fc98435157d1d74a6a27a7fb9",
+    "file": "html5lib_tests15.html",
+    "input": "<!doctype html><div><table><a>foo</a> <tr><td>bar</td> </tr></table></div>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       <a>\n|         \"foo\"\n|       <table>\n|         \" \"\n|         <tbody>\n|           <tr>\n|             <td>\n|               \"bar\"\n|             \" \""
+  },
+  {
+    "test_id": "f4c1486ad877d96aeb9a31fde16d2a93ada53b35",
+    "file": "html5lib_tests15.html",
+    "input": "<frame></frame></frame><frameset><frame><frameset><frame></frameset><noframes></frameset><noframes>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <frameset>\n|     <frame>\n|     <frameset>\n|       <frame>\n|     <noframes>\n|       \"</frameset><noframes>\""
+  },
+  {
+    "test_id": "c1176256398117ceca6c3878106893855c39aa5a",
+    "file": "html5lib_tests15.html",
+    "input": "<!DOCTYPE html><object></html>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <object>"
+  }
+]
