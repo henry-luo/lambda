@@ -56,7 +56,8 @@ char* find_font_path_platform(const char* font_name) {
         {"PingFang SC", "/System/Library/Fonts/STHeiti Medium.ttc"},  // Fallback to STHeiti
         {"Heiti SC", "/System/Library/Fonts/STHeiti Medium.ttc"},
         {"STHeiti", "/System/Library/Fonts/STHeiti Medium.ttc"},
-        {"Hiragino Sans", "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"},
+        {"Hiragino Sans", "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc"},
+        {"Arial Unicode MS", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"},
         {"Apple Color Emoji", "/System/Library/Fonts/Apple Color Emoji.ttc"},
         {"Helvetica Neue", "/System/Library/Fonts/Helvetica.ttc"},
         {"Times New Roman", "/System/Library/Fonts/Times.ttc"},
