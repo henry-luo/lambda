@@ -331,24 +331,24 @@ const std::map<std::string, std::string>& TextgreekPackage::symbols() const {
 
 static const std::map<std::string, std::string> TEXTCOMP_SYMBOLS = {
     // Currencies
-    {"textcentoldstyle", ""},      // Private use area
-    {"textdollaroldstyle", ""},    // Private use area
+    {"textcentoldstyle", "¢"},
+    {"textdollaroldstyle", "$"},
     {"textguarani", "₲"},
     
     // Legal symbols
     {"textcopyleft", "🄯"},
     
-    // Old style numerals
-    {"textzerooldstyle", ""},
-    {"textoneoldstyle", ""},
-    {"texttwooldstyle", ""},
-    {"textthreeoldstyle", ""},
-    {"textfouroldstyle", ""},
-    {"textfiveoldstyle", ""},
-    {"textsixoldstyle", ""},
-    {"textsevenoldstyle", ""},
-    {"texteightoldstyle", ""},
-    {"textnineoldstyle", ""},
+    // Old style numerals (use standard digits as fallback - font provides styling)
+    {"textzerooldstyle", "0"},
+    {"textoneoldstyle", "1"},
+    {"texttwooldstyle", "2"},
+    {"textthreeoldstyle", "3"},
+    {"textfouroldstyle", "4"},
+    {"textfiveoldstyle", "5"},
+    {"textsixoldstyle", "6"},
+    {"textsevenoldstyle", "7"},
+    {"texteightoldstyle", "8"},
+    {"textnineoldstyle", "9"},
     
     // Genealogical
     {"textborn", "⭑"},
