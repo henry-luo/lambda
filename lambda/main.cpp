@@ -455,7 +455,9 @@ int exec_convert(int argc, char* argv[]) {
 
         // Capture the effective type by checking if LaTeX parsing was used
         bool is_latex_input = false;
-        if (from_format && (strcmp(from_format, "latex") == 0 || strcmp(from_format, "tex") == 0)) {
+        if (from_format && (strcmp(from_format, "latex") == 0 || 
+                           strcmp(from_format, "tex") == 0 || 
+                           strcmp(from_format, "latex-ts") == 0)) {
             is_latex_input = true;
         } else if (!from_format && strcmp(type_string->chars, "auto") == 0) {
             // For auto-detection, check if the file extension suggests LaTeX
@@ -465,6 +467,10 @@ int exec_convert(int argc, char* argv[]) {
             if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
                 is_latex_input = true;
             }
+        } else if (type_string && (strcmp(type_string->chars, "latex-ts") == 0 ||
+                                   strcmp(type_string->chars, "latex") == 0)) {
+            // Also check the actual input type used
+            is_latex_input = true;
         }
 
         // Step 2: Format the parsed data to the target format
