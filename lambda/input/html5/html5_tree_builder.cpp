@@ -346,6 +346,11 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 log_error("html5: null character in body");
                 return;
             }
+            // Reconstruct active formatting elements before inserting text
+            // (but not for whitespace-only text)
+            if (c != '\t' && c != '\n' && c != '\f' && c != '\r' && c != ' ') {
+                html5_reconstruct_active_formatting_elements(parser);
+            }
             html5_insert_character(parser, c);
         }
         return;
@@ -413,12 +418,24 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             strcmp(tag, "th") == 0 || strcmp(tag, "tbody") == 0 || strcmp(tag, "thead") == 0 ||
             strcmp(tag, "section") == 0 || strcmp(tag, "article") == 0 || strcmp(tag, "nav") == 0 ||
             strcmp(tag, "header") == 0 || strcmp(tag, "footer") == 0 || strcmp(tag, "main") == 0 ||
-            strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 || strcmp(tag, "pre") == 0) {
+            strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 || strcmp(tag, "pre") == 0 ||
+            strcmp(tag, "address") == 0 || strcmp(tag, "center") == 0 || strcmp(tag, "details") == 0 ||
+            strcmp(tag, "dialog") == 0 || strcmp(tag, "dir") == 0 || strcmp(tag, "dl") == 0 ||
+            strcmp(tag, "fieldset") == 0 || strcmp(tag, "figcaption") == 0 || strcmp(tag, "figure") == 0 ||
+            strcmp(tag, "form") == 0 || strcmp(tag, "hgroup") == 0 || strcmp(tag, "menu") == 0 ||
+            strcmp(tag, "search") == 0 || strcmp(tag, "summary") == 0) {
 
-            // if current node is <p>, close it first
-            Element* current = html5_current_node(parser);
-            if (current && strcmp(((TypeElmt*)current->type)->name.str, "p") == 0) {
-                html5_pop_element(parser);
+            // Close any <p> element in button scope per spec
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                // Pop elements until we pop the <p> element
+                while (parser->open_elements->length > 0) {
+                    Element* current = html5_current_node(parser);
+                    const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                    html5_pop_element(parser);
+                    if (strcmp(current_tag, "p") == 0) {
+                        break;
+                    }
+                }
             }
 
             html5_insert_html_element(parser, token);
@@ -429,8 +446,13 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         if (strcmp(tag, "a") == 0 || strcmp(tag, "b") == 0 || strcmp(tag, "i") == 0 ||
             strcmp(tag, "em") == 0 || strcmp(tag, "strong") == 0 || strcmp(tag, "span") == 0 ||
             strcmp(tag, "code") == 0 || strcmp(tag, "small") == 0 || strcmp(tag, "big") == 0 ||
-            strcmp(tag, "u") == 0 || strcmp(tag, "s") == 0 || strcmp(tag, "strike") == 0) {
-            html5_insert_html_element(parser, token);
+            strcmp(tag, "u") == 0 || strcmp(tag, "s") == 0 || strcmp(tag, "strike") == 0 ||
+            strcmp(tag, "font") == 0 || strcmp(tag, "nobr") == 0 || strcmp(tag, "tt") == 0) {
+            // Reconstruct active formatting elements before insertion
+            html5_reconstruct_active_formatting_elements(parser);
+            Element* elem = html5_insert_html_element(parser, token);
+            // Add to active formatting elements list (for AAA)
+            html5_push_active_formatting_element(parser, elem, token);
             return;
         }
 
@@ -440,12 +462,15 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             strcmp(tag, "area") == 0 || strcmp(tag, "base") == 0 || strcmp(tag, "col") == 0 ||
             strcmp(tag, "embed") == 0 || strcmp(tag, "param") == 0 || strcmp(tag, "source") == 0 ||
             strcmp(tag, "track") == 0 || strcmp(tag, "wbr") == 0) {
+            // Reconstruct active formatting before void elements too
+            html5_reconstruct_active_formatting_elements(parser);
             html5_insert_html_element(parser, token);
             html5_pop_element(parser);  // immediately pop void elements
             return;
         }
 
-        // default: insert as regular element
+        // default: reconstruct active formatting and insert as regular element
+        html5_reconstruct_active_formatting_elements(parser);
         html5_insert_html_element(parser, token);
         return;
     }
@@ -474,19 +499,32 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
+        // Formatting elements use the Adoption Agency Algorithm
+        if (html5_is_formatting_element(tag)) {
+            html5_run_adoption_agency(parser, token);
+            return;
+        }
+
         // generic end tag handling: pop elements until matching tag found
         for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
             Element* elem = (Element*)parser->open_elements->items[i].element;
             const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
 
             if (strcmp(elem_tag, tag) == 0) {
-                // found matching element, pop it and everything above
+                // found matching element, generate implied end tags and pop
+                html5_generate_implied_end_tags_except(parser, tag);
                 while (parser->open_elements->length > 0) {
                     Element* popped = html5_pop_element(parser);
                     if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
                         break;
                     }
                 }
+                return;
+            }
+
+            // If we hit a special element, stop
+            if (html5_is_special_element(elem_tag)) {
+                log_error("html5: end tag </%s> hit special element <%s>", tag, elem_tag);
                 return;
             }
         }
