@@ -69,11 +69,19 @@
           "named": true
         },
         {
+          "type": "line_comment",
+          "named": true
+        },
+        {
           "type": "math",
           "named": true
         },
         {
           "type": "nbsp",
+          "named": true
+        },
+        {
+          "type": "paragraph_break",
           "named": true
         },
         {
@@ -164,11 +172,19 @@
           "named": true
         },
         {
+          "type": "line_comment",
+          "named": true
+        },
+        {
           "type": "math",
           "named": true
         },
         {
           "type": "nbsp",
+          "named": true
+        },
+        {
+          "type": "paragraph_break",
           "named": true
         },
         {
