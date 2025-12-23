@@ -623,7 +623,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // Per WHATWG 12.2.6.4.7: base, basefont, bgsound, link, meta, noframes, 
+        // Per WHATWG 12.2.6.4.7: base, basefont, bgsound, link, meta, noframes,
         // script, style, template, title - process using "in head" rules
         if (strcmp(tag, "base") == 0 || strcmp(tag, "basefont") == 0 ||
             strcmp(tag, "bgsound") == 0 || strcmp(tag, "link") == 0 ||
@@ -896,7 +896,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 String* a_name = builder.createString("a");
                 Html5Token* fake_end_tag = html5_token_create_end_tag(parser->pool, parser->arena, a_name);
                 html5_run_adoption_agency(parser, fake_end_tag);
-                
+
                 // If still in the list, remove it (AAA may have failed)
                 existing_a = html5_find_formatting_element(parser, "a");
                 if (existing_a >= 0) {
@@ -923,7 +923,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             html5_push_active_formatting_element(parser, elem, token);
             return;
         }
-        
+
         if (strcmp(tag, "nobr") == 0) {
             html5_reconstruct_active_formatting_elements(parser);
             // Check if there's already a <nobr> in scope
@@ -1145,8 +1145,8 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         }
 
         // Special handling for block elements that generate implied end tags
-        // Per WHATWG: address, article, aside, blockquote, button, center, details, 
-        // dialog, dir, div, fieldset, figcaption, figure, footer, header, hgroup, 
+        // Per WHATWG: address, article, aside, blockquote, button, center, details,
+        // dialog, dir, div, fieldset, figcaption, figure, footer, header, hgroup,
         // listing, main, menu, nav, pre, search, section, summary
         if (strcmp(tag, "address") == 0 || strcmp(tag, "article") == 0 ||
             strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 ||
@@ -1444,7 +1444,7 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
         if (strcmp(tag, "table") == 0) {
             // Flush any pending foster-parented text first
             html5_flush_foster_text(parser);
-            
+
             if (!html5_has_element_in_table_scope(parser, "table")) {
                 log_error("html5: </table> without <table> in scope");
                 return;
@@ -2207,7 +2207,7 @@ static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token
             return;
         }
 
-        // </body>, </col>, </colgroup>, </html>, </tbody>, </td>, </tfoot>, 
+        // </body>, </col>, </colgroup>, </html>, </tbody>, </td>, </tfoot>,
         // </th>, </thead>, </tr> - ignore
         if (strcmp(tag, "body") == 0 || strcmp(tag, "col") == 0 ||
             strcmp(tag, "colgroup") == 0 || strcmp(tag, "html") == 0 ||
