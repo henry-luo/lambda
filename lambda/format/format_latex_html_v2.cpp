@@ -3509,6 +3509,118 @@ static void cmd_comment(LatexProcessor* proc, Item elem) {
     (void)elem;
 }
 
+static void cmd_multicols(LatexProcessor* proc, Item elem) {
+    // \begin{multicols}{n} ... \end{multicols}
+    // Multi-column layout using CSS columns
+    HtmlGenerator* gen = proc->generator();
+    
+    proc->closeParagraphIfOpen();
+    
+    ElementReader reader(elem);
+    int num_cols = 2;  // Default to 2 columns
+    
+    // First child should be the number of columns
+    if (reader.childCount() > 0) {
+        ItemReader first_child = reader.childAt(0);
+        if (first_child.isString()) {
+            const char* num_str = first_child.cstring();
+            if (num_str) {
+                num_cols = atoi(num_str);
+                if (num_cols < 1) num_cols = 1;
+                if (num_cols > 10) num_cols = 10;  // Reasonable limit
+            }
+        }
+    }
+    
+    // Build style string for CSS columns
+    char style[128];
+    snprintf(style, sizeof(style), "column-count:%d", num_cols);
+    
+    // Open multicols container
+    gen->writer()->openTagRaw("div", nullptr);
+    gen->writer()->writeRawHtml(" class=\"multicols\"");
+    gen->writer()->writeRawHtml(" style=\"");
+    gen->writer()->writeRawHtml(style);
+    gen->writer()->writeRawHtml("\">");
+    
+    // Process content (skip first child which is the column count)
+    for (int64_t i = 1; i < reader.childCount(); i++) {
+        proc->processNode(reader.childAt(i).item());
+    }
+    
+    proc->closeParagraphIfOpen();
+    gen->writer()->closeTag("div");
+    
+    proc->setNextParagraphIsContinue();
+}
+
+// Forward declaration
+static void cmd_verb_command(LatexProcessor* proc, Item elem);
+
+static void cmd_verb(LatexProcessor* proc, Item elem) {
+    // \verb|text| when parsed as a regular command (scanner fallback)
+    // In this case, the children contain the verbatim content
+    // This happens when the scanner doesn't recognize the \verb pattern
+    HtmlGenerator* gen = proc->generator();
+    
+    proc->ensureParagraph();
+    
+    ElementReader reader(elem);
+    int64_t child_count = reader.childCount();
+    
+    if (child_count == 0) {
+        // No content - just output empty code block
+        gen->writer()->openTagRaw("code", "class=\"tt\"");
+        gen->writer()->closeTag("code");
+        return;
+    }
+    
+    // Check if first child is a string that looks like the full \verb token
+    // (scanner format: "\verb|content|")
+    ItemReader first_child = reader.childAt(0);
+    if (first_child.isString()) {
+        const char* text = first_child.cstring();
+        if (text && strncmp(text, "\\verb", 5) == 0) {
+            // This is actually a verb_command format - delegate to that handler
+            cmd_verb_command(proc, elem);
+            return;
+        }
+    }
+    
+    // Regular command form - extract content from children
+    gen->writer()->openTagRaw("code", "class=\"tt\"");
+    
+    // Collect all text content from children
+    for (int64_t i = 0; i < child_count; i++) {
+        ItemReader child = reader.childAt(i);
+        if (child.isString()) {
+            String* str = child.asString();
+            if (str && str->chars && str->len > 0) {
+                // Output verbatim - don't process special characters
+                std::string content(str->chars, str->len);
+                gen->writer()->writeText(content.c_str());
+            }
+        } else if (child.isElement()) {
+            // Process child elements (might be nested commands)
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            // For curly groups, extract their text content
+            if (tag && (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_text") == 0)) {
+                StringBuf* sb = stringbuf_new(proc->pool());
+                child_elem.textContent(sb);
+                if (sb->str && sb->length > 0) {
+                    std::string content(sb->str->chars, sb->length);
+                    gen->writer()->writeText(content.c_str());
+                }
+                stringbuf_free(sb);
+            }
+        }
+    }
+    
+    gen->writer()->closeTag("code");
+}
+
 static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     // \verb|text| inline verbatim with delimiter
     // The external scanner matched the full \verb<delim>text<delim> pattern
@@ -3633,13 +3745,33 @@ static void cmd_math(LatexProcessor* proc, Item elem) {
     gen->endInlineMath();
 }
 
+// Alias for inline_math (tree-sitter grammar node type)
+static void cmd_inline_math(LatexProcessor* proc, Item elem) {
+    cmd_math(proc, elem);
+}
+
 static void cmd_displaymath(LatexProcessor* proc, Item elem) {
-    // Display math: \[...\]
+    // Display math: \[...\] or $$...$$
     HtmlGenerator* gen = proc->generator();
     
     gen->startDisplayMath();
     proc->processChildren(elem);
     gen->endDisplayMath();
+}
+
+// Alias for display_math (tree-sitter grammar node type)
+static void cmd_display_math(LatexProcessor* proc, Item elem) {
+    cmd_displaymath(proc, elem);
+}
+
+// Handler for $$ delimiter token
+static void cmd_dollar_dollar(LatexProcessor* proc, Item elem) {
+    // This is a standalone $$ token - typically start/end of display math
+    // In tree-sitter parsing, display math should be wrapped in display_math element
+    // If we get a bare $$, treat it as displaymath content marker
+    (void)proc;
+    (void)elem;
+    // Nothing to output - $$ is just a delimiter
 }
 
 static void cmd_math_environment(LatexProcessor* proc, Item elem) {
@@ -3663,6 +3795,105 @@ static void cmd_equation_star(LatexProcessor* proc, Item elem) {
     gen->startEquation(true);  // unnumbered
     proc->processChildren(elem);
     gen->endEquation(true);
+}
+
+// Math-mode text command
+static void cmd_text(LatexProcessor* proc, Item elem) {
+    // \text{...} - text inside math mode (or standalone)
+    // Output as regular text (not math font)
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->span("text");  // Use text class for Roman font in math
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+// Math-mode symbols (Greek letters, operators, etc.)
+static void cmd_xi(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("ξ");
+    (void)elem;
+}
+
+static void cmd_pi(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("π");
+    (void)elem;
+}
+
+static void cmd_infty(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("∞");
+    (void)elem;
+}
+
+static void cmd_int_sym(LatexProcessor* proc, Item elem) {
+    proc->ensureParagraph();
+    proc->generator()->text("∫");
+    (void)elem;
+}
+
+static void cmd_frac(LatexProcessor* proc, Item elem) {
+    // \frac{numerator}{denominator}
+    // Output as inline fraction: (num)/(denom) or use MathML-like structure
+    HtmlGenerator* gen = proc->generator();
+    ElementReader reader(elem);
+    
+    proc->ensureParagraph();
+    
+    // Get numerator and denominator from children
+    int64_t count = reader.childCount();
+    if (count >= 2) {
+        // Open fraction container
+        gen->writer()->openTagRaw("span", "class=\"frac\"");
+        
+        // Numerator
+        gen->writer()->openTagRaw("span", "class=\"numer\"");
+        ItemReader num = reader.childAt(0);
+        proc->processNode(num.item());
+        gen->writer()->closeTag("span");
+        
+        // Fraction bar is CSS
+        gen->writer()->openTagRaw("span", "class=\"frac-line\"");
+        gen->writer()->closeTag("span");
+        
+        // Denominator
+        gen->writer()->openTagRaw("span", "class=\"denom\"");
+        ItemReader denom = reader.childAt(1);
+        proc->processNode(denom.item());
+        gen->writer()->closeTag("span");
+        
+        gen->writer()->closeTag("span");
+    } else if (count >= 1) {
+        // Only numerator
+        proc->processChildren(elem);
+    }
+}
+
+static void cmd_superscript(LatexProcessor* proc, Item elem) {
+    // Superscript: x^{y}
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->writer()->openTagRaw("sup", nullptr);
+    proc->processChildren(elem);
+    gen->writer()->closeTag("sup");
+}
+
+static void cmd_subscript(LatexProcessor* proc, Item elem) {
+    // Subscript: x_{y}
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    gen->writer()->openTagRaw("sub", nullptr);
+    proc->processChildren(elem);
+    gen->writer()->closeTag("sub");
+}
+
+static void cmd_hat(LatexProcessor* proc, Item elem) {
+    // \hat{x} - hat accent (caret)
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+    proc->processChildren(elem);
+    gen->text("̂");  // U+0302 combining circumflex accent
 }
 
 // Line break commands
@@ -6512,6 +6743,10 @@ static void cmd_documentclass(LatexProcessor* proc, Item elem) {
 static void cmd_usepackage(LatexProcessor* proc, Item elem) {
     // \usepackage[options]{package1,package2,...}
     // Parse options and package names, then load them via PackageRegistry
+    // 
+    // AST structure: <usepackage "package1,package2,...">
+    // - The curly group content is unwrapped to a direct string child
+    // - Optional bracket_group for options
     
     ElementReader reader(elem);
     std::vector<std::string> options;
@@ -6526,7 +6761,7 @@ static void cmd_usepackage(LatexProcessor* proc, Item elem) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
             
-            if (tag && strcmp(tag, "bracket_group") == 0) {
+            if (tag && (strcmp(tag, "bracket_group") == 0 || strcmp(tag, "brack_group") == 0)) {
                 // Parse options (comma-separated in brackets)
                 StringBuf* sb = stringbuf_new(pool);
                 child_elem.textContent(sb);
@@ -6543,12 +6778,12 @@ static void cmd_usepackage(LatexProcessor* proc, Item elem) {
                         options.push_back(opt.substr(start, end - start + 1));
                     }
                 }
-            } else if (tag && (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_text") == 0)) {
-                // Parse package names (comma-separated in braces)
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                std::string pkg_text(sb->str ? sb->str->chars : "", sb->length);
-                stringbuf_free(sb);
+            }
+        } else if (child.isString()) {
+            // Package names are stored as direct string children (curly group is unwrapped)
+            String* str = child.asString();
+            if (str && str->chars) {
+                std::string pkg_text(str->chars, str->len);
                 
                 // Split by comma
                 std::istringstream iss(pkg_text);
@@ -6569,7 +6804,7 @@ static void cmd_usepackage(LatexProcessor* proc, Item elem) {
     for (const auto& pkg_name : package_names) {
         if (!pkg_name.empty()) {
             registry.loadPackage(pkg_name.c_str(), options);
-            log_debug("Loaded package: %s", pkg_name.c_str());
+            log_debug("usepackage: loaded package '%s'", pkg_name.c_str());
         }
     }
 }
@@ -7275,16 +7510,32 @@ void LatexProcessor::initCommandTable() {
     command_table_["flushleft"] = cmd_flushleft;
     command_table_["flushright"] = cmd_flushright;
     command_table_["comment"] = cmd_comment;
+    command_table_["multicols"] = cmd_multicols;  // Multi-column layout
     command_table_["verbatim"] = cmd_verbatim;
-    command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim
+    command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim (scanner)
+    command_table_["verb"] = cmd_verb;  // \verb fallback when scanner doesn't recognize
     
     // Math environments
     command_table_["math"] = cmd_math;
+    command_table_["inline_math"] = cmd_inline_math;  // Tree-sitter node for $...$
     command_table_["displaymath"] = cmd_displaymath;
+    command_table_["display_math"] = cmd_display_math;  // Tree-sitter node for $$...$$
+    command_table_["$$"] = cmd_dollar_dollar;  // $$ delimiter token
     command_table_["math_environment"] = cmd_math_environment;  // Tree-sitter node for \[...\]
     command_table_["displayed_equation"] = cmd_displaymath;  // Tree-sitter node for \[...\]
     command_table_["equation"] = cmd_equation;
     command_table_["equation*"] = cmd_equation_star;
+    
+    // Math-mode commands
+    command_table_["text"] = cmd_text;  // \text{...} inside math
+    command_table_["xi"] = cmd_xi;
+    command_table_["pi"] = cmd_pi;
+    command_table_["infty"] = cmd_infty;
+    command_table_["int"] = cmd_int_sym;
+    command_table_["frac"] = cmd_frac;
+    command_table_["superscript"] = cmd_superscript;
+    command_table_["subscript"] = cmd_subscript;
+    command_table_["hat"] = cmd_hat;
     
     // Line breaks
     command_table_["\\"] = cmd_newline;
