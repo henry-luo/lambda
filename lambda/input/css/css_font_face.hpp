@@ -9,11 +9,22 @@
 
 #include "css_style.hpp"
 
+// Maximum number of src entries in a single @font-face rule
+#define CSS_FONT_FACE_MAX_SRC 8
+
+// Individual src entry with URL and format
+typedef struct CssFontFaceSrc {
+    char* url;                   // URL from url(...)
+    char* format;                // Format string from format(...), e.g. "woff", "truetype"
+} CssFontFaceSrc;
+
 // Font face descriptor extracted from @font-face rule
 typedef struct CssFontFaceDescriptor {
     char* family_name;           // font-family value
-    char* src_url;               // URL from src: url(...)
+    char* src_url;               // URL from src: url(...) - first/fallback URL for backwards compat
     char* src_local;             // local font name from src: local(...)
+    CssFontFaceSrc* src_urls;    // Array of all src URL entries with formats
+    int src_count;               // Number of entries in src_urls array
     CssEnum font_style;          // normal, italic, oblique
     CssEnum font_weight;         // normal, bold, or numeric 100-900
     CssEnum font_display;        // auto, block, swap, fallback, optional

@@ -637,6 +637,88 @@ void css_tokenizer_destroy(CSSTokenizer* tokenizer) {
  * Extract and store the token value as a null-terminated string
  * For STRING tokens, strips surrounding quotes
  */
+// unescape CSS escape sequences in a string
+// handles \XXXXXX (1-6 hex digits) and \X (single char escape)
+// returns unescaped string allocated from pool
+static char* css_unescape_string(const char* str, size_t len, Pool* pool) {
+    if (!str || len == 0 || !pool) {
+        char* empty = (char*)pool_alloc(pool, 1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+
+    // allocate buffer (unescaped string will be <= original length)
+    char* result = (char*)pool_alloc(pool, len + 1);
+    if (!result) return NULL;
+
+    size_t out_pos = 0;
+    size_t i = 0;
+
+    while (i < len) {
+        if (str[i] == '\\' && i + 1 < len) {
+            i++; // skip backslash
+
+            // check if next char is hex digit
+            if ((str[i] >= '0' && str[i] <= '9') ||
+                (str[i] >= 'a' && str[i] <= 'f') ||
+                (str[i] >= 'A' && str[i] <= 'F')) {
+
+                // parse hex escape: \XXXXXX (1-6 hex digits)
+                unsigned int codepoint = 0;
+                int hex_count = 0;
+                while (hex_count < 6 && i < len) {
+                    char c = str[i];
+                    if (c >= '0' && c <= '9') {
+                        codepoint = (codepoint << 4) | (c - '0');
+                    } else if (c >= 'a' && c <= 'f') {
+                        codepoint = (codepoint << 4) | (c - 'a' + 10);
+                    } else if (c >= 'A' && c <= 'F') {
+                        codepoint = (codepoint << 4) | (c - 'A' + 10);
+                    } else {
+                        break; // not a hex digit
+                    }
+                    i++;
+                    hex_count++;
+                }
+
+                // skip optional whitespace after hex escape
+                if (i < len && (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r')) {
+                    i++;
+                }
+
+                // convert codepoint to UTF-8
+                if (codepoint <= 0x7F) {
+                    result[out_pos++] = (char)codepoint;
+                } else if (codepoint <= 0x7FF) {
+                    result[out_pos++] = (char)(0xC0 | (codepoint >> 6));
+                    result[out_pos++] = (char)(0x80 | (codepoint & 0x3F));
+                } else if (codepoint <= 0xFFFF) {
+                    result[out_pos++] = (char)(0xE0 | (codepoint >> 12));
+                    result[out_pos++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+                    result[out_pos++] = (char)(0x80 | (codepoint & 0x3F));
+                } else if (codepoint <= 0x10FFFF) {
+                    result[out_pos++] = (char)(0xF0 | (codepoint >> 18));
+                    result[out_pos++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+                    result[out_pos++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+                    result[out_pos++] = (char)(0x80 | (codepoint & 0x3F));
+                }
+            } else {
+                // single character escape (e.g., \", \\, \n)
+                // for CSS, backslash followed by non-hex char is just that char
+                result[out_pos++] = str[i];
+                i++;
+            }
+        } else {
+            // regular character
+            result[out_pos++] = str[i];
+            i++;
+        }
+    }
+
+    result[out_pos] = '\0';
+    return result;
+}
+
 static void css_token_set_value(CssToken* token, Pool* pool) {
     if (!token || !pool || !token->start) {
         return;
@@ -653,18 +735,22 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
         return;
     }
 
-    // For STRING tokens, strip quotes
+    // For STRING tokens, strip quotes and unescape
     if (token->type == CSS_TOKEN_STRING && token->length >= 2) {
         char quote = token->start[0];
         if ((quote == '\'' || quote == '"') && token->start[token->length - 1] == quote) {
-            // Strip quotes: copy from start+1, length-2
+            // Strip quotes: start+1, length-2
             size_t unquoted_len = token->length - 2;
-            char* value = (char*)pool_alloc(pool, unquoted_len + 1);
-            if (value) {
-                if (unquoted_len > 0) {
-                    memcpy(value, token->start + 1, unquoted_len);
-                }
-                value[unquoted_len] = '\0';
+            if (unquoted_len > 0) {
+                // unescape CSS escape sequences
+                token->value = css_unescape_string(token->start + 1, unquoted_len, pool);
+                log_debug("[CSS UNESCAPE] Input: '%.*s' -> Output: '%s' (len=%zu)",
+                    (int)unquoted_len, token->start + 1,
+                    token->value ? token->value : "(null)",
+                    token->value ? strlen(token->value) : 0);
+            } else {
+                char* value = (char*)pool_alloc(pool, 1);
+                if (value) value[0] = '\0';
                 token->value = value;
             }
             return;

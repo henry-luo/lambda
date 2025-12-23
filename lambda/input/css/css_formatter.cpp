@@ -85,34 +85,28 @@ static void append_space(CssFormatter* formatter) {
 }
 
 // Helper function to determine if a property uses comma-separated lists
-// NOTE: box-shadow and text-shadow use SPACE separation within each shadow
-//       Multiple shadows are represented by comma markers stored in the value list
-// NOTE: transform and filter use SPACE separation between functions
+// NOTE: Most CSS properties use SPACE separation between values
+// Only specific longhand properties use comma separation for multiple values
+// Shorthand properties always use space separation (commas are handled during parsing)
 static bool property_uses_comma_separated_list(CssPropertyId property_id) {
     switch (property_id) {
         // Properties that use comma-separated lists for multiple values
-        case CSS_PROPERTY_FONT_FAMILY:
-        case CSS_PROPERTY_BACKGROUND_IMAGE:
-        case CSS_PROPERTY_BACKGROUND:
-        case CSS_PROPERTY_BACKGROUND_POSITION:
-        case CSS_PROPERTY_BACKGROUND_SIZE:
-        case CSS_PROPERTY_BACKGROUND_REPEAT:
-        case CSS_PROPERTY_TRANSITION:
-        case CSS_PROPERTY_TRANSITION_PROPERTY:
-        case CSS_PROPERTY_TRANSITION_DURATION:
-        case CSS_PROPERTY_TRANSITION_TIMING_FUNCTION:
-        case CSS_PROPERTY_TRANSITION_DELAY:
-        case CSS_PROPERTY_ANIMATION:
-        case CSS_PROPERTY_ANIMATION_NAME:
-        case CSS_PROPERTY_ANIMATION_DURATION:
-        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION:
-        case CSS_PROPERTY_ANIMATION_DELAY:
-        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT:
-        case CSS_PROPERTY_ANIMATION_DIRECTION:
-        case CSS_PROPERTY_ANIMATION_FILL_MODE:
-        case CSS_PROPERTY_ANIMATION_PLAY_STATE:
+        case CSS_PROPERTY_FONT_FAMILY:                      // Multiple font names
+        case CSS_PROPERTY_BACKGROUND_IMAGE:                 // Multiple background images
+        case CSS_PROPERTY_TRANSITION_PROPERTY:              // Multiple property names
+        case CSS_PROPERTY_TRANSITION_DURATION:              // Multiple durations
+        case CSS_PROPERTY_TRANSITION_TIMING_FUNCTION:       // Multiple timing functions
+        case CSS_PROPERTY_TRANSITION_DELAY:                 // Multiple delays
+        case CSS_PROPERTY_ANIMATION_NAME:                   // Multiple animation names
+        case CSS_PROPERTY_ANIMATION_DURATION:               // Multiple durations
+        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION:        // Multiple timing functions
+        case CSS_PROPERTY_ANIMATION_DELAY:                  // Multiple delays
+        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT:        // Multiple counts
+        case CSS_PROPERTY_ANIMATION_DIRECTION:              // Multiple directions
+        case CSS_PROPERTY_ANIMATION_FILL_MODE:              // Multiple fill modes
+        case CSS_PROPERTY_ANIMATION_PLAY_STATE:             // Multiple play states
             return true;
-        // box-shadow, text-shadow, transform, filter use SPACE separation
+        // All other properties (including shorthands) use space separation
         default:
             return false;
     }
