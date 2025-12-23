@@ -137,8 +137,17 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
     }
 
     if (token->type == HTML5_TOKEN_DOCTYPE) {
-        // insert doctype (for now just acknowledge it)
+        // insert DOCTYPE node as child of document
         log_debug("html5: doctype name=%s", token->doctype_name ? token->doctype_name->chars : "null");
+        
+        MarkBuilder builder(parser->input);
+        ElementBuilder eb = builder.element("#doctype");
+        if (token->doctype_name) {
+            eb.attr("name", token->doctype_name->chars);
+        }
+        Element* doctype = eb.final().element;
+        array_append(parser->document, Item{.element = doctype}, parser->pool, parser->arena);
+        
         parser->mode = HTML5_MODE_BEFORE_HTML;
         return;
     }
@@ -444,9 +453,74 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // block elements (except headings and table which are handled above)
+        // <li> has special auto-closing behavior per WHATWG 12.2.6.4.7
+        if (strcmp(tag, "li") == 0) {
+            parser->frameset_ok = false;
+            // close any <li> elements in list item scope
+            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+                Element* node = (Element*)parser->open_elements->items[i].element;
+                const char* node_tag = ((TypeElmt*)node->type)->name.str;
+                if (strcmp(node_tag, "li") == 0) {
+                    // generate implied end tags except for li
+                    html5_generate_implied_end_tags_except(parser, "li");
+                    // pop until we pop the li
+                    while (parser->open_elements->length > 0) {
+                        Element* popped = html5_pop_element(parser);
+                        if (strcmp(((TypeElmt*)popped->type)->name.str, "li") == 0) {
+                            break;
+                        }
+                    }
+                    break;
+                }
+                // stop if we hit a list container or special element that creates scope
+                if (strcmp(node_tag, "ul") == 0 || strcmp(node_tag, "ol") == 0 ||
+                    strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
+                    strcmp(node_tag, "p") == 0) {
+                    break;
+                }
+            }
+            // close any <p> in button scope
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                html5_close_p_element(parser);
+            }
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
+        // <dd>, <dt> have similar auto-closing behavior
+        if (strcmp(tag, "dd") == 0 || strcmp(tag, "dt") == 0) {
+            parser->frameset_ok = false;
+            // close any <dd> or <dt> elements
+            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+                Element* node = (Element*)parser->open_elements->items[i].element;
+                const char* node_tag = ((TypeElmt*)node->type)->name.str;
+                if (strcmp(node_tag, "dd") == 0 || strcmp(node_tag, "dt") == 0) {
+                    html5_generate_implied_end_tags_except(parser, node_tag);
+                    while (parser->open_elements->length > 0) {
+                        Element* popped = html5_pop_element(parser);
+                        const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                        if (strcmp(popped_tag, "dd") == 0 || strcmp(popped_tag, "dt") == 0) {
+                            break;
+                        }
+                    }
+                    break;
+                }
+                // stop at special elements
+                if (strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
+                    strcmp(node_tag, "p") == 0) {
+                    break;
+                }
+            }
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                html5_close_p_element(parser);
+            }
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
+        // block elements (except headings, table, li, dd, dt which are handled above)
         if (strcmp(tag, "div") == 0 || strcmp(tag, "p") == 0 ||
-            strcmp(tag, "ul") == 0 || strcmp(tag, "ol") == 0 || strcmp(tag, "li") == 0 ||
+            strcmp(tag, "ul") == 0 || strcmp(tag, "ol") == 0 ||
             strcmp(tag, "section") == 0 || strcmp(tag, "article") == 0 || strcmp(tag, "nav") == 0 ||
             strcmp(tag, "header") == 0 || strcmp(tag, "footer") == 0 || strcmp(tag, "main") == 0 ||
             strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 || strcmp(tag, "pre") == 0 ||
@@ -548,6 +622,55 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 html5_insert_html_element(parser, fake_p_token);
             }
             html5_close_p_element(parser);
+            return;
+        }
+
+        // Special handling for </li> - per WHATWG 12.2.6.4.7
+        if (strcmp(tag, "li") == 0) {
+            if (!html5_has_element_in_list_item_scope(parser, "li")) {
+                log_error("html5: </li> without <li> in scope");
+                return;
+            }
+            html5_generate_implied_end_tags_except(parser, "li");
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (strcmp(((TypeElmt*)popped->type)->name.str, "li") == 0) {
+                    break;
+                }
+            }
+            return;
+        }
+
+        // Special handling for </dd>, </dt>
+        if (strcmp(tag, "dd") == 0 || strcmp(tag, "dt") == 0) {
+            if (!html5_has_element_in_scope(parser, tag)) {
+                log_error("html5: </%s> without matching tag in scope", tag);
+                return;
+            }
+            html5_generate_implied_end_tags_except(parser, tag);
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, tag) == 0) {
+                    break;
+                }
+            }
+            return;
+        }
+
+        // Special handling for </ul>, </ol>, </dl> - close implicitly opened list items
+        if (strcmp(tag, "ul") == 0 || strcmp(tag, "ol") == 0 || strcmp(tag, "dl") == 0) {
+            if (!html5_has_element_in_scope(parser, tag)) {
+                log_error("html5: </%s> without matching tag in scope", tag);
+                return;
+            }
+            html5_generate_implied_end_tags(parser);
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
+                    break;
+                }
+            }
             return;
         }
 
