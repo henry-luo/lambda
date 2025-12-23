@@ -82,6 +82,10 @@ typedef struct Html5Parser {
     // Text content buffering (for efficient text node creation)
     StringBuf* text_buffer;
     Element* pending_text_parent;  // parent element for buffered text
+
+    // Last emitted start tag name (for RCDATA/RAWTEXT end tag matching)
+    char* last_start_tag_name;
+    size_t last_start_tag_name_len;
 } Html5Parser;
 
 // Parser lifecycle
