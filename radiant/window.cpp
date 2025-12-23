@@ -31,6 +31,7 @@ typedef enum {
     DOC_FORMAT_UNKNOWN,
     DOC_FORMAT_HTML,
     DOC_FORMAT_MARKDOWN,
+    DOC_FORMAT_LATEX,
     DOC_FORMAT_XML,
     DOC_FORMAT_RST
 } DocFormat;
@@ -48,6 +49,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_HTML;
     } else if (strcasecmp(ext, "md") == 0 || strcasecmp(ext, "markdown") == 0) {
         return DOC_FORMAT_MARKDOWN;
+    } else if (strcasecmp(ext, "tex") == 0 || strcasecmp(ext, "latex") == 0) {
+        return DOC_FORMAT_LATEX;
     } else if (strcasecmp(ext, "xml") == 0) {
         return DOC_FORMAT_XML;
     } else if (strcasecmp(ext, "rst") == 0) {
@@ -77,6 +80,11 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             return doc;
         }
 
+        case DOC_FORMAT_LATEX:
+            log_debug("Loading as LaTeX document");
+            // load_html_doc will detect .tex/.latex extension and route to load_latex_doc
+            return load_html_doc(base_url, (char*)filename, width, height);
+
         case DOC_FORMAT_XML:
             log_warn("XML format not yet implemented, treating as HTML");
             return load_html_doc(base_url, (char*)filename, width, height);
@@ -97,6 +105,7 @@ static const char* get_format_name(const char* filename) {
     switch (format) {
         case DOC_FORMAT_HTML: return "HTML";
         case DOC_FORMAT_MARKDOWN: return "Markdown";
+        case DOC_FORMAT_LATEX: return "LaTeX";
         case DOC_FORMAT_XML: return "XML";
         case DOC_FORMAT_RST: return "RST";
         default: return "Document";
