@@ -476,6 +476,7 @@ project "lambda"
         "lambda/format/format-rst.cpp",
         "lambda/format/format-graph.cpp",
         "lambda/format/format-org.cpp",
+        "lambda/format/latex_hyphenation.cpp",
         "lambda/format/latex_docclass.cpp",
         "lambda/format/format-ini.cpp",
         "lambda/format/format-xml.cpp",
