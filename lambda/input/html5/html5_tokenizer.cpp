@@ -49,6 +49,20 @@ static String* html5_create_string_from_temp_buffer(Html5Parser* parser) {
     return str;
 }
 
+// helper: create lowercase string from temp buffer (for tag names)
+static String* html5_create_lowercase_string_from_temp_buffer(Html5Parser* parser) {
+    String* str = (String*)arena_alloc(parser->arena, sizeof(String) + parser->temp_buffer_len + 1);
+    str->ref_cnt = 1;
+    str->len = parser->temp_buffer_len;
+    for (size_t i = 0; i < parser->temp_buffer_len; i++) {
+        char c = parser->temp_buffer[i];
+        if (c >= 'A' && c <= 'Z') c += 0x20;
+        str->chars[i] = c;
+    }
+    str->chars[parser->temp_buffer_len] = '\0';
+    return str;
+}
+
 // helper: append character to temp buffer
 static void html5_append_to_temp_buffer(Html5Parser* parser, char c) {
     if (parser->temp_buffer_len >= parser->temp_buffer_capacity) {
@@ -141,6 +155,7 @@ static void html5_save_last_start_tag(Html5Parser* parser, const char* name, siz
 }
 
 // helper: check if temp buffer matches last start tag (for appropriate end tag)
+// Per WHATWG spec, this is case-insensitive - temp_buffer has original case
 static bool html5_is_appropriate_end_tag(Html5Parser* parser) {
     if (!parser->last_start_tag_name || parser->last_start_tag_name_len == 0) {
         return false;
@@ -148,7 +163,16 @@ static bool html5_is_appropriate_end_tag(Html5Parser* parser) {
     if (parser->temp_buffer_len != parser->last_start_tag_name_len) {
         return false;
     }
-    return memcmp(parser->temp_buffer, parser->last_start_tag_name, parser->temp_buffer_len) == 0;
+    // Case-insensitive comparison
+    for (size_t i = 0; i < parser->temp_buffer_len; i++) {
+        char c1 = parser->temp_buffer[i];
+        char c2 = parser->last_start_tag_name[i];
+        // Convert to lowercase for comparison
+        if (c1 >= 'A' && c1 <= 'Z') c1 += 0x20;
+        if (c2 >= 'A' && c2 <= 'Z') c2 += 0x20;
+        if (c1 != c2) return false;
+    }
+    return true;
 }
 
 // helper: check if string matches (case insensitive)
@@ -819,10 +843,12 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
 
             case HTML5_TOK_RCDATA_END_TAG_NAME: {
                 // Building end tag name in RCDATA
+                // Per WHATWG spec: temp_buffer stores ORIGINAL case for text emission
+                // Tag name is created with lowercase
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
                     // Check if this is the appropriate end tag
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
                         html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                     } else {
                         // Not appropriate, emit as text
@@ -830,14 +856,14 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     }
                 } else if (c == '/') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
                         html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                     } else {
                         goto rcdata_emit_as_text;
                     }
                 } else if (c == '>') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
                         html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                         Html5Token* token = parser->current_token;
                         parser->current_token = nullptr;
@@ -845,9 +871,8 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         goto rcdata_emit_as_text;
                     }
-                } else if (c >= 'A' && c <= 'Z') {
-                    html5_append_to_temp_buffer(parser, c + 0x20);  // lowercase
-                } else if (c >= 'a' && c <= 'z') {
+                } else if (isalpha(c)) {
+                    // Store ORIGINAL case in temp_buffer (for text emission if not valid end tag)
                     html5_append_to_temp_buffer(parser, c);
                 } else {
                     // Not a valid end tag name character
@@ -915,24 +940,26 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
 
             case HTML5_TOK_RAWTEXT_END_TAG_NAME: {
-                // Building end tag name in RAWTEXT (same logic as RCDATA)
+                // Building end tag name in RAWTEXT
+                // Per WHATWG spec: temp_buffer stores ORIGINAL case for text emission
+                // Tag name is created with lowercase
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
                         html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                     } else {
                         goto rawtext_emit_as_text;
                     }
                 } else if (c == '/') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
                         html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                     } else {
                         goto rawtext_emit_as_text;
                     }
                 } else if (c == '>') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
                         html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                         Html5Token* token = parser->current_token;
                         parser->current_token = nullptr;
@@ -940,9 +967,8 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         goto rawtext_emit_as_text;
                     }
-                } else if (c >= 'A' && c <= 'Z') {
-                    html5_append_to_temp_buffer(parser, c + 0x20);
-                } else if (c >= 'a' && c <= 'z') {
+                } else if (isalpha(c)) {
+                    // Store ORIGINAL case in temp_buffer (for text emission if not valid end tag)
                     html5_append_to_temp_buffer(parser, c);
                 } else {
                     rawtext_emit_as_text:
