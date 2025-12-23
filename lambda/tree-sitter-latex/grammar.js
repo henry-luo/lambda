@@ -239,6 +239,7 @@ module.exports = grammar({
       $.paragraph_break,  // Blank lines inside groups also create paragraph breaks
       $.line_comment,     // Comments can appear inside groups (e.g., [% comment\n text])
       $.linebreak_command, // \\ with optional [<length>] - must be before command
+      $.verb_command,   // \verb|text| - must be before command to get correct token
       $.command,
       $.curly_group,
       $.brack_group,

@@ -17,6 +17,8 @@
 // Forward declaration for LaTeX HTML v2 formatter
 namespace lambda {
     Item format_latex_html_v2(Input* input, bool text_mode);
+    std::string format_latex_html_v2_document(Input* input, const char* doc_class,
+                                               const char* asset_base_url, bool embed_css);
 }
 
 #ifdef _WIN32
@@ -307,7 +309,7 @@ int exec_convert(int argc, char* argv[]) {
 
     if (argc < 2) {
         printf("Error: convert command requires input file\n");
-        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output>\n");
+        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--full-document]\n");
         printf("Use 'lambda convert --help' for more information\n");
         return 1;
     }
@@ -317,6 +319,7 @@ int exec_convert(int argc, char* argv[]) {
     const char* from_format = NULL;  // Optional, will auto-detect if not provided
     const char* to_format = NULL;    // Required
     const char* output_file = NULL;  // Required
+    bool full_document = false;      // For LaTeX to HTML: generate complete HTML with CSS
 
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
@@ -341,6 +344,8 @@ int exec_convert(int argc, char* argv[]) {
                 printf("Error: -o option requires an output file argument\n");
                 return 1;
             }
+        } else if (strcmp(argv[i], "--full-document") == 0) {
+            full_document = true;
         } else if (argv[i][0] != '-') {
             // This should be the input file
             if (input_file == NULL) {
@@ -466,6 +471,7 @@ int exec_convert(int argc, char* argv[]) {
         printf("Converting to format: %s\n", to_format);
 
         String* formatted_output = NULL;
+        std::string full_doc_output;  // For full document mode
 
         // Use the existing format functions based on target format
         if (strcmp(to_format, "json") == 0) {
@@ -477,11 +483,20 @@ int exec_convert(int argc, char* argv[]) {
             if (is_latex_input) {
                 // Use LaTeX to HTML v2 converter (hybrid grammar support)
                 printf("Using LaTeX to HTML v2 converter\n");
-                Item result = lambda::format_latex_html_v2(input, true);  // text mode for HTML string output
-                if (result.item != 0 && get_type_id(result) == LMD_TYPE_STRING) {
-                    formatted_output = (String*)result.string_ptr;
+                if (full_document) {
+                    // Generate complete HTML document with external CSS links
+                    printf("Generating full HTML document with external CSS links\n");
+                    full_doc_output = lambda::format_latex_html_v2_document(input, "article", nullptr, false);
+                    if (full_doc_output.empty()) {
+                        printf("Error: LaTeX to HTML v2 full document conversion failed\n");
+                    }
                 } else {
-                    printf("Error: LaTeX to HTML v2 conversion failed\n");
+                    Item result = lambda::format_latex_html_v2(input, true);  // text mode for HTML string output
+                    if (result.item != 0 && get_type_id(result) == LMD_TYPE_STRING) {
+                        formatted_output = (String*)result.string_ptr;
+                    } else {
+                        printf("Error: LaTeX to HTML v2 conversion failed\n");
+                    }
                 }
             } else {
                 // Use regular HTML formatter
@@ -538,7 +553,7 @@ int exec_convert(int argc, char* argv[]) {
             return 1;
         }
 
-        if (!formatted_output) {
+        if (!formatted_output && full_doc_output.empty()) {
             printf("Error: Failed to format output\n");
             pool_destroy(temp_pool);
             return 1;
@@ -546,7 +561,11 @@ int exec_convert(int argc, char* argv[]) {
 
         // Step 3: Write the output to file
         printf("Writing output to: %s\n", output_file);
-        write_text_file(output_file, formatted_output->chars);
+        if (!full_doc_output.empty()) {
+            write_text_file(output_file, full_doc_output.c_str());
+        } else {
+            write_text_file(output_file, formatted_output->chars);
+        }
 
     printf("Conversion completed successfully!\n");
     printf("Input:  %s\n", input_file);
