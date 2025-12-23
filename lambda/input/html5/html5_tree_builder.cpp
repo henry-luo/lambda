@@ -1066,16 +1066,34 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
+        // <applet>, <marquee>, <object> - push formatting marker
+        // Per WHATWG spec: these create a scope and need a marker
+        if (strcmp(tag, "applet") == 0 || strcmp(tag, "marquee") == 0 ||
+            strcmp(tag, "object") == 0) {
+            html5_reconstruct_active_formatting_elements(parser);
+            html5_insert_html_element(parser, token);
+            html5_push_active_formatting_marker(parser);
+            return;
+        }
+
         // void elements (do NOT close <p>)
+        // NOTE: <col> is NOT included here - it's only valid inside tables
         if (strcmp(tag, "img") == 0 || strcmp(tag, "br") == 0 ||
             strcmp(tag, "input") == 0 || strcmp(tag, "meta") == 0 || strcmp(tag, "link") == 0 ||
-            strcmp(tag, "area") == 0 || strcmp(tag, "base") == 0 || strcmp(tag, "col") == 0 ||
+            strcmp(tag, "area") == 0 || strcmp(tag, "base") == 0 ||
             strcmp(tag, "embed") == 0 || strcmp(tag, "param") == 0 || strcmp(tag, "source") == 0 ||
             strcmp(tag, "track") == 0 || strcmp(tag, "wbr") == 0) {
             // Reconstruct active formatting before void elements too
             html5_reconstruct_active_formatting_elements(parser);
             html5_insert_html_element(parser, token);
             html5_pop_element(parser);  // immediately pop void elements
+            return;
+        }
+
+        // <col> and <colgroup> outside table context - parse error, ignore
+        // Per WHATWG: col/colgroup are only valid inside table
+        if (strcmp(tag, "col") == 0 || strcmp(tag, "colgroup") == 0) {
+            log_error("html5: <%s> outside table context, ignoring", tag);
             return;
         }
 
@@ -1087,6 +1105,20 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
 
     if (token->type == HTML5_TOKEN_END_TAG) {
         const char* tag = token->tag_name->chars;
+
+        // special handling for </br> - per WHATWG spec 13.2.6.4.7:
+        // parse error, treat as <br> start tag
+        if (strcmp(tag, "br") == 0) {
+            log_error("html5: </br> treated as <br> start tag");
+            html5_reconstruct_active_formatting_elements(parser);
+            // create and insert br element
+            MarkBuilder builder(parser->input);
+            String* br_name = builder.createString("br");
+            Html5Token* fake_br = html5_token_create_start_tag(parser->pool, parser->arena, br_name);
+            html5_insert_html_element(parser, fake_br);
+            html5_pop_element(parser);  // br is void element
+            return;
+        }
 
         if (strcmp(tag, "body") == 0) {
             // check if body is in scope
@@ -1206,6 +1238,26 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                     break;
                 }
             }
+            return;
+        }
+
+        // Special handling for </applet>, </marquee>, </object>
+        // Per WHATWG: these clear the active formatting list to the last marker
+        if (strcmp(tag, "applet") == 0 || strcmp(tag, "marquee") == 0 ||
+            strcmp(tag, "object") == 0) {
+            if (!html5_has_element_in_scope(parser, tag)) {
+                log_error("html5: </%s> without matching tag in scope", tag);
+                return;
+            }
+            html5_generate_implied_end_tags(parser);
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
+                    break;
+                }
+            }
+            // Clear active formatting elements to the last marker
+            html5_clear_active_formatting_to_marker(parser);
             return;
         }
 
@@ -1371,8 +1423,9 @@ static void html5_clear_stack_back_to_table_row_context(Html5Parser* parser) {
 // https://html.spec.whatwg.org/#parsing-main-intable
 static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_CHARACTER) {
-        // Per WHATWG spec: Character tokens in table context need foster parenting
-        // BUT only if current node is table, tbody, tfoot, thead, or tr
+        // Per WHATWG spec 13.2.6.4.9 "in table text":
+        // For non-space characters, enable foster parenting and process using in-body rules
+        // This ensures active formatting elements are reconstructed
         Element* current = html5_current_node(parser);
         if (current != nullptr) {
             const char* current_tag = ((TypeElmt*)current->type)->name.str;
@@ -1392,10 +1445,56 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
                 return;
             }
         }
-        // Foster parent the text before the table element
+        // Check if text contains any non-whitespace characters
+        bool has_non_whitespace = false;
         if (token->data != nullptr && token->data->len > 0) {
             for (size_t i = 0; i < token->data->len; i++) {
-                html5_foster_parent_character(parser, token->data->chars[i]);
+                char c = token->data->chars[i];
+                if (c != ' ' && c != '\t' && c != '\n' && c != '\f' && c != '\r') {
+                    has_non_whitespace = true;
+                    break;
+                }
+            }
+        }
+        if (has_non_whitespace) {
+            // Parse error. Foster parent the text.
+            log_error("html5: non-whitespace text in table context, foster parenting");
+
+            // Reconstruct active formatting elements with foster parenting enabled
+            // This creates new elements before the table
+            parser->foster_parenting = true;
+            html5_reconstruct_active_formatting_elements(parser);
+
+            // Check if current node is now a table element or the reconstructed element
+            Element* current = html5_current_node(parser);
+            const char* current_tag = current ? ((TypeElmt*)current->type)->name.str : "";
+            bool is_table_element = (strcmp(current_tag, "table") == 0 ||
+                                     strcmp(current_tag, "tbody") == 0 ||
+                                     strcmp(current_tag, "tfoot") == 0 ||
+                                     strcmp(current_tag, "thead") == 0 ||
+                                     strcmp(current_tag, "tr") == 0);
+
+            // Insert text
+            if (token->data != nullptr && token->data->len > 0) {
+                for (size_t i = 0; i < token->data->len; i++) {
+                    char c = token->data->chars[i];
+                    if (c == '\0') continue;
+                    if (is_table_element) {
+                        // Current node is still a table element - foster parent the text
+                        html5_foster_parent_character(parser, c);
+                    } else {
+                        // Current node is a reconstructed element - insert normally
+                        html5_insert_character(parser, c);
+                    }
+                }
+            }
+            parser->foster_parenting = false;
+        } else {
+            // Whitespace only - insert directly (no formatting reconstruction needed)
+            if (token->data != nullptr && token->data->len > 0) {
+                for (size_t i = 0; i < token->data->len; i++) {
+                    html5_foster_parent_character(parser, token->data->chars[i]);
+                }
             }
         }
         return;
@@ -1907,6 +2006,15 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
         // script, template - process in head rules
         if (strcmp(tag, "script") == 0 || strcmp(tag, "template") == 0) {
             html5_process_in_head_mode(parser, token);
+            return;
+        }
+
+        // formatting elements - insert and add to active formatting elements
+        // Per html5lib tests, formatting elements should be inserted in select
+        // (even though WHATWG says "any other start tag - ignore")
+        if (html5_is_formatting_element(tag)) {
+            html5_insert_html_element(parser, token);
+            html5_push_active_formatting_element(parser, html5_current_node(parser), token);
             return;
         }
 
