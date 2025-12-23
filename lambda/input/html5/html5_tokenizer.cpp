@@ -674,7 +674,7 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
     // Check for semicolon and what follows
     char next_char = html5_peek_char(parser, 0);
     bool has_semicolon = (next_char == ';');
-    
+
     // First try: exact match with semicolon
     if (has_semicolon) {
         const char* replacement = html5_lookup_named_entity(entity_name, name_len);
@@ -699,7 +699,7 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
                 // Rewind position to just after the matched entity
                 // start_pos is position of first char after '&', so start_pos + try_len is position after entity
                 parser->pos = start_pos + try_len;
-                
+
                 // For legacy entities in attribute context, check if followed by
                 // alphanumeric or '=' - don't decode in that case
                 if (in_attribute) {
@@ -713,7 +713,7 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
                         return 0;
                     }
                 }
-                
+
                 size_t rep_len = strlen(replacement);
                 memcpy(out_chars, replacement, rep_len);
                 *out_len = (int)rep_len;
