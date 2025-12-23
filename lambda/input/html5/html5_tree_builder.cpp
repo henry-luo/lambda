@@ -13,6 +13,7 @@ static void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* to
 static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_after_body_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token);
 
 // main entry point for parsing HTML
 Element* html5_parse(Input* input, const char* html) {
@@ -109,6 +110,9 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
             break;
         case HTML5_MODE_TEXT:
             html5_process_in_text_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_SELECT:
+            html5_process_in_select_mode(parser, token);
             break;
         default:
             log_error("html5: unimplemented insertion mode: %d", parser->mode);
@@ -490,6 +494,14 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
+        // Elements that are invalid in body mode - ignore per HTML5 spec 12.2.6.4.7
+        // frame: only valid in frameset mode
+        // head: already processed, ignore stray <head> tags
+        if (strcmp(tag, "frame") == 0 || strcmp(tag, "head") == 0) {
+            log_error("html5: ignoring <%s> in body mode", tag);
+            return;
+        }
+
         // heading elements - h1 through h6
         // special behavior: if there's a heading element in the stack, close it
         if (strcmp(tag, "h1") == 0 || strcmp(tag, "h2") == 0 || strcmp(tag, "h3") == 0 ||
@@ -668,6 +680,54 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
             parser->original_insertion_mode = parser->mode;
             parser->mode = HTML5_MODE_TEXT;
+            return;
+        }
+
+        // <select> switches to IN_SELECT mode
+        if (strcmp(tag, "select") == 0) {
+            html5_reconstruct_active_formatting_elements(parser);
+            html5_insert_html_element(parser, token);
+            parser->frameset_ok = false;
+            // Switch to IN_SELECT mode
+            parser->mode = HTML5_MODE_IN_SELECT;
+            return;
+        }
+
+        // <option> closes any previous <option> element on the stack
+        if (strcmp(tag, "option") == 0) {
+            // If current node is an option, pop it
+            Element* current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "option") == 0) {
+                    html5_pop_element(parser);
+                }
+            }
+            html5_reconstruct_active_formatting_elements(parser);
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
+        // <optgroup> closes any previous <option> or <optgroup> element
+        if (strcmp(tag, "optgroup") == 0) {
+            // If current node is an option, pop it
+            Element* current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "option") == 0) {
+                    html5_pop_element(parser);
+                    // Check again after popping
+                    current = html5_current_node(parser);
+                    if (current) {
+                        current_tag = ((TypeElmt*)current->type)->name.str;
+                    }
+                }
+                if (current && strcmp(current_tag, "optgroup") == 0) {
+                    html5_pop_element(parser);
+                }
+            }
+            html5_reconstruct_active_formatting_elements(parser);
+            html5_insert_html_element(parser, token);
             return;
         }
 
@@ -1339,6 +1399,195 @@ static void html5_process_in_cell_mode(Html5Parser* parser, Html5Token* token) {
 
     // Anything else: process using IN_BODY rules
     html5_process_in_body_mode(parser, token);
+}
+
+// ===== IN SELECT MODE =====
+static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token) {
+    if (token->type == HTML5_TOKEN_CHARACTER) {
+        if (token->data && token->data->len > 0) {
+            for (uint32_t i = 0; i < token->data->len; i++) {
+                char c = token->data->chars[i];
+                if (c == '\0') {
+                    log_error("html5: null character in select");
+                    continue;
+                }
+                html5_insert_character(parser, c);
+            }
+        }
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_DOCTYPE) {
+        log_error("html5: unexpected doctype in select mode");
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "html") == 0) {
+            // Process using in body mode rules
+            html5_process_in_body_mode(parser, token);
+            return;
+        }
+
+        if (strcmp(tag, "option") == 0) {
+            // If current node is an option, pop it
+            Element* current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "option") == 0) {
+                    html5_pop_element(parser);
+                }
+            }
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
+        if (strcmp(tag, "optgroup") == 0) {
+            // If current node is an option, pop it
+            Element* current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "option") == 0) {
+                    html5_pop_element(parser);
+                }
+            }
+            // If current node is now optgroup, pop it too
+            current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "optgroup") == 0) {
+                    html5_pop_element(parser);
+                }
+            }
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
+        // Another <select> closes the current select and reprocesses in body mode
+        if (strcmp(tag, "select") == 0) {
+            log_error("html5: nested <select> - closing current select");
+            // Pop until <select>
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, "select") == 0) {
+                    break;
+                }
+            }
+            html5_reset_insertion_mode(parser);
+            return;
+        }
+
+        // input, keygen, textarea - close select and reprocess
+        if (strcmp(tag, "input") == 0 || strcmp(tag, "keygen") == 0 ||
+            strcmp(tag, "textarea") == 0) {
+            log_error("html5: <%s> in select - closing select", tag);
+            if (!html5_has_element_in_select_scope(parser, "select")) {
+                log_error("html5: no select in scope");
+                return;
+            }
+            // Pop until <select>
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, "select") == 0) {
+                    break;
+                }
+            }
+            html5_reset_insertion_mode(parser);
+            html5_process_token(parser, token);
+            return;
+        }
+
+        // script, template - process in head rules
+        if (strcmp(tag, "script") == 0 || strcmp(tag, "template") == 0) {
+            html5_process_in_head_mode(parser, token);
+            return;
+        }
+
+        // Anything else - parse error, ignore
+        log_error("html5: ignoring <%s> in select mode", tag);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "optgroup") == 0) {
+            // If current node is option and previous is optgroup, pop option first
+            Element* current = html5_current_node(parser);
+            if (current && parser->open_elements->length >= 2) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "option") == 0) {
+                    Element* prev = (Element*)parser->open_elements->items[parser->open_elements->length - 2].element;
+                    const char* prev_tag = ((TypeElmt*)prev->type)->name.str;
+                    if (strcmp(prev_tag, "optgroup") == 0) {
+                        html5_pop_element(parser);
+                    }
+                }
+            }
+            // If current node is optgroup, pop it
+            current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "optgroup") == 0) {
+                    html5_pop_element(parser);
+                }
+            }
+            return;
+        }
+
+        if (strcmp(tag, "option") == 0) {
+            // If current node is option, pop it
+            Element* current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "option") == 0) {
+                    html5_pop_element(parser);
+                }
+            }
+            return;
+        }
+
+        if (strcmp(tag, "select") == 0) {
+            if (!html5_has_element_in_select_scope(parser, "select")) {
+                log_error("html5: </select> without select in scope");
+                return;
+            }
+            // Pop until <select>
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, "select") == 0) {
+                    break;
+                }
+            }
+            html5_reset_insertion_mode(parser);
+            return;
+        }
+
+        if (strcmp(tag, "template") == 0) {
+            html5_process_in_head_mode(parser, token);
+            return;
+        }
+
+        // Anything else - parse error, ignore
+        log_error("html5: ignoring </%s> in select mode", tag);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_EOF) {
+        // Process using in body rules
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
 }
 
 // helper: close the current cell (td/th)
