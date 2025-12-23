@@ -1,0 +1,810 @@
+#include "html5_parser.h"
+#include "../../../lib/log.h"
+#include "../../mark_builder.hpp"
+#include "../../mark_reader.hpp"
+#include <string.h>
+#include <assert.h>
+
+// parser lifecycle
+Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
+    Html5Parser* parser = (Html5Parser*)pool_calloc(pool, sizeof(Html5Parser));
+    parser->pool = pool;
+    parser->arena = arena;
+    parser->input = input;
+
+    // initialize stacks
+    parser->open_elements = list_arena(arena);
+    parser->active_formatting = list_arena(arena);
+    parser->template_modes = list_arena(arena);
+
+    // initial mode
+    parser->mode = HTML5_MODE_INITIAL;
+    parser->original_insertion_mode = HTML5_MODE_INITIAL;
+
+    // flags
+    parser->scripting_enabled = true;
+    parser->frameset_ok = true;
+    parser->foster_parenting = false;
+    parser->ignore_next_lf = false;
+
+    // temporary buffer (4KB initial capacity)
+    parser->temp_buffer_capacity = 4096;
+    parser->temp_buffer = (char*)arena_alloc(arena, parser->temp_buffer_capacity);
+    parser->temp_buffer_len = 0;
+
+    // text content buffering
+    parser->text_buffer = stringbuf_new(pool);
+    parser->pending_text_parent = nullptr;
+
+    return parser;
+}
+
+void html5_parser_destroy(Html5Parser* parser) {
+    // memory is pool/arena-managed, nothing to free explicitly
+    (void)parser;
+}
+
+// stack operations - these implement the "stack of open elements" from WHATWG spec
+Element* html5_current_node(Html5Parser* parser) {
+    if (parser->open_elements->length == 0) {
+        return nullptr;
+    }
+    return (Element*)parser->open_elements->items[parser->open_elements->length - 1].element;
+}
+
+void html5_push_element(Html5Parser* parser, Element* elem) {
+    Item item;
+    item.element = elem;
+    array_append(parser->open_elements, item, parser->pool, parser->arena);
+    log_debug("html5: pushed element <%s>, stack depth now %zu", ((TypeElmt*)elem->type)->name.str, parser->open_elements->length);
+}
+
+Element* html5_pop_element(Html5Parser* parser) {
+    if (parser->open_elements->length == 0) {
+        log_error("html5: attempted to pop from empty stack");
+        return nullptr;
+    }
+
+    Element* elem = (Element*)parser->open_elements->items[parser->open_elements->length - 1].element;
+    parser->open_elements->length--;
+    log_debug("html5: popped element <%s>, stack depth now %zu", ((TypeElmt*)elem->type)->name.str, parser->open_elements->length);
+    return elem;
+}
+
+// scope checking - implements "has an element in scope" algorithms from WHATWG spec
+static bool is_scope_marker(const char* tag_name, const char** scope_list, size_t scope_len) {
+    for (size_t i = 0; i < scope_len; i++) {
+        if (strcmp(tag_name, scope_list[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool has_element_in_scope_generic(Html5Parser* parser, const char* target_tag_name,
+                                          const char** scope_list, size_t scope_len) {
+    // traverse stack from top to bottom
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        Element* elem = (Element*)parser->open_elements->items[i].element;
+        const char* tag_name = ((TypeElmt*)elem->type)->name.str;
+
+        if (strcmp(tag_name, target_tag_name) == 0) {
+            return true;
+        }
+
+        if (is_scope_marker(tag_name, scope_list, scope_len)) {
+            return false;
+        }
+    }
+    return false;
+}
+
+bool html5_has_element_in_scope(Html5Parser* parser, const char* tag_name) {
+    // standard scope markers: applet, caption, html, table, td, th, marquee, object, template,
+    // plus MathML mi, mo, mn, ms, mtext, annotation-xml, and SVG foreignObject, desc, title
+    static const char* scope_markers[] = {
+        "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template"
+    };
+    return has_element_in_scope_generic(parser, tag_name, scope_markers, 9);
+}
+
+bool html5_has_element_in_button_scope(Html5Parser* parser, const char* tag_name) {
+    // button scope = standard scope + button
+    static const char* scope_markers[] = {
+        "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template", "button"
+    };
+    return has_element_in_scope_generic(parser, tag_name, scope_markers, 10);
+}
+
+bool html5_has_element_in_table_scope(Html5Parser* parser, const char* tag_name) {
+    // table scope = html, table, template
+    static const char* scope_markers[] = {"html", "table", "template"};
+    return has_element_in_scope_generic(parser, tag_name, scope_markers, 3);
+}
+
+bool html5_has_element_in_list_item_scope(Html5Parser* parser, const char* tag_name) {
+    // list item scope = standard scope + ol, ul
+    static const char* scope_markers[] = {
+        "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template", "ol", "ul"
+    };
+    return has_element_in_scope_generic(parser, tag_name, scope_markers, 11);
+}
+
+bool html5_has_element_in_select_scope(Html5Parser* parser, const char* tag_name) {
+    // select scope = all elements EXCEPT optgroup and option
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        Element* elem = (Element*)parser->open_elements->items[i].element;
+        const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
+
+        if (strcmp(elem_tag, tag_name) == 0) {
+            return true;
+        }
+
+        if (strcmp(elem_tag, "optgroup") != 0 && strcmp(elem_tag, "option") != 0) {
+            return false;
+        }
+    }
+    return false;
+}
+
+// implied end tags - implements "generate implied end tags" from WHATWG spec
+void html5_generate_implied_end_tags(Html5Parser* parser) {
+    static const char* implied_tags[] = {
+        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc"
+    };
+
+    while (parser->open_elements->length > 0) {
+        Element* current = html5_current_node(parser);
+        const char* tag_name = ((TypeElmt*)current->type)->name.str;
+
+        bool is_implied = false;
+        for (size_t i = 0; i < 10; i++) {
+            if (strcmp(tag_name, implied_tags[i]) == 0) {
+                is_implied = true;
+                break;
+            }
+        }
+
+        if (!is_implied) {
+            break;
+        }
+
+        html5_pop_element(parser);
+    }
+}
+
+void html5_generate_implied_end_tags_except(Html5Parser* parser, const char* exception_tag) {
+    static const char* implied_tags[] = {
+        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc"
+    };
+
+    while (parser->open_elements->length > 0) {
+        Element* current = html5_current_node(parser);
+        const char* tag_name = ((TypeElmt*)current->type)->name.str;
+
+        if (strcmp(tag_name, exception_tag) == 0) {
+            break;
+        }
+
+        bool is_implied = false;
+        for (size_t i = 0; i < 10; i++) {
+            if (strcmp(tag_name, implied_tags[i]) == 0) {
+                is_implied = true;
+                break;
+            }
+        }
+
+        if (!is_implied) {
+            break;
+        }
+
+        html5_pop_element(parser);
+    }
+}
+
+// close a <p> element in button scope - implements "close a p element" from WHATWG spec
+void html5_close_p_element(Html5Parser* parser) {
+    // generate implied end tags except for p
+    html5_generate_implied_end_tags_except(parser, "p");
+    // pop elements until we pop a p element
+    while (parser->open_elements->length > 0) {
+        Element* current = html5_current_node(parser);
+        const char* tag_name = ((TypeElmt*)current->type)->name.str;
+        html5_pop_element(parser);
+        if (strcmp(tag_name, "p") == 0) {
+            break;
+        }
+    }
+}
+
+// active formatting elements - implements "reconstruct the active formatting elements" from WHATWG spec
+void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
+    // step 1: if there are no entries in the list, stop
+    if (parser->active_formatting->length == 0) {
+        return;
+    }
+
+    // step 2: if the last entry is a marker or in the stack, stop
+    int entry_idx = (int)parser->active_formatting->length - 1;
+    Item entry = parser->active_formatting->items[entry_idx];
+
+    if (entry.element == nullptr) {  // marker
+        return;
+    }
+
+    // check if entry is in stack
+    bool in_stack = false;
+    for (size_t i = 0; i < parser->open_elements->length; i++) {
+        if (parser->open_elements->items[i].element == entry.element) {
+            in_stack = true;
+            break;
+        }
+    }
+    if (in_stack) {
+        return;
+    }
+
+    // step 3-6: rewind to find first entry not in stack
+    while (entry_idx > 0) {
+        entry_idx--;
+        entry = parser->active_formatting->items[entry_idx];
+
+        if (entry.element == nullptr) {  // marker
+            entry_idx++;
+            break;
+        }
+
+        in_stack = false;
+        for (size_t i = 0; i < parser->open_elements->length; i++) {
+            if (parser->open_elements->items[i].element == entry.element) {
+                in_stack = true;
+                break;
+            }
+        }
+        if (in_stack) {
+            entry_idx++;
+            break;
+        }
+    }
+
+    // step 7-10: create and insert elements
+    while (entry_idx < (int)parser->active_formatting->length) {
+        Element* old_elem = (Element*)parser->active_formatting->items[entry_idx].element;
+
+        // create new element with same name
+        MarkBuilder builder(parser->input);
+        const char* tag_name = ((TypeElmt*)old_elem->type)->name.str;
+        Element* new_elem = builder.element(tag_name).final().element;
+
+        // insert into appropriate place in stack
+        Element* parent = html5_current_node(parser);
+        array_append(parent, Item{.element = new_elem}, parser->pool, parser->arena);
+        html5_push_element(parser, new_elem);
+
+        // replace entry in active formatting list
+        parser->active_formatting->items[entry_idx].element = new_elem;
+
+        entry_idx++;
+    }
+}
+
+void html5_clear_active_formatting_to_marker(Html5Parser* parser) {
+    while (parser->active_formatting->length > 0) {
+        Item entry = parser->active_formatting->items[parser->active_formatting->length - 1];
+        parser->active_formatting->length--;
+
+        if (entry.element == nullptr) {  // marker
+            break;
+        }
+    }
+}
+
+// element insertion helpers
+Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
+    // Flush any pending text before inserting element
+    html5_flush_pending_text(parser);
+
+    // Create element with attributes from token
+    Element* elem = html5_create_element_for_token(parser, token);
+
+    // insert into tree
+    Element* parent = html5_current_node(parser);
+    if (parent != nullptr) {
+        array_append((Array*)parent, Item{.element = elem}, parser->pool, parser->arena);
+    } else {
+        // no parent - must be root html element, add to document
+        array_append((Array*)parser->document, Item{.element = elem}, parser->pool, parser->arena);
+    }
+
+    // push onto stack
+    html5_push_element(parser, elem);
+
+    log_debug("html5: inserted element <%s>", token->tag_name->chars);
+    return elem;
+}
+
+// Flush pending text buffer to parent element as a single text node
+void html5_flush_pending_text(Html5Parser* parser) {
+    if (parser->text_buffer->length == 0) {
+        return;  // nothing to flush
+    }
+
+    Element* parent = parser->pending_text_parent;
+    if (parent == nullptr) {
+        parent = html5_current_node(parser);
+    }
+    if (parent == nullptr) {
+        log_error("html5: cannot flush text, no parent element");
+        stringbuf_reset(parser->text_buffer);
+        parser->pending_text_parent = nullptr;
+        return;
+    }
+
+    // Convert buffer to String and create text node
+    String* text_str = stringbuf_to_string(parser->text_buffer);
+    Item text_node = {.item = s2it(text_str)};
+    array_append((Array*)parent, text_node, parser->pool, parser->arena);
+
+    // Reset buffer for next text run
+    stringbuf_reset(parser->text_buffer);
+    parser->pending_text_parent = nullptr;
+}
+
+void html5_insert_character(Html5Parser* parser, char c) {
+    Element* parent = html5_current_node(parser);
+    if (parent == nullptr) {
+        log_error("html5: cannot insert character, no current node");
+        return;
+    }
+
+    // If parent changed, flush previous text first
+    if (parser->pending_text_parent != nullptr && parser->pending_text_parent != parent) {
+        html5_flush_pending_text(parser);
+    }
+
+    // Buffer the character
+    stringbuf_append_char(parser->text_buffer, c);
+    parser->pending_text_parent = parent;
+}
+
+void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
+    // Flush any pending text before inserting comment
+    html5_flush_pending_text(parser);
+
+    // comments are stored as special element nodes with name "#comment"
+    MarkBuilder builder(parser->input);
+
+    // Get comment data - might be empty or null
+    const char* comment_data = "";
+    size_t comment_len = 0;
+    if (token->data && token->data->chars) {
+        comment_data = token->data->chars;
+        comment_len = token->data->len;
+    }
+
+    // Create the comment element - need to handle empty comments specially
+    // because createString("") returns EMPTY_STRING which has "lambda.nil" content
+    ElementBuilder elem_builder = builder.element("#comment");
+
+    // Only set data attribute if there's actual content
+    // For empty comments, we still need the data attribute but with empty value
+    // We'll handle this by creating a zero-length string if needed
+    if (comment_len > 0) {
+        elem_builder.attr("data", comment_data);
+    } else {
+        // For empty comment, store a single space as placeholder
+        // The test expects "<!--  -->" (with space) for empty comments
+        elem_builder.attr("data", "");
+    }
+
+    Element* comment = elem_builder.final().element;
+
+    Element* parent = html5_current_node(parser);
+    if (parent == nullptr) {
+        parent = parser->document;
+    }
+
+    array_append(parent, Item{.element = comment}, parser->pool, parser->arena);
+    log_debug("html5: inserted comment with data len=%zu", comment_len);
+}
+
+// ==================== ADOPTION AGENCY ALGORITHM ====================
+
+// Check if tag name is a formatting element (per WHATWG spec)
+bool html5_is_formatting_element(const char* tag_name) {
+    static const char* formatting_elements[] = {
+        "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small",
+        "strike", "strong", "tt", "u"
+    };
+    for (size_t i = 0; i < sizeof(formatting_elements)/sizeof(formatting_elements[0]); i++) {
+        if (strcmp(tag_name, formatting_elements[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Check if tag name is a special element (per WHATWG spec)
+bool html5_is_special_element(const char* tag_name) {
+    static const char* special_elements[] = {
+        "address", "applet", "area", "article", "aside", "base", "basefont",
+        "bgsound", "blockquote", "body", "br", "button", "caption", "center",
+        "col", "colgroup", "dd", "details", "dir", "div", "dl", "dt", "embed",
+        "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset",
+        "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr",
+        "html", "iframe", "img", "input", "keygen", "li", "link", "listing",
+        "main", "marquee", "menu", "meta", "nav", "noembed", "noframes",
+        "noscript", "object", "ol", "p", "param", "plaintext", "pre", "script",
+        "section", "select", "source", "style", "summary", "table", "tbody",
+        "td", "template", "textarea", "tfoot", "th", "thead", "title", "tr",
+        "track", "ul", "wbr", "xmp"
+    };
+    for (size_t i = 0; i < sizeof(special_elements)/sizeof(special_elements[0]); i++) {
+        if (strcmp(tag_name, special_elements[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Create element for token (without inserting into tree)
+Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) {
+    MarkBuilder builder(parser->input);
+    ElementBuilder eb = builder.element(token->tag_name->chars);
+
+    // Copy attributes from token to element
+    if (token->attributes != nullptr) {
+        MapReader reader(token->attributes);
+        MapReader::EntryIterator it = reader.entries();
+        const char* key;
+        ItemReader value;
+        while (it.next(&key, &value)) {
+            if (key && value.isString()) {
+                eb.attr(key, value.cstring());
+            }
+        }
+    }
+
+    Element* elem = eb.final().element;
+    return elem;
+}
+
+// Push element to active formatting list
+void html5_push_active_formatting_element(Html5Parser* parser, Element* elem, Html5Token* token) {
+    (void)token;  // token can be used for Noah's Ark clause, not implemented yet
+
+    // Add to active formatting elements list
+    Item item = {.element = elem};
+    array_append(parser->active_formatting, item, parser->pool, parser->arena);
+    log_debug("html5: added <%s> to active formatting list, size=%zu",
+              ((TypeElmt*)elem->type)->name.str, parser->active_formatting->length);
+}
+
+// Push a marker onto active formatting list
+void html5_push_active_formatting_marker(Html5Parser* parser) {
+    Item marker = {.element = nullptr};
+    array_append(parser->active_formatting, marker, parser->pool, parser->arena);
+    log_debug("html5: pushed marker to active formatting list");
+}
+
+// Find formatting element in active formatting list (returns -1 if not found)
+int html5_find_formatting_element(Html5Parser* parser, const char* tag_name) {
+    for (int i = (int)parser->active_formatting->length - 1; i >= 0; i--) {
+        Element* elem = (Element*)parser->active_formatting->items[i].element;
+        if (elem == nullptr) {
+            // marker - stop searching
+            return -1;
+        }
+        const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
+        if (strcmp(elem_tag, tag_name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Find element in open elements stack (returns -1 if not found)
+int html5_find_element_in_stack(Html5Parser* parser, Element* elem) {
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        if (parser->open_elements->items[i].element == elem) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Remove element from active formatting list by index
+void html5_remove_from_active_formatting(Html5Parser* parser, int index) {
+    if (index < 0 || index >= (int)parser->active_formatting->length) {
+        return;
+    }
+    // shift elements down
+    for (size_t i = index; i < parser->active_formatting->length - 1; i++) {
+        parser->active_formatting->items[i] = parser->active_formatting->items[i + 1];
+    }
+    parser->active_formatting->length--;
+}
+
+// Remove element from open elements stack by index
+void html5_remove_from_stack(Html5Parser* parser, int index) {
+    if (index < 0 || index >= (int)parser->open_elements->length) {
+        return;
+    }
+    // shift elements down
+    for (size_t i = index; i < parser->open_elements->length - 1; i++) {
+        parser->open_elements->items[i] = parser->open_elements->items[i + 1];
+    }
+    parser->open_elements->length--;
+}
+
+// Helper: insert element at specified position in array
+// Uses array_append to ensure capacity, then shifts elements
+static void array_insert_at(Array* arr, int position, Item item, Pool* pool, Arena* arena) {
+    // First, append a dummy to ensure capacity
+    array_append(arr, item, pool, arena);
+
+    // Now shift elements from the end down to position
+    for (int64_t i = arr->length - 1; i > position; i--) {
+        arr->items[i] = arr->items[i - 1];
+    }
+
+    // Insert the item at position
+    arr->items[position] = item;
+}
+
+// Helper: remove specific child element from parent
+static void remove_element_child(Element* parent, Element* child) {
+    for (int64_t i = 0; i < parent->length; i++) {
+        if (parent->items[i].element == child) {
+            // Shift remaining elements down
+            for (int64_t j = i; j < parent->length - 1; j++) {
+                parent->items[j] = parent->items[j + 1];
+            }
+            parent->length--;
+            return;
+        }
+    }
+}
+
+// Helper: move all children from one element to another
+static void reparent_children(Html5Parser* parser, Element* from, Element* to) {
+    for (int64_t i = 0; i < from->length; i++) {
+        Item child = from->items[i];
+        array_append((Array*)to, child, parser->pool, parser->arena);
+    }
+    from->length = 0;
+}
+
+// The Adoption Agency Algorithm
+// Implements WHATWG spec section 12.2.6.4.7
+void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
+    const char* subject = token->tag_name->chars;
+    log_debug("html5: running adoption agency for </%s>", subject);
+
+    // Flush any pending text before restructuring the tree
+    html5_flush_pending_text(parser);
+
+    // Outer loop limit
+    int outer_loop_counter = 0;
+
+    while (outer_loop_counter < 8) {
+        outer_loop_counter++;
+
+        // Step 1: Find formatting element
+        int formatting_element_idx = html5_find_formatting_element(parser, subject);
+        if (formatting_element_idx < 0) {
+            // No formatting element found - treat as "any other end tag"
+            log_debug("html5: AAA - no formatting element found for </%s>", subject);
+
+            // Generic end tag handling
+            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+                Element* node = (Element*)parser->open_elements->items[i].element;
+                const char* node_tag = ((TypeElmt*)node->type)->name.str;
+
+                if (strcmp(node_tag, subject) == 0) {
+                    html5_generate_implied_end_tags_except(parser, subject);
+                    while ((int)parser->open_elements->length > i) {
+                        html5_pop_element(parser);
+                    }
+                    return;
+                }
+
+                if (html5_is_special_element(node_tag)) {
+                    return;  // parse error, ignore token
+                }
+            }
+            return;
+        }
+
+        Element* formatting_element = (Element*)parser->active_formatting->items[formatting_element_idx].element;
+
+        // Step 2: If formatting element not in stack of open elements
+        int fe_stack_idx = html5_find_element_in_stack(parser, formatting_element);
+        if (fe_stack_idx < 0) {
+            log_debug("html5: AAA - formatting element not in stack, removing from active list");
+            html5_remove_from_active_formatting(parser, formatting_element_idx);
+            return;
+        }
+
+        // Step 3: If formatting element is not in scope, parse error
+        if (!html5_has_element_in_scope(parser, subject)) {
+            log_error("html5: AAA - formatting element not in scope");
+            return;
+        }
+
+        // Step 4: If formatting element is not current node, parse error (continue)
+        if (formatting_element != html5_current_node(parser)) {
+            log_debug("html5: AAA - formatting element is not current node (parse error, continuing)");
+        }
+
+        // Step 5: Find furthest block
+        Element* furthest_block = nullptr;
+        int furthest_block_idx = -1;
+
+        for (int i = fe_stack_idx + 1; i < (int)parser->open_elements->length; i++) {
+            Element* node = (Element*)parser->open_elements->items[i].element;
+            const char* node_tag = ((TypeElmt*)node->type)->name.str;
+            if (html5_is_special_element(node_tag)) {
+                furthest_block = node;
+                furthest_block_idx = i;
+                break;
+            }
+        }
+
+        // Step 6: If no furthest block, pop until formatting element is popped
+        if (furthest_block == nullptr) {
+            log_debug("html5: AAA - no furthest block, popping to formatting element");
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (popped == formatting_element) {
+                    break;
+                }
+            }
+            html5_remove_from_active_formatting(parser, formatting_element_idx);
+            return;
+        }
+
+        // Step 7: Get common ancestor (element before formatting element in stack)
+        Element* common_ancestor = (Element*)parser->open_elements->items[fe_stack_idx - 1].element;
+        log_debug("html5: AAA - common ancestor: <%s>, furthest block: <%s>",
+                  ((TypeElmt*)common_ancestor->type)->name.str,
+                  ((TypeElmt*)furthest_block->type)->name.str);
+
+        // Step 8: Remember bookmark (position in active formatting list)
+        int bookmark = formatting_element_idx;
+
+        // Step 9: Initialize node and last node
+        Element* node = furthest_block;
+        int node_idx = furthest_block_idx;
+        Element* last_node = furthest_block;
+
+        // Track the tree parent of last_node (for step 11)
+        // Initially, furthest_block's parent in the tree is the element
+        // immediately before it in the stack (at node_idx - 1)
+        Element* last_node_parent = (Element*)parser->open_elements->items[node_idx - 1].element;
+
+        // Step 10: Inner loop
+        int inner_loop_counter = 0;
+
+        while (true) {
+            inner_loop_counter++;
+
+            // Step 10.1: Move node to previous in stack
+            node_idx--;
+            node = (Element*)parser->open_elements->items[node_idx].element;
+
+            // Step 10.2: If node is formatting element, exit inner loop
+            if (node == formatting_element) {
+                break;
+            }
+
+            // Step 10.3: If inner loop > 3 and node is in active formatting list
+            int node_active_idx = -1;
+            for (int i = 0; i < (int)parser->active_formatting->length; i++) {
+                if (parser->active_formatting->items[i].element == node) {
+                    node_active_idx = i;
+                    break;
+                }
+            }
+
+            if (inner_loop_counter > 3 && node_active_idx >= 0) {
+                html5_remove_from_active_formatting(parser, node_active_idx);
+                if (node_active_idx < bookmark) {
+                    bookmark--;
+                }
+                node_active_idx = -1;
+            }
+
+            // Step 10.4: If node is not in active formatting list, remove from stack
+            if (node_active_idx < 0) {
+                html5_remove_from_stack(parser, node_idx);
+                // Note: last_node's parent in the tree is still "node" since
+                // we're just removing from stack, not from tree
+                // But we need to track this for step 11
+                // Actually, when we skip node, the parent becomes the next node
+                // we'll process, so we update last_node_parent to node's parent
+                // which is at node_idx - 1 (after removal, indices shift)
+                // This is complex - let's just search for parent in step 11
+                continue;
+            }
+
+            // Step 10.5: Create a new element with same tag name
+            MarkBuilder builder(parser->input);
+            const char* node_tag = ((TypeElmt*)node->type)->name.str;
+            Element* new_element = builder.element(node_tag).final().element;
+
+            // Replace in active formatting list
+            parser->active_formatting->items[node_active_idx].element = new_element;
+
+            // Replace in stack of open elements
+            parser->open_elements->items[node_idx].element = new_element;
+
+            node = new_element;
+
+            // Step 10.6: If last node is furthest block, update bookmark
+            if (last_node == furthest_block) {
+                bookmark = node_active_idx + 1;
+            }
+
+            // Step 10.7: Append last node to node
+            // Remove from old parent first
+            if (last_node_parent != nullptr) {
+                remove_element_child(last_node_parent, last_node);
+            }
+            array_append((Array*)node, Item{.element = last_node}, parser->pool, parser->arena);
+
+            // Update parent tracking
+            last_node_parent = node;
+
+            // Step 10.8: Set last node to node
+            last_node = node;
+        }
+
+        // Step 11: Insert last_node at appropriate place
+        // First, remove last_node from its current parent
+        // This is the element that contains last_node in the tree
+        if (last_node_parent != nullptr) {
+            remove_element_child(last_node_parent, last_node);
+        }
+
+        // Now insert into common_ancestor
+        array_append((Array*)common_ancestor, Item{.element = last_node}, parser->pool, parser->arena);
+
+        // Step 12: Create new element with same tag as formatting element
+        MarkBuilder builder(parser->input);
+        Element* new_formatting_element = builder.element(subject).final().element;
+
+        // Step 13: Take all children of furthest block and append to new element
+        reparent_children(parser, furthest_block, new_formatting_element);
+
+        // Step 14: Append new element to furthest block
+        array_append((Array*)furthest_block, Item{.element = new_formatting_element},
+                     parser->pool, parser->arena);
+
+        // Step 15: Remove formatting element from active list, insert new at bookmark
+        html5_remove_from_active_formatting(parser, formatting_element_idx);
+        if (bookmark > (int)parser->active_formatting->length) {
+            bookmark = (int)parser->active_formatting->length;
+        }
+        // Insert at bookmark position using our helper
+        Item new_fe_item = {.element = new_formatting_element};
+        array_insert_at((Array*)parser->active_formatting, bookmark, new_fe_item,
+                        parser->pool, parser->arena);
+
+        // Step 16: Remove formatting element from stack, insert new after furthest block
+        html5_remove_from_stack(parser, fe_stack_idx);
+
+        // Find furthest block in stack (its index may have shifted)
+        int fb_new_idx = html5_find_element_in_stack(parser, furthest_block);
+        if (fb_new_idx >= 0) {
+            // Insert new formatting element after furthest block
+            Item new_fe_item2 = {.element = new_formatting_element};
+            array_insert_at((Array*)parser->open_elements, fb_new_idx + 1, new_fe_item2,
+                            parser->pool, parser->arena);
+        }
+
+        log_debug("html5: AAA iteration complete for </%s>", subject);
+    }
+
+    log_debug("html5: AAA completed after %d iterations", outer_loop_counter);
+}

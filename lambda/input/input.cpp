@@ -21,6 +21,7 @@ void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
 void parse_html_impl(Input* input, const char* html_string, const char* flavor);  // Internal - use input_from_source()
+Element* html5_parse(Input* input, const char* html);  // HTML5 compliant parser
 extern "C" void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser (default)
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string);
@@ -582,9 +583,17 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         else if (strcmp(effective_type, "rst") == 0) {
             input->root = input_markup(input, source);
         }
-        else if (strcmp(effective_type, "html") == 0) {
+        else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
             const char* html_flavor = (flavor && flavor->chars) ? flavor->chars : "html5";
-            parse_html_impl(input, source, html_flavor);
+
+            // Use HTML5 compliant parser by default
+            if (strcmp(html_flavor, "html5") == 0 || strcmp(html_flavor, "html") == 0) {
+                Element* doc = html5_parse(input, source);
+                input->root = (Item){.element = doc};
+            } else {
+                // Fall back to old parser for other flavors
+                parse_html_impl(input, source, html_flavor);
+            }
         }
         else if (strcmp(effective_type, "latex") == 0 || strcmp(effective_type, "latex-ts") == 0) {
             // Tree-sitter LaTeX parser (default)
