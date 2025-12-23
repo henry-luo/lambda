@@ -46,7 +46,7 @@ Html5Token* html5_token_create_character(Pool* pool, Arena* arena, char c);
 Html5Token* html5_token_create_eof(Pool* pool, Arena* arena);
 
 // Token helper functions
-void html5_token_add_attribute(Html5Token* token, String* name, String* value);
+void html5_token_add_attribute(Html5Token* token, String* name, String* value, Input* input);
 void html5_token_append_to_tag_name(Html5Token* token, char c);
 void html5_token_append_to_data(Html5Token* token, char c);
 
