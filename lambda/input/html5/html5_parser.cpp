@@ -316,10 +316,77 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
     // Flush any pending text before inserting element
     html5_flush_pending_text(parser);
 
+    // Also flush any pending foster text
+    html5_flush_foster_text(parser);
+
     // Create element with attributes from token
     Element* elem = html5_create_element_for_token(parser, token);
 
-    // insert into tree
+    // Check if foster parenting is enabled (inside table but outside cells)
+    if (parser->foster_parenting) {
+        // Find the last table element in the stack
+        Element* table_element = nullptr;
+        int table_index = -1;
+
+        for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+            Element* el = (Element*)parser->open_elements->items[i].element;
+            const char* el_tag = ((TypeElmt*)el->type)->name.str;
+            if (strcmp(el_tag, "table") == 0) {
+                table_element = el;
+                table_index = i;
+                break;
+            }
+        }
+
+        if (table_element != nullptr) {
+            // Per WHATWG spec: Find the table's DOM parent by searching backwards in the stack
+            // for the element that actually contains the table as a child
+            Element* foster_parent = nullptr;
+            int table_pos = -1;
+
+            for (int i = table_index - 1; i >= 0; i--) {
+                Element* candidate = (Element*)parser->open_elements->items[i].element;
+                // Check if table is a direct child of this element
+                for (size_t j = 0; j < candidate->length; j++) {
+                    if (candidate->items[j].element == table_element) {
+                        foster_parent = candidate;
+                        table_pos = (int)j;
+                        break;
+                    }
+                }
+                if (foster_parent != nullptr) {
+                    break;
+                }
+            }
+
+            if (foster_parent != nullptr && table_pos >= 0) {
+                const char* foster_tag = ((TypeElmt*)foster_parent->type)->name.str;
+                log_debug("html5_foster: element=<%s> table_index=%d foster_parent=<%s> table_pos=%d",
+                          token->tag_name->chars, table_index, foster_tag, table_pos);
+
+                // Insert element before the table in the foster parent
+                log_debug("html5: foster parenting element <%s> before table at pos %d",
+                          token->tag_name->chars, table_pos);
+                MarkEditor editor(parser->input);
+                editor.array_insert(Item{.element = foster_parent}, table_pos, Item{.element = elem});
+
+                // push onto stack
+                html5_push_element(parser, elem);
+                log_debug("html5: inserted element <%s> (foster parented)", token->tag_name->chars);
+                return elem;
+            } else if (table_index > 0) {
+                // Fallback: use element before table in stack as foster parent
+                foster_parent = (Element*)parser->open_elements->items[table_index - 1].element;
+                log_debug("html5_foster: fallback - element=<%s> foster_parent=<%s>",
+                          token->tag_name->chars, ((TypeElmt*)foster_parent->type)->name.str);
+                array_append(foster_parent, Item{.element = elem}, parser->pool, parser->arena);
+                html5_push_element(parser, elem);
+                return elem;
+            }
+        }
+    }
+
+    // Normal insertion: insert into tree
     Element* parent = html5_current_node(parser);
     if (parent != nullptr) {
         array_append((Array*)parent, Item{.element = elem}, parser->pool, parser->arena);
