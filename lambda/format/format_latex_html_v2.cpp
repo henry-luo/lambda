@@ -4,6 +4,9 @@
 #include "format.h"
 #include "html_writer.hpp"
 #include "html_generator.hpp"
+#include "latex_packages.hpp"
+#include "latex_docclass.hpp"
+#include "latex_assets.hpp"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 #include "../input/input.hpp"
@@ -5783,9 +5786,68 @@ static void cmd_documentclass(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_usepackage(LatexProcessor* proc, Item elem) {
-    // \usepackage[options]{package}
-    // Store package name for reference but no HTML output
-    // Package-specific commands should already be implemented individually
+    // \usepackage[options]{package1,package2,...}
+    // Parse options and package names, then load them via PackageRegistry
+    
+    ElementReader reader(elem);
+    std::vector<std::string> options;
+    std::vector<std::string> package_names;
+    Pool* pool = proc->pool();
+    
+    int64_t child_count = reader.childCount();
+    for (int64_t i = 0; i < child_count; i++) {
+        ItemReader child = reader.childAt(i);
+        
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            
+            if (tag && strcmp(tag, "bracket_group") == 0) {
+                // Parse options (comma-separated in brackets)
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                std::string opt_text(sb->str ? sb->str->chars : "", sb->length);
+                stringbuf_free(sb);
+                
+                // Split by comma
+                std::istringstream iss(opt_text);
+                std::string opt;
+                while (std::getline(iss, opt, ',')) {
+                    size_t start = opt.find_first_not_of(" \t\n\r");
+                    size_t end = opt.find_last_not_of(" \t\n\r");
+                    if (start != std::string::npos) {
+                        options.push_back(opt.substr(start, end - start + 1));
+                    }
+                }
+            } else if (tag && (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_text") == 0)) {
+                // Parse package names (comma-separated in braces)
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                std::string pkg_text(sb->str ? sb->str->chars : "", sb->length);
+                stringbuf_free(sb);
+                
+                // Split by comma
+                std::istringstream iss(pkg_text);
+                std::string pkg;
+                while (std::getline(iss, pkg, ',')) {
+                    size_t start = pkg.find_first_not_of(" \t\n\r");
+                    size_t end = pkg.find_last_not_of(" \t\n\r");
+                    if (start != std::string::npos) {
+                        package_names.push_back(pkg.substr(start, end - start + 1));
+                    }
+                }
+            }
+        }
+    }
+    
+    // Load each package via the registry
+    PackageRegistry& registry = PackageRegistry::instance();
+    for (const auto& pkg_name : package_names) {
+        if (!pkg_name.empty()) {
+            registry.loadPackage(pkg_name.c_str(), options);
+            log_debug("Loaded package: %s", pkg_name.c_str());
+        }
+    }
 }
 
 static void cmd_include(LatexProcessor* proc, Item elem) {
@@ -8846,6 +8908,15 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         return;
     }
     
+    // Look up symbol in package registry (for symbols from textgreek, textcomp, gensymb, etc.)
+    const char* symbol = PackageRegistry::instance().lookupSymbol(cmd_name);
+    if (symbol && *symbol) {
+        log_debug("Symbol lookup: %s -> %s", cmd_name, symbol);
+        ensureParagraph();
+        gen_->text(symbol);
+        return;
+    }
+    
     // Unknown command - just output children
     log_debug("Unknown command: %s - processing children", cmd_name);  // DEBUG
     processChildren(elem);
@@ -8928,6 +8999,71 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     return result;
 }
 
+// =============================================================================
+// Full HTML Document Generation (with CSS and fonts)
+// =============================================================================
+
+std::string format_latex_html_v2_document(Input* input, const char* doc_class, 
+                                           const char* asset_base_url, bool embed_css) {
+    // Generate complete HTML document with CSS and fonts
+    // asset_base_url: base URL for CSS/font files (e.g., "https://cdn.example.com/latex-assets/")
+    // embed_css: if true, embed CSS inline; if false, use <link> tags
+    
+    if (!input || !input->root.item) {
+        log_error("format_latex_html_v2_document: invalid input");
+        return "";
+    }
+    
+    // Reset package registry for fresh document processing
+    PackageRegistry::instance().reset();
+    
+    // Get HTML body content
+    Item body_content = format_latex_html_v2(input, true);
+    TypeId body_type = get_type_id(body_content);
+    if (body_type != LMD_TYPE_STRING) {
+        log_error("format_latex_html_v2_document: failed to generate body content, got type %d", body_type);
+        return "";
+    }
+    
+    String* body_str = (String*)body_content.item;
+    std::string body_html(body_str->chars, body_str->len);
+    
+    // Configure asset loading
+    LatexAssetConfig config;
+    if (asset_base_url && *asset_base_url) {
+        config.mode = AssetMode::LINK;
+        config.base_url = asset_base_url;
+    } else if (embed_css) {
+        config.mode = AssetMode::EMBED;
+    } else {
+        config.mode = AssetMode::LINK;
+    }
+    config.asset_dir = LatexAssets::getDefaultAssetDir();
+    
+    // Determine document class
+    std::string docclass = doc_class ? doc_class : "article";
+    
+    // Get head content
+    std::string head_content = LatexAssets::generateHeadContent(docclass.c_str(), config);
+    
+    // Build complete HTML document
+    std::ostringstream oss;
+    oss << "<!DOCTYPE html>\n";
+    oss << "<html lang=\"en\">\n";
+    oss << "<head>\n";
+    oss << "  <meta charset=\"UTF-8\">\n";
+    oss << "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
+    oss << "  <title>LaTeX Document</title>\n";
+    oss << head_content;
+    oss << "</head>\n";
+    oss << "<body>\n";
+    oss << body_html;
+    oss << "</body>\n";
+    oss << "</html>\n";
+    
+    return oss.str();
+}
+
 } // namespace lambda
 
 // C API for compatibility with existing code
@@ -8937,6 +9073,20 @@ extern "C" {
 Item format_latex_html_v2_c(Input* input, int text_mode) {
     log_debug("format_latex_html_v2_c called, text_mode=%d", text_mode);
     return lambda::format_latex_html_v2(input, text_mode != 0);
+}
+
+// Generate complete HTML document with CSS - returns allocated C string (caller must free)
+const char* format_latex_html_v2_document_c(Input* input, const char* doc_class,
+                                             const char* asset_base_url, int embed_css) {
+    std::string result = lambda::format_latex_html_v2_document(input, doc_class, 
+                                                                 asset_base_url, embed_css != 0);
+    if (result.empty()) {
+        return nullptr;
+    }
+    // Allocate copy in input's arena for memory management
+    char* copy = (char*)arena_alloc(input->arena, result.size() + 1);
+    memcpy(copy, result.c_str(), result.size() + 1);
+    return copy;
 }
 
 } // extern "C"
