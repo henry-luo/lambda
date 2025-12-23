@@ -113,9 +113,12 @@ static void html5_commit_attribute(Html5Parser* parser) {
         parser->temp_buffer[parser->temp_buffer_len] = '\0';
         attr_value = builder.createString(parser->temp_buffer, parser->temp_buffer_len);
     } else {
-        // Use TRUE_EMPTY_STRING for boolean attributes (has len=0, chars="")
-        // not EMPTY_STRING which has "lambda.nil" content
-        attr_value = &TRUE_EMPTY_STRING;
+        // Create actual empty string for boolean attributes
+        // We can't use createString("", 0) because it returns EMPTY_STRING which has "lambda.nil"
+        attr_value = (String*)arena_alloc(parser->arena, sizeof(String) + 1);
+        attr_value->ref_cnt = 1;
+        attr_value->len = 0;
+        attr_value->chars[0] = '\0';
     }
 
     // Add attribute to token
@@ -158,6 +161,39 @@ static bool html5_match_string_ci(const char* str1, const char* str2, size_t len
     return true;
 }
 
+// Legacy named character references that can be used without semicolon
+// Per HTML5 spec: https://html.spec.whatwg.org/multipage/parsing.html#named-character-reference-state
+static const char* legacy_entities[] = {
+    "AElig", "AMP", "Aacute", "Acirc", "Agrave", "Aring", "Atilde", "Auml",
+    "COPY", "Ccedil", "ETH", "Eacute", "Ecirc", "Egrave", "Euml",
+    "GT", "Iacute", "Icirc", "Igrave", "Iuml", "LT", "Ntilde",
+    "Oacute", "Ocirc", "Ograve", "Oslash", "Otilde", "Ouml",
+    "QUOT", "REG", "THORN", "Uacute", "Ucirc", "Ugrave", "Uuml", "Yacute",
+    "aacute", "acirc", "acute", "aelig", "agrave", "amp", "aring", "atilde", "auml",
+    "brvbar", "ccedil", "cedil", "cent", "copy", "curren",
+    "deg", "divide", "eacute", "ecirc", "egrave", "eth", "euml",
+    "frac12", "frac14", "frac34", "gt",
+    "iacute", "icirc", "iexcl", "igrave", "iquest", "iuml",
+    "laquo", "lt", "macr", "micro", "middot",
+    "nbsp", "not", "ntilde",
+    "oacute", "ocirc", "ograve", "ordf", "ordm", "oslash", "otilde", "ouml",
+    "para", "plusmn", "pound", "quot", "raquo", "reg",
+    "sect", "shy", "sup1", "sup2", "sup3", "szlig",
+    "thorn", "times", "uacute", "ucirc", "ugrave", "uml", "uuml",
+    "yacute", "yen", "yuml",
+    nullptr
+};
+
+// Check if entity name is a legacy entity (can be used without semicolon)
+static bool html5_is_legacy_entity(const char* name, size_t len) {
+    for (const char** p = legacy_entities; *p != nullptr; p++) {
+        if (strlen(*p) == len && memcmp(*p, name, len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Named character entity table (common entities)
 struct NamedEntity {
     const char* name;
@@ -165,14 +201,21 @@ struct NamedEntity {
 };
 
 static const NamedEntity named_entities[] = {
+    // Basic entities - both cases for legacy compatibility (HTML5 spec)
     {"amp", "&"},
+    {"AMP", "&"},
     {"lt", "<"},
+    {"LT", "<"},
     {"gt", ">"},
+    {"GT", ">"},
     {"quot", "\""},
+    {"QUOT", "\""},
     {"apos", "'"},
     {"nbsp", "\xC2\xA0"},  // UTF-8 for non-breaking space
     {"copy", "\xC2\xA9"},  // ©
+    {"COPY", "\xC2\xA9"},  // © (uppercase)
     {"reg", "\xC2\xAE"},   // ®
+    {"REG", "\xC2\xAE"},   // ® (uppercase)
     {"deg", "\xC2\xB0"},   // °
     {"plusmn", "\xC2\xB1"}, // ±
     {"times", "\xC3\x97"}, // ×
@@ -210,6 +253,15 @@ static const NamedEntity named_entities[] = {
     {"acute", "\xC2\xB4"}, // ´
     {"micro", "\xC2\xB5"}, // µ
     {"cedil", "\xC2\xB8"}, // ¸
+    // Additional legacy entities
+    {"sup1", "\xC2\xB9"},  // ¹
+    {"sup2", "\xC2\xB2"},  // ²
+    {"sup3", "\xC2\xB3"},  // ³
+    {"curren", "\xC2\xA4"}, // ¤
+    {"brvbar", "\xC2\xA6"}, // ¦
+    {"ordf", "\xC2\xAA"},  // ª
+    {"ordm", "\xC2\xBA"},  // º
+    {"uml", "\xC2\xA8"},   // ¨
     {"Agrave", "\xC3\x80"}, // À
     {"Aacute", "\xC3\x81"}, // Á
     {"Acirc", "\xC3\x82"},  // Â
@@ -629,16 +681,26 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
     // Look up entity
     const char* replacement = html5_lookup_named_entity(entity_name, name_len);
     if (replacement != nullptr) {
-        // In attribute context, named entities without semicolons are only decoded
-        // if the next character is NOT alphanumeric or '=' (per HTML5 spec)
-        if (in_attribute && !has_semicolon) {
-            if ((next_char >= 'a' && next_char <= 'z') ||
-                (next_char >= 'A' && next_char <= 'Z') ||
-                (next_char >= '0' && next_char <= '9') ||
-                next_char == '=') {
-                // Don't decode - restore position and return failure
+        // Per HTML5 spec: named entities without semicolons are only decoded
+        // if they are "legacy named character references"
+        if (!has_semicolon) {
+            // Check if this is a legacy entity
+            if (!html5_is_legacy_entity(entity_name, name_len)) {
+                // Non-legacy entities require semicolon
                 parser->pos = start_pos;
                 return 0;
+            }
+            // For legacy entities in attribute context, check if followed by
+            // alphanumeric or '=' - don't decode in that case
+            if (in_attribute) {
+                if ((next_char >= 'a' && next_char <= 'z') ||
+                    (next_char >= 'A' && next_char <= 'Z') ||
+                    (next_char >= '0' && next_char <= '9') ||
+                    next_char == '=') {
+                    // Don't decode - restore position and return failure
+                    parser->pos = start_pos;
+                    return 0;
+                }
             }
         }
         size_t rep_len = strlen(replacement);
@@ -779,7 +841,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     rcdata_emit_as_text:
                     // Emit '</' + temp_buffer contents as text
                     parser->current_token = nullptr;
-                    html5_reconsume(parser);
+                    // Only reconsume if not at EOF - at EOF there's nothing to reconsume
+                    if (!html5_is_eof(parser)) {
+                        html5_reconsume(parser);
+                    }
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
                     // Build the string "</" + temp_buffer
                     size_t len = 2 + parser->temp_buffer_len;
@@ -869,7 +934,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else {
                     rawtext_emit_as_text:
                     parser->current_token = nullptr;
-                    html5_reconsume(parser);
+                    // Only reconsume if not at EOF - at EOF there's nothing to reconsume
+                    if (!html5_is_eof(parser)) {
+                        html5_reconsume(parser);
+                    }
                     html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
                     size_t len = 2 + parser->temp_buffer_len;
                     char* text = (char*)arena_alloc(parser->arena, len + 1);

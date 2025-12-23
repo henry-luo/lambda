@@ -1,12 +1,12 @@
 # HTML5 Parser WPT Compliance Fix Proposal
 
 **Goal**: Achieve 100% compliance with W3C/WHATWG HTML5 Web Platform Tests (WPT)
-**Current Status**: 107/364 tests passing (29.4%) ✅ IN PROGRESS
+**Current Status**: 281/364 tests passing (77.2%) ✅ IN PROGRESS
 **Target**: 364/364 tests passing (100%)
 
 ## Executive Summary
 
-**UPDATE December 23, 2025**: Significant progress has been made. We implemented a new HTML5 tree builder with tokenizer state machine and achieved **29.4% pass rate** (up from 0% with the fragment parser).
+**UPDATE December 23, 2025**: Major progress achieved. We've gone from 0% to **77.2% pass rate** through systematic implementation of the HTML5 parsing specification.
 
 ### Progress History
 
@@ -15,7 +15,9 @@
 | Dec 23 (baseline) | 0 | 112 | 0% | Fragment parser only |
 | Dec 23 (tree builder) | 91 | 364 | 25% | HTML5 tree builder implemented |
 | Dec 23 (hr/p fix) | 94 | 364 | 25.8% | Fixed `<hr>` and `</p>` handling |
-| Dec 23 (attributes) | 107 | 364 | **29.4%** | Fixed attribute handling |
+| Dec 23 (attributes) | 107 | 364 | 29.4% | Fixed attribute handling |
+| Dec 23 (AAA partial) | 260 | 364 | 71.4% | Adoption Agency, table modes, entity parsing |
+| Dec 23 (RCDATA/RAWTEXT) | **281** | 364 | **77.2%** | RCDATA/RAWTEXT states, TEXT mode, metadata tags |
 
 ### What's Been Implemented ✅
 
@@ -24,12 +26,19 @@
    - Attribute name/value parsing
    - Comment and DOCTYPE handling
    - Start/end tag token emission
+   - **RCDATA state** for `<title>`, `<textarea>` content
+   - **RAWTEXT state** for `<style>`, `<script>`, `<noscript>`, `<noframes>` content
+   - Last start tag tracking for appropriate end tag matching
+   - Character entity reference decoding (named + numeric)
+   - Bogus comment handling for malformed markup (`<!`, `<?`, etc.)
 
 2. **HTML5 Tree Builder** (`lambda/input/html5/html5_tree_builder.cpp`)
-   - Insertion modes: INITIAL, BEFORE_HTML, BEFORE_HEAD, IN_HEAD, AFTER_HEAD, IN_BODY
+   - **Insertion modes**: INITIAL, BEFORE_HTML, BEFORE_HEAD, IN_HEAD, AFTER_HEAD, IN_BODY, AFTER_BODY, AFTER_AFTER_BODY, IN_TABLE, IN_TABLE_BODY, IN_ROW, IN_CELL, **TEXT**
    - Open elements stack with push/pop operations
-   - Active formatting elements list (partial)
+   - Active formatting elements list with marker support
    - Implicit element creation (html, head, body)
+   - **Adoption Agency Algorithm** (AAA) for misnested formatting elements
+   - Metadata tags handled after `</head>` (link, meta, base, script, style, etc.)
 
 3. **Element Handling**
    - Block elements closing `<p>` in button scope
@@ -37,26 +46,42 @@
    - Heading auto-closing (`<h1>` closed by `<h2>`, etc.)
    - Void element handling (`<br>`, `<hr>`, `<img>`, etc.)
    - Attribute parsing and transfer to elements
+   - `<image>` → `<img>` conversion per spec
+   - `<textarea>` RCDATA mode switching
+   - Boolean attributes with empty string values
+
+4. **Recent Fixes (Session 2)**
+   - ✅ Empty comment at EOF (`<!` → `<!--  -->`)
+   - ✅ `TRUE_EMPTY_STRING` for HTML boolean attributes (`x=""` not `x="lambda.nil"`)
+   - ✅ Metadata tags inserted into `<head>` even after `</head>`
+   - ✅ RCDATA tokenizer state (for `<title>`, `<textarea>`)
+   - ✅ RAWTEXT tokenizer state (for `<style>`, `<script>`, etc.)
+   - ✅ TEXT insertion mode for raw text elements
+   - ✅ Last start tag name tracking for end tag matching
 
 ### Remaining Work ❌
 
-1. **Table Mode** (~10-15% improvement expected)
-   - IN_TABLE, IN_TABLE_BODY, IN_ROW, IN_CELL modes
-   - Implicit `<tbody>` and `<tr>` creation
-   - Foster parenting
+1. **Adoption Agency Algorithm Completion** (~5-10% improvement expected)
+   - Complex nested cases like `<a><p>X<a>Y</a>Z</p></a>`
+   - More thorough `<b>` in `<p>` restructuring
 
-2. **Adoption Agency Algorithm** (~5-10% improvement expected)
-   - Same-element nesting (e.g., `<a>` inside `<a>`)
-   - Formatting element reconstruction
+2. **SELECT/OPTION Handling** (~3-5% improvement expected)
+   - IN_SELECT, IN_SELECT_IN_TABLE modes
+   - Nested `<select>` closing outer one
+   - `<optgroup>` closing `<option>`
 
-3. **Character Entity References** (~5-10% improvement expected)
-   - Named entities (`&amp;`, `&lt;`, `&gt;`, `&nbsp;`, etc.)
-   - Numeric entities (`&#123;`, `&#x7B;`)
+3. **Table Foster Parenting** (~2-3% improvement expected)
+   - Content outside cells being foster-parented before table
+   - Proper table restructuring
 
-4. **Other Edge Cases**
-   - RAWTEXT/RCDATA for `<script>`, `<style>`, `<textarea>`
+4. **Entity Parsing Edge Cases** (~1-2% improvement expected)
+   - Semicolon-less named entities in certain contexts
+   - Attribute vs content entity rules
+
+5. **Other Edge Cases**
    - Foreign content (SVG, MathML)
    - Template element handling
+   - Frameset mode
 
 ---
 
@@ -284,18 +309,26 @@ f158c8b44e - <!DOCTYPE html><li>hello<li>world<ul>how<li>do</ul>you</body><!--do
 8. **Auto-closing Rules**: Basic auto-close for `<p>`, `<li>`, heading tags
 9. **Void Elements**: Proper handling of self-closing elements (br, hr, img, etc.)
 10. **MarkBuilder Integration**: Proper Lambda data structure construction
+11. **Adoption Agency Algorithm**: Core AAA for misnested formatting elements ✅ NEW
+12. **Active Formatting Elements**: List with marker support for AAA ✅ NEW
+13. **RCDATA/RAWTEXT States**: `<title>`, `<textarea>`, `<style>`, `<script>` content ✅ NEW
+14. **TEXT Insertion Mode**: For processing raw text element content ✅ NEW
+15. **Character Entity References**: Named and numeric entity decoding ✅ NEW
+16. **Table Modes**: Basic IN_TABLE, IN_TABLE_BODY, IN_ROW, IN_CELL modes ✅ NEW
+17. **Metadata After Head**: `<link>`, `<meta>`, etc. correctly inserted after `</head>` ✅ NEW
+18. **Bogus Comment Handling**: Malformed markup like `<!`, `<?` converted to comments ✅ NEW
 
 ### What We're Missing ✗
-1. **Table Insertion Modes**: "in table", "in table body", "in row", "in cell" modes incomplete
-2. **Implicit Table Elements**: `<tbody>`, `<tr>` not auto-created when `<td>` appears in `<table>`
-3. **Adoption Agency Algorithm**: Not implemented for handling misnested formatting elements
-4. **Active Formatting Elements**: List not properly maintained for AAA
-5. **Foster Parenting**: Not implemented for content appearing in wrong table context
+1. ~~**Table Insertion Modes**: "in table", "in table body", "in row", "in cell" modes incomplete~~ ✅ DONE
+2. **Implicit Table Elements**: `<tbody>`, `<tr>` not always auto-created correctly
+3. ~~**Adoption Agency Algorithm**: Not implemented for handling misnested formatting elements~~ ✅ DONE (partial)
+4. ~~**Active Formatting Elements**: List not properly maintained for AAA~~ ✅ DONE
+5. **Foster Parenting**: Not fully implemented for content appearing in wrong table context
 6. **Select Modes**: "in select", "in select in table" modes not implemented
-7. **RCDATA/RAWTEXT States**: Script/style content not properly handled as raw text
-8. **Character References**: Entity decoding in attribute values incomplete
+7. ~~**RCDATA/RAWTEXT States**: Script/style content not properly handled as raw text~~ ✅ DONE
+8. **Character References**: Some edge cases with semicolon-less entities remain
 9. **Template Handling**: Template element not properly supported
-10. **Scope Checking**: Element scope algorithms not fully implemented
+10. **Scope Checking**: Some element scope algorithms need refinement
 
 ## Architectural Recommendations
 
