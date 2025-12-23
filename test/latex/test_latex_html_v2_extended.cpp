@@ -170,7 +170,7 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
     std::map<std::string, std::set<int>> extended_test_ids = {
         // boxes.tex: All tests pass! tex_4 fixed with lazy paragraph opening
         // counters.tex test 2 moved to baseline (PASSES)
-        {"environments.tex", {14}},  // test 10 moved to baseline (font environments fix)
+        // environments.tex: All tests pass! test 14 (comment env) fixed with special handling
         // fonts.tex: All tests pass! Tests 7, 8 moved to baseline (font class wrapper for breakspace)
         // groups.tex: All tests pass! Tests 2, 3 fixed (error brack_group + paragraph_break in groups) - moved to baseline
         // label-ref.tex: All tests pass! Test 7 fixed (list item paragraph tracking)
@@ -179,7 +179,8 @@ std::vector<LatexHtmlFixture> load_v2_extended_fixtures() {
         // sectioning.tex: All tests pass! test 3 fixed with inStyledSpan() check - moved to baseline
         // symbols.tex test 2 PASSES (^^ unicode notation) - moved to baseline
         // text.tex test 10 moved to baseline (paragraph alignment buffering fix)
-        {"whitespace.tex", {5, 7, 8}}  // test 21 fixed (ZWS at horizontal env boundaries) - moved to baseline
+        // whitespace.tex test 5 moved to baseline (mbox ZWS at start when newline)
+        {"whitespace.tex", {7, 8}}  // test 21 fixed (ZWS at horizontal env boundaries) - moved to baseline
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {

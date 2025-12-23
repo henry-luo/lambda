@@ -200,7 +200,7 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
     std::map<std::string, std::set<int>> excluded_test_ids = {
         // boxes.tex: All tests pass! tex_4 fixed with lazy paragraph opening
         // counters.tex: All tests pass! Test 1 (counter arithmetic), Test 2 (moved from extended)
-        {"environments.tex", {14}},  // test 10 moved to baseline (font environments fix)
+        // environments.tex: All tests pass! test 14 (comment env) fixed with special handling
         // fonts.tex: All tests pass! Tests 7, 8 pass with font class wrapper for breakspace
         // groups.tex: All tests pass! Tests 2, 3 fixed (error brack_group + paragraph_break in groups)
         // label-ref.tex: All tests pass! Test 7 moved from extended (list item paragraph fix)
@@ -210,7 +210,8 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         {"spacing.tex", {1}},  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
         // text.tex test 10 now passes (paragraph alignment buffering fix)
-        {"whitespace.tex", {5, 7, 8}}  // test 21 fixed (ZWS at horizontal env boundaries)
+        // whitespace.tex test 5 now passes (mbox ZWS at start when newline) - moved to baseline
+        {"whitespace.tex", {7, 8}}  // test 21 fixed (ZWS at horizontal env boundaries)
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {

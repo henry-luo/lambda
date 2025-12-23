@@ -73,6 +73,10 @@
           "named": true
         },
         {
+          "type": "linebreak_command",
+          "named": true
+        },
+        {
           "type": "math",
           "named": true
         },
@@ -173,6 +177,10 @@
         },
         {
           "type": "line_comment",
+          "named": true
+        },
+        {
+          "type": "linebreak_command",
           "named": true
         },
         {

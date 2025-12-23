@@ -364,10 +364,19 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
         return {.item = y2it(builder.createSymbol(source + start, len))};
     }
     
-    // Space -> String(" ")
-    // (LaTeX.js rule: multiple spaces/newlines collapse to single space)
+    // Space -> preserve first character type (newline vs space)
+    // This is important for latex-js compatibility where newline at start of hgroup
+    // triggers ZWS output while regular space does not
+    // Output "\n" for newline-starting, " " for space-starting
     if (strcmp(node_type, "space") == 0) {
-        return {.item = s2it(builder.createString(" ", 1))};
+        char first_char = source[start];
+        if (first_char == '\n' || first_char == '\r') {
+            // Newline-starting space: output "\n" to mark it specially
+            return {.item = s2it(builder.createString("\n", 1))};
+        } else {
+            // Regular space: output " "
+            return {.item = s2it(builder.createString(" ", 1))};
+        }
     }
     
     // Line comment -> skip for now
@@ -500,9 +509,70 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
     log_debug("convert_latex_node: type='%s', start=%u, end=%u, text='%s'", 
               node_type, start, end, text_preview);
     
-    // Skip certain node types
+    // Handle ERROR nodes by recovering content
+    // ERROR nodes may contain parseable content that should be processed
     if (strcmp(node_type, "ERROR") == 0) {
-        log_error("Parse error at position %u", ts_node_start_byte(node));
+        log_warn("Parse error at position %u - attempting recovery", ts_node_start_byte(node));
+        
+        // Extract raw text from ERROR node
+        uint32_t start = ts_node_start_byte(node);
+        uint32_t end = ts_node_end_byte(node);
+        if (end > start) {
+            const char* text = source + start;
+            size_t len = end - start;
+            
+            // Check if this ERROR contains comment-related content
+            bool has_comment_content = (memmem(text, len, "\\begin{comment}", 15) != nullptr ||
+                                       memmem(text, len, "\\end{comment}", 13) != nullptr);
+            
+            if (has_comment_content) {
+                // Build processed text by stripping comments
+                std::string result;
+                result.reserve(len);
+                
+                size_t i = 0;
+                while (i < len) {
+                    // Check for \begin{comment}
+                    if (i + 15 <= len && strncmp(text + i, "\\begin{comment}", 15) == 0) {
+                        // Skip until \end{comment}
+                        i += 15;
+                        while (i < len) {
+                            if (i + 13 <= len && strncmp(text + i, "\\end{comment}", 13) == 0) {
+                                i += 13;
+                                // Skip optional trailing newline
+                                if (i < len && text[i] == '\n') {
+                                    i++;
+                                }
+                                break;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+                    
+                    // Check for line comment (%)
+                    if (text[i] == '%') {
+                        // Skip % and everything until end of line (including newline)
+                        // In LaTeX, % eats the line break, joining adjacent text
+                        while (i < len && text[i] != '\n') {
+                            i++;
+                        }
+                        if (i < len && text[i] == '\n') {
+                            i++;
+                        }
+                        continue;
+                    }
+                    
+                    // Copy regular character
+                    result += text[i];
+                    i++;
+                }
+                
+                if (!result.empty()) {
+                    return ctx.builder.createStringItem(result.c_str(), result.size());
+                }
+            }
+        }
         return {.item = ITEM_NULL};
     }
     
@@ -625,6 +695,13 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             
             if (strcmp(node_type, "generic_environment") == 0) {
                 return convert_environment(ctx, node, source);
+            }
+            
+            // Special handling for comment_environment - skip all content
+            // The comment environment content is verbatim and should be discarded
+            if (strcmp(node_type, "comment_environment") == 0) {
+                // Return an empty "comment" element to mark that a comment was here
+                return ctx.builder.element("comment").final();
             }
             
             // Special handling for document container: skip begin_document/end_document
@@ -1289,6 +1366,105 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
     if (!env_name || env_name->len == 0) {
         log_warn("Failed to extract environment name");
         env_name = ctx.builder.createString("unknown", 7);
+    }
+    
+    // Special handling for comment environment
+    // The comment environment treats all content as verbatim until \end{comment}
+    // This includes handling malformed \end{comment} (missing brace) inside the content
+    if (strcmp(env_name->chars, "comment") == 0) {
+        // Find the real \end{comment} in the raw source
+        // The parser may have incorrectly included content after it due to malformed instances
+        uint32_t env_start = ts_node_start_byte(node);
+        uint32_t env_end = ts_node_end_byte(node);
+        
+        // Look for the first valid \end{comment} after \begin{comment}
+        // A valid \end{comment} is followed by } (not inside the comment content)
+        uint32_t begin_end = ts_node_end_byte(begin_node);
+        const char* search_start = source + begin_end;
+        size_t search_len = env_end - begin_end;
+        
+        // Find \end{comment} followed by optional whitespace/newlines and the next content
+        const char* real_end = nullptr;
+        const char* p = search_start;
+        const char* limit = source + env_end;
+        
+        while (p < limit) {
+            // Look for \end{comment}
+            if (p + 13 <= limit && strncmp(p, "\\end{comment}", 13) == 0) {
+                real_end = p + 13;  // Position right after \end{comment}
+                break;
+            }
+            p++;
+        }
+        
+        // Create a container with the content AFTER the comment environment
+        if (real_end && real_end < limit) {
+            // There's content after \end{comment} that was incorrectly included
+            // Skip any leading whitespace/newline after \end{comment}
+            while (real_end < limit && (*real_end == ' ' || *real_end == '\t' || *real_end == '\n' || *real_end == '\r')) {
+                real_end++;
+            }
+            
+            size_t remaining_len = limit - real_end;
+            if (remaining_len > 0) {
+                // We have content after the comment that needs to be processed
+                // Create a _seq element containing:
+                // 1. Empty comment element
+                // 2. The remaining content (which needs to be processed)
+                
+                // Process the remaining content by stripping comments
+                std::string processed;
+                processed.reserve(remaining_len);
+                
+                size_t i = 0;
+                while (i < remaining_len) {
+                    // Check for \begin{comment}
+                    if (i + 15 <= remaining_len && strncmp(real_end + i, "\\begin{comment}", 15) == 0) {
+                        // Skip until \end{comment}
+                        i += 15;
+                        while (i < remaining_len) {
+                            if (i + 13 <= remaining_len && strncmp(real_end + i, "\\end{comment}", 13) == 0) {
+                                i += 13;
+                                // Skip trailing newline
+                                if (i < remaining_len && real_end[i] == '\n') {
+                                    i++;
+                                }
+                                break;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+                    
+                    // Check for line comment (%)
+                    if (real_end[i] == '%') {
+                        // Skip % and everything until end of line (% eats the newline)
+                        while (i < remaining_len && real_end[i] != '\n') {
+                            i++;
+                        }
+                        if (i < remaining_len && real_end[i] == '\n') {
+                            i++;
+                        }
+                        continue;
+                    }
+                    
+                    // Copy regular character
+                    processed += real_end[i];
+                    i++;
+                }
+                
+                if (!processed.empty()) {
+                    // Create a _seq element with comment + remaining text
+                    ElementBuilder seq = ctx.builder.element("_seq");
+                    seq.child(ctx.builder.element("comment").final());
+                    seq.child(ctx.builder.createStringItem(processed.c_str(), processed.size()));
+                    return seq.final();
+                }
+            }
+        }
+        
+        // No remaining content after comment, return empty comment element
+        return ctx.builder.element("comment").final();
     }
     
     // Create element with environment name as tag
