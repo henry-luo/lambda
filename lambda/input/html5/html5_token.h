@@ -43,6 +43,7 @@ Html5Token* html5_token_create_start_tag(Pool* pool, Arena* arena, String* tag_n
 Html5Token* html5_token_create_end_tag(Pool* pool, Arena* arena, String* tag_name);
 Html5Token* html5_token_create_comment(Pool* pool, Arena* arena, String* data);
 Html5Token* html5_token_create_character(Pool* pool, Arena* arena, char c);
+Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const char* chars, int len);
 Html5Token* html5_token_create_eof(Pool* pool, Arena* arena);
 
 // Token helper functions
