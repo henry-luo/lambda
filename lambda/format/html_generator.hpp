@@ -281,20 +281,31 @@ public:
     
     // =============================================================================
     // Capture Mode (for rendering content to a string)
+    // Supports nested captures using a stack
     // =============================================================================
     
-    // Start capturing output to a string buffer
+    // Start capturing output to a string buffer (can be nested)
     void startCapture();
     
     // Stop capturing and return the captured HTML string
     std::string endCapture();
+    
+    // Check if currently in capture mode
+    bool inCaptureMode() const { return !capture_stack_.empty(); }
     
 protected:
     // State tracking
     bool math_mode_;
     bool verbatim_mode_;
     
-    // Capture mode state
+    // Capture mode state - supports nesting via stack
+    struct CaptureState {
+        HtmlWriter* previous_writer;   // Writer before this capture started
+        HtmlWriter* capture_writer;    // The capture writer created
+    };
+    std::vector<CaptureState> capture_stack_;
+    
+    // Legacy capture mode state (kept for backward compatibility, unused with new stack)
     HtmlWriter* capture_writer_;      // Temporary writer for capture mode
     HtmlWriter* original_writer_;     // Saved writer during capture
     
