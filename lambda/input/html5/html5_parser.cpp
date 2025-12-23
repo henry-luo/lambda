@@ -31,6 +31,10 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     parser->temp_buffer = (char*)arena_alloc(arena, parser->temp_buffer_capacity);
     parser->temp_buffer_len = 0;
 
+    // text content buffering
+    parser->text_buffer = stringbuf_new(pool);
+    parser->pending_text_parent = nullptr;
+
     return parser;
 }
 
@@ -281,6 +285,9 @@ void html5_clear_active_formatting_to_marker(Html5Parser* parser) {
 
 // element insertion helpers
 Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
+    // Flush any pending text before inserting element
+    html5_flush_pending_text(parser);
+
     MarkBuilder builder(parser->input);
     // TODO: properly handle attributes from token->attributes map
     Element* elem = builder.element(token->tag_name->chars).final().element;
@@ -288,14 +295,44 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
     // insert into tree
     Element* parent = html5_current_node(parser);
     if (parent != nullptr) {
-        array_append(parent, Item{.element = elem}, parser->pool, parser->arena);
+        array_append((Array*)parent, Item{.element = elem}, parser->pool, parser->arena);
+    } else {
+        // no parent - must be root html element, add to document
+        array_append((Array*)parser->document, Item{.element = elem}, parser->pool, parser->arena);
     }
 
     // push onto stack
     html5_push_element(parser, elem);
 
-    log_debug("html5: inserted element <%s>", token->tag_name);
+    log_debug("html5: inserted element <%s>", token->tag_name->chars);
     return elem;
+}
+
+// Flush pending text buffer to parent element as a single text node
+void html5_flush_pending_text(Html5Parser* parser) {
+    if (parser->text_buffer->length == 0) {
+        return;  // nothing to flush
+    }
+
+    Element* parent = parser->pending_text_parent;
+    if (parent == nullptr) {
+        parent = html5_current_node(parser);
+    }
+    if (parent == nullptr) {
+        log_error("html5: cannot flush text, no parent element");
+        stringbuf_reset(parser->text_buffer);
+        parser->pending_text_parent = nullptr;
+        return;
+    }
+
+    // Convert buffer to String and create text node
+    String* text_str = stringbuf_to_string(parser->text_buffer);
+    Item text_node = {.item = s2it(text_str)};
+    array_append((Array*)parent, text_node, parser->pool, parser->arena);
+
+    // Reset buffer for next text run
+    stringbuf_reset(parser->text_buffer);
+    parser->pending_text_parent = nullptr;
 }
 
 void html5_insert_character(Html5Parser* parser, char c) {
@@ -305,20 +342,47 @@ void html5_insert_character(Html5Parser* parser, char c) {
         return;
     }
 
-    // Strings are immutable - always create new text node
-    // TODO: optimize by merging adjacent text nodes
-    MarkBuilder builder(parser->input);
-    char text[2] = {c, '\0'};
-    Item text_node = builder.createStringItem(text);
-    array_append((Array*)parent, text_node, parser->pool, parser->arena);
+    // If parent changed, flush previous text first
+    if (parser->pending_text_parent != nullptr && parser->pending_text_parent != parent) {
+        html5_flush_pending_text(parser);
+    }
+
+    // Buffer the character
+    stringbuf_append_char(parser->text_buffer, c);
+    parser->pending_text_parent = parent;
 }
 
 void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
+    // Flush any pending text before inserting comment
+    html5_flush_pending_text(parser);
+
     // comments are stored as special element nodes with name "#comment"
     MarkBuilder builder(parser->input);
-    Element* comment = builder.element("#comment")
-        .attr("data", token->data->chars)
-        .final().element;
+
+    // Get comment data - might be empty or null
+    const char* comment_data = "";
+    size_t comment_len = 0;
+    if (token->data && token->data->chars) {
+        comment_data = token->data->chars;
+        comment_len = token->data->len;
+    }
+
+    // Create the comment element - need to handle empty comments specially
+    // because createString("") returns EMPTY_STRING which has "lambda.nil" content
+    ElementBuilder elem_builder = builder.element("#comment");
+
+    // Only set data attribute if there's actual content
+    // For empty comments, we still need the data attribute but with empty value
+    // We'll handle this by creating a zero-length string if needed
+    if (comment_len > 0) {
+        elem_builder.attr("data", comment_data);
+    } else {
+        // For empty comment, store a single space as placeholder
+        // The test expects "<!--  -->" (with space) for empty comments
+        elem_builder.attr("data", "");
+    }
+
+    Element* comment = elem_builder.final().element;
 
     Element* parent = html5_current_node(parser);
     if (parent == nullptr) {
@@ -326,5 +390,5 @@ void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
     }
 
     array_append(parent, Item{.element = comment}, parser->pool, parser->arena);
-    log_debug("html5: inserted comment with data: %s", token->data);
+    log_debug("html5: inserted comment with data len=%zu", comment_len);
 }
