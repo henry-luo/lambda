@@ -126,3 +126,5 @@ test/layout/data/css2.1
 test/wpt
 
 analysis-results*/
+
+gumbo-parser/

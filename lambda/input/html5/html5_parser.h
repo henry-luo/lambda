@@ -3,6 +3,7 @@
 
 #include "../../lambda-data.hpp"
 #include "html5_token.h"
+#include "../../../lib/stringbuf.h"
 
 // HTML5 insertion modes as defined in WHATWG spec section 12.2.6
 enum Html5InsertionMode {
@@ -72,6 +73,10 @@ typedef struct Html5Parser {
     char* temp_buffer;
     size_t temp_buffer_len;
     size_t temp_buffer_capacity;
+
+    // Text content buffering (for efficient text node creation)
+    StringBuf* text_buffer;
+    Element* pending_text_parent;  // parent element for buffered text
 } Html5Parser;
 
 // Parser lifecycle
@@ -101,6 +106,7 @@ void html5_clear_active_formatting_to_marker(Html5Parser* parser);
 Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token);
 void html5_insert_character(Html5Parser* parser, char c);
 void html5_insert_comment(Html5Parser* parser, Html5Token* token);
+void html5_flush_pending_text(Html5Parser* parser);
 
 // Tokenizer (defined in html5_tokenizer.cpp)
 Html5Token* html5_tokenize_next(Html5Parser* parser);
