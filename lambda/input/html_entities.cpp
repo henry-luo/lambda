@@ -35,7 +35,8 @@ static const struct {
     const char* name;
     uint32_t codepoint;
 } unicode_spaces[] = {
-    {"nbsp", 0x00A0},    // Non-breaking space
+    // Note: nbsp is NOT here because it's common in HTML and should roundtrip
+    // It's in html_entity_table instead and will be preserved as &nbsp;
     {"ensp", 0x2002},    // En space
     {"emsp", 0x2003},    // Em space
     {"thinsp", 0x2009}, // Thin space

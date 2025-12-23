@@ -46,7 +46,8 @@ int counter_format(CounterContext* ctx, const char* name, uint32_t style,
  * @return The created DomElement or NULL on failure
  */
 static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
-                                          const char* content, bool is_before) {
+                                          const char* content, bool is_before,
+                                          FontProp* parent_font) {
     // Allow empty content - pseudo-elements with display:block and clear:both still need to be created
     if (!lycon || !parent) return nullptr;
 
@@ -69,8 +70,27 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->next_sibling = nullptr;
     pseudo_elem->prev_sibling = nullptr;
 
-    // Copy inherited styles from parent
-    pseudo_elem->font = parent->font;
+    // Copy inherited styles from parent ViewBlock (has fully resolved font-family)
+    // Use parent_font param which comes from ViewBlock, not from DomElement
+    pseudo_elem->font = parent_font ? parent_font : parent->font;
+
+    // Log font inheritance for debugging Font Awesome
+    if (content && strstr(content, "\\f1")) {
+        if (parent->font) {
+            if (parent->font->family) {
+                log_debug("[PSEUDO FONT] ::before inherits font '%s' (size %.1f) from parent <%s>",
+                          parent->font->family, parent->font->font_size,
+                          parent->tag_name ? parent->tag_name : "?");
+            } else {
+                log_debug("[PSEUDO FONT] Parent <%s> has font but NULL family",
+                          parent->tag_name ? parent->tag_name : "?");
+            }
+        } else {
+            log_debug("[PSEUDO FONT] Parent <%s> has NULL font pointer - need to resolve styles first!",
+                      parent->tag_name ? parent->tag_name : "?");
+        }
+    }
+
     // DON'T copy bound - pseudo-element should have its own BoundaryProp
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
     pseudo_elem->bound = nullptr;  // Will be allocated when CSS properties are applied
@@ -107,6 +127,8 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // Create the text child only if there's content
     // Empty content pseudo-elements still participate in layout (e.g., clearfix)
     if (content && *content) {
+        log_info("[PSEUDO] Creating text node for pseudo-element, content_len=%zu, first_byte=0x%02x",
+            strlen(content), (unsigned char)*content);
         DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
         if (text_node) {
             // Initialize as text node
@@ -122,6 +144,11 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
             if (text_content) {
                 memcpy(text_content, content, content_len);
                 text_content[content_len] = '\0';
+                log_info("[PSEUDO] Text node created with content_len=%zu, bytes=[%02x %02x %02x]",
+                    content_len,
+                    content_len > 0 ? (unsigned char)text_content[0] : 0,
+                    content_len > 1 ? (unsigned char)text_content[1] : 0,
+                    content_len > 2 ? (unsigned char)text_content[2] : 0);
             }
             text_node->text = text_content;
             text_node->length = content_len;
@@ -131,6 +158,9 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
             // Link text node as child of pseudo element
             pseudo_elem->first_child = text_node;
         }
+    } else {
+        log_info("[PSEUDO] NOT creating text node: content=%p, first_byte=%s",
+            (void*)content, content ? ((*content) ? "nonzero" : "ZERO") : "NULL");
     }
 
     log_debug("[PSEUDO] Created ::%s element for <%s> with content \"%s\", display.outer=%d",
@@ -183,16 +213,39 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     // Create ::before pseudo-element if needed
     // Note: Even empty content "" creates a pseudo-element for layout purposes (e.g., clearfix)
     if (has_before) {
+        log_info("[PSEUDO] Getting before content for <%s>", elem->tag_name ? elem->tag_name : "?");
         const char* before_content = nullptr;
         if (lycon->counter_context) {
+            log_info("[PSEUDO] Calling get_pseudo_element_content_with_counters");
             before_content = dom_element_get_pseudo_element_content_with_counters(
                 elem, PSEUDO_ELEMENT_BEFORE, lycon->counter_context, lycon->doc->arena);
+            log_info("[PSEUDO] Returned from with_counters: %p, len=%zu, bytes=[%02x %02x %02x]",
+                (void*)before_content,
+                before_content ? strlen(before_content) : 0,
+                before_content && strlen(before_content) > 0 ? (unsigned char)before_content[0] : 0,
+                before_content && strlen(before_content) > 1 ? (unsigned char)before_content[1] : 0,
+                before_content && strlen(before_content) > 2 ? (unsigned char)before_content[2] : 0);
         }
         if (!before_content) {
+            log_info("[PSEUDO] Calling dom_element_get_pseudo_element_content");
             before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
+            log_info("[PSEUDO] Returned: %p", (void*)before_content);
         }
+
+        // Debug: log what font we're passing to pseudo-element
+        log_debug("[PSEUDO ALLOC] block->font=%p, elem->font=%p", (void*)block->font, (void*)elem->font);
+        if (block->font && block->font->family) {
+            log_debug("[PSEUDO ALLOC] Passing font '%s' (size %.1f) from ViewBlock",
+                     block->font->family, block->font->font_size);
+        } else if (block->font) {
+            log_debug("[PSEUDO ALLOC] block->font exists but has no family");
+        } else {
+            log_debug("[PSEUDO ALLOC] block->font is NULL");
+        }
+
         // Create pseudo-element even for empty content if display/clear properties are set
-        pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true);
+        // Pass block->font (from ViewBlock) for accurate font-family inheritance
+        pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true, block->font);
         log_debug("[PSEUDO] Created ::before for <%s> with content='%s'",
                   elem->tag_name ? elem->tag_name : "?", before_content ? before_content : "(empty)");
     }
@@ -208,7 +261,8 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
         if (!after_content) {
             after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
         }
-        pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false);
+        // Pass block->font (from ViewBlock) for accurate font-family inheritance
+        pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font);
         log_debug("[PSEUDO] Created ::after for <%s> with content='%s'",
                   elem->tag_name ? elem->tag_name : "?", after_content ? after_content : "(empty)");
     }
@@ -230,6 +284,10 @@ static void layout_pseudo_element(LayoutContext* lycon, DomElement* pseudo_elem)
     if (!pseudo_elem) return;
 
     log_debug("[PSEUDO] Laying out %s content", pseudo_elem->tag_name);
+
+    // Resolve CSS styles for the pseudo-element BEFORE layout
+    // This ensures font-family and other properties from CSS are applied
+    dom_node_resolve_style(pseudo_elem, lycon);
 
     // Layout the pseudo-element as inline (it will lay out its text child)
     layout_inline(lycon, pseudo_elem, pseudo_elem->display);
@@ -451,6 +509,23 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
 
     // Set pseudo-element properties - tag_name already set by dom_element_create
     pseudo_elem->parent = parent_elem;
+
+    // Copy inherited properties from parent (CSS inheritance)
+    // Font properties are inherited by pseudo-elements
+    pseudo_elem->font = parent_elem->font;
+    pseudo_elem->in_line = parent_elem->in_line;
+
+    // Log font inheritance for debugging
+    if (parent_elem->font && parent_elem->font->family) {
+        log_debug("[Pseudo-Element] Inherited font-family '%s' from parent <%s>",
+                  parent_elem->font->family, parent_elem->tag_name ? parent_elem->tag_name : "?");
+    } else {
+        log_debug("[Pseudo-Element] Parent <%s> font is NULL or has no family name",
+                  parent_elem->tag_name ? parent_elem->tag_name : "?");
+    }
+
+    // Copy pseudo-element-specific styles (::before or ::after styles)
+    pseudo_elem->specified_style = is_before ? parent_elem->before_styles : parent_elem->after_styles;
 
     // Handle different content types
     switch (content_type) {

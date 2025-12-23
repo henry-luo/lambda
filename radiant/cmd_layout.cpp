@@ -866,6 +866,46 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
     bool matched = selector_matcher_matches(matcher, selector, elem, &match_result);
     g_selector_match_count++;
 
+    // DEBUG: Log .fa class selector matching on <i> elements
+    bool is_i_element = (elem->tag_name && strcmp(elem->tag_name, "i") == 0 && elem->class_count > 0);
+    if (is_i_element) {
+        bool is_fa_selector = false;
+        // Check if this is a simple .fa class selector (single compound selector with one simple selector)
+        if (selector->compound_selector_count == 1 && selector->compound_selectors[0] &&
+            selector->compound_selectors[0]->simple_selector_count == 1) {
+            CssSimpleSelector* simple = selector->compound_selectors[0]->simple_selectors[0];
+            if (simple && simple->type == CSS_SELECTOR_TYPE_CLASS && simple->value &&
+                strcmp(simple->value, "fa") == 0) {
+                is_fa_selector = true;
+            }
+        }
+        // Log .fa selector matching attempts
+        if (is_fa_selector) {
+            log_debug("[FA MATCH] Selector '.fa' vs <i class='%s %s'> -> matched=%d",
+                      elem->class_names && elem->class_count > 0 ? elem->class_names[0] : "none",
+                      elem->class_names && elem->class_count > 1 ? elem->class_names[1] : "",
+                      matched);
+            if (matched && rule->data.style_rule.declaration_count > 0) {
+                log_debug("[FA MATCH] Applying %d declarations from .fa rule",
+                          rule->data.style_rule.declaration_count);
+            }
+        }
+        // Also log ALL selectors tested on <i> elements with "fa" class
+        if (elem->class_names && elem->class_count > 0 && strcmp(elem->class_names[0], "fa") == 0) {
+            // Log first simple selector if available
+            if (selector->compound_selector_count > 0 && selector->compound_selectors[0] &&
+                selector->compound_selectors[0]->simple_selector_count > 0) {
+                CssSimpleSelector* simple = selector->compound_selectors[0]->simple_selectors[0];
+                if (simple) {
+                    const char* type_names[] = {"ELEMENT", "CLASS", "ID", "UNIVERSAL", "ATTR", "..."};
+                    int type_idx = (simple->type <= CSS_SELECTOR_TYPE_UNIVERSAL) ? simple->type : 4;
+                    log_debug("[I SELECTOR CHECK] Testing selector type=%s value='%s' on <i class='fa ...'> -> matched=%d",
+                              type_names[type_idx], simple->value ? simple->value : "(null)", matched);
+                }
+            }
+        }
+    }
+
     if (matched) {
         g_selector_match_success++;
         if (rule->data.style_rule.declaration_count > 0) {
