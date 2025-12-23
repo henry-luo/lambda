@@ -58,6 +58,23 @@ Html5Token* html5_token_create_character(Pool* pool, Arena* arena, char c) {
     return token;
 }
 
+Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const char* chars, int len) {
+    Html5Token* token = (Html5Token*)pool_calloc(pool, sizeof(Html5Token));
+    token->type = HTML5_TOKEN_CHARACTER;
+
+    // Create multi-character string using arena
+    String* s = (String*)arena_alloc(arena, sizeof(String) + len + 1);
+    s->ref_cnt = 1;
+    s->len = len;
+    memcpy(s->chars, chars, len);
+    s->chars[len] = '\0';
+
+    token->data = s;
+    token->pool = pool;
+    token->arena = arena;
+    return token;
+}
+
 Html5Token* html5_token_create_eof(Pool* pool, Arena* arena) {
     Html5Token* token = (Html5Token*)pool_calloc(pool, sizeof(Html5Token));
     token->type = HTML5_TOKEN_EOF;
