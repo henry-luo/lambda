@@ -155,11 +155,37 @@ void serialize_attributes_wpt(const ElementReader& elem, std::string& output, in
     // Get attributes and sort alphabetically (WPT requirement)
     std::vector<std::pair<std::string, std::string>> attrs;
 
-    for (int64_t i = 0; i < elem.attrCount(); i++) {
-        // Access attribute by index - need to iterate through element's attributes
-        // Note: ElementReader doesn't expose attribute_name/attribute_value by index directly
-        // We'll need to handle this differently or use Element directly
-        // For now, skip attributes serialization as a simplification
+    // Access the underlying Element to iterate through its shape (attribute schema)
+    const Element* element = elem.element();
+    if (element && element->type) {
+        TypeElmt* type = (TypeElmt*)element->type;
+        ShapeEntry* shape = type->shape;
+
+        while (shape) {
+            if (shape->name) {
+                // Get attribute name
+                std::string attr_name(shape->name->str, shape->name->length);
+
+                // Get attribute value
+                ItemReader val = elem.get_attr(attr_name.c_str());
+                if (!val.isNull()) {
+                    std::string attr_value;
+                    TypeId val_type = val.getType();
+                    if (val_type == LMD_TYPE_STRING) {
+                        String* str = val.asString();
+                        if (str) {
+                            attr_value = std::string(str->chars, str->len);
+                        }
+                    } else if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
+                        attr_value = std::to_string(val.asInt());
+                    } else if (val_type == LMD_TYPE_BOOL) {
+                        attr_value = val.asBool() ? "true" : "false";
+                    }
+                    attrs.push_back({attr_name, attr_value});
+                }
+            }
+            shape = shape->next;
+        }
     }
 
     std::sort(attrs.begin(), attrs.end());

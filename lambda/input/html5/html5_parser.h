@@ -74,6 +74,11 @@ typedef struct Html5Parser {
     size_t temp_buffer_len;
     size_t temp_buffer_capacity;
 
+    // Attribute parsing state
+    char* current_attr_name;
+    size_t current_attr_name_len;
+    size_t current_attr_name_capacity;
+
     // Text content buffering (for efficient text node creation)
     StringBuf* text_buffer;
     Element* pending_text_parent;  // parent element for buffered text
@@ -101,6 +106,7 @@ void html5_generate_implied_end_tags(Html5Parser* parser);
 void html5_generate_implied_end_tags_except(Html5Parser* parser, const char* tag_name);
 void html5_reconstruct_active_formatting_elements(Html5Parser* parser);
 void html5_clear_active_formatting_to_marker(Html5Parser* parser);
+void html5_close_p_element(Html5Parser* parser);
 
 // Element insertion
 Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token);
