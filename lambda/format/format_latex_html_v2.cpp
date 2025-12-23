@@ -516,6 +516,17 @@ public:
     bool hasMarginParagraphs() const;
     void writeMarginParagraphs(HtmlWriter* writer);
     
+    // Helper to get next sibling (skipping whitespace) for command argument collection
+    // Returns true if a sibling was found, sets out_item and out_type
+    bool getNextSiblingArg(int64_t offset, Item* out_item, const char** out_type);
+    
+    // Helper to consume sibling arguments for echo commands
+    // Returns number of siblings consumed
+    int consumeSiblingArgs(std::vector<Item>& brack_args, std::vector<Item>& curly_args);
+    
+    // Helper to output the content of a group with parbreak -> <br> conversion
+    void outputGroupContent(Item group_item);
+    
 private:
     HtmlGenerator* gen_;
     Pool* pool_;
@@ -598,6 +609,15 @@ private:
     
     // Process specific command
     void processCommand(const char* cmd_name, Item elem);
+    
+    // Sibling context for lookahead in command handlers
+    // Set by processChildren before calling processNode/processCommand
+    struct SiblingContext {
+        ElementReader* parent_reader;  // Parent element containing siblings
+        int64_t current_index;         // Current child index being processed
+        int64_t* consumed_count;       // Output: how many extra siblings were consumed
+    };
+    SiblingContext sibling_ctx_;
     
     // Initialize command table
     void initCommandTable();
@@ -3666,13 +3686,22 @@ static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
     // latex.js: args.echoOGO = <[ H o? g o? ]>
     // Pattern: -optional- for optional args, +mandatory+ for mandatory args
     // For \echoOGO[o1]{g}[o2] -> outputs: -o1-+g+-o2-
-    // Note: The parser may put the mandatory arg as direct text child or in a group
+    // 
+    // Parser behavior:
+    // - First curly_group {g} is UNWRAPPED: its content becomes direct children of the command
+    // - If [o1] is directly adjacent (no space), it becomes a child
+    // - If [o2] is separated by space, it becomes a SIBLING
     
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     ElementReader reader(elem);
     
-    bool found_mandatory = false;
+    std::vector<Item> brack_args_children;  // optional args from children (before mandatory)
+    std::vector<Item> brack_args_siblings;  // optional args from siblings (after mandatory)
+    std::vector<Item> curly_args;           // extra mandatory args from siblings (shouldn't normally happen)
+    
+    // Mandatory arg: the unwrapped text content of the command element
+    StringBuf* mandatory_sb = stringbuf_new(pool);
     
     auto iter = reader.children();
     ItemReader child;
@@ -3682,33 +3711,49 @@ static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
             const char* tag = child_elem.tagName();
             
             if (strcmp(tag, "brack_group") == 0) {
-                // Optional argument - output -content-
-                gen->text("-");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("-");
-            } else if (strcmp(tag, "group") == 0 && !found_mandatory) {
-                // Mandatory group argument - output +content+
-                found_mandatory = true;
-                gen->text("+");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("+");
+                // Optional arg as child (before mandatory, i.e. [o1])
+                brack_args_children.push_back(child.item());
+            } else if (strcmp(tag, "group") == 0 || strcmp(tag, "curly_group") == 0) {
+                // Should not happen for echoOGO since only curly is mandatory and gets unwrapped
+                child_elem.textContent(mandatory_sb);
+            } else {
+                // Other element content - add to mandatory
+                child_elem.textContent(mandatory_sb);
             }
-        } else if (child.isString() && !found_mandatory) {
-            // Text child as mandatory argument
-            found_mandatory = true;
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0) {
-                gen->text("+");
-                gen->text(text);
-                gen->text("+");
-            }
+        } else if (child.isString()) {
+            // Text content (unwrapped from {g})
+            stringbuf_append_str(mandatory_sb, child.cstring());
         }
+    }
+    
+    // Then, consume sibling arguments (pattern: o? after mandatory)
+    proc->consumeSiblingArgs(brack_args_siblings, curly_args);
+    
+    // Ensure we're in a paragraph before outputting content
+    proc->ensureParagraph();
+    
+    // Output: -o1- +g+ -o2-
+    
+    // First optional(s) from children (use outputGroupContent to handle parbreak -> <br>)
+    for (size_t i = 0; i < brack_args_children.size(); i++) {
+        gen->text("-");
+        proc->outputGroupContent(brack_args_children[i]);
+        gen->text("-");
+    }
+    
+    // Mandatory (unwrapped text content)
+    String* mandatory = stringbuf_to_string(mandatory_sb);
+    if (mandatory && mandatory->len > 0) {
+        gen->text("+");
+        gen->text(mandatory->chars);
+        gen->text("+");
+    }
+    
+    // Second optional(s) from siblings (use outputGroupContent to handle parbreak -> <br>)
+    for (size_t i = 0; i < brack_args_siblings.size(); i++) {
+        gen->text("-");
+        proc->outputGroupContent(brack_args_siblings[i]);
+        gen->text("-");
     }
 }
 
@@ -3716,13 +3761,22 @@ static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
     // \echoGOG{g1}[o]{g2} - from echo package for testing
     // latex.js: args.echoGOG = <[ H g o? g ]>
     // Pattern: +g1+-o-+g2+ where optional is only if present
-    // Note: The parser may put mandatory args as direct text children or in groups
+    // 
+    // Parser behavior:
+    // - First curly_group {g1} is UNWRAPPED: its content becomes direct children of the command
+    // - If [o] and {g2} are directly adjacent (no space), they become children
+    // - If [o] and {g2} are separated by space, they become SIBLINGS
     
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     ElementReader reader(elem);
     
-    int mandatory_count = 0;
+    std::vector<Item> brack_args;  // optional args (from children and siblings)
+    std::vector<Item> curly_args;  // mandatory args (from siblings only - first is unwrapped)
+    
+    // First mandatory arg: the unwrapped text content of the command element
+    // Collect all non-brack_group, non-curly_group children as the first mandatory
+    StringBuf* first_mandatory_sb = stringbuf_new(pool);
     
     auto iter = reader.children();
     ItemReader child;
@@ -3731,34 +3785,51 @@ static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             
-            if (strcmp(tag, "group") == 0) {
-                // Mandatory group argument - output +content+
-                mandatory_count++;
-                gen->text("+");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("+");
-            } else if (strcmp(tag, "brack_group") == 0) {
-                // Optional argument - output -content-
-                gen->text("-");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("-");
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional arg as child (no space between command and [])
+                brack_args.push_back(child.item());
+            } else if (strcmp(tag, "group") == 0 || strcmp(tag, "curly_group") == 0) {
+                // Additional mandatory arg as child (shouldn't happen with unwrapping, but handle it)
+                curly_args.push_back(child.item());
+            } else {
+                // Other element content - add to first mandatory
+                child_elem.textContent(first_mandatory_sb);
             }
-        } else if (child.isString() && mandatory_count < 2) {
-            // Text child as mandatory argument
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0) {
-                mandatory_count++;
-                gen->text("+");
-                gen->text(text);
-                gen->text("+");
-            }
+        } else if (child.isString()) {
+            // Text content (unwrapped from first curly_group)
+            stringbuf_append_str(first_mandatory_sb, child.cstring());
         }
+    }
+    
+    // Then, consume sibling arguments (optional and second mandatory)
+    proc->consumeSiblingArgs(brack_args, curly_args);
+    
+    // Ensure we're in a paragraph before outputting content
+    proc->ensureParagraph();
+    
+    // Pattern for echoGOG: g o? g
+    // Output: +g1+ -o- +g2+ (or +g1+ +g2+ if no optional)
+    
+    // First mandatory (unwrapped text content)
+    String* first_mandatory = stringbuf_to_string(first_mandatory_sb);
+    if (first_mandatory && first_mandatory->len > 0) {
+        gen->text("+");
+        gen->text(first_mandatory->chars);
+        gen->text("+");
+    }
+    
+    // Optional (if present) - use outputGroupContent to handle parbreak -> <br>
+    for (size_t i = 0; i < brack_args.size(); i++) {
+        gen->text("-");
+        proc->outputGroupContent(brack_args[i]);
+        gen->text("-");
+    }
+    
+    // Second mandatory (from siblings) - use outputGroupContent for consistency
+    for (size_t i = 0; i < curly_args.size(); i++) {
+        gen->text("+");
+        proc->outputGroupContent(curly_args[i]);
+        gen->text("+");
     }
 }
 
@@ -6598,10 +6669,197 @@ void LatexProcessor::endParagraph() {
     closeParagraphIfOpen();
 }
 
+// Helper: Get next sibling argument, skipping whitespace/comments
+bool LatexProcessor::getNextSiblingArg(int64_t offset, Item* out_item, const char** out_type) {
+    if (!sibling_ctx_.parent_reader) return false;
+    
+    int64_t count = sibling_ctx_.parent_reader->childCount();
+    int64_t idx = sibling_ctx_.current_index + offset;
+    
+    while (idx < count) {
+        ItemReader reader = sibling_ctx_.parent_reader->childAt(idx);
+        
+        // Skip whitespace strings
+        if (reader.isString()) {
+            const char* text = reader.cstring();
+            if (text) {
+                bool is_whitespace = true;
+                for (const char* p = text; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                        is_whitespace = false;
+                        break;
+                    }
+                }
+                if (is_whitespace) {
+                    idx++;
+                    continue;
+                }
+            }
+        }
+        
+        // Skip space elements
+        if (reader.isElement()) {
+            ElementReader elem(reader.item());
+            const char* tag = elem.tagName();
+            if (tag && strcmp(tag, "space") == 0) {
+                idx++;
+                continue;
+            }
+            // Found a non-whitespace element
+            *out_item = reader.item();
+            *out_type = tag;
+            return true;
+        }
+        
+        // Any other content - not a valid argument
+        break;
+    }
+    
+    return false;
+}
+
+// Helper: Output the content of a group (brack_group, curly_group, etc.) with parbreak handling
+// This processes children and converts parbreak symbols to <br> tags
+void LatexProcessor::outputGroupContent(Item group_item) {
+    HtmlGenerator* gen = generator();
+    ElementReader reader(group_item);
+    
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && *text) {
+                gen->text(text);
+            }
+        } else if (child.isSymbol()) {
+            const char* sym = child.cstring();
+            if (sym && strcmp(sym, "parbreak") == 0) {
+                // Convert paragraph break to <br>
+                gen->lineBreak(false);
+            } else if (sym) {
+                // Other symbols - output as-is
+                gen->text(sym);
+            }
+        } else if (child.isElement()) {
+            ElementReader elem(child.item());
+            const char* tag = elem.tagName();
+            
+            if (tag && strcmp(tag, "line_comment") == 0) {
+                // Skip line comments in group content
+                continue;
+            }
+            
+            // For other elements, extract text content recursively
+            Pool* pool = this->pool();
+            StringBuf* sb = stringbuf_new(pool);
+            elem.textContent(sb);
+            String* str = stringbuf_to_string(sb);
+            if (str && str->len > 0) {
+                gen->text(str->chars);
+            }
+        }
+    }
+}
+
+// Helper: Consume sibling brack_group and curly_group arguments
+int LatexProcessor::consumeSiblingArgs(std::vector<Item>& brack_args, std::vector<Item>& curly_args) {
+    // Debug logging
+    FILE* debug_f = fopen("/tmp/sibling_debug.txt", "a");
+    if (debug_f) {
+        fprintf(debug_f, "consumeSiblingArgs: parent_reader=%p, current_index=%lld\n", 
+                (void*)sibling_ctx_.parent_reader, (long long)sibling_ctx_.current_index);
+    }
+    
+    if (!sibling_ctx_.parent_reader) {
+        if (debug_f) { fprintf(debug_f, "  -> no parent_reader, returning 0\n"); fclose(debug_f); }
+        return 0;
+    }
+    
+    int consumed = 0;
+    int64_t count = sibling_ctx_.parent_reader->childCount();
+    int64_t idx = sibling_ctx_.current_index + 1;
+    
+    if (debug_f) {
+        fprintf(debug_f, "  -> count=%lld, starting at idx=%lld\n", (long long)count, (long long)idx);
+    }
+    
+    while (idx < count) {
+        ItemReader reader = sibling_ctx_.parent_reader->childAt(idx);
+        
+        // Skip whitespace strings
+        if (reader.isString()) {
+            const char* text = reader.cstring();
+            if (text) {
+                bool is_whitespace = true;
+                for (const char* p = text; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                        is_whitespace = false;
+                        break;
+                    }
+                }
+                if (is_whitespace) {
+                    consumed++;
+                    idx++;
+                    continue;
+                }
+            }
+            // Non-whitespace text - stop consuming
+            break;
+        }
+        
+        // Check for brack_group or curly_group elements
+        if (reader.isElement()) {
+            ElementReader elem(reader.item());
+            const char* tag = elem.tagName();
+            
+            if (tag && strcmp(tag, "space") == 0) {
+                consumed++;
+                idx++;
+                continue;
+            }
+            
+            if (tag && strcmp(tag, "brack_group") == 0) {
+                brack_args.push_back(reader.item());
+                consumed++;
+                idx++;
+                continue;
+            }
+            
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                curly_args.push_back(reader.item());
+                consumed++;
+                idx++;
+                continue;
+            }
+            
+            // Any other element - stop consuming
+            break;
+        }
+        
+        // Any other node type - stop consuming
+        break;
+    }
+    
+    // Update the consumed count so processChildren can skip these siblings
+    if (sibling_ctx_.consumed_count) {
+        *sibling_ctx_.consumed_count = consumed;
+    }
+    
+    if (debug_f) {
+        fprintf(debug_f, "  -> returning consumed=%d, brack_args.size=%zu, curly_args.size=%zu\n", 
+                consumed, brack_args.size(), curly_args.size());
+        fclose(debug_f);
+    }
+    
+    return consumed;
+}
+
 void LatexProcessor::process(Item root) {
     initCommandTable();
     in_paragraph_ = false;  // Reset paragraph state
     depth_exceeded_ = false;  // Reset depth error flag for this processing session
+    sibling_ctx_ = {};  // Reset sibling context
     processNode(root);
     closeParagraphIfOpen();  // Close any open paragraph at the end
 }
@@ -6858,6 +7116,13 @@ void LatexProcessor::processNode(Item node) {
             // Get the actual space text from children and normalize to single space
             // In LaTeX, any amount of horizontal whitespace or single newline = one space
             processText(" ");
+            return;
+        }
+        
+        // Handle _seq elements (from error recovery in parser)
+        // These are transparent containers - just process children
+        if (strcmp(tag, "_seq") == 0) {
+            processChildren(node);
             return;
         }
         
@@ -7370,7 +7635,21 @@ void LatexProcessor::processChildren(Item elem) {
         }
         
         // Normal processing for other nodes
+        // Set up sibling context so command handlers can access following arguments
+        int64_t consumed_count = 0;
+        sibling_ctx_.parent_reader = &elem_reader;
+        sibling_ctx_.current_index = i;
+        sibling_ctx_.consumed_count = &consumed_count;
+        
         processNode(child_reader.item());
+        
+        // Skip any siblings that were consumed by command handlers
+        if (consumed_count > 0) {
+            i += consumed_count;
+        }
+        
+        // Clear sibling context
+        sibling_ctx_ = {};
         
         // Check if previous node set pending ZWS output flag (curly_group at document level)
         if (pending_zws_output_) {

@@ -37,6 +37,8 @@ module.exports = grammar({
     [$.char_command, $.command],
     // controlspace_command and control_symbol both start with backslash - need GLR
     [$.controlspace_command, $.control_symbol],
+    // '[' can be start of brack_group or standalone bracket in _group_content
+    [$.brack_group],
   ],
 
   rules: {
@@ -57,7 +59,7 @@ module.exports = grammar({
       $.control_symbol, // Escape sequences like \%, \& 
       $.command,        // Commands can appear at top level (e.g., \textellipsis)
       $.curly_group,    // Curly braces can appear at top level
-      $.brack_group,    // Brackets can appear at top level
+      $.brack_group,    // Restored: [ ... ] bracket groups at top level
       $.space,
       $.text,
       $.paragraph_break,  // Blank lines are allowed in preamble
@@ -119,7 +121,7 @@ module.exports = grammar({
       $.linebreak_command, // \\ with optional [<length>]
       $.command,
       $.curly_group,
-      $.brack_group,
+      $.brack_group,    // Restored: [ ... ] is an optional argument group
       $.math,
       $.ligature,
       $.control_symbol,
@@ -225,15 +227,17 @@ module.exports = grammar({
       '}',
     ),
 
-    brack_group: $ => seq(
+    brack_group: $ => prec(1, seq(
       '[',
       repeat($._group_content),
       ']',
-    ),
+    )),
 
     _group_content: $ => choice(
       $.text,
       $.space,
+      $.paragraph_break,  // Blank lines inside groups also create paragraph breaks
+      $.line_comment,     // Comments can appear inside groups (e.g., [% comment\n text])
       $.command,
       $.curly_group,
       $.brack_group,
@@ -244,6 +248,8 @@ module.exports = grammar({
       $.nbsp,         // Non-breaking space ~
       ',',   // Common in group content
       '=',   // For key=value
+      ']',   // Standalone closing bracket (not part of brack_group)
+      prec(-1, '['),   // Standalone opening bracket - lower priority than brack_group
     ),
 
     // ========================================================================
@@ -289,7 +295,7 @@ module.exports = grammar({
       // $.math_environment,
       // DISABLED: verbatim/comment external scanning causes GLR issues
       // $.verbatim_environment,
-      // $.comment_environment,
+      // $.comment_environment,  // External scanner interferes with line_comment parsing
     ),
 
     // Generic environment for most cases
