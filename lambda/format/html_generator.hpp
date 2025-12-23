@@ -73,6 +73,9 @@ public:
     // Write text with CSS class
     void textWithClass(const char* content, const char* css_class);
     
+    // Write raw HTML (not escaped)
+    void rawHtml(const char* html);
+    
     // =============================================================================
     // Length and Style Methods (html-generator.ls lines 152-200)
     // =============================================================================

@@ -1,10 +1,141 @@
 # LaTeX to HTML V3.1 - Design Document
 
 **Date**: December 23, 2025  
-**Status**: 📋 **Proposal**  
+**Status**: ✅ **Implemented** (Phase 1-4 Complete)  
 **Objective**: Extend V2 formatter to full LaTeX.js feature parity with CSS, document classes, fonts, and packages support
 
 **Prerequisite**: V2 baseline complete (97/101 tests pass, 4 skipped)
+
+---
+
+## Implementation Progress
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: CSS Infrastructure | ✅ Complete | CSS files copied, asset management implemented |
+| Phase 2: Font System | ✅ Complete | Computer Modern fonts (WOFF) copied |
+| Phase 3: Document Classes | ✅ Complete | ArticleClass, BookClass, ReportClass implemented |
+| Phase 4: Package System | ✅ Complete | 12 packages with symbol tables |
+| Phase 5: Picture Environment | ❌ Missing | SVG generation not implemented |
+| Phase 6: Integration & Testing | ⚠️ Partial | See Gap Analysis section below |
+
+### Files Created
+
+- `lambda/format/latex_assets.hpp/cpp` - Asset management for CSS/fonts
+- `lambda/format/latex_docclass.hpp/cpp` - Document class system
+- `lambda/format/latex_packages.hpp/cpp` - Package registry with symbol tables
+- `lambda/input/latex/css/` - CSS files (base.css, article.css, book.css, katex.css)
+- `lambda/input/latex/fonts/` - Computer Modern Unicode fonts (15 subdirectories)
+
+### CLI Usage
+
+```bash
+# Generate HTML fragment (body only)
+./lambda.exe convert input.tex -t html -o output.html
+
+# Generate complete HTML document with embedded CSS
+./lambda.exe convert input.tex -t html -o output.html --full-document
+```
+
+---
+
+## Gap Analysis: Lambda vs LaTeX.js
+
+**Comparison Date**: December 2025  
+**Test File**: `test/input/latex-showcase.tex`
+
+### Summary Statistics
+
+| Metric | LaTeX.js | Lambda | Status |
+|--------|----------|--------|--------|
+| Output lines | 495 | 2028 | Lambda embeds CSS |
+| Picture/SVG elements | 346 | 0 | ❌ Critical gap |
+| KaTeX math spans | 46 | 17 | ⚠️ Placeholder only |
+| Hyphenation | Yes (soft hyphens) | No | ⚠️ Missing |
+
+### Critical Gaps (Priority Order)
+
+#### 1. Picture Environment (CRITICAL)
+
+**LaTeX.js Output**: Full SVG rendering with lines, circles, vectors, bezier curves
+```html
+<span class="picture" style="width:231.307px;height:161.915px">
+  <span class="picture-canvas">
+    <svg xmlns="http://www.w3.org/2000/svg" width="80.223px" height="5.711px">
+      <line x1="0" y1="0" x2="74.512" y2="0" stroke-width="0.531px"/>
+      <circle r="77.1025px" cx="77.634px" fill="none"/>
+    </svg>
+  </span>
+</span>
+```
+
+**Lambda Output**: Raw text output (not rendered)
+```html
+picture(3,2.1)(‐1.2,‐0.05) (0,1)(1,0)1​ (0,1)2​ (0,0)(1,0)1​
+```
+
+**Missing Commands**:
+- `\put(x,y){...}` - Positioning objects
+- `\line(dx,dy){length}` - Drawing lines
+- `\vector(dx,dy){length}` - Drawing arrows
+- `\circle{diameter}` / `\circle*{diameter}` - Circles
+- `\oval(width,height)[position]` - Ovals/rounded rectangles
+- `\qbezier(x1,y1)(cx,cy)(x2,y2)` - Bezier curves
+- `\multiput` - Repeated placement
+- `\thicklines`, `\thinlines`, `\linethickness{}`
+
+**Required Implementation**:
+1. Create SVG generator in `format_latex_html_v2.cpp`
+2. Parse picture environment arguments: `\begin{picture}(width,height)(x_offset,y_offset)`
+3. Convert TeX coordinates to SVG coordinate system (inverted Y-axis)
+4. Generate proper CSS for positioning (absolute within relative container)
+
+#### 2. Math Rendering (HIGH)
+
+**LaTeX.js Output**: Full KaTeX rendering with MathML
+```html
+<span class="katex">
+  <span class="katex-mathml"><math>...</math></span>
+  <span class="katex-html">
+    <span class="mord mathnormal">F</span>
+    <span class="mrel">=</span>
+    <span class="mord sqrt">...</span>
+  </span>
+</span>
+```
+
+**Lambda Output**: Placeholder markers
+```html
+<span class="math inline">$F=\sqrt{s(s-a)(s-b)(s-c)}$</span>
+```
+
+**Required Implementation**:
+- Either integrate KaTeX for server-side rendering
+- Or generate basic HTML/CSS math layout for common patterns
+
+#### 3. Title/Author/Date Structure (MEDIUM)
+
+**LaTeX.js**: Uses `<div>` elements
+```html
+<div class="title">LaTeX.js Showcase</div>
+<div class="author">made with ♥ by Michael Brade</div>
+<div class="date">2017–2021</div>
+```
+
+**Lambda**: Uses nested `<span>` and `<p>`
+```html
+<span class="latex-title"><p>...</p></span>
+```
+
+#### 4. Appendix Numbering (LOW)
+
+**LaTeX.js**: `A Source` (letter numbering)  
+**Lambda**: `13 Source` (numeric, continues from sections)
+
+#### 5. Automatic Hyphenation (LOW)
+
+**LaTeX.js**: Inserts soft hyphens (`­`) for browser hyphenation  
+**Lambda**: No hyphenation support
 
 ---
 
@@ -56,10 +187,11 @@ LaTeX.js uses a layered CSS architecture:
 | `book.css` | Book/report styles | 50 | Chapter headings, additional structure |
 | `katex.css` | Math rendering | - | KaTeX math styling |
 | `cmu.css` | Font imports | 14 | Imports Computer Modern font faces |
+| `base.js` | Dynamic features | 147 | Margin paragraph positioning, counter display |
 
 ### 2.2 Implementation Strategy
 
-**Phase 1: CSS Asset Management**
+**Phase 1: CSS Asset Management** ✅ Implemented
 
 Create a CSS resource system that:
 1. Copies CSS files to output directory structure
@@ -330,7 +462,52 @@ struct FontConfig {
 
 ---
 
-## 5. Package Support
+## 5. JavaScript Limitations
+
+### 5.1 What base.js Does
+
+LaTeX.js includes a JavaScript file (`base.js`) that provides client-side dynamic behavior:
+
+**1. Margin Paragraph Positioning (`positionMarginpars`)**
+
+LaTeX's `\marginpar{}` places notes in the margin aligned with the **baseline** of the text where it was invoked. CSS cannot achieve this because:
+- CSS positioning works with box edges (top/left/bottom/right), not text baselines
+- There's no CSS property like `baseline-align-to: #reference-element`
+- The margin note is in a separate container from the main text flow
+- Variable content height requires measuring the rendered element
+
+The JS uses `getBoundingClientRect()` to measure positions and dynamically sets `marginTop` to align baselines.
+
+**2. Counter Display (`processTheElements`)**
+
+LaTeX's `\the` command displays counter values (e.g., `\thepage`, `\thesection`). The JS reads CSS custom properties and updates elements with class `.the` to show current counter values.
+
+**3. Event Handling**
+
+- Uses `MutationObserver` to re-process when DOM changes
+- Throttles resize events via `requestAnimationFrame` for performance
+
+### 5.2 Lambda Implementation Limitation
+
+**Lambda does not support JavaScript execution.** This means:
+
+| Feature | LaTeX.js (with JS) | Lambda (no JS) |
+|---------|-------------------|----------------|
+| Margin paragraphs | ✅ Baseline-aligned dynamically | ⚠️ Top-aligned only (static positioning) |
+| `\the` counters | ✅ Dynamic updates | ✅ Pre-computed during generation |
+| Resize handling | ✅ Re-positions on resize | ❌ Fixed layout |
+
+**Workarounds:**
+
+1. **Margin paragraphs**: We calculate approximate positions during HTML generation and embed fixed `margin-top` values. For pixel-perfect baseline alignment, users would need to include `base.js` in their HTML output.
+
+2. **Counters**: All counter values are computed during the formatting phase and embedded directly in the HTML output, so no JS is needed.
+
+3. **For interactive use**: Users can optionally include `base.js` from latex-js if they need dynamic features.
+
+---
+
+## 6. Package Support
 
 ### 5.1 Package Architecture
 
@@ -423,92 +600,100 @@ static const std::map<std::string, const char*> TEXTCOMP_SYMBOLS = {
 
 ---
 
-## 6. Implementation Phases
+## 7. Implementation Phases
 
-### Phase 1: CSS Infrastructure (Estimated: 2-3 days)
+### Phase 1: CSS Infrastructure ✅ Complete
 
 **Tasks:**
-1. Create `latex_assets.hpp/cpp` - Asset management
-2. Copy CSS files from `latex-js/src/css/` to Lambda resources
-3. Implement stylesheet link generation
-4. Update HTML output to include proper `<head>` section
-5. Test with basic document
+1. ✅ Create `latex_assets.hpp/cpp` - Asset management
+2. ✅ Copy CSS files from `latex-js/src/css/` to Lambda resources
+3. ✅ Implement stylesheet link generation
+4. ✅ Update HTML output to include proper `<head>` section
+5. ✅ Test with basic document
 
-**Files to create/modify:**
+**Files created/modified:**
 - `lambda/format/latex_assets.hpp` (new)
 - `lambda/format/latex_assets.cpp` (new)
-- `lambda/format/format_latex_html_v2.cpp` (modify)
-- `lambda/format/html_generator.hpp` (modify for head section)
+- `lambda/format/format_latex_html_v2.cpp` (modified - added `format_latex_html_v2_document()`)
+- `lambda/format/format.h` (modified - added declarations)
+- `lambda/main.cpp` (modified - added `--full-document` CLI flag)
 
 **Deliverables:**
-- HTML output includes `<link>` to CSS files
-- CSS variables work correctly
-- Font classes apply proper styling
+- ✅ HTML output includes embedded CSS styles
+- ✅ CSS variables work correctly
+- ✅ Font classes apply proper styling
 
-### Phase 2: Font System (Estimated: 1-2 days)
+### Phase 2: Font System ✅ Complete
 
 **Tasks:**
-1. Copy font files from `latex-js/src/fonts/`
-2. Create font CSS import structure
-3. Implement font path configuration
-4. Test with various font commands
+1. ✅ Copy font files from `latex-js/src/fonts/`
+2. ✅ Create font CSS import structure
+3. ✅ Implement font path configuration (via LatexAssets)
+4. ✅ Test with various font commands
 
 **Files:**
-- Font resources (copy from latex-js)
-- `lambda/format/latex_fonts.hpp` (new, optional)
+- `lambda/input/latex/fonts/` - 15 font subdirectories with WOFF files
+  - Serif, Sans, Typewriter, Serif Slanted, Typewriter Slanted
+  - Bright, Concrete, Classical Serif Italic, etc.
 
 **Deliverables:**
-- Computer Modern fonts render correctly
-- All font variants work (rm, sf, tt, sl, sc, bf, it)
+- ✅ Computer Modern fonts render correctly
+- ✅ All font variants work (rm, sf, tt, sl, sc, bf, it)
 
-### Phase 3: Document Classes (Estimated: 2-3 days)
+### Phase 3: Document Classes ✅ Complete
 
 **Tasks:**
-1. Create `DocumentClass` base class
-2. Implement `ArticleClass`, `ReportClass`, `BookClass`
-3. Add class option parsing
-4. Implement counter management per class
-5. Add sectioning command variations
+1. ✅ Create `DocumentClass` base class
+2. ✅ Implement `ArticleClass`, `ReportClass`, `BookClass`
+3. ✅ Add class option parsing
+4. ✅ Implement counter management per class (`DocCounter`, `DocLength`)
+5. ✅ Add sectioning command variations
 
 **Files:**
 - `lambda/format/latex_docclass.hpp` (new)
 - `lambda/format/latex_docclass.cpp` (new)
-- `lambda/format/format_latex_html_v2.cpp` (modify)
+
+**Key Classes:**
+- `DocumentClass` base with `initCounters()`, `initLengths()`, `theCounter()`
+- `ArticleClass`, `BookClass`, `ReportClass` with class-specific behavior
+- `DocClassOptions` for paper size, font size, layout options
 
 **Deliverables:**
-- `\documentclass{article}` selects correct CSS and behavior
-- Class options work (a4paper, 12pt, etc.)
-- Sectioning commands formatted per class
+- ✅ `\documentclass{article}` selects correct CSS and behavior
+- ✅ Class options parsed (a4paper, 12pt, etc.)
+- ✅ Sectioning commands formatted per class
 
-### Phase 4: Package System (Estimated: 3-4 days)
+### Phase 4: Package System ✅ Complete
 
 **Tasks:**
-1. Create package registry infrastructure
-2. Implement priority 1 packages:
-   - `hyperref` - links
+1. ✅ Create package registry infrastructure (`PackageRegistry` singleton)
+2. ✅ Implement 12 packages with symbol tables:
+   - `hyperref` - links (`\href`, `\url`)
    - `multicol` - multi-column layout
-   - `textgreek` - Greek letters
-   - `textcomp` - extended symbols
-   - `gensymb` - scientific symbols
-   - `stix` - math symbols
+   - `textgreek` - Greek letters (52 symbols)
+   - `textcomp` - extended symbols (40+ symbols)
+   - `gensymb` - scientific symbols (`\degree`, `\celsius`, `\ohm`, `\micro`)
+   - `stix` - math/card symbols
    - `comment` - comment environment
-3. Handle `\usepackage` command
+   - `graphicx` - graphics commands
+   - `xcolor` - color support
+   - `calc`, `pict2e`, `latexsym`
+3. ✅ Handle `\usepackage` command (parses package list, loads each)
 
 **Files:**
 - `lambda/format/latex_packages.hpp` (new)
-- `lambda/format/latex_packages.cpp` (new)
-- `lambda/format/packages/` (new directory)
-  - `pkg_hyperref.cpp`
-  - `pkg_multicol.cpp`
-  - `pkg_textgreek.cpp`
-  - `pkg_textcomp.cpp`
-  - `pkg_gensymb.cpp`
-  - `pkg_stix.cpp`
+- `lambda/format/latex_packages.cpp` (new) - all packages in single file
+
+**Key Features:**
+- `PackageRegistry::loadPackage()` - loads package and registers symbols
+- `PackageRegistry::lookupSymbol()` - finds symbol across all loaded packages
+- Base symbols (ligatures, diacritics) always available
+- Symbol lookup integrated into unknown command handler
 
 **Deliverables:**
-- `\usepackage{textgreek}` enables Greek letters
-- All symbols from packages render correctly
-- `multicols` environment works
+- ✅ `\usepackage{textgreek}` enables Greek letters
+- ✅ All symbols from packages render correctly
+- ✅ `multicols` environment recognized
 
 ### Phase 5: Picture Environment (Estimated: 3-4 days)
 
@@ -546,7 +731,7 @@ static const std::map<std::string, const char*> TEXTCOMP_SYMBOLS = {
 
 ---
 
-## 7. Testing Strategy
+## 8. Testing Strategy
 
 ### 7.1 Test Categories
 
@@ -581,7 +766,7 @@ For complex rendering (pictures, layouts):
 
 ---
 
-## 8. Resource Management
+## 9. Resource Management
 
 ### 8.1 Asset Embedding Options
 
@@ -617,7 +802,7 @@ Item html = format_latex_html_v3(input, opts);
 
 ---
 
-## 9. Dependencies
+## 10. Dependencies
 
 ### 9.1 New Dependencies
 
@@ -630,7 +815,7 @@ None required - all functionality implemented in C++.
 
 ---
 
-## 10. Migration Path
+## 11. Migration Path
 
 ### 10.1 Backward Compatibility
 
@@ -658,7 +843,7 @@ Item format_latex_html_v3(Input* input, const FormatOptionsV3& opts);
 
 ---
 
-## 11. Success Criteria
+## 12. Success Criteria
 
 ### 11.1 Minimum Viable Product
 
@@ -683,7 +868,7 @@ Item format_latex_html_v3(Input* input, const FormatOptionsV3& opts);
 
 ---
 
-## 12. Appendix: latex-showcase.tex Analysis
+## 13. Appendix: latex-showcase.tex Analysis
 
 ### Commands Used
 
@@ -745,7 +930,7 @@ Item format_latex_html_v3(Input* input, const FormatOptionsV3& opts);
 
 ---
 
-## 13. Timeline Summary
+## 14. Timeline Summary
 
 | Phase | Duration | Dependencies |
 |-------|----------|--------------|
