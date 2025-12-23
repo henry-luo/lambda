@@ -128,6 +128,10 @@ void html5_remove_from_active_formatting(Html5Parser* parser, int index);
 void html5_remove_from_stack(Html5Parser* parser, int index);
 void html5_flush_pending_text(Html5Parser* parser);
 
+// Table mode helpers
+void html5_close_cell(Html5Parser* parser);
+void html5_reset_insertion_mode(Html5Parser* parser);
+
 // Tokenizer (defined in html5_tokenizer.cpp)
 Html5Token* html5_tokenize_next(Html5Parser* parser);
 
