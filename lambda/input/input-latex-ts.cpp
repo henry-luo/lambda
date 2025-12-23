@@ -1471,6 +1471,21 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
     MarkBuilder& builder = ctx.builder;
     ElementBuilder env_elem_builder = builder.element(env_name->chars);
     
+    // Extract arguments from begin_env (e.g., {2} for multicols)
+    // The grammar has: begin_env -> \begin name:curly_group options:brack_group? arg:curly_group*
+    uint32_t begin_child_count = ts_node_child_count(begin_node);
+    for (uint32_t i = 0; i < begin_child_count; i++) {
+        TSNode begin_child = ts_node_child(begin_node, i);
+        const char* field_name = ts_node_field_name_for_child(begin_node, i);
+        if (field_name && strcmp(field_name, "arg") == 0) {
+            // Extract the text content from the curly group
+            Item arg_item = convert_latex_node(ctx, begin_child, source);
+            if (arg_item.item != ITEM_NULL) {
+                env_elem_builder.child(arg_item);
+            }
+        }
+    }
+    
     // Process environment content (between \begin and \end)
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; i++) {
