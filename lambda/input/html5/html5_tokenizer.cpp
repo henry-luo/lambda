@@ -674,42 +674,55 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
     // Check for semicolon and what follows
     char next_char = html5_peek_char(parser, 0);
     bool has_semicolon = (next_char == ';');
+    
+    // First try: exact match with semicolon
     if (has_semicolon) {
-        parser->pos++;  // consume ';'
+        const char* replacement = html5_lookup_named_entity(entity_name, name_len);
+        if (replacement != nullptr) {
+            parser->pos++;  // consume ';'
+            size_t rep_len = strlen(replacement);
+            memcpy(out_chars, replacement, rep_len);
+            *out_len = (int)rep_len;
+            return 1;
+        }
     }
 
-    // Look up entity
-    const char* replacement = html5_lookup_named_entity(entity_name, name_len);
-    if (replacement != nullptr) {
-        // Per HTML5 spec: named entities without semicolons are only decoded
-        // if they are "legacy named character references"
-        if (!has_semicolon) {
-            // Check if this is a legacy entity
-            if (!html5_is_legacy_entity(entity_name, name_len)) {
-                // Non-legacy entities require semicolon
-                parser->pos = start_pos;
-                return 0;
-            }
-            // For legacy entities in attribute context, check if followed by
-            // alphanumeric or '=' - don't decode in that case
-            if (in_attribute) {
-                if ((next_char >= 'a' && next_char <= 'z') ||
-                    (next_char >= 'A' && next_char <= 'Z') ||
-                    (next_char >= '0' && next_char <= '9') ||
-                    next_char == '=') {
-                    // Don't decode - restore position and return failure
-                    parser->pos = start_pos;
-                    return 0;
+    // Second try: look for longest legacy entity prefix match
+    // This handles cases like "&notit;" -> "&not" + "it;"
+    size_t save_pos = parser->pos;
+    for (size_t try_len = name_len; try_len > 0; try_len--) {
+        entity_name[try_len] = '\0';
+        if (html5_is_legacy_entity(entity_name, try_len)) {
+            const char* replacement = html5_lookup_named_entity(entity_name, try_len);
+            if (replacement != nullptr) {
+                // Found a legacy entity prefix match
+                // Rewind position to just after the matched entity
+                // start_pos is position of first char after '&', so start_pos + try_len is position after entity
+                parser->pos = start_pos + try_len;
+                
+                // For legacy entities in attribute context, check if followed by
+                // alphanumeric or '=' - don't decode in that case
+                if (in_attribute) {
+                    char after_entity = html5_peek_char(parser, 0);
+                    if ((after_entity >= 'a' && after_entity <= 'z') ||
+                        (after_entity >= 'A' && after_entity <= 'Z') ||
+                        (after_entity >= '0' && after_entity <= '9') ||
+                        after_entity == '=') {
+                        // Don't decode - restore position and return failure
+                        parser->pos = start_pos;
+                        return 0;
+                    }
                 }
+                
+                size_t rep_len = strlen(replacement);
+                memcpy(out_chars, replacement, rep_len);
+                *out_len = (int)rep_len;
+                return 1;
             }
         }
-        size_t rep_len = strlen(replacement);
-        memcpy(out_chars, replacement, rep_len);
-        *out_len = (int)rep_len;
-        return 1;
     }
 
-    // Entity not found - restore position and emit '&' as literal
+    // No match found - restore position and emit '&' as literal
     parser->pos = start_pos;
     return 0;
 }
@@ -946,6 +959,22 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
                     text[len] = '\0';
                     return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+                }
+                break;
+            }
+
+            case HTML5_TOK_PLAINTEXT: {
+                // PLAINTEXT state - everything is literal text, no end tag recognized
+                // Per WHATWG: keep emitting characters until EOF
+                if (c == '\0') {
+                    if (html5_is_eof(parser)) {
+                        return html5_token_create_eof(parser->pool, parser->arena);
+                    } else {
+                        log_error("html5: unexpected null in PLAINTEXT");
+                        return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
+                    }
+                } else {
+                    return html5_token_create_character(parser->pool, parser->arena, c);
                 }
                 break;
             }

@@ -68,6 +68,8 @@ typedef struct Html5Parser {
     bool frameset_ok;
     bool foster_parenting;
     bool ignore_next_lf;
+    bool quirks_mode;           // Document quirks mode (affects table/p behavior)
+    bool limited_quirks_mode;   // Limited quirks mode
 
     // Temporary buffers
     char* temp_buffer;
@@ -82,6 +84,11 @@ typedef struct Html5Parser {
     // Text content buffering (for efficient text node creation)
     StringBuf* text_buffer;
     Element* pending_text_parent;  // parent element for buffered text
+    
+    // Foster parent text buffering
+    StringBuf* foster_text_buffer;
+    Element* foster_table_element;   // the table element we're foster parenting for
+    Element* foster_parent_element;  // the element before the table (usually body)
 
     // Last emitted start tag name (for RCDATA/RAWTEXT end tag matching)
     char* last_start_tag_name;
@@ -116,6 +123,8 @@ void html5_close_p_element(Html5Parser* parser);
 Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token);
 Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token);
 void html5_insert_character(Html5Parser* parser, char c);
+void html5_foster_parent_character(Html5Parser* parser, char c);
+void html5_flush_foster_text(Html5Parser* parser);
 void html5_insert_comment(Html5Parser* parser, Html5Token* token);
 
 // Active formatting elements

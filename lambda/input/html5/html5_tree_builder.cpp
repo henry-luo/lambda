@@ -2,6 +2,8 @@
 #include "html5_tokenizer.h"
 #include "../../../lib/log.h"
 #include "../../mark_builder.hpp"
+#include "../../mark_reader.hpp"
+#include "../../mark_editor.hpp"
 #include <string.h>
 
 // forward declarations for insertion mode handlers
@@ -45,8 +47,9 @@ Element* html5_parse(Input* input, const char* html) {
         }
     }
 
-    // Flush any remaining pending text
+    // Flush any remaining pending text (both normal and foster)
     html5_flush_pending_text(parser);
+    html5_flush_foster_text(parser);
 
     log_debug("html5: parse complete, mode=%d, open_elements=%zu",
               parser->mode, parser->open_elements->length);
@@ -61,6 +64,10 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_table_body_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_row_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_cell_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_column_group_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_frameset_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_after_frameset_mode(Html5Parser* parser, Html5Token* token);
 
 // helper: clear stack back to table context
 static void html5_clear_stack_back_to_table_context(Html5Parser* parser);
@@ -93,6 +100,12 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
         case HTML5_MODE_IN_TABLE:
             html5_process_in_table_mode(parser, token);
             break;
+        case HTML5_MODE_IN_CAPTION:
+            html5_process_in_caption_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_COLUMN_GROUP:
+            html5_process_in_column_group_mode(parser, token);
+            break;
         case HTML5_MODE_IN_TABLE_BODY:
             html5_process_in_table_body_mode(parser, token);
             break;
@@ -106,13 +119,19 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
             html5_process_in_after_body_mode(parser, token);
             break;
         case HTML5_MODE_AFTER_AFTER_BODY:
-            html5_process_in_after_after_body_mode(parser, token);
+            html5_process_in_after_after_body_mode(parser, token);;
             break;
         case HTML5_MODE_TEXT:
             html5_process_in_text_mode(parser, token);
             break;
         case HTML5_MODE_IN_SELECT:
             html5_process_in_select_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_FRAMESET:
+            html5_process_in_frameset_mode(parser, token);
+            break;
+        case HTML5_MODE_AFTER_FRAMESET:
+            html5_process_in_after_frameset_mode(parser, token);
             break;
         default:
             log_error("html5: unimplemented insertion mode: %d", parser->mode);
@@ -156,12 +175,25 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
         Element* doctype = eb.final().element;
         array_append(parser->document, Item{.element = doctype}, parser->pool, parser->arena);
 
+        // Set quirks mode based on DOCTYPE per WHATWG spec 13.2.6.4.1
+        // For simplicity: "<!DOCTYPE html>" (with public/system id empty) = standards mode
+        // Missing DOCTYPE name or legacy DOCTYPEs = quirks mode
+        if (token->doctype_name && strcmp(token->doctype_name->chars, "html") == 0) {
+            // Standards mode or limited quirks - simplified check
+            // Full spec check would examine public/system identifiers
+            parser->quirks_mode = false;
+        } else {
+            // Missing or wrong doctype name = quirks mode
+            parser->quirks_mode = true;
+        }
+
         parser->mode = HTML5_MODE_BEFORE_HTML;
         return;
     }
 
     // anything else: missing doctype, switch to before html mode
     log_error("html5: missing doctype, switching to before html mode");
+    parser->quirks_mode = true;  // no DOCTYPE = quirks mode
     parser->mode = HTML5_MODE_BEFORE_HTML;
     html5_process_token(parser, token);  // reprocess in new mode
 }
@@ -417,7 +449,15 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
         // Insert the character into current element
         if (token->data && token->data->len > 0) {
             for (uint32_t i = 0; i < token->data->len; i++) {
-                html5_insert_character(parser, token->data->chars[i]);
+                char c = token->data->chars[i];
+                // Check if we should skip leading newline (for textarea, pre)
+                if (parser->ignore_next_lf) {
+                    parser->ignore_next_lf = false;
+                    if (c == '\n') {
+                        continue;  // skip this newline
+                    }
+                }
+                html5_insert_character(parser, c);
             }
         }
         return;
@@ -466,6 +506,13 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             // Insert all characters from the token
             for (uint32_t i = 0; i < token->data->len; i++) {
                 char c = token->data->chars[i];
+                // Check if we should skip leading newline (for pre, listing)
+                if (parser->ignore_next_lf) {
+                    parser->ignore_next_lf = false;
+                    if (c == '\n') {
+                        continue;  // skip this newline
+                    }
+                }
                 if (c == '\0') {
                     log_error("html5: null character in body");
                     continue;  // skip null, process rest
@@ -489,8 +536,82 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_START_TAG) {
         const char* tag = token->tag_name->chars;
 
+        // <html> in body: merge attributes onto existing html element
         if (strcmp(tag, "html") == 0) {
-            log_error("html5: unexpected <html> in body mode");
+            // Per WHATWG spec: if there's a template on the stack, ignore
+            // Otherwise, merge attributes from token onto the html element
+            bool has_template = false;
+            for (size_t i = 0; i < parser->open_elements->length; i++) {
+                Element* el = (Element*)parser->open_elements->items[i].element;
+                const char* el_tag = ((TypeElmt*)el->type)->name.str;
+                if (strcmp(el_tag, "template") == 0) {
+                    has_template = true;
+                    break;
+                }
+            }
+            if (!has_template && parser->open_elements->length > 0) {
+                // Find html element (should be first)
+                Element* html_el = (Element*)parser->open_elements->items[0].element;
+                // Add any attributes from token that are not already on html
+                if (token->attributes != nullptr && html_el->type != nullptr) {
+                    MapReader html_attrs = MapReader::fromItem(Item { .element = html_el });
+                    MapReader attr_reader(token->attributes);
+                    MapReader::EntryIterator it = attr_reader.entries();
+                    const char* key;
+                    ItemReader value;
+                    while (it.next(&key, &value)) {
+                        if (key && value.isString()) {
+                            // Only add if not already present
+                            if (!html_attrs.has(key)) {
+                                MarkEditor editor(parser->input);
+                                editor.elmt_update_attr(Item { .element = html_el }, key, Item { .item = s2it(value.asString()) });
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        // <body> in body: merge attributes onto existing body element per WHATWG spec
+        if (strcmp(tag, "body") == 0) {
+            // Per WHATWG spec: if there's a template on the stack, ignore
+            // If only one element on stack, or second element isn't body, ignore
+            // Otherwise, merge attributes from token onto the body element
+            bool has_template = false;
+            for (size_t i = 0; i < parser->open_elements->length; i++) {
+                Element* el = (Element*)parser->open_elements->items[i].element;
+                const char* el_tag = ((TypeElmt*)el->type)->name.str;
+                if (strcmp(el_tag, "template") == 0) {
+                    has_template = true;
+                    break;
+                }
+            }
+            if (!has_template && parser->open_elements->length >= 2) {
+                // Body element should be second in stack (after html)
+                Element* body_el = (Element*)parser->open_elements->items[1].element;
+                const char* body_tag = ((TypeElmt*)body_el->type)->name.str;
+                if (strcmp(body_tag, "body") == 0) {
+                    // Add any attributes from token that are not already on body
+                    if (token->attributes != nullptr) {
+                        MapReader body_attrs = MapReader::fromItem(Item { .element = body_el });
+                        MapReader attr_reader(token->attributes);
+                        MapReader::EntryIterator it = attr_reader.entries();
+                        const char* key;
+                        ItemReader value;
+                        while (it.next(&key, &value)) {
+                            if (key && value.isString()) {
+                                // Only add if not already present
+                                if (!body_attrs.has(key)) {
+                                    MarkEditor editor(parser->input);
+                                    editor.elmt_update_attr(Item { .element = body_el }, key, Item { .item = s2it(value.asString()) });
+                                }
+                            }
+                        }
+                    }
+                    parser->frameset_ok = false;
+                }
+            }
             return;
         }
 
@@ -499,6 +620,17 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         // head: already processed, ignore stray <head> tags
         if (strcmp(tag, "frame") == 0 || strcmp(tag, "head") == 0) {
             log_error("html5: ignoring <%s> in body mode", tag);
+            return;
+        }
+
+        // Per WHATWG 12.2.6.4.7: base, basefont, bgsound, link, meta, noframes, 
+        // script, style, template, title - process using "in head" rules
+        if (strcmp(tag, "base") == 0 || strcmp(tag, "basefont") == 0 ||
+            strcmp(tag, "bgsound") == 0 || strcmp(tag, "link") == 0 ||
+            strcmp(tag, "meta") == 0 || strcmp(tag, "noframes") == 0 ||
+            strcmp(tag, "script") == 0 || strcmp(tag, "style") == 0 ||
+            strcmp(tag, "template") == 0 || strcmp(tag, "title") == 0) {
+            html5_process_in_head_mode(parser, token);
             return;
         }
 
@@ -541,8 +673,8 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
 
         // <table> requires special handling - switch to table mode
         if (strcmp(tag, "table") == 0) {
-            // Close any <p> element in button scope per spec
-            if (html5_has_element_in_button_scope(parser, "p")) {
+            // Per WHATWG spec: Only close <p> if NOT in quirks mode
+            if (!parser->quirks_mode && html5_has_element_in_button_scope(parser, "p")) {
                 html5_close_p_element(parser);
             }
             html5_insert_html_element(parser, token);
@@ -555,6 +687,8 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         if (strcmp(tag, "li") == 0) {
             parser->frameset_ok = false;
             // close any <li> elements in list item scope
+            // Per spec: loop through stack, looking for <li>
+            // Stop only at special elements EXCEPT address, div, p
             for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
                 Element* node = (Element*)parser->open_elements->items[i].element;
                 const char* node_tag = ((TypeElmt*)node->type)->name.str;
@@ -570,11 +704,54 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                     }
                     break;
                 }
-                // stop if we hit a list container or special element that creates scope
-                if (strcmp(node_tag, "ul") == 0 || strcmp(node_tag, "ol") == 0 ||
-                    strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
+                // Per WHATWG spec: stop at special elements EXCEPT address, div, p
+                // address, div, p are special but explicitly exempted
+                if (strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
                     strcmp(node_tag, "p") == 0) {
-                    break;
+                    continue;  // these don't stop the search
+                }
+                // Check for other special elements that DO stop the search
+                if (strcmp(node_tag, "applet") == 0 || strcmp(node_tag, "area") == 0 ||
+                    strcmp(node_tag, "article") == 0 || strcmp(node_tag, "aside") == 0 ||
+                    strcmp(node_tag, "base") == 0 || strcmp(node_tag, "basefont") == 0 ||
+                    strcmp(node_tag, "bgsound") == 0 || strcmp(node_tag, "blockquote") == 0 ||
+                    strcmp(node_tag, "body") == 0 || strcmp(node_tag, "br") == 0 ||
+                    strcmp(node_tag, "button") == 0 || strcmp(node_tag, "caption") == 0 ||
+                    strcmp(node_tag, "center") == 0 || strcmp(node_tag, "col") == 0 ||
+                    strcmp(node_tag, "colgroup") == 0 || strcmp(node_tag, "dd") == 0 ||
+                    strcmp(node_tag, "details") == 0 || strcmp(node_tag, "dir") == 0 ||
+                    strcmp(node_tag, "dl") == 0 || strcmp(node_tag, "dt") == 0 ||
+                    strcmp(node_tag, "embed") == 0 || strcmp(node_tag, "fieldset") == 0 ||
+                    strcmp(node_tag, "figcaption") == 0 || strcmp(node_tag, "figure") == 0 ||
+                    strcmp(node_tag, "footer") == 0 || strcmp(node_tag, "form") == 0 ||
+                    strcmp(node_tag, "frame") == 0 || strcmp(node_tag, "frameset") == 0 ||
+                    strcmp(node_tag, "h1") == 0 || strcmp(node_tag, "h2") == 0 ||
+                    strcmp(node_tag, "h3") == 0 || strcmp(node_tag, "h4") == 0 ||
+                    strcmp(node_tag, "h5") == 0 || strcmp(node_tag, "h6") == 0 ||
+                    strcmp(node_tag, "head") == 0 || strcmp(node_tag, "header") == 0 ||
+                    strcmp(node_tag, "hgroup") == 0 || strcmp(node_tag, "hr") == 0 ||
+                    strcmp(node_tag, "html") == 0 || strcmp(node_tag, "iframe") == 0 ||
+                    strcmp(node_tag, "img") == 0 || strcmp(node_tag, "input") == 0 ||
+                    strcmp(node_tag, "keygen") == 0 || strcmp(node_tag, "link") == 0 ||
+                    strcmp(node_tag, "listing") == 0 || strcmp(node_tag, "main") == 0 ||
+                    strcmp(node_tag, "marquee") == 0 || strcmp(node_tag, "menu") == 0 ||
+                    strcmp(node_tag, "meta") == 0 || strcmp(node_tag, "nav") == 0 ||
+                    strcmp(node_tag, "noembed") == 0 || strcmp(node_tag, "noframes") == 0 ||
+                    strcmp(node_tag, "noscript") == 0 || strcmp(node_tag, "object") == 0 ||
+                    strcmp(node_tag, "ol") == 0 || strcmp(node_tag, "param") == 0 ||
+                    strcmp(node_tag, "plaintext") == 0 || strcmp(node_tag, "pre") == 0 ||
+                    strcmp(node_tag, "script") == 0 || strcmp(node_tag, "search") == 0 ||
+                    strcmp(node_tag, "section") == 0 || strcmp(node_tag, "select") == 0 ||
+                    strcmp(node_tag, "source") == 0 || strcmp(node_tag, "style") == 0 ||
+                    strcmp(node_tag, "summary") == 0 || strcmp(node_tag, "table") == 0 ||
+                    strcmp(node_tag, "tbody") == 0 || strcmp(node_tag, "td") == 0 ||
+                    strcmp(node_tag, "template") == 0 || strcmp(node_tag, "textarea") == 0 ||
+                    strcmp(node_tag, "tfoot") == 0 || strcmp(node_tag, "th") == 0 ||
+                    strcmp(node_tag, "thead") == 0 || strcmp(node_tag, "title") == 0 ||
+                    strcmp(node_tag, "tr") == 0 || strcmp(node_tag, "track") == 0 ||
+                    strcmp(node_tag, "ul") == 0 || strcmp(node_tag, "wbr") == 0 ||
+                    strcmp(node_tag, "xmp") == 0) {
+                    break;  // stop at special elements
                 }
             }
             // close any <p> in button scope
@@ -585,10 +762,12 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // <dd>, <dt> have similar auto-closing behavior
+        // <dd>, <dt> have similar auto-closing behavior per WHATWG spec
         if (strcmp(tag, "dd") == 0 || strcmp(tag, "dt") == 0) {
             parser->frameset_ok = false;
             // close any <dd> or <dt> elements
+            // Per spec: loop through stack, looking for <dd> or <dt>
+            // Stop only at special elements EXCEPT address, div, p
             for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
                 Element* node = (Element*)parser->open_elements->items[i].element;
                 const char* node_tag = ((TypeElmt*)node->type)->name.str;
@@ -603,10 +782,54 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                     }
                     break;
                 }
-                // stop at special elements
+                // Per WHATWG spec: stop at special elements EXCEPT address, div, p
                 if (strcmp(node_tag, "address") == 0 || strcmp(node_tag, "div") == 0 ||
                     strcmp(node_tag, "p") == 0) {
-                    break;
+                    continue;  // these don't stop the search
+                }
+                // Check for other special elements that DO stop the search
+                if (strcmp(node_tag, "applet") == 0 || strcmp(node_tag, "area") == 0 ||
+                    strcmp(node_tag, "article") == 0 || strcmp(node_tag, "aside") == 0 ||
+                    strcmp(node_tag, "base") == 0 || strcmp(node_tag, "basefont") == 0 ||
+                    strcmp(node_tag, "bgsound") == 0 || strcmp(node_tag, "blockquote") == 0 ||
+                    strcmp(node_tag, "body") == 0 || strcmp(node_tag, "br") == 0 ||
+                    strcmp(node_tag, "button") == 0 || strcmp(node_tag, "caption") == 0 ||
+                    strcmp(node_tag, "center") == 0 || strcmp(node_tag, "col") == 0 ||
+                    strcmp(node_tag, "colgroup") == 0 ||
+                    strcmp(node_tag, "details") == 0 || strcmp(node_tag, "dir") == 0 ||
+                    strcmp(node_tag, "dl") == 0 ||
+                    strcmp(node_tag, "embed") == 0 || strcmp(node_tag, "fieldset") == 0 ||
+                    strcmp(node_tag, "figcaption") == 0 || strcmp(node_tag, "figure") == 0 ||
+                    strcmp(node_tag, "footer") == 0 || strcmp(node_tag, "form") == 0 ||
+                    strcmp(node_tag, "frame") == 0 || strcmp(node_tag, "frameset") == 0 ||
+                    strcmp(node_tag, "h1") == 0 || strcmp(node_tag, "h2") == 0 ||
+                    strcmp(node_tag, "h3") == 0 || strcmp(node_tag, "h4") == 0 ||
+                    strcmp(node_tag, "h5") == 0 || strcmp(node_tag, "h6") == 0 ||
+                    strcmp(node_tag, "head") == 0 || strcmp(node_tag, "header") == 0 ||
+                    strcmp(node_tag, "hgroup") == 0 || strcmp(node_tag, "hr") == 0 ||
+                    strcmp(node_tag, "html") == 0 || strcmp(node_tag, "iframe") == 0 ||
+                    strcmp(node_tag, "img") == 0 || strcmp(node_tag, "input") == 0 ||
+                    strcmp(node_tag, "keygen") == 0 || strcmp(node_tag, "li") == 0 ||
+                    strcmp(node_tag, "link") == 0 ||
+                    strcmp(node_tag, "listing") == 0 || strcmp(node_tag, "main") == 0 ||
+                    strcmp(node_tag, "marquee") == 0 || strcmp(node_tag, "menu") == 0 ||
+                    strcmp(node_tag, "meta") == 0 || strcmp(node_tag, "nav") == 0 ||
+                    strcmp(node_tag, "noembed") == 0 || strcmp(node_tag, "noframes") == 0 ||
+                    strcmp(node_tag, "noscript") == 0 || strcmp(node_tag, "object") == 0 ||
+                    strcmp(node_tag, "ol") == 0 || strcmp(node_tag, "param") == 0 ||
+                    strcmp(node_tag, "plaintext") == 0 || strcmp(node_tag, "pre") == 0 ||
+                    strcmp(node_tag, "script") == 0 || strcmp(node_tag, "search") == 0 ||
+                    strcmp(node_tag, "section") == 0 || strcmp(node_tag, "select") == 0 ||
+                    strcmp(node_tag, "source") == 0 || strcmp(node_tag, "style") == 0 ||
+                    strcmp(node_tag, "summary") == 0 || strcmp(node_tag, "table") == 0 ||
+                    strcmp(node_tag, "tbody") == 0 || strcmp(node_tag, "td") == 0 ||
+                    strcmp(node_tag, "template") == 0 || strcmp(node_tag, "textarea") == 0 ||
+                    strcmp(node_tag, "tfoot") == 0 || strcmp(node_tag, "th") == 0 ||
+                    strcmp(node_tag, "thead") == 0 || strcmp(node_tag, "title") == 0 ||
+                    strcmp(node_tag, "tr") == 0 || strcmp(node_tag, "track") == 0 ||
+                    strcmp(node_tag, "ul") == 0 || strcmp(node_tag, "wbr") == 0 ||
+                    strcmp(node_tag, "xmp") == 0) {
+                    break;  // stop at special elements
                 }
             }
             if (html5_has_element_in_button_scope(parser, "p")) {
@@ -617,11 +840,36 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         }
 
         // block elements (except headings, table, li, dd, dt which are handled above)
+        // <pre> and <listing> need special handling for newline
+        if (strcmp(tag, "pre") == 0 || strcmp(tag, "listing") == 0) {
+            // Close any <p> element in button scope per spec
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                html5_close_p_element(parser);
+            }
+            html5_insert_html_element(parser, token);
+            // Set ignore_next_lf to skip leading newline per spec
+            parser->ignore_next_lf = true;
+            parser->frameset_ok = false;
+            return;
+        }
+
+        // <plaintext> - switch tokenizer to PLAINTEXT state (never exits)
+        if (strcmp(tag, "plaintext") == 0) {
+            // Close any <p> element in button scope per spec
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                html5_close_p_element(parser);
+            }
+            html5_insert_html_element(parser, token);
+            html5_switch_tokenizer_state(parser, HTML5_TOK_PLAINTEXT);
+            parser->frameset_ok = false;
+            return;
+        }
+
         if (strcmp(tag, "div") == 0 || strcmp(tag, "p") == 0 ||
             strcmp(tag, "ul") == 0 || strcmp(tag, "ol") == 0 ||
             strcmp(tag, "section") == 0 || strcmp(tag, "article") == 0 || strcmp(tag, "nav") == 0 ||
             strcmp(tag, "header") == 0 || strcmp(tag, "footer") == 0 || strcmp(tag, "main") == 0 ||
-            strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 || strcmp(tag, "pre") == 0 ||
+            strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 ||
             strcmp(tag, "address") == 0 || strcmp(tag, "center") == 0 || strcmp(tag, "details") == 0 ||
             strcmp(tag, "dialog") == 0 || strcmp(tag, "dir") == 0 || strcmp(tag, "dl") == 0 ||
             strcmp(tag, "fieldset") == 0 || strcmp(tag, "figcaption") == 0 || strcmp(tag, "figure") == 0 ||
@@ -638,11 +886,65 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         }
 
         // inline/formatting elements
-        if (strcmp(tag, "a") == 0 || strcmp(tag, "b") == 0 || strcmp(tag, "i") == 0 ||
+        // Special handling for <a> and <nobr>: run AAA if already in active formatting
+        if (strcmp(tag, "a") == 0) {
+            // Check if there's already an <a> in active formatting elements
+            int existing_a = html5_find_formatting_element(parser, "a");
+            if (existing_a >= 0) {
+                // Run adoption agency algorithm for "a"
+                MarkBuilder builder(parser->input);
+                String* a_name = builder.createString("a");
+                Html5Token* fake_end_tag = html5_token_create_end_tag(parser->pool, parser->arena, a_name);
+                html5_run_adoption_agency(parser, fake_end_tag);
+                
+                // If still in the list, remove it (AAA may have failed)
+                existing_a = html5_find_formatting_element(parser, "a");
+                if (existing_a >= 0) {
+                    // Remove from active formatting
+                    for (size_t i = existing_a; i < parser->active_formatting->length - 1; i++) {
+                        parser->active_formatting->items[i] = parser->active_formatting->items[i + 1];
+                    }
+                    parser->active_formatting->length--;
+                    // Also remove from open elements if present
+                    for (size_t i = 0; i < parser->open_elements->length; i++) {
+                        Element* elem = (Element*)parser->open_elements->items[i].element;
+                        if (elem && strcmp(((TypeElmt*)elem->type)->name.str, "a") == 0) {
+                            for (size_t j = i; j < parser->open_elements->length - 1; j++) {
+                                parser->open_elements->items[j] = parser->open_elements->items[j + 1];
+                            }
+                            parser->open_elements->length--;
+                            break;
+                        }
+                    }
+                }
+            }
+            html5_reconstruct_active_formatting_elements(parser);
+            Element* elem = html5_insert_html_element(parser, token);
+            html5_push_active_formatting_element(parser, elem, token);
+            return;
+        }
+        
+        if (strcmp(tag, "nobr") == 0) {
+            html5_reconstruct_active_formatting_elements(parser);
+            // Check if there's already a <nobr> in scope
+            if (html5_has_element_in_scope(parser, "nobr")) {
+                // Run adoption agency algorithm for "nobr"
+                MarkBuilder builder(parser->input);
+                String* nobr_name = builder.createString("nobr");
+                Html5Token* fake_end_tag = html5_token_create_end_tag(parser->pool, parser->arena, nobr_name);
+                html5_run_adoption_agency(parser, fake_end_tag);
+                html5_reconstruct_active_formatting_elements(parser);
+            }
+            Element* elem = html5_insert_html_element(parser, token);
+            html5_push_active_formatting_element(parser, elem, token);
+            return;
+        }
+
+        if (strcmp(tag, "b") == 0 || strcmp(tag, "i") == 0 ||
             strcmp(tag, "em") == 0 || strcmp(tag, "strong") == 0 || strcmp(tag, "span") == 0 ||
             strcmp(tag, "code") == 0 || strcmp(tag, "small") == 0 || strcmp(tag, "big") == 0 ||
             strcmp(tag, "u") == 0 || strcmp(tag, "s") == 0 || strcmp(tag, "strike") == 0 ||
-            strcmp(tag, "font") == 0 || strcmp(tag, "nobr") == 0 || strcmp(tag, "tt") == 0) {
+            strcmp(tag, "font") == 0 || strcmp(tag, "tt") == 0) {
             // Reconstruct active formatting elements before insertion
             html5_reconstruct_active_formatting_elements(parser);
             Element* elem = html5_insert_html_element(parser, token);
@@ -842,6 +1144,38 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
+        // Special handling for block elements that generate implied end tags
+        // Per WHATWG: address, article, aside, blockquote, button, center, details, 
+        // dialog, dir, div, fieldset, figcaption, figure, footer, header, hgroup, 
+        // listing, main, menu, nav, pre, search, section, summary
+        if (strcmp(tag, "address") == 0 || strcmp(tag, "article") == 0 ||
+            strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 ||
+            strcmp(tag, "button") == 0 || strcmp(tag, "center") == 0 ||
+            strcmp(tag, "details") == 0 || strcmp(tag, "dialog") == 0 ||
+            strcmp(tag, "dir") == 0 || strcmp(tag, "div") == 0 ||
+            strcmp(tag, "fieldset") == 0 || strcmp(tag, "figcaption") == 0 ||
+            strcmp(tag, "figure") == 0 || strcmp(tag, "footer") == 0 ||
+            strcmp(tag, "header") == 0 || strcmp(tag, "hgroup") == 0 ||
+            strcmp(tag, "listing") == 0 || strcmp(tag, "main") == 0 ||
+            strcmp(tag, "menu") == 0 || strcmp(tag, "nav") == 0 ||
+            strcmp(tag, "pre") == 0 || strcmp(tag, "search") == 0 ||
+            strcmp(tag, "section") == 0 || strcmp(tag, "summary") == 0) {
+            if (!html5_has_element_in_scope(parser, tag)) {
+                log_error("html5: </%s> without matching tag in scope", tag);
+                return;
+            }
+            // Generate implied end tags (this closes <p> etc.)
+            html5_generate_implied_end_tags(parser);
+            // Pop until the matching element
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
+                    break;
+                }
+            }
+            return;
+        }
+
         // generic end tag handling: pop elements until matching tag found
         for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
             Element* elem = (Element*)parser->open_elements->items[i].element;
@@ -1004,9 +1338,13 @@ static void html5_clear_stack_back_to_table_row_context(Html5Parser* parser) {
 // https://html.spec.whatwg.org/#parsing-main-intable
 static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_CHARACTER) {
-        // TODO: handle table text properly (foster parenting)
-        // For now, process in body mode (simplified)
-        html5_process_in_body_mode(parser, token);
+        // Per WHATWG spec: Character tokens in table context need foster parenting
+        // Foster parent the text before the table element
+        if (token->data != nullptr && token->data->len > 0) {
+            for (size_t i = 0; i < token->data->len; i++) {
+                html5_foster_parent_character(parser, token->data->chars[i]);
+            }
+        }
         return;
     }
 
@@ -1104,6 +1442,9 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
 
         // </table>
         if (strcmp(tag, "table") == 0) {
+            // Flush any pending foster-parented text first
+            html5_flush_foster_text(parser);
+            
             if (!html5_has_element_in_table_scope(parser, "table")) {
                 log_error("html5: </table> without <table> in scope");
                 return;
@@ -1648,4 +1989,349 @@ void html5_reset_insertion_mode(Html5Parser* parser) {
 
     // Default to in body mode
     parser->mode = HTML5_MODE_IN_BODY;
+}
+
+// IN_FRAMESET mode handler - for frameset content
+static void html5_process_in_frameset_mode(Html5Parser* parser, Html5Token* token) {
+    // Handle character tokens (whitespace only)
+    if (token->type == HTML5_TOKEN_CHARACTER) {
+        // Insert whitespace characters
+        if (token->data != nullptr && token->data->len > 0) {
+            // Filter to whitespace only
+            for (size_t i = 0; i < token->data->len; i++) {
+                char c = token->data->chars[i];
+                if (c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r') {
+                    html5_insert_character(parser, c);
+                }
+            }
+        }
+        return;
+    }
+
+    // Handle comments
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token);
+        return;
+    }
+
+    // Handle doctype
+    if (token->type == HTML5_TOKEN_DOCTYPE) {
+        // Ignore
+        log_error("html5: ignoring DOCTYPE in frameset mode");
+        return;
+    }
+
+    // Handle start tags
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "html") == 0) {
+            // Process using body mode rules
+            html5_process_in_body_mode(parser, token);
+            return;
+        }
+
+        if (strcmp(tag, "frameset") == 0) {
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
+        if (strcmp(tag, "frame") == 0) {
+            // Self-closing void element
+            html5_insert_html_element(parser, token);
+            html5_pop_element(parser);
+            return;
+        }
+
+        if (strcmp(tag, "noframes") == 0) {
+            // Process using head mode rules (raw text element)
+            html5_process_in_head_mode(parser, token);
+            return;
+        }
+
+        // Anything else - ignore
+        log_error("html5: ignoring <%s> in frameset mode", tag);
+        return;
+    }
+
+    // Handle end tags
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "frameset") == 0) {
+            // If current node is root html, ignore (fragment case)
+            Element* current = html5_current_node(parser);
+            if (current != nullptr) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "html") == 0) {
+                    // Ignore
+                    return;
+                }
+            }
+            // Pop frameset
+            html5_pop_element(parser);
+            // If not fragment and current node is not frameset, switch to after frameset
+            current = html5_current_node(parser);
+            if (current != nullptr) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "frameset") != 0) {
+                    parser->mode = HTML5_MODE_AFTER_FRAMESET;
+                }
+            }
+            return;
+        }
+
+        // Anything else - ignore
+        log_error("html5: ignoring </%s> in frameset mode", tag);
+        return;
+    }
+
+
+    // Handle EOF
+    if (token->type == HTML5_TOKEN_EOF) {
+        // Stop parsing
+        return;
+    }
+
+    // Anything else - ignore
+}
+
+// AFTER_FRAMESET mode handler
+static void html5_process_in_after_frameset_mode(Html5Parser* parser, Html5Token* token) {
+    // Handle character tokens (whitespace only)
+    if (token->type == HTML5_TOKEN_CHARACTER) {
+        // Insert whitespace characters
+        if (token->data != nullptr && token->data->len > 0) {
+            for (size_t i = 0; i < token->data->len; i++) {
+                char c = token->data->chars[i];
+                if (c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r') {
+                    html5_insert_character(parser, c);
+                }
+            }
+        }
+        return;
+    }
+
+    // Handle comments
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token);
+        return;
+    }
+
+    // Handle doctype
+    if (token->type == HTML5_TOKEN_DOCTYPE) {
+        log_error("html5: ignoring DOCTYPE in after frameset mode");
+        return;
+    }
+
+    // Handle start tags
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "html") == 0) {
+            html5_process_in_body_mode(parser, token);
+            return;
+        }
+
+        if (strcmp(tag, "noframes") == 0) {
+            html5_process_in_head_mode(parser, token);
+            return;
+        }
+
+        log_error("html5: ignoring <%s> in after frameset mode", tag);
+        return;
+    }
+
+    // Handle end tags
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "html") == 0) {
+            parser->mode = HTML5_MODE_AFTER_AFTER_FRAMESET;
+            return;
+        }
+
+        log_error("html5: ignoring </%s> in after frameset mode", tag);
+        return;
+    }
+
+    // Handle EOF
+    if (token->type == HTML5_TOKEN_EOF) {
+        return;
+    }
+
+    // Anything else - ignore
+}
+
+// ===== IN_CAPTION MODE =====
+// Per WHATWG 12.2.6.4.11
+static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token) {
+    // End tag </caption>
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "caption") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "caption")) {
+                log_error("html5: </caption> without <caption> in table scope");
+                return;
+            }
+            html5_generate_implied_end_tags(parser);
+            // Pop until caption
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (strcmp(((TypeElmt*)popped->type)->name.str, "caption") == 0) {
+                    break;
+                }
+            }
+            html5_clear_active_formatting_to_marker(parser);
+            parser->mode = HTML5_MODE_IN_TABLE;
+            return;
+        }
+
+        if (strcmp(tag, "table") == 0) {
+            // Act as if </caption> then reprocess
+            if (!html5_has_element_in_table_scope(parser, "caption")) {
+                log_error("html5: </table> without <caption> in table scope");
+                return;
+            }
+            html5_generate_implied_end_tags(parser);
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (strcmp(((TypeElmt*)popped->type)->name.str, "caption") == 0) {
+                    break;
+                }
+            }
+            html5_clear_active_formatting_to_marker(parser);
+            parser->mode = HTML5_MODE_IN_TABLE;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // </body>, </col>, </colgroup>, </html>, </tbody>, </td>, </tfoot>, 
+        // </th>, </thead>, </tr> - ignore
+        if (strcmp(tag, "body") == 0 || strcmp(tag, "col") == 0 ||
+            strcmp(tag, "colgroup") == 0 || strcmp(tag, "html") == 0 ||
+            strcmp(tag, "tbody") == 0 || strcmp(tag, "td") == 0 ||
+            strcmp(tag, "tfoot") == 0 || strcmp(tag, "th") == 0 ||
+            strcmp(tag, "thead") == 0 || strcmp(tag, "tr") == 0) {
+            log_error("html5: ignoring </%s> in caption mode", tag);
+            return;
+        }
+    }
+
+    // Start tags that close caption implicitly
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "caption") == 0 || strcmp(tag, "col") == 0 ||
+            strcmp(tag, "colgroup") == 0 || strcmp(tag, "tbody") == 0 ||
+            strcmp(tag, "td") == 0 || strcmp(tag, "tfoot") == 0 ||
+            strcmp(tag, "th") == 0 || strcmp(tag, "thead") == 0 ||
+            strcmp(tag, "tr") == 0) {
+            // Act as if </caption> then reprocess
+            if (!html5_has_element_in_table_scope(parser, "caption")) {
+                log_error("html5: <%s> without <caption> in table scope", tag);
+                return;
+            }
+            html5_generate_implied_end_tags(parser);
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                if (strcmp(((TypeElmt*)popped->type)->name.str, "caption") == 0) {
+                    break;
+                }
+            }
+            html5_clear_active_formatting_to_marker(parser);
+            parser->mode = HTML5_MODE_IN_TABLE;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+    }
+
+    // Anything else: process using in body rules
+    html5_process_in_body_mode(parser, token);
+}
+
+// ===== IN_COLUMN_GROUP MODE =====
+// Per WHATWG 12.2.6.4.12
+static void html5_process_in_column_group_mode(Html5Parser* parser, Html5Token* token) {
+    // Whitespace
+    if (token->type == HTML5_TOKEN_CHARACTER && is_whitespace_token(token)) {
+        html5_insert_character(parser, token->data->chars[0]);
+        return;
+    }
+
+    // Comment
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token);
+        return;
+    }
+
+    // DOCTYPE - ignore
+    if (token->type == HTML5_TOKEN_DOCTYPE) {
+        log_error("html5: ignoring DOCTYPE in column group mode");
+        return;
+    }
+
+    // Start tags
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "html") == 0) {
+            html5_process_in_body_mode(parser, token);
+            return;
+        }
+
+        if (strcmp(tag, "col") == 0) {
+            html5_insert_html_element(parser, token);
+            html5_pop_element(parser);  // self-closing
+            return;
+        }
+
+        if (strcmp(tag, "template") == 0) {
+            html5_process_in_head_mode(parser, token);
+            return;
+        }
+    }
+
+    // End tags
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        if (strcmp(tag, "colgroup") == 0) {
+            Element* current = html5_current_node(parser);
+            if (current && strcmp(((TypeElmt*)current->type)->name.str, "colgroup") == 0) {
+                html5_pop_element(parser);
+                parser->mode = HTML5_MODE_IN_TABLE;
+            } else {
+                log_error("html5: </colgroup> but current node is not colgroup");
+            }
+            return;
+        }
+
+        if (strcmp(tag, "col") == 0) {
+            log_error("html5: ignoring </col> in column group mode");
+            return;
+        }
+
+        if (strcmp(tag, "template") == 0) {
+            html5_process_in_head_mode(parser, token);
+            return;
+        }
+    }
+
+    // EOF
+    if (token->type == HTML5_TOKEN_EOF) {
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
+
+    // Anything else: act as if </colgroup> and reprocess
+    Element* current = html5_current_node(parser);
+    if (current && strcmp(((TypeElmt*)current->type)->name.str, "colgroup") == 0) {
+        html5_pop_element(parser);
+        parser->mode = HTML5_MODE_IN_TABLE;
+        html5_process_token(parser, token);
+    } else {
+        log_error("html5: cannot close colgroup in column group mode");
+    }
 }

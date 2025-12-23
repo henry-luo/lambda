@@ -1,12 +1,12 @@
 # HTML5 Parser WPT Compliance Fix Proposal
 
 **Goal**: Achieve 100% compliance with W3C/WHATWG HTML5 Web Platform Tests (WPT)
-**Current Status**: 281/364 tests passing (77.2%) ✅ IN PROGRESS
+**Current Status**: 349/364 tests passing (95.9%) ✅ IN PROGRESS
 **Target**: 364/364 tests passing (100%)
 
 ## Executive Summary
 
-**UPDATE December 23, 2025**: Major progress achieved. We've gone from 0% to **77.2% pass rate** through systematic implementation of the HTML5 parsing specification.
+**UPDATE December 23, 2025**: Major progress achieved. We've gone from 0% to **95.6% pass rate** through systematic implementation of the HTML5 parsing specification.
 
 ### Progress History
 
@@ -17,7 +17,11 @@
 | Dec 23 (hr/p fix) | 94 | 364 | 25.8% | Fixed `<hr>` and `</p>` handling |
 | Dec 23 (attributes) | 107 | 364 | 29.4% | Fixed attribute handling |
 | Dec 23 (AAA partial) | 260 | 364 | 71.4% | Adoption Agency, table modes, entity parsing |
-| Dec 23 (RCDATA/RAWTEXT) | **281** | 364 | **77.2%** | RCDATA/RAWTEXT states, TEXT mode, metadata tags |
+| Dec 23 (RCDATA/RAWTEXT) | 281 | 364 | 77.2% | RCDATA/RAWTEXT states, TEXT mode, metadata tags |
+| Dec 23 (entity/frameset/blocks) | 328 | 364 | 90.1% | Legacy entity prefix matching, IN_FRAMESET mode, block element end tag handling |
+| Dec 23 (quirks/body attrs/nobr) | 341 | 364 | 93.7% | Quirks mode for table/p, body/html attribute merging, nobr AAA |
+| Dec 23 (caption/colgroup/foster) | 348 | 364 | 95.6% | IN_CAPTION/IN_COLUMN_GROUP modes, foster parenting for table text |
+| Dec 23 (foster text merge) | **349** | 364 | **95.9%** | Foster parented text merges with adjacent text nodes |
 
 ### What's Been Implemented ✅
 
@@ -28,17 +32,25 @@
    - Start/end tag token emission
    - **RCDATA state** for `<title>`, `<textarea>` content
    - **RAWTEXT state** for `<style>`, `<script>`, `<noscript>`, `<noframes>` content
+   - **PLAINTEXT state** for `<plaintext>` content
    - Last start tag tracking for appropriate end tag matching
    - Character entity reference decoding (named + numeric)
+   - **Legacy entity prefix matching** (`&notit;` → `¬` + `it;`)
    - Bogus comment handling for malformed markup (`<!`, `<?`, etc.)
 
 2. **HTML5 Tree Builder** (`lambda/input/html5/html5_tree_builder.cpp`)
-   - **Insertion modes**: INITIAL, BEFORE_HTML, BEFORE_HEAD, IN_HEAD, AFTER_HEAD, IN_BODY, AFTER_BODY, AFTER_AFTER_BODY, IN_TABLE, IN_TABLE_BODY, IN_ROW, IN_CELL, **TEXT**
+   - **Insertion modes**: INITIAL, BEFORE_HTML, BEFORE_HEAD, IN_HEAD, AFTER_HEAD, IN_BODY, AFTER_BODY, AFTER_AFTER_BODY, IN_TABLE, IN_TABLE_BODY, IN_ROW, IN_CELL, **TEXT**, **IN_SELECT**, **IN_FRAMESET**, **AFTER_FRAMESET**, **IN_CAPTION**, **IN_COLUMN_GROUP**
    - Open elements stack with push/pop operations
    - Active formatting elements list with marker support
    - Implicit element creation (html, head, body)
    - **Adoption Agency Algorithm** (AAA) for misnested formatting elements
    - Metadata tags handled after `</head>` (link, meta, base, script, style, etc.)
+   - **Ignore leading newline** for `<textarea>`, `<pre>`, `<listing>`
+   - **Block element end tags** generate implied end tags per WHATWG spec
+   - **Quirks mode detection** - no DOCTYPE → quirks mode (affects table/p behavior)
+   - **Body/html attribute merging** - subsequent `<body>` tags merge attrs to existing
+   - **`<nobr>` and `<a>` AAA handling** - nested tags close previous one via AAA
+   - **Foster parenting** - text in table context inserted before table element
 
 3. **Element Handling**
    - Block elements closing `<p>` in button scope
@@ -49,43 +61,37 @@
    - `<image>` → `<img>` conversion per spec
    - `<textarea>` RCDATA mode switching
    - Boolean attributes with empty string values
+   - `<li>`, `<dd>`, `<dt>` closing previous siblings (not stopped by `<div>`/`<p>`)
 
-4. **Recent Fixes (Session 2)**
-   - ✅ Empty comment at EOF (`<!` → `<!--  -->`)
-   - ✅ `TRUE_EMPTY_STRING` for HTML boolean attributes (`x=""` not `x="lambda.nil"`)
-   - ✅ Metadata tags inserted into `<head>` even after `</head>`
-   - ✅ RCDATA tokenizer state (for `<title>`, `<textarea>`)
-   - ✅ RAWTEXT tokenizer state (for `<style>`, `<script>`, etc.)
-   - ✅ TEXT insertion mode for raw text elements
-   - ✅ Last start tag name tracking for end tag matching
+4. **Recent Fixes (Latest Session)**
+   - ✅ IN_CAPTION mode - proper caption handling and implicit closing
+   - ✅ IN_COLUMN_GROUP mode - `<col>` handling and implicit colgroup closing
+   - ✅ Foster parenting for text in table context
+   - ✅ `<plaintext>` element handling (PLAINTEXT tokenizer state)
+   - ✅ MarkEditor.array_insert support for Element types
 
-### Remaining Work ❌
+### Remaining Work ❌ (16 tests)
 
-1. **Adoption Agency Algorithm Completion** (~5-10% improvement expected)
-   - Complex nested cases like `<a><p>X<a>Y</a>Z</p></a>`
-   - More thorough `<b>` in `<p>` restructuring
+1. **Complex AAA/Anchor in Table** (~10 tests)
+   - Nested `<a>` tags with tables: `<a><table><td><a>...`
+   - `<a>` foster parented from table contexts
+   - `<marquee>` and `<a>` interaction
 
-2. **SELECT/OPTION Handling** (~3-5% improvement expected)
-   - IN_SELECT, IN_SELECT_IN_TABLE modes
-   - Nested `<select>` closing outer one
-   - `<optgroup>` closing `<option>`
+2. **SELECT Element Handling** (~2 tests)
+   - Nested `<select>` elements
+   - `<b>` inside `<select>` context
 
-3. **Table Foster Parenting** (~2-3% improvement expected)
-   - Content outside cells being foster-parented before table
-   - Proper table restructuring
+3. **Colgroup Edge Cases** (~2 tests)
+   - Multiple colgroup elements with interleaved content
+   - `<col>` outside colgroup
 
-4. **Entity Parsing Edge Cases** (~1-2% improvement expected)
-   - Semicolon-less named entities in certain contexts
-   - Attribute vs content entity rules
+4. **Script Type Edge Case** (~1 test)
+   - Non-JS script type (`type=text/x-foobar`) preserving end tag case
 
-5. **Other Edge Cases**
-   - Foreign content (SVG, MathML)
-   - Template element handling
-   - Frameset mode
+5. **Table Plaintext** (~1 test)
+   - `<plaintext>` inside `<table>` should be foster parented
 
 ---
-
-## Original Analysis (for reference)
 
 ## Test Failure Analysis
 
