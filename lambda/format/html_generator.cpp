@@ -1334,39 +1334,39 @@ std::vector<std::string> HtmlGenerator::parseColumnSpec(const char* spec) {
 }
 
 // =============================================================================
-// Capture Mode Methods
+// Capture Mode Methods (supports nested captures)
 // =============================================================================
 
 void HtmlGenerator::startCapture() {
-    // Save the original writer and create a temporary capture writer
-    if (capture_writer_ != nullptr) {
-        log_error("startCapture: already in capture mode");
-        return;
-    }
-    
-    original_writer_ = writer_;
-    capture_writer_ = new TextHtmlWriter(pool_, false);  // No pretty-printing
-    writer_ = capture_writer_;
+    // Push current writer onto stack and create a new capture writer
+    CaptureState state;
+    state.previous_writer = writer_;
+    state.capture_writer = new TextHtmlWriter(pool_, false);  // No pretty-printing
+    capture_stack_.push_back(state);
+    writer_ = state.capture_writer;
+    log_debug("startCapture: depth=%zu", capture_stack_.size());
 }
 
 std::string HtmlGenerator::endCapture() {
-    // Restore original writer and return captured content
-    if (original_writer_ == nullptr) {
+    // Pop the capture stack and restore previous writer
+    if (capture_stack_.empty()) {
         log_error("endCapture: not in capture mode");
         return "";
     }
     
-    const char* html = capture_writer_->getHtml();
+    CaptureState state = capture_stack_.back();
+    capture_stack_.pop_back();
+    
+    const char* html = state.capture_writer->getHtml();
     std::string result = html ? html : "";
     
-    // Restore original writer
-    writer_ = original_writer_;
-    original_writer_ = nullptr;
+    // Restore previous writer
+    writer_ = state.previous_writer;
     
     // Clean up capture writer
-    delete capture_writer_;
-    capture_writer_ = nullptr;
+    delete state.capture_writer;
     
+    log_debug("endCapture: depth=%zu, captured=%zu chars", capture_stack_.size(), result.size());
     return result;
 }
 
