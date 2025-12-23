@@ -1674,8 +1674,9 @@ Item MarkEditor::array_set(Item array, int index, Item value) {
 Item MarkEditor::array_insert(Item array, int index, Item value) {
     TypeId array_type = get_type_id(array);
 
-    if (array_type == LMD_TYPE_ARRAY) {
-        Array* arr = array.array;
+    if (array_type == LMD_TYPE_ARRAY || array_type == LMD_TYPE_ELEMENT || array_type == LMD_TYPE_LIST) {
+        // All these types share the same memory layout for items/length/capacity
+        Array* arr = array.array;  // Works for List and Element too since they share layout
 
         if (index < 0) index = arr->length;
         if (index > arr->length) {
@@ -1708,9 +1709,10 @@ Item MarkEditor::array_insert(Item array, int index, Item value) {
             arr->items[index] = value;
             arr->length = new_length;
 
-            return {.array = arr};
+            return array;  // return original with modifications
 
         } else {
+            // COW mode - need to create a new array
             int64_t new_length = arr->length + 1;
 
             Array* new_arr = (Array*)arena_alloc(arena_, sizeof(Array));

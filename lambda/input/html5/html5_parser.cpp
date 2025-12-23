@@ -2,6 +2,7 @@
 #include "../../../lib/log.h"
 #include "../../mark_builder.hpp"
 #include "../../mark_reader.hpp"
+#include "../../mark_editor.hpp"
 #include <string.h>
 #include <assert.h>
 
@@ -26,6 +27,8 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     parser->frameset_ok = true;
     parser->foster_parenting = false;
     parser->ignore_next_lf = false;
+    parser->quirks_mode = false;      // default to standards mode
+    parser->limited_quirks_mode = false;
 
     // temporary buffer (4KB initial capacity)
     parser->temp_buffer_capacity = 4096;
@@ -35,6 +38,11 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     // text content buffering
     parser->text_buffer = stringbuf_new(pool);
     parser->pending_text_parent = nullptr;
+    
+    // foster parent text buffering
+    parser->foster_text_buffer = stringbuf_new(pool);
+    parser->foster_table_element = nullptr;
+    parser->foster_parent_element = nullptr;
 
     // last start tag (for RCDATA/RAWTEXT end tag matching)
     parser->last_start_tag_name = nullptr;
@@ -369,6 +377,140 @@ void html5_insert_character(Html5Parser* parser, char c) {
     // Buffer the character
     stringbuf_append_char(parser->text_buffer, c);
     parser->pending_text_parent = parent;
+}
+
+// Foster parent: insert text/element before the table element
+// Flush foster parented text buffer - inserts text before the table element
+void html5_flush_foster_text(Html5Parser* parser) {
+    if (parser->foster_text_buffer->length == 0) {
+        return;  // nothing to flush
+    }
+    
+    Element* table_element = parser->foster_table_element;
+    Element* foster_parent = parser->foster_parent_element;
+    
+    if (table_element == nullptr || foster_parent == nullptr) {
+        log_error("html5_flush_foster_text: no table or foster parent");
+        stringbuf_reset(parser->foster_text_buffer);
+        return;
+    }
+    
+    // Find the table's position in foster parent's children
+    int table_pos = -1;
+    for (size_t i = 0; i < foster_parent->length; i++) {
+        if (foster_parent->items[i].element == table_element) {
+            table_pos = (int)i;
+            break;
+        }
+    }
+    
+    // Check if there's already a text node immediately before the table
+    // that we should merge with (per WHATWG spec - foster text merges)
+    if (table_pos > 0) {
+        Item prev = foster_parent->items[table_pos - 1];
+        TypeId prev_type = get_type_id(prev);
+        if (prev_type == LMD_TYPE_STRING) {
+            // Merge with existing text node
+            String* existing = (String*)prev.string_ptr;
+            StringBuf* combined = stringbuf_new(parser->pool);
+            stringbuf_append_str_n(combined, existing->chars, existing->len);
+            stringbuf_append_str_n(combined, parser->foster_text_buffer->str->chars, 
+                                   parser->foster_text_buffer->length);
+            String* new_str = stringbuf_to_string(combined);
+            foster_parent->items[table_pos - 1] = {.item = s2it(new_str)};
+            log_debug("html5_flush_foster_text: merged foster text with existing text before table");
+            stringbuf_reset(parser->foster_text_buffer);
+            parser->foster_table_element = nullptr;
+            parser->foster_parent_element = nullptr;
+            return;
+        }
+    }
+    
+    // Create text node from buffer
+    String* text_str = stringbuf_to_string(parser->foster_text_buffer);
+    Item text_node = {.item = s2it(text_str)};
+    
+    if (table_pos >= 0) {
+        // Insert before the table
+        log_debug("html5_flush_foster_text: inserting '%s' before table at pos %d", 
+                  text_str->chars, table_pos);
+        MarkEditor editor(parser->input);
+        editor.array_insert(Item{.element = foster_parent}, table_pos, text_node);
+    } else {
+        // Table not found, append
+        log_debug("html5_flush_foster_text: appending '%s' to foster parent", text_str->chars);
+        array_append(foster_parent, text_node, parser->pool, parser->arena);
+    }
+    
+    // Reset buffer
+    stringbuf_reset(parser->foster_text_buffer);
+    parser->foster_table_element = nullptr;
+    parser->foster_parent_element = nullptr;
+}
+
+// Per WHATWG 12.2.6.1, foster parenting inserts nodes before the table
+// rather than inside it when text/elements appear in table context
+void html5_foster_parent_character(Html5Parser* parser, char c) {
+    // Find the last table element in the stack
+    Element* table_element = nullptr;
+    Element* foster_parent = nullptr;
+    int table_index = -1;
+    
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        Element* el = (Element*)parser->open_elements->items[i].element;
+        const char* el_tag = ((TypeElmt*)el->type)->name.str;
+        if (strcmp(el_tag, "table") == 0) {
+            table_element = el;
+            table_index = i;
+            break;
+        }
+    }
+    
+    if (table_element == nullptr || table_index == 0) {
+        // No table found or table is first element - insert into body/html
+        if (parser->open_elements->length >= 2) {
+            foster_parent = (Element*)parser->open_elements->items[1].element;
+        } else if (parser->open_elements->length >= 1) {
+            foster_parent = (Element*)parser->open_elements->items[0].element;
+        }
+        if (foster_parent) {
+            // Flush any existing foster text if it's for a different parent
+            if (parser->foster_parent_element != nullptr && 
+                parser->foster_parent_element != foster_parent) {
+                html5_flush_foster_text(parser);
+            }
+            // Use normal text insertion since there's no table to insert before
+            if (parser->pending_text_parent != nullptr && 
+                parser->pending_text_parent != foster_parent) {
+                html5_flush_pending_text(parser);
+            }
+            stringbuf_append_char(parser->text_buffer, c);
+            parser->pending_text_parent = foster_parent;
+        }
+        return;
+    }
+    
+    // Foster parent is the element before table in the stack (usually body)
+    foster_parent = (Element*)parser->open_elements->items[table_index - 1].element;
+    
+    // Flush any pending normal text
+    html5_flush_pending_text(parser);
+    
+    // Check if we're continuing to buffer for the same table/parent
+    if (parser->foster_table_element == table_element && 
+        parser->foster_parent_element == foster_parent) {
+        // Just append to existing buffer
+        stringbuf_append_char(parser->foster_text_buffer, c);
+        return;
+    }
+    
+    // New table context - flush any previous foster text
+    html5_flush_foster_text(parser);
+    
+    // Start new foster text buffer
+    parser->foster_table_element = table_element;
+    parser->foster_parent_element = foster_parent;
+    stringbuf_append_char(parser->foster_text_buffer, c);
 }
 
 void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
