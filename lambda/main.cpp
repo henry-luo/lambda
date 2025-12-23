@@ -800,20 +800,25 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML/CSS Layout Engine v2.0 (Lambda CSS)\n\n");
-            printf("Usage: %s layout <file.html> [options]\n", argv[0]);
+            printf("Usage: %s layout <file.html|file.tex> [options]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'layout' command performs HTML/CSS layout analysis using Lambda's\n");
             printf("  CSS system (separate from Lexbor-based layout). It parses HTML with\n");
             printf("  Lambda parser, applies CSS using Lambda CSS engine, and outputs layout.\n");
+            printf("  For LaTeX files (.tex/.latex), it parses LaTeX, converts to HTML, then layouts.\n");
+            printf("\nSupported Formats:\n");
+            printf("  .html, .htm    HTML documents\n");
+            printf("  .tex, .latex   LaTeX documents (converted to HTML)\n");
             printf("\nOptions:\n");
             printf("  -o, --output FILE                  Output file for layout results (default: stdout)\n");
-            printf("  -c, --css FILE                     External CSS file to apply\n");
+            printf("  -c, --css FILE                     External CSS file to apply (HTML only)\n");
             printf("  -vw, --viewport-width WIDTH        Viewport width in pixels (default: 1200)\n");
             printf("  -vh, --viewport-height HEIGHT      Viewport height in pixels (default: 800)\n");
             printf("  --debug                            Enable debug output\n");
             printf("  --help                             Show this help message\n");
             printf("\nExamples:\n");
-            printf("  %s layout index.html                   # Basic layout analysis\n", argv[0]);
+            printf("  %s layout index.html                   # Basic HTML layout\n", argv[0]);
+            printf("  %s layout document.tex                 # Layout LaTeX document\n", argv[0]);
             printf("  %s layout test.html --debug            # With debug output\n", argv[0]);
             printf("  %s layout page.html -c styles.css      # With external CSS\n", argv[0]);
             printf("  %s layout doc.html -vw 1024 -vh 768    # Custom viewport\n", argv[0]);
@@ -839,11 +844,14 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
+            printf("Usage: %s render <input.html|input.tex> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
             printf("\nDescription:\n");
-            printf("  The 'render' command layouts an HTML file and renders the result as SVG, PDF, or PNG.\n");
-            printf("  It parses the HTML, applies CSS styles, calculates layout, and generates\n");
-            printf("  output in the specified format based on file extension.\n");
+            printf("  The 'render' command layouts an HTML or LaTeX file and renders the result as SVG, PDF, or PNG.\n");
+            printf("  It parses the input (converting LaTeX to HTML if needed), applies CSS styles,\n");
+            printf("  calculates layout, and generates output in the specified format based on file extension.\n");
+            printf("\nSupported Input Formats:\n");
+            printf("  .html, .htm    HTML documents\n");
+            printf("  .tex, .latex   LaTeX documents (converted to HTML)\n");
             printf("\nSupported Output Formats:\n");
             printf("  .svg    Scalable Vector Graphics (SVG)\n");
             printf("  .pdf    Portable Document Format (PDF)\n");
@@ -1010,6 +1018,8 @@ int main(int argc, char *argv[]) {
             printf("  .htm       HyperText Markup Language (alternative extension)\n");
             printf("  .md        Markdown (with GitHub-like styling)\n");
             printf("  .markdown  Markdown (with GitHub-like styling)\n");
+            printf("  .tex       LaTeX (converted to HTML)\n");
+            printf("  .latex     LaTeX (converted to HTML)\n");
             printf("  .xml       Extensible Markup Language (treated as HTML)\n");
             printf("  .rst       reStructuredText (planned support)\n");
             printf("\nExamples:\n");
@@ -1017,6 +1027,7 @@ int main(int argc, char *argv[]) {
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
             printf("  %s view page.html                # View HTML document\n", argv[0]);
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
+            printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
             printf("  %s view config.xml               # View XML document\n", argv[0]);
             printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
             printf("\nKeyboard Controls:\n");
@@ -1051,13 +1062,14 @@ int main(int argc, char *argv[]) {
             exit_code = view_pdf_in_window(filename);
         } else if (ext && (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                           strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
+                          strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                           strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0)) {
-            // Use unified document viewer for HTML, Markdown, XML, RST, etc.
+            // Use unified document viewer for HTML, Markdown, LaTeX, XML, RST, etc.
             log_info("Opening document file: %s", filename);
             exit_code = view_doc_in_window(filename);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .xml, .rst\n");
+            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .tex, .latex, .xml, .rst\n");
             log_finish();
             return 1;
         }
