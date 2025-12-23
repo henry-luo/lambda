@@ -1016,7 +1016,7 @@ static void process_implicit_tbody(Input* input, Item item) {
 
 // Internal function - use input_from_source() instead for external API
 __attribute__((visibility("hidden")))
-void parse_html_impl(Input* input, const char* html_string) {
+void parse_html_impl(Input* input, const char* html_string, const char* flavor) {
     const char *html = html_string;
 
     // Create HTML input context with error tracking and HTML5 state management
@@ -1110,6 +1110,9 @@ void parse_html_impl(Input* input, const char* html_string) {
     for (size_t i = 0; i < root_list->length; i++) {
         process_implicit_tbody(input, root_list->items[i]);
     }
+
+    // Determine if we're in fragment mode (html-frag flavor skips HTML5 wrapping)
+    bool is_fragment_mode = (flavor && strcmp(flavor, "html-frag") == 0);
 
     // HTML 1.0 normalization: If root has <HEADER> and <BODY> as siblings (no <html> wrapper),
     // normalize to match browser behavior:
@@ -1238,7 +1241,9 @@ void parse_html_impl(Input* input, const char* html_string) {
     // HTML5 normalization: If root has <head> and/or <body> as siblings without <html> wrapper,
     // create an implicit <html> element to wrap them (browser behavior)
     // This handles cases like: <!DOCTYPE html><head>...</head><body>...</body>
-    if (!has_html && (has_body || root_list->length > 0)) {
+    // Only apply HTML5 wrapping if flavor is not "html-frag"
+
+    if (!is_fragment_mode && !has_html && (has_body || root_list->length > 0)) {
         // Re-scan for head/body since we may not have found them in the HTML 1.0 check
         Element* head_elem_found = nullptr;
         Element* body_elem_found = nullptr;
@@ -1314,6 +1319,96 @@ void parse_html_impl(Input* input, const char* html_string) {
                 root_list->capacity = new_root_list->capacity;
 
                 log_info("Created implicit <html> wrapper for document");
+            }
+        }
+    }
+
+    // HTML5 compliance: Ensure all content is wrapped in <html><head></head><body>...</body></html>
+    // This handles cases where we have bare elements without proper structure
+    if (!is_fragment_mode) {
+        // Check what we have in root_list
+        bool has_proper_html = false;
+
+        for (size_t i = 0; i < root_list->length; i++) {
+            Item item = root_list->items[i];
+            if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+                Element* elem = item.element;
+                TypeElmt* type = (TypeElmt*)elem->type;
+                if (type && strcasecmp(type->name.str, "html") == 0) {
+                    has_proper_html = true;
+                    break;
+                }
+            }
+        }
+
+        // If we don't have an <html> element, wrap everything in proper HTML5 structure
+        if (!has_proper_html && root_list->length > 0) {
+            log_info("Wrapping content in HTML5 structure: <html><head></head><body>...</body></html>");
+
+            MarkBuilder builder(input);
+
+            // Create empty <head>
+            ElementBuilder head_builder = builder.element("head");
+            Element* head_elem = head_builder.final().element;
+
+            // Create <body> with all parsed content
+            ElementBuilder body_builder = builder.element("body");
+
+            for (size_t i = 0; i < root_list->length; i++) {
+                Item item = root_list->items[i];
+                TypeId item_type = get_type_id(item);
+
+                if (item_type == LMD_TYPE_ELEMENT) {
+                    Element* elem = item.element;
+                    TypeElmt* type = (TypeElmt*)elem->type;
+                    if (type) {
+                        const char* tag = type->name.str;
+                        // Skip DOCTYPE and comments (they should stay at root)
+                        if (tag[0] != '!' && tag[0] != '?') {
+                            body_builder.child(item);
+                        }
+                    }
+                } else if (item_type == LMD_TYPE_STRING) {
+                    // Add text nodes to body
+                    body_builder.child(item);
+                }
+            }
+
+            Element* body_elem = body_builder.final().element;
+
+            // Create <html> wrapper
+            ElementBuilder html_builder = builder.element("html");
+            html_builder.child((Item){.element = head_elem});
+            html_builder.child((Item){.element = body_elem});
+            Element* html_elem = html_builder.final().element;
+
+            // Build new root list with DOCTYPE/comments first, then html
+            List* new_root_list = (List*)pool_calloc(input->pool, sizeof(List));
+            if (new_root_list) {
+                new_root_list->type_id = LMD_TYPE_LIST;
+                new_root_list->length = 0;
+                new_root_list->capacity = 0;
+                new_root_list->items = nullptr;
+
+                // Add DOCTYPE and comments first
+                for (size_t i = 0; i < root_list->length; i++) {
+                    Item item = root_list->items[i];
+                    if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+                        Element* elem = item.element;
+                        TypeElmt* type = (TypeElmt*)elem->type;
+                        if (type && (type->name.str[0] == '!' || type->name.str[0] == '?')) {
+                            list_push(new_root_list, item);
+                        }
+                    }
+                }
+
+                // Add the html element
+                list_push(new_root_list, (Item){.element = html_elem});
+
+                // Replace root_list with new_root_list
+                root_list->items = new_root_list->items;
+                root_list->length = new_root_list->length;
+                root_list->capacity = new_root_list->capacity;
             }
         }
     }
