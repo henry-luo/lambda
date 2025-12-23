@@ -905,17 +905,50 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                         parser->active_formatting->items[i] = parser->active_formatting->items[i + 1];
                     }
                     parser->active_formatting->length--;
-                    // Also remove from open elements if present
-                    for (size_t i = 0; i < parser->open_elements->length; i++) {
-                        Element* elem = (Element*)parser->open_elements->items[i].element;
-                        if (elem && strcmp(((TypeElmt*)elem->type)->name.str, "a") == 0) {
-                            for (size_t j = i; j < parser->open_elements->length - 1; j++) {
-                                parser->open_elements->items[j] = parser->open_elements->items[j + 1];
+                    
+                    // If we're in foster parenting mode, we need to keep the <a> temporarily
+                    // to find the correct foster parent (table's DOM parent)
+                    // After insertion, we'll remove it
+                    Element* elem_to_remove = nullptr;
+                    size_t elem_to_remove_idx = 0;
+                    
+                    if (parser->foster_parenting) {
+                        // Find the <a> element but don't remove it yet
+                        for (size_t i = 0; i < parser->open_elements->length; i++) {
+                            Element* elem = (Element*)parser->open_elements->items[i].element;
+                            if (elem && strcmp(((TypeElmt*)elem->type)->name.str, "a") == 0) {
+                                elem_to_remove = elem;
+                                elem_to_remove_idx = i;
+                                break;
                             }
-                            parser->open_elements->length--;
-                            break;
                         }
                     }
+                    
+                    // Insert the new element (will use foster parenting if enabled)
+                    html5_reconstruct_active_formatting_elements(parser);
+                    Element* new_elem = html5_insert_html_element(parser, token);
+                    html5_push_active_formatting_element(parser, new_elem, token);
+                    
+                    // Now remove the old <a> from open elements if we were in foster parenting mode
+                    if (parser->foster_parenting && elem_to_remove != nullptr) {
+                        for (size_t j = elem_to_remove_idx; j < parser->open_elements->length - 1; j++) {
+                            parser->open_elements->items[j] = parser->open_elements->items[j + 1];
+                        }
+                        parser->open_elements->length--;
+                    } else if (!parser->foster_parenting) {
+                        // Normal case: remove from open elements
+                        for (size_t i = 0; i < parser->open_elements->length; i++) {
+                            Element* elem = (Element*)parser->open_elements->items[i].element;
+                            if (elem && strcmp(((TypeElmt*)elem->type)->name.str, "a") == 0 && elem != new_elem) {
+                                for (size_t j = i; j < parser->open_elements->length - 1; j++) {
+                                    parser->open_elements->items[j] = parser->open_elements->items[j + 1];
+                                }
+                                parser->open_elements->length--;
+                                break;
+                            }
+                        }
+                    }
+                    return;
                 }
             }
             html5_reconstruct_active_formatting_elements(parser);
@@ -1339,6 +1372,26 @@ static void html5_clear_stack_back_to_table_row_context(Html5Parser* parser) {
 static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_CHARACTER) {
         // Per WHATWG spec: Character tokens in table context need foster parenting
+        // BUT only if current node is table, tbody, tfoot, thead, or tr
+        Element* current = html5_current_node(parser);
+        if (current != nullptr) {
+            const char* current_tag = ((TypeElmt*)current->type)->name.str;
+            bool is_table_element = (strcmp(current_tag, "table") == 0 ||
+                                     strcmp(current_tag, "tbody") == 0 ||
+                                     strcmp(current_tag, "tfoot") == 0 ||
+                                     strcmp(current_tag, "thead") == 0 ||
+                                     strcmp(current_tag, "tr") == 0);
+            if (!is_table_element) {
+                // Current node is not a table element (e.g., foster parented element)
+                // Insert characters normally
+                if (token->data != nullptr && token->data->len > 0) {
+                    for (size_t i = 0; i < token->data->len; i++) {
+                        html5_insert_character(parser, token->data->chars[i]);
+                    }
+                }
+                return;
+            }
+        }
         // Foster parent the text before the table element
         if (token->data != nullptr && token->data->len > 0) {
             for (size_t i = 0; i < token->data->len; i++) {
@@ -1432,8 +1485,10 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
         }
 
         // Other start tags: foster parent (process in body mode)
-        // This is simplified - should actually use foster parenting
+        // Per WHATWG spec: enable foster parenting, process in body mode, then disable
+        parser->foster_parenting = true;
         html5_process_in_body_mode(parser, token);
+        parser->foster_parenting = false;
         return;
     }
 
@@ -1473,7 +1528,9 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
         }
 
         // Other end tags: foster parent
+        parser->foster_parenting = true;
         html5_process_in_body_mode(parser, token);
+        parser->foster_parenting = false;
         return;
     }
 
