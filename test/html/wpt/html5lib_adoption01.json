@@ -1,0 +1,104 @@
+[
+  {
+    "test_id": "dab5eca760a630bc57719d678d789dd1ca74f492",
+    "file": "html5lib_adoption01.html",
+    "input": "<a><p></a></p>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|     <p>\n|       <a>"
+  },
+  {
+    "test_id": "a3a46907dc73b7be1e1171f797a9f696b7fb185b",
+    "file": "html5lib_adoption01.html",
+    "input": "<a>1<p>2</a>3</p>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       \"1\"\n|     <p>\n|       <a>\n|         \"2\"\n|       \"3\""
+  },
+  {
+    "test_id": "b720cd1d95283d6288e7ca17142540b10ef8f847",
+    "file": "html5lib_adoption01.html",
+    "input": "<a>1<button>2</a>3</button>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       \"1\"\n|     <button>\n|       <a>\n|         \"2\"\n|       \"3\""
+  },
+  {
+    "test_id": "83b2bd6f0849b2c7283448f15095806a17c7f0c0",
+    "file": "html5lib_adoption01.html",
+    "input": "<a>1<b>2</a>3</b>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       \"1\"\n|       <b>\n|         \"2\"\n|     <b>\n|       \"3\""
+  },
+  {
+    "test_id": "1d56fa2d9d756f9053638a3db25fcd84e57e41ec",
+    "file": "html5lib_adoption01.html",
+    "input": "<a>1<div>2<div>3</a>4</div>5</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       \"1\"\n|     <div>\n|       <a>\n|         \"2\"\n|       <div>\n|         <a>\n|           \"3\"\n|         \"4\"\n|       \"5\""
+  },
+  {
+    "test_id": "c129fce97933067558d7833632ad7ef2d149616e",
+    "file": "html5lib_adoption01.html",
+    "input": "<table><a>1<p>2</a>3</p>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       \"1\"\n|     <p>\n|       <a>\n|         \"2\"\n|       \"3\"\n|     <table>"
+  },
+  {
+    "test_id": "39a3ec04f54cda2bf1e06c54caf0b302da4fd252",
+    "file": "html5lib_adoption01.html",
+    "input": "<b><b><a><p></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <b>\n|         <a>\n|         <p>\n|           <a>"
+  },
+  {
+    "test_id": "d0bdfe6be48309b2d01b497667b350a8e6ec8ffb",
+    "file": "html5lib_adoption01.html",
+    "input": "<b><a><b><p></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <a>\n|         <b>\n|       <b>\n|         <p>\n|           <a>"
+  },
+  {
+    "test_id": "63401082c6afd4b3c3201e348a1a61722f167b21",
+    "file": "html5lib_adoption01.html",
+    "input": "<a><b><b><p></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       <b>\n|         <b>\n|     <b>\n|       <b>\n|         <p>\n|           <a>"
+  },
+  {
+    "test_id": "883cfd89f63da854dffbfbc938da1f31887a55e5",
+    "file": "html5lib_adoption01.html",
+    "input": "<p>1<s id=\"A\">2<b id=\"B\">3</p>4</s>5</b>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       \"1\"\n|       <s>\n|         id=\"A\"\n|         \"2\"\n|         <b>\n|           id=\"B\"\n|           \"3\"\n|     <s>\n|       id=\"A\"\n|       <b>\n|         id=\"B\"\n|         \"4\"\n|     <b>\n|       id=\"B\"\n|       \"5\""
+  },
+  {
+    "test_id": "4dc0665051dac0d72c71aba5c95c5b86437dea2c",
+    "file": "html5lib_adoption01.html",
+    "input": "<table><a>1<td>2</td>3</table>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       \"1\"\n|     <a>\n|       \"3\"\n|     <table>\n|       <tbody>\n|         <tr>\n|           <td>\n|             \"2\""
+  },
+  {
+    "test_id": "4f376c0a798e71a91065e215dc0175d3107d5208",
+    "file": "html5lib_adoption01.html",
+    "input": "<table>A<td>B</td>C</table>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"AC\"\n|     <table>\n|       <tbody>\n|         <tr>\n|           <td>\n|             \"B\""
+  },
+  {
+    "test_id": "52b62611a847a3f5fc3dc607a6b0174f1697247c",
+    "file": "html5lib_adoption01.html",
+    "input": "<a><svg><tr><input></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       <svg svg>\n|         <svg tr>\n|           <svg input>"
+  },
+  {
+    "test_id": "88d0d3403d2a7b4058fcfb4e62835acb1c207e0f",
+    "file": "html5lib_adoption01.html",
+    "input": "<div><a><b><div><div><div><div><div><div><div><div><div><div></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       <a>\n|         <b>\n|       <b>\n|         <div>\n|           <a>\n|           <div>\n|             <a>\n|             <div>\n|               <a>\n|               <div>\n|                 <a>\n|                 <div>\n|                   <a>\n|                   <div>\n|                     <a>\n|                     <div>\n|                       <a>\n|                       <div>\n|                         <a>\n|                           <div>\n|                             <div>"
+  },
+  {
+    "test_id": "d7338f457789f65d47b240e203b9e40a3925f2ca",
+    "file": "html5lib_adoption01.html",
+    "input": "<div><a><b><u><i><code><div></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       <a>\n|         <b>\n|           <u>\n|             <i>\n|               <code>\n|       <u>\n|         <i>\n|           <code>\n|             <div>\n|               <a>"
+  },
+  {
+    "test_id": "bf8088acd8bd48d8487bae49a613c248c488c041",
+    "file": "html5lib_adoption01.html",
+    "input": "<b><b><b><b>x</b></b></b></b>y",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <b>\n|         <b>\n|           <b>\n|             \"x\"\n|     \"y\""
+  },
+  {
+    "test_id": "39edaa2e298c60ad4a1b0b9fdb4481d4aea98f36",
+    "file": "html5lib_adoption01.html",
+    "input": "<p><b><b><b><b><p>x",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <b>\n|         <b>\n|           <b>\n|             <b>\n|     <p>\n|       <b>\n|         <b>\n|           <b>\n|             \"x\""
+  }
+]
