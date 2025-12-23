@@ -55,6 +55,15 @@ Element* html5_parse(Input* input, const char* html) {
 // forward declarations
 static void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_table_body_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_row_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_cell_mode(Html5Parser* parser, Html5Token* token);
+
+// helper: clear stack back to table context
+static void html5_clear_stack_back_to_table_context(Html5Parser* parser);
+static void html5_clear_stack_back_to_table_body_context(Html5Parser* parser);
+static void html5_clear_stack_back_to_table_row_context(Html5Parser* parser);
 
 // main token processing dispatcher
 void html5_process_token(Html5Parser* parser, Html5Token* token) {
@@ -78,6 +87,18 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
             break;
         case HTML5_MODE_IN_BODY:
             html5_process_in_body_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_TABLE:
+            html5_process_in_table_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_TABLE_BODY:
+            html5_process_in_table_body_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_ROW:
+            html5_process_in_row_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_CELL:
+            html5_process_in_cell_mode(parser, token);
             break;
         case HTML5_MODE_AFTER_BODY:
             html5_process_in_after_body_mode(parser, token);
@@ -411,11 +432,21 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // block elements (except headings which are handled above)
+        // <table> requires special handling - switch to table mode
+        if (strcmp(tag, "table") == 0) {
+            // Close any <p> element in button scope per spec
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                html5_close_p_element(parser);
+            }
+            html5_insert_html_element(parser, token);
+            parser->frameset_ok = false;
+            parser->mode = HTML5_MODE_IN_TABLE;
+            return;
+        }
+
+        // block elements (except headings and table which are handled above)
         if (strcmp(tag, "div") == 0 || strcmp(tag, "p") == 0 ||
             strcmp(tag, "ul") == 0 || strcmp(tag, "ol") == 0 || strcmp(tag, "li") == 0 ||
-            strcmp(tag, "table") == 0 || strcmp(tag, "tr") == 0 || strcmp(tag, "td") == 0 ||
-            strcmp(tag, "th") == 0 || strcmp(tag, "tbody") == 0 || strcmp(tag, "thead") == 0 ||
             strcmp(tag, "section") == 0 || strcmp(tag, "article") == 0 || strcmp(tag, "nav") == 0 ||
             strcmp(tag, "header") == 0 || strcmp(tag, "footer") == 0 || strcmp(tag, "main") == 0 ||
             strcmp(tag, "aside") == 0 || strcmp(tag, "blockquote") == 0 || strcmp(tag, "pre") == 0 ||
@@ -637,4 +668,504 @@ static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Tok
     log_error("html5: unexpected token in after after body mode, switching to body mode");
     parser->mode = HTML5_MODE_IN_BODY;
     html5_process_token(parser, token);
+}
+
+// ===== TABLE MODE HELPERS =====
+
+// clear stack back to table context: pop until table or html
+static void html5_clear_stack_back_to_table_context(Html5Parser* parser) {
+    while (parser->open_elements->length > 0) {
+        Element* current = html5_current_node(parser);
+        const char* tag = ((TypeElmt*)current->type)->name.str;
+        if (strcmp(tag, "table") == 0 || strcmp(tag, "template") == 0 || strcmp(tag, "html") == 0) {
+            return;
+        }
+        html5_pop_element(parser);
+    }
+}
+
+// clear stack back to table body context: pop until tbody, tfoot, thead, template, or html
+static void html5_clear_stack_back_to_table_body_context(Html5Parser* parser) {
+    while (parser->open_elements->length > 0) {
+        Element* current = html5_current_node(parser);
+        const char* tag = ((TypeElmt*)current->type)->name.str;
+        if (strcmp(tag, "tbody") == 0 || strcmp(tag, "tfoot") == 0 || strcmp(tag, "thead") == 0 ||
+            strcmp(tag, "template") == 0 || strcmp(tag, "html") == 0) {
+            return;
+        }
+        html5_pop_element(parser);
+    }
+}
+
+// clear stack back to table row context: pop until tr, template, or html
+static void html5_clear_stack_back_to_table_row_context(Html5Parser* parser) {
+    while (parser->open_elements->length > 0) {
+        Element* current = html5_current_node(parser);
+        const char* tag = ((TypeElmt*)current->type)->name.str;
+        if (strcmp(tag, "tr") == 0 || strcmp(tag, "template") == 0 || strcmp(tag, "html") == 0) {
+            return;
+        }
+        html5_pop_element(parser);
+    }
+}
+
+// ===== IN TABLE MODE =====
+// https://html.spec.whatwg.org/#parsing-main-intable
+static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) {
+    if (token->type == HTML5_TOKEN_CHARACTER) {
+        // TODO: handle table text properly (foster parenting)
+        // For now, process in body mode (simplified)
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_DOCTYPE) {
+        log_error("html5: unexpected doctype in table mode");
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // <caption> - not fully implemented
+        if (strcmp(tag, "caption") == 0) {
+            html5_clear_stack_back_to_table_context(parser);
+            html5_push_active_formatting_marker(parser);
+            html5_insert_html_element(parser, token);
+            parser->mode = HTML5_MODE_IN_CAPTION;
+            return;
+        }
+
+        // <colgroup>
+        if (strcmp(tag, "colgroup") == 0) {
+            html5_clear_stack_back_to_table_context(parser);
+            html5_insert_html_element(parser, token);
+            parser->mode = HTML5_MODE_IN_COLUMN_GROUP;
+            return;
+        }
+
+        // <col> - act as if <colgroup> was seen
+        if (strcmp(tag, "col") == 0) {
+            html5_clear_stack_back_to_table_context(parser);
+            // insert implicit <colgroup>
+            MarkBuilder builder(parser->input);
+            String* colgroup_name = builder.createString("colgroup");
+            Html5Token* fake_token = html5_token_create_start_tag(parser->pool, parser->arena, colgroup_name);
+            html5_insert_html_element(parser, fake_token);
+            parser->mode = HTML5_MODE_IN_COLUMN_GROUP;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // <tbody>, <tfoot>, <thead>
+        if (strcmp(tag, "tbody") == 0 || strcmp(tag, "tfoot") == 0 || strcmp(tag, "thead") == 0) {
+            html5_clear_stack_back_to_table_context(parser);
+            html5_insert_html_element(parser, token);
+            parser->mode = HTML5_MODE_IN_TABLE_BODY;
+            return;
+        }
+
+        // <td>, <th>, <tr> - need implicit <tbody>
+        if (strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0 || strcmp(tag, "tr") == 0) {
+            html5_clear_stack_back_to_table_context(parser);
+            // insert implicit <tbody>
+            MarkBuilder builder(parser->input);
+            String* tbody_name = builder.createString("tbody");
+            Html5Token* fake_token = html5_token_create_start_tag(parser->pool, parser->arena, tbody_name);
+            html5_insert_html_element(parser, fake_token);
+            parser->mode = HTML5_MODE_IN_TABLE_BODY;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // <table> - parse error, act as </table> then reprocess
+        if (strcmp(tag, "table") == 0) {
+            log_error("html5: nested <table> tag");
+            if (!html5_has_element_in_table_scope(parser, "table")) {
+                return;  // ignore
+            }
+            // pop until table
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, "table") == 0) {
+                    break;
+                }
+            }
+            html5_reset_insertion_mode(parser);
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // Other start tags: foster parent (process in body mode)
+        // This is simplified - should actually use foster parenting
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // </table>
+        if (strcmp(tag, "table") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "table")) {
+                log_error("html5: </table> without <table> in scope");
+                return;
+            }
+            // pop until table
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, "table") == 0) {
+                    break;
+                }
+            }
+            html5_reset_insertion_mode(parser);
+            return;
+        }
+
+        // These end tags are ignored in table mode
+        if (strcmp(tag, "body") == 0 || strcmp(tag, "caption") == 0 ||
+            strcmp(tag, "col") == 0 || strcmp(tag, "colgroup") == 0 ||
+            strcmp(tag, "html") == 0 || strcmp(tag, "tbody") == 0 ||
+            strcmp(tag, "td") == 0 || strcmp(tag, "tfoot") == 0 ||
+            strcmp(tag, "th") == 0 || strcmp(tag, "thead") == 0 ||
+            strcmp(tag, "tr") == 0) {
+            log_error("html5: unexpected end tag in table mode: %s", tag);
+            return;
+        }
+
+        // Other end tags: foster parent
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_EOF) {
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
+}
+
+// ===== IN TABLE BODY MODE =====
+// https://html.spec.whatwg.org/#parsing-main-intbody
+static void html5_process_in_table_body_mode(Html5Parser* parser, Html5Token* token) {
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // <tr>
+        if (strcmp(tag, "tr") == 0) {
+            html5_clear_stack_back_to_table_body_context(parser);
+            html5_insert_html_element(parser, token);
+            parser->mode = HTML5_MODE_IN_ROW;
+            return;
+        }
+
+        // <td>, <th> - need implicit <tr>
+        if (strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0) {
+            log_error("html5: %s in table body without <tr>", tag);
+            html5_clear_stack_back_to_table_body_context(parser);
+            // insert implicit <tr>
+            MarkBuilder builder(parser->input);
+            String* tr_name = builder.createString("tr");
+            Html5Token* fake_token = html5_token_create_start_tag(parser->pool, parser->arena, tr_name);
+            html5_insert_html_element(parser, fake_token);
+            parser->mode = HTML5_MODE_IN_ROW;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // <caption>, <col>, <colgroup>, <tbody>, <tfoot>, <thead>
+        if (strcmp(tag, "caption") == 0 || strcmp(tag, "col") == 0 ||
+            strcmp(tag, "colgroup") == 0 || strcmp(tag, "tbody") == 0 ||
+            strcmp(tag, "tfoot") == 0 || strcmp(tag, "thead") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "tbody") &&
+                !html5_has_element_in_table_scope(parser, "thead") &&
+                !html5_has_element_in_table_scope(parser, "tfoot")) {
+                log_error("html5: no table body in scope");
+                return;
+            }
+            html5_clear_stack_back_to_table_body_context(parser);
+            html5_pop_element(parser);  // pop tbody/thead/tfoot
+            parser->mode = HTML5_MODE_IN_TABLE;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+    }
+
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // </tbody>, </tfoot>, </thead>
+        if (strcmp(tag, "tbody") == 0 || strcmp(tag, "tfoot") == 0 || strcmp(tag, "thead") == 0) {
+            if (!html5_has_element_in_table_scope(parser, tag)) {
+                log_error("html5: end tag without matching start in scope: %s", tag);
+                return;
+            }
+            html5_clear_stack_back_to_table_body_context(parser);
+            html5_pop_element(parser);
+            parser->mode = HTML5_MODE_IN_TABLE;
+            return;
+        }
+
+        // </table> - close tbody and reprocess
+        if (strcmp(tag, "table") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "tbody") &&
+                !html5_has_element_in_table_scope(parser, "thead") &&
+                !html5_has_element_in_table_scope(parser, "tfoot")) {
+                log_error("html5: no table body in scope for </table>");
+                return;
+            }
+            html5_clear_stack_back_to_table_body_context(parser);
+            html5_pop_element(parser);  // pop tbody/thead/tfoot
+            parser->mode = HTML5_MODE_IN_TABLE;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // These end tags are errors in table body mode
+        if (strcmp(tag, "body") == 0 || strcmp(tag, "caption") == 0 ||
+            strcmp(tag, "col") == 0 || strcmp(tag, "colgroup") == 0 ||
+            strcmp(tag, "html") == 0 || strcmp(tag, "td") == 0 ||
+            strcmp(tag, "th") == 0 || strcmp(tag, "tr") == 0) {
+            log_error("html5: unexpected end tag in table body mode: %s", tag);
+            return;
+        }
+    }
+
+    // Anything else: process using IN_TABLE rules
+    html5_process_in_table_mode(parser, token);
+}
+
+// ===== IN ROW MODE =====
+// https://html.spec.whatwg.org/#parsing-main-intr
+static void html5_process_in_row_mode(Html5Parser* parser, Html5Token* token) {
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // <td>, <th>
+        if (strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0) {
+            html5_clear_stack_back_to_table_row_context(parser);
+            html5_insert_html_element(parser, token);
+            parser->mode = HTML5_MODE_IN_CELL;
+            html5_push_active_formatting_marker(parser);
+            return;
+        }
+
+        // <caption>, <col>, <colgroup>, <tbody>, <tfoot>, <thead>, <tr>
+        if (strcmp(tag, "caption") == 0 || strcmp(tag, "col") == 0 ||
+            strcmp(tag, "colgroup") == 0 || strcmp(tag, "tbody") == 0 ||
+            strcmp(tag, "tfoot") == 0 || strcmp(tag, "thead") == 0 ||
+            strcmp(tag, "tr") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "tr")) {
+                log_error("html5: no <tr> in scope");
+                return;
+            }
+            html5_clear_stack_back_to_table_row_context(parser);
+            html5_pop_element(parser);  // pop tr
+            parser->mode = HTML5_MODE_IN_TABLE_BODY;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+    }
+
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // </tr>
+        if (strcmp(tag, "tr") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "tr")) {
+                log_error("html5: </tr> without <tr> in scope");
+                return;
+            }
+            html5_clear_stack_back_to_table_row_context(parser);
+            html5_pop_element(parser);  // pop tr
+            parser->mode = HTML5_MODE_IN_TABLE_BODY;
+            return;
+        }
+
+        // </table>
+        if (strcmp(tag, "table") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "tr")) {
+                log_error("html5: </table> without <tr> in scope");
+                return;
+            }
+            html5_clear_stack_back_to_table_row_context(parser);
+            html5_pop_element(parser);  // pop tr
+            parser->mode = HTML5_MODE_IN_TABLE_BODY;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // </tbody>, </tfoot>, </thead>
+        if (strcmp(tag, "tbody") == 0 || strcmp(tag, "tfoot") == 0 || strcmp(tag, "thead") == 0) {
+            if (!html5_has_element_in_table_scope(parser, tag)) {
+                log_error("html5: end tag without matching start: %s", tag);
+                return;
+            }
+            if (!html5_has_element_in_table_scope(parser, "tr")) {
+                return;  // ignore
+            }
+            html5_clear_stack_back_to_table_row_context(parser);
+            html5_pop_element(parser);  // pop tr
+            parser->mode = HTML5_MODE_IN_TABLE_BODY;
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // These end tags are errors
+        if (strcmp(tag, "body") == 0 || strcmp(tag, "caption") == 0 ||
+            strcmp(tag, "col") == 0 || strcmp(tag, "colgroup") == 0 ||
+            strcmp(tag, "html") == 0 || strcmp(tag, "td") == 0 ||
+            strcmp(tag, "th") == 0) {
+            log_error("html5: unexpected end tag in row mode: %s", tag);
+            return;
+        }
+    }
+
+    // Anything else: process using IN_TABLE rules
+    html5_process_in_table_mode(parser, token);
+}
+
+// ===== IN CELL MODE =====
+// https://html.spec.whatwg.org/#parsing-main-intd
+static void html5_process_in_cell_mode(Html5Parser* parser, Html5Token* token) {
+    if (token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // </td>, </th>
+        if (strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0) {
+            if (!html5_has_element_in_table_scope(parser, tag)) {
+                log_error("html5: end tag without matching start: %s", tag);
+                return;
+            }
+            html5_generate_implied_end_tags(parser);
+            Element* current = html5_current_node(parser);
+            const char* current_tag = ((TypeElmt*)current->type)->name.str;
+            if (strcmp(current_tag, tag) != 0) {
+                log_error("html5: current node is not %s", tag);
+            }
+            // pop until td/th
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (strcmp(popped_tag, tag) == 0) {
+                    break;
+                }
+            }
+            html5_clear_active_formatting_to_marker(parser);
+            parser->mode = HTML5_MODE_IN_ROW;
+            return;
+        }
+
+        // </body>, </caption>, </col>, </colgroup>, </html> - ignored
+        if (strcmp(tag, "body") == 0 || strcmp(tag, "caption") == 0 ||
+            strcmp(tag, "col") == 0 || strcmp(tag, "colgroup") == 0 ||
+            strcmp(tag, "html") == 0) {
+            log_error("html5: unexpected end tag in cell mode: %s", tag);
+            return;
+        }
+
+        // </table>, </tbody>, </tfoot>, </thead>, </tr>
+        if (strcmp(tag, "table") == 0 || strcmp(tag, "tbody") == 0 ||
+            strcmp(tag, "tfoot") == 0 || strcmp(tag, "thead") == 0 ||
+            strcmp(tag, "tr") == 0) {
+            if (!html5_has_element_in_table_scope(parser, tag)) {
+                log_error("html5: end tag without matching start: %s", tag);
+                return;
+            }
+            // close the cell first
+            html5_close_cell(parser);
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+    }
+
+    if (token->type == HTML5_TOKEN_START_TAG) {
+        const char* tag = token->tag_name->chars;
+
+        // <caption>, <col>, <colgroup>, <tbody>, <td>, <tfoot>, <th>, <thead>, <tr>
+        if (strcmp(tag, "caption") == 0 || strcmp(tag, "col") == 0 ||
+            strcmp(tag, "colgroup") == 0 || strcmp(tag, "tbody") == 0 ||
+            strcmp(tag, "td") == 0 || strcmp(tag, "tfoot") == 0 ||
+            strcmp(tag, "th") == 0 || strcmp(tag, "thead") == 0 ||
+            strcmp(tag, "tr") == 0) {
+            if (!html5_has_element_in_table_scope(parser, "td") &&
+                !html5_has_element_in_table_scope(parser, "th")) {
+                log_error("html5: no cell in scope");
+                return;
+            }
+            // close the cell first
+            html5_close_cell(parser);
+            html5_process_token(parser, token);  // reprocess
+            return;
+        }
+    }
+
+    // Anything else: process using IN_BODY rules
+    html5_process_in_body_mode(parser, token);
+}
+
+// helper: close the current cell (td/th)
+void html5_close_cell(Html5Parser* parser) {
+    html5_generate_implied_end_tags(parser);
+    
+    // pop until td or th
+    while (parser->open_elements->length > 0) {
+        Element* popped = html5_pop_element(parser);
+        const char* tag = ((TypeElmt*)popped->type)->name.str;
+        if (strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0) {
+            break;
+        }
+    }
+    html5_clear_active_formatting_to_marker(parser);
+    parser->mode = HTML5_MODE_IN_ROW;
+}
+
+// helper: reset insertion mode appropriately
+void html5_reset_insertion_mode(Html5Parser* parser) {
+    // Walk up the stack to determine the correct mode
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        Element* node = (Element*)parser->open_elements->items[i].element;
+        const char* tag = ((TypeElmt*)node->type)->name.str;
+        bool last = (i == 0);
+
+        if (strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0) {
+            if (!last) {
+                parser->mode = HTML5_MODE_IN_CELL;
+                return;
+            }
+        }
+        if (strcmp(tag, "tr") == 0) {
+            parser->mode = HTML5_MODE_IN_ROW;
+            return;
+        }
+        if (strcmp(tag, "tbody") == 0 || strcmp(tag, "thead") == 0 || strcmp(tag, "tfoot") == 0) {
+            parser->mode = HTML5_MODE_IN_TABLE_BODY;
+            return;
+        }
+        if (strcmp(tag, "table") == 0) {
+            parser->mode = HTML5_MODE_IN_TABLE;
+            return;
+        }
+        if (strcmp(tag, "body") == 0) {
+            parser->mode = HTML5_MODE_IN_BODY;
+            return;
+        }
+        if (strcmp(tag, "html") == 0) {
+            if (parser->head_element == nullptr) {
+                parser->mode = HTML5_MODE_BEFORE_HEAD;
+            } else {
+                parser->mode = HTML5_MODE_AFTER_HEAD;
+            }
+            return;
+        }
+    }
+
+    // Default to in body mode
+    parser->mode = HTML5_MODE_IN_BODY;
 }
