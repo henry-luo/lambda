@@ -1253,6 +1253,20 @@
                         "icon": "🔄"
                     },
                     {
+                        "source": "test_wpt_html_parser_gtest.cpp",
+                        "name": "WPT HTML Parser Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_wpt_html_parser_gtest.exe",
+                        "icon": "🌐"
+                    },
+                    {
                         "source": "test_latex_ts_gtest.cpp",
                         "name": "LaTeX Tree-sitter Parser Tests",
                         "dependencies": [
