@@ -124,6 +124,7 @@ project "lambda-input-full-cpp"
         "lambda/format/latex_assets.cpp",
         "lambda/format/latex_packages.cpp",
         "lambda/format/latex_docclass.cpp",
+        "lambda/format/latex_hyphenation.cpp",
         "test/test_stubs.cpp",
         "lambda/input/parse_error.cpp",
         "lambda/input/source_tracker.cpp",
