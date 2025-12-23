@@ -418,7 +418,8 @@ public:
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), next_box_frame_(false),
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), 
+          restricted_h_mode_first_text_(false), next_box_frame_(false),
           pending_zws_output_(false), pending_zws_had_trailing_space_(false),
           group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0) {}
     
@@ -466,10 +467,26 @@ public:
     void exitMonospaceMode() { if (monospace_depth_ > 0) monospace_depth_--; }
     bool inMonospaceMode() const { return monospace_depth_ > 0; }
     
+    // Font environment class tracking - for \begin{small}, \begin{bfseries}, etc.
+    // Only the innermost environment class is used for text wrapping
+    void pushFontEnvClass(const std::string& font_class) { font_env_class_stack_.push_back(font_class); }
+    void popFontEnvClass() { if (!font_env_class_stack_.empty()) font_env_class_stack_.pop_back(); }
+    bool inFontEnv() const { return !font_env_class_stack_.empty(); }
+    const std::string& currentFontEnvClass() const { 
+        static const std::string empty;
+        return font_env_class_stack_.empty() ? empty : font_env_class_stack_.back(); 
+    }
+    
     // Restricted horizontal mode (inside \mbox, \fbox, etc.)
     // In this mode: \\ and \newline are ignored, \par becomes a space
-    void enterRestrictedHMode() { restricted_h_mode_ = true; }
-    void exitRestrictedHMode() { restricted_h_mode_ = false; }
+    void enterRestrictedHMode() { 
+        restricted_h_mode_ = true; 
+        restricted_h_mode_first_text_ = true;  // Track first text for ZWS handling
+    }
+    void exitRestrictedHMode() { 
+        restricted_h_mode_ = false; 
+        restricted_h_mode_first_text_ = false;
+    }
     bool inRestrictedHMode() const { return restricted_h_mode_; }
     
     // Frame class flag - when true, next box command should add "frame" class
@@ -580,6 +597,9 @@ private:
     bool next_box_frame_;
     // In this mode, linebreaks (\\, \newline) are ignored and \par becomes a space
     bool restricted_h_mode_;
+    // Flag to track if we should add ZWS before first newline-sourced whitespace
+    // Set when entering restricted h-mode, cleared after first text is processed
+    bool restricted_h_mode_first_text_;
     
     // Pending ZWS output - when true, a ZWS should be output if there's more content
     // Set by curly_group handler when a group at document level closes
@@ -594,6 +614,12 @@ private:
     // In monospace mode, dash ligatures (-- → en-dash, --- → em-dash) are suppressed
     // and single hyphens are not converted to Unicode hyphen
     int monospace_depth_;
+    
+    // Font environment class stack - tracks the class to use for current font environment
+    // When inside \begin{small}...\end{small}, this is "small"
+    // When inside \begin{bfseries}...\end{bfseries}, this is "bf"
+    // The innermost (top) class is used for text wrapping, not the accumulated font state
+    std::vector<std::string> font_env_class_stack_;
     
     // Margin paragraph tracking
     struct MarginParagraph {
@@ -1406,10 +1432,54 @@ static void cmd_textnormal(LatexProcessor* proc, Item elem) {
 // Font Declaration Commands (bfseries, mdseries, rmfamily, etc.)
 // These can operate in two modes:
 // 1. Declaration-style (no children): \bfseries sets font for subsequent text in current scope
-// 2. Environment-style (with children): \begin{bfseries}...\end{bfseries} wraps content in a span
-// Note: When the parser sees \begin{bfseries}, it creates an element with tag "bfseries"
-// and the environment content as children.
+// 2. Command-style (\small{text}): wraps content in a single span
+// 3. Environment-style (\begin{small}...\end{small}): 
+//    - Outputs ZWS spans at boundaries for visual separation
+//    - Text inside gets per-chunk wrapping via processText() based on font state
+// Distinction: Environment-style has paragraph elements as children (from \begin{...})
+// while command-style has direct text/inline content as children.
 // =============================================================================
+
+// Helper: Check if element has a paragraph child (indicates environment syntax)
+static bool hasEnvironmentSyntax(Item elem) {
+    ElementReader reader(elem);
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            if (tag && strcmp(tag, "paragraph") == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Helper: Output a ZWS marker span with specified font class
+// Used at font environment boundaries to mark the transition
+// Uses explicit class to avoid inheriting parent font state
+static void outputFontBoundaryZWSWithClass(LatexProcessor* proc, const char* font_class) {
+    HtmlGenerator* gen = proc->generator();
+    if (font_class && font_class[0] != '\0') {
+        gen->span(font_class);
+        gen->text("\xe2\x80\x8b ");  // ZWS + space
+        gen->closeElement();
+    }
+}
+
+// Helper: Output a ZWS marker span with current font class (full state)
+// Used for generic contexts, but NOT for font environments
+static void outputFontBoundaryZWS(LatexProcessor* proc) {
+    HtmlGenerator* gen = proc->generator();
+    std::string font_class = gen->getFontClass(gen->currentFont());
+    if (!font_class.empty()) {
+        gen->span(font_class.c_str());
+        gen->text("\xe2\x80\x8b ");  // ZWS + space
+        gen->closeElement();
+    }
+}
 
 static void cmd_bfseries(LatexProcessor* proc, Item elem) {
     // \bfseries - switch to bold
@@ -1420,12 +1490,23 @@ static void cmd_bfseries(LatexProcessor* proc, Item elem) {
         // Declaration-style: just set font state
         gen->currentFont().series = FontSeries::Bold;
         proc->setStripNextLeadingSpace(true);
+    } else if (hasEnvironmentSyntax(elem)) {
+        // Environment-style (\begin{bfseries}...): ZWS at boundaries, per-chunk wrapping
+        // Use explicit "bf" class, not inherited font state
+        gen->enterGroup();
+        gen->currentFont().series = FontSeries::Bold;
+        proc->pushFontEnvClass("bf");  // Push font env class for text wrapping
+        outputFontBoundaryZWSWithClass(proc, "bf");  // ZWS span at start
+        proc->processChildren(elem);
+        outputFontBoundaryZWSWithClass(proc, "bf");  // ZWS span at end
+        proc->popFontEnvClass();
+        gen->exitGroup();
     } else {
-        // Environment-style: wrap content in a span
+        // Command-style (\bfseries{text}): single span wrapper
         gen->enterGroup();
         gen->currentFont().series = FontSeries::Bold;
         proc->enterStyledSpan();
-        gen->span("bf");  // LaTeX.js uses "bf" not "bfseries"
+        gen->span("bf");
         proc->processChildren(elem);
         gen->closeElement();
         proc->exitStyledSpan();
@@ -2127,7 +2208,19 @@ static void cmd_small(LatexProcessor* proc, Item elem) {
     
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Small;
+    } else if (hasEnvironmentSyntax(elem)) {
+        // Environment-style (\begin{small}...): ZWS at boundaries, per-chunk wrapping
+        // Use explicit "small" class, not inherited font state
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Small;
+        proc->pushFontEnvClass("small");  // Push font env class for text wrapping
+        outputFontBoundaryZWSWithClass(proc, "small");  // ZWS span at start
+        proc->processChildren(elem);
+        outputFontBoundaryZWSWithClass(proc, "small");  // ZWS span at end
+        proc->popFontEnvClass();
+        gen->exitGroup();
     } else {
+        // Command-style (\small{text}): single span wrapper
         gen->enterGroup();
         gen->currentFont().size = FontSize::Small;
         proc->enterStyledSpan();
@@ -3566,9 +3659,10 @@ static void cmd_equation_star(LatexProcessor* proc, Item elem) {
 static void cmd_newline(LatexProcessor* proc, Item elem) {
     // \\ or \newline - create a line break
     // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
-    // We only strip leading whitespace on next token (skip), not trailing (no unskip).
-    // This allows: "one \\ space" -> "one space" (trailing space preserved)
+    // Both trailing and leading whitespace are stripped (unskip + skip).
     if (proc->inRestrictedHMode()) {
+        HtmlGenerator* gen = proc->generator();
+        gen->trimTrailingWhitespace();  // unskip
         proc->setStripNextLeadingSpace(true);  // skip after
         return;
     }
@@ -3579,8 +3673,10 @@ static void cmd_newline(LatexProcessor* proc, Item elem) {
 static void cmd_linebreak(LatexProcessor* proc, Item elem) {
     // \linebreak - optional line break hint
     // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
-    // We only strip leading whitespace on next token (skip), not trailing (no unskip).
+    // Both trailing and leading whitespace are stripped (unskip + skip).
     if (proc->inRestrictedHMode()) {
+        HtmlGenerator* gen = proc->generator();
+        gen->trimTrailingWhitespace();  // unskip
         proc->setStripNextLeadingSpace(true);  // skip after
         return;
     }
@@ -4492,11 +4588,11 @@ static void cmd_rlap(LatexProcessor* proc, Item elem) {
 
 static void cmd_centering(LatexProcessor* proc, Item elem) {
     // \centering - center alignment (declaration)
-    // This is a paragraph alignment declaration that affects following paragraphs
-    // in the current group scope. It does NOT wrap content in a div.
-    // Instead, we close the current paragraph and set alignment for the next one.
+    // This is a paragraph alignment declaration that affects the current paragraph
+    // (if open) or following paragraphs in the current group scope.
+    // Per LaTeX semantics, alignment is applied at paragraph END, not start.
+    // We set the alignment but do NOT end the paragraph.
     (void)elem;
-    proc->endParagraph();
     proc->setNextParagraphAlignment("centering");
 }
 
@@ -4504,7 +4600,6 @@ static void cmd_raggedright(LatexProcessor* proc, Item elem) {
     // \raggedright - ragged right (left-aligned, declaration)
     // This is a paragraph alignment declaration
     (void)elem;
-    proc->endParagraph();
     proc->setNextParagraphAlignment("raggedright");
 }
 
@@ -4512,7 +4607,6 @@ static void cmd_raggedleft(LatexProcessor* proc, Item elem) {
     // \raggedleft - ragged left (right-aligned, declaration)
     // This is a paragraph alignment declaration
     (void)elem;
-    proc->endParagraph();
     proc->setNextParagraphAlignment("raggedleft");
 }
 
@@ -5572,6 +5666,13 @@ static void cmd_citeyear(LatexProcessor* proc, Item elem) {
     gen->closeElement();
 }
 
+static void cmd_nocite(LatexProcessor* proc, Item elem) {
+    // \nocite{key} - add to bibliography without displaying citation
+    // This is metadata only, produces no visible output
+    (void)proc;
+    (void)elem;
+}
+
 static void cmd_bibliographystyle(LatexProcessor* proc, Item elem) {
     // \bibliographystyle{style} - set citation style
     // This is typically just metadata, doesn't produce output
@@ -5721,6 +5822,7 @@ static void cmd_abstract(LatexProcessor* proc, Item elem) {
     gen->currentFont().size = FontSize::Small;  // set small font for content
     proc->processChildren(elem);
     gen->exitGroup();
+    proc->closeParagraphIfOpen();  // Ensure paragraph is closed before closing div
     gen->closeElement();  // close content div
 }
 
@@ -6525,6 +6627,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["cite"] = cmd_cite;
     command_table_["citeauthor"] = cmd_citeauthor;
     command_table_["citeyear"] = cmd_citeyear;
+    command_table_["nocite"] = cmd_nocite;
     command_table_["bibliographystyle"] = cmd_bibliographystyle;
     command_table_["bibliography"] = cmd_bibliography;
     command_table_["bibitem"] = cmd_bibitem;
@@ -6637,30 +6740,50 @@ bool LatexProcessor::isInlineCommand(const char* cmd_name) {
 void LatexProcessor::ensureParagraph() {
     // Only open paragraph if we're not inside an inline element
     if (!in_paragraph_ && inline_depth_ == 0) {
-        log_debug("ensureParagraph: opening paragraph, restricted=%d", restricted_h_mode_);
-        if (next_paragraph_alignment_) {
-            // Alignment declaration takes precedence
-            gen_->p(next_paragraph_alignment_);
-            // Keep alignment for subsequent paragraphs (until explicitly changed)
-            // next_paragraph_alignment_ is NOT reset here
-        } else if (next_paragraph_is_noindent_) {
-            gen_->p("noindent");
-            next_paragraph_is_noindent_ = false;  // Reset the flag
-        } else if (next_paragraph_is_continue_) {
-            gen_->p("continue");
-            next_paragraph_is_continue_ = false;  // Reset the flag
-        } else {
-            gen_->p();
-        }
+        log_debug("ensureParagraph: starting paragraph buffering, restricted=%d", restricted_h_mode_);
+        // Start capturing paragraph content - we'll wrap it with <p> when we end the paragraph
+        // This allows alignment commands to affect the paragraph retroactively
+        gen_->startCapture();
         in_paragraph_ = true;
     }
 }
 
 void LatexProcessor::closeParagraphIfOpen() {
     if (in_paragraph_) {
-        log_debug("closeParagraphIfOpen: closing paragraph, restricted=%d", restricted_h_mode_);
-        gen_->trimTrailingWhitespace();  // Trim trailing whitespace before closing paragraph
-        gen_->closeElement();
+        log_debug("closeParagraphIfOpen: closing paragraph with alignment=%s, restricted=%d", 
+                  next_paragraph_alignment_ ? next_paragraph_alignment_ : "none", restricted_h_mode_);
+        
+        // Get the captured paragraph content
+        std::string para_content = gen_->endCapture();
+        
+        // Trim trailing whitespace from captured content
+        while (!para_content.empty() && 
+               (para_content.back() == ' ' || para_content.back() == '\t' || 
+                para_content.back() == '\n' || para_content.back() == '\r')) {
+            para_content.pop_back();
+        }
+        
+        // Only output paragraph if it has content
+        if (!para_content.empty()) {
+            // Determine paragraph class
+            const char* para_class = nullptr;
+            if (next_paragraph_alignment_) {
+                para_class = next_paragraph_alignment_;
+                // Keep alignment for subsequent paragraphs (until explicitly changed)
+            } else if (next_paragraph_is_noindent_) {
+                para_class = "noindent";
+                next_paragraph_is_noindent_ = false;
+            } else if (next_paragraph_is_continue_) {
+                para_class = "continue";
+                next_paragraph_is_continue_ = false;
+            }
+            
+            // Write the paragraph with proper class
+            gen_->p(para_class);
+            gen_->writer()->writeRawHtml(para_content.c_str());
+            gen_->closeElement();
+        }
+        
         in_paragraph_ = false;
     }
 }
@@ -6951,9 +7074,23 @@ void LatexProcessor::processNode(Item node) {
             const char* sym_name = str->chars;
             
             if (strcmp(sym_name, "parbreak") == 0) {
-                // In restricted horizontal mode (inside \mbox), paragraph breaks become spaces
+                // In restricted horizontal mode (inside \mbox), paragraph breaks:
+                // 1. Trim trailing whitespace (unskip)
+                // 2. Output exactly one space (to preserve word separation)
+                // 3. Skip next leading whitespace
+                // Note: If \par immediately precedes, the \par already did unskip,
+                // and here we output a space. But if \par's skip consumed the parbreak's
+                // effective content, the result is still correct.
                 if (restricted_h_mode_) {
-                    gen_->text(" ");
+                    bool had_trailing = gen_->hasTrailingWhitespace();
+                    gen_->trimTrailingWhitespace();
+                    // Only output space if we had actual trailing content (not just ws)
+                    // This handles "xx\par\n\n{..." where \par already did unskip
+                    // and the parbreak shouldn't add more space
+                    if (!strip_next_leading_space_) {
+                        gen_->text(" ");
+                    }
+                    strip_next_leading_space_ = true;
                     return;
                 }
                 // Paragraph break: close current paragraph and prepare for next
@@ -7037,6 +7174,13 @@ void LatexProcessor::processNode(Item node) {
         
         // Special handling for linebreak_command (\\)
         if (strcmp(tag, "linebreak_command") == 0) {
+            // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
+            // Both trailing and leading whitespace are stripped (unskip + skip).
+            if (inRestrictedHMode()) {
+                gen_->trimTrailingWhitespace();  // unskip
+                setStripNextLeadingSpace(true);  // skip after
+                return;
+            }
             ensureParagraph();
             
             // Check for optional length attribute
@@ -7333,7 +7477,9 @@ void LatexProcessor::processChildren(Item elem) {
                 // - \\ without dim, or next has no leading space: collapse all
                 // - \newline: collapse all
                 if (restricted_h_mode_) {
-                    bool is_linebreak_cmd = (child_elem.childCount() > 0) || (strcmp(tag, "linebreak_command") == 0);
+                    // \linebreak command (not \\) outputs exactly one space
+                    // Note: "linebreak_command" is \\ in tree-sitter, "linebreak" is \linebreak
+                    bool is_linebreak_cmd = (strcmp(tag, "linebreak") == 0);
                     bool had_trailing_ws = gen_->hasTrailingWhitespace();
                     gen_->trimTrailingWhitespace();
                     
@@ -7369,8 +7515,9 @@ void LatexProcessor::processChildren(Item elem) {
                     // This handles cases like "one \\[4cm] space" where the dimension
                     // indicates intentional vertical space, and word separation should be preserved
                     // Note: has_dimension is set earlier when brack_group is consumed and i is incremented
-                    if (strcmp(tag, "linebreak") == 0 && has_dimension && 
-                        had_trailing_ws && next_has_leading_ws) {
+                    // "linebreak" is old grammar, "linebreak_command" is new tree-sitter grammar for backslash-backslash
+                    if ((strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0) && 
+                        has_dimension && had_trailing_ws && next_has_leading_ws) {
                         gen_->text(" ");
                     }
                     strip_next_leading_space_ = true;
@@ -8171,6 +8318,18 @@ void LatexProcessor::processText(const char* text) {
     // Note: ZWS output is handled by processChildren() which checks for following content
     // Don't output ZWS here - let the sibling loop decide based on context
     
+    // In restricted h-mode, check if first text starts with newline (latex-js adds ZWS + space)
+    // This distinguishes "\mbox{\n..." from "\mbox{ ..." 
+    // Only applies to the very first text in restricted h-mode
+    bool add_leading_zws = false;
+    if (restricted_h_mode_first_text_) {
+        restricted_h_mode_first_text_ = false;  // Clear flag - only check first text
+        // Check if original text starts with newline (not space)
+        if (text[0] == '\n' || (text[0] == '\r' && text[1] == '\n')) {
+            add_leading_zws = true;
+        }
+    }
+    
     // Normalize whitespace: collapse multiple spaces/newlines/tabs to single space
     // This matches LaTeX behavior where whitespace is collapsed
     std::string normalized;
@@ -8267,7 +8426,22 @@ void LatexProcessor::processText(const char* text) {
     
     // Check if current font differs from default - if so, wrap text in a span
     // BUT skip this if we're inside a styled span (like \textbf{}) to prevent double-wrapping
-    std::string font_class = gen_->getFontClass(gen_->currentFont());
+    // When inside a font environment, use only the innermost environment's class (not accumulated)
+    std::string font_class;
+    if (inFontEnv()) {
+        // Inside a font environment: use only the innermost environment's class
+        font_class = currentFontEnvClass();
+    } else {
+        // Not in a font environment: use accumulated font class
+        font_class = gen_->getFontClass(gen_->currentFont());
+    }
+    
+    // Output leading ZWS if needed (for restricted h-mode with leading newline)
+    // This is output before the text content, creating "ZWS + space + text" pattern
+    if (add_leading_zws && !normalized.empty() && normalized[0] == ' ') {
+        gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
+    }
+    
     if (!font_class.empty() && !inStyledSpan()) {
         // When font styling is active
         if (all_whitespace) {
