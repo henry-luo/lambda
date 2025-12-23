@@ -7,6 +7,7 @@
     "source_dirs": [
         "lambda/input",
         "lambda/input/css",
+        "lambda/input/html5",
         "lambda/format",
         "lambda/validator"
     ],
@@ -354,6 +355,10 @@
                 "lambda/input/css/css_engine.cpp",
                 "lambda/input/css/css_formatter.cpp",
                 "lambda/input/css/css_style_node.cpp",
+                "lambda/input/html5/html5_tree_builder.cpp",
+                "lambda/input/html5/html5_tokenizer.cpp",
+                "lambda/input/html5/html5_parser.cpp",
+                "lambda/input/html5/html5_token.cpp",
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
                 "lib/hashmap.c",

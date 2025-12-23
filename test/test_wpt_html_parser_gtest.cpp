@@ -155,11 +155,37 @@ void serialize_attributes_wpt(const ElementReader& elem, std::string& output, in
     // Get attributes and sort alphabetically (WPT requirement)
     std::vector<std::pair<std::string, std::string>> attrs;
 
-    for (int64_t i = 0; i < elem.attrCount(); i++) {
-        // Access attribute by index - need to iterate through element's attributes
-        // Note: ElementReader doesn't expose attribute_name/attribute_value by index directly
-        // We'll need to handle this differently or use Element directly
-        // For now, skip attributes serialization as a simplification
+    // Access the underlying Element to iterate through its shape (attribute schema)
+    const Element* element = elem.element();
+    if (element && element->type) {
+        TypeElmt* type = (TypeElmt*)element->type;
+        ShapeEntry* shape = type->shape;
+
+        while (shape) {
+            if (shape->name) {
+                // Get attribute name
+                std::string attr_name(shape->name->str, shape->name->length);
+
+                // Get attribute value
+                ItemReader val = elem.get_attr(attr_name.c_str());
+                if (!val.isNull()) {
+                    std::string attr_value;
+                    TypeId val_type = val.getType();
+                    if (val_type == LMD_TYPE_STRING) {
+                        String* str = val.asString();
+                        if (str) {
+                            attr_value = std::string(str->chars, str->len);
+                        }
+                    } else if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
+                        attr_value = std::to_string(val.asInt());
+                    } else if (val_type == LMD_TYPE_BOOL) {
+                        attr_value = val.asBool() ? "true" : "false";
+                    }
+                    attrs.push_back({attr_name, attr_value});
+                }
+            }
+            shape = shape->next;
+        }
     }
 
     std::sort(attrs.begin(), attrs.end());
@@ -190,7 +216,52 @@ void serialize_element_wpt(Item item, std::string& output, int depth) {
         // Get tag name
         std::string tag_name(elem.tagName(), elem.tagNameLen());
 
-        // Element tag (lowercase for HTML)
+        // Handle special element types
+        if (tag_name == "#comment") {
+            // Comment node - format as <!-- ... -->
+            std::string data;
+            if (elem.has_attr("data")) {
+                String* str = elem.get_string_attr("data");
+                if (str && str->chars) {
+                    // Check for "lambda.nil" sentinel which represents empty string
+                    if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
+                        // Empty comment
+                        data = "";
+                    } else {
+                        data = std::string(str->chars, str->len);
+                    }
+                }
+            }
+            output += "| " + indent + "<!-- " + data + " -->\n";
+            return;
+        }
+
+        if (tag_name == "#doctype") {
+            // DOCTYPE node - format as <!DOCTYPE ...>
+            std::string name;
+            if (elem.has_attr("name")) {
+                String* str = elem.get_string_attr("name");
+                if (str) name = std::string(str->chars, str->len);
+            }
+            std::string public_id, system_id;
+            if (elem.has_attr("publicId")) {
+                String* str = elem.get_string_attr("publicId");
+                if (str) public_id = std::string(str->chars, str->len);
+            }
+            if (elem.has_attr("systemId")) {
+                String* str = elem.get_string_attr("systemId");
+                if (str) system_id = std::string(str->chars, str->len);
+            }
+
+            output += "| " + indent + "<!DOCTYPE " + name;
+            if (!public_id.empty() || !system_id.empty()) {
+                output += " \"" + public_id + "\" \"" + system_id + "\"";
+            }
+            output += ">\n";
+            return;
+        }
+
+        // Regular element tag (lowercase for HTML)
         output += "| " + indent + "<" + tag_name + ">\n";
 
         // Attributes (sorted)
@@ -217,7 +288,10 @@ void serialize_element_wpt(Item item, std::string& output, int depth) {
             }
         }
     }
-    // TODO: Handle comments, DOCTYPE when Lambda parser supports them
+    else {
+        // Debug: print unhandled type
+        fprintf(stderr, "DEBUG: unhandled type=%d item.item=0x%lx at depth=%d\n", type, (unsigned long)item.item, depth);
+    }
 }
 
 std::string lambda_tree_to_wpt_format(Item root) {
@@ -247,7 +321,18 @@ std::string lambda_tree_to_wpt_format(Item root) {
         }
     }
     else if (root_type == LMD_TYPE_ELEMENT) {
-        serialize_element_wpt(root, result, 0);
+        // Check if this is a #document element
+        ElementReader doc_elem(root);
+        std::string tag_name(doc_elem.tagName(), doc_elem.tagNameLen());
+
+        if (tag_name == "#document") {
+            // Skip the #document element itself (already printed above)
+            // Serialize its children (the html element)
+            serialize_children_wpt(doc_elem, result, -1);  // depth -1 so children are at depth 0
+        } else {
+            // Regular element at root level
+            serialize_element_wpt(root, result, 0);
+        }
     }
 
     // Remove trailing newline to match WPT format
