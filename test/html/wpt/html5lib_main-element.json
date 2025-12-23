@@ -1,0 +1,20 @@
+[
+  {
+    "test_id": "336a047fbc84b86dfd4baea5881b50fe0cdb5ce8",
+    "file": "html5lib_main-element.html",
+    "input": "<!doctype html><p>foo<main>bar<p>baz",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       \"foo\"\n|     <main>\n|       \"bar\"\n|       <p>\n|         \"baz\""
+  },
+  {
+    "test_id": "fc887f078ddc2723261a7dfb25829efe2da284f2",
+    "file": "html5lib_main-element.html",
+    "input": "<!doctype html><main><p>foo</main>bar",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <main>\n|       <p>\n|         \"foo\"\n|     \"bar\""
+  },
+  {
+    "test_id": "ebd10973e73d3a339bdf22f8bbac2f028044e096",
+    "file": "html5lib_main-element.html",
+    "input": "<!DOCTYPE html>xxx<svg><x><g><a><main><b>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \"xxx\"\n|     <svg svg>\n|       <svg x>\n|         <svg g>\n|           <svg a>\n|             <svg main>\n|     <b>"
+  }
+]
