@@ -250,6 +250,11 @@ std::string lambda_tree_to_wpt_format(Item root) {
         serialize_element_wpt(root, result, 0);
     }
 
+    // Remove trailing newline to match WPT format
+    if (!result.empty() && result.back() == '\n') {
+        result.pop_back();
+    }
+
     return result;
 }
 

@@ -20,7 +20,7 @@ void parse_properties(Input* input, const char* prop_string);
 void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
-void parse_html_impl(Input* input, const char* html_string);  // Internal - use input_from_source()
+void parse_html_impl(Input* input, const char* html_string, const char* flavor);  // Internal - use input_from_source()
 extern "C" void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser (default)
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string);
@@ -583,7 +583,8 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             input->root = input_markup(input, source);
         }
         else if (strcmp(effective_type, "html") == 0) {
-            parse_html_impl(input, source);
+            const char* html_flavor = (flavor && flavor->chars) ? flavor->chars : "html5";
+            parse_html_impl(input, source, html_flavor);
         }
         else if (strcmp(effective_type, "latex") == 0 || strcmp(effective_type, "latex-ts") == 0) {
             // Tree-sitter LaTeX parser (default)
