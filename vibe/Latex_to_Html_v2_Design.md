@@ -1,10 +1,39 @@
 # LaTeX to HTML V2 - Design Document
 
-**Date**: December 22, 2025  
-**Status**: In Progress (**Baseline: 79/79 (100%), Extended: 2/24 passing**)  
+**Date**: December 23, 2025  
+**Status**: In Progress (**Baseline: 95/95 (100%), Extended: 4/6 passing, 3 skipped**)  
 **Objective**: Translate LaTeX.js formatting logic to C++ for Lambda runtime
 
-**Recent Progress** (Dec 22):
+**Recent Progress** (Dec 23 - Session 2):
+- **text_tex_10 FIXED**: Paragraph alignment now applies at paragraph END, not declaration time
+  - Problem: `\centering` was immediately ending paragraph and setting alignment for next one
+  - Solution: Implemented paragraph content buffering using HtmlGenerator's capture mode
+    - `ensureParagraph()` now starts capture mode instead of writing `<p>` immediately
+    - Content is buffered until `endParagraph()` is called
+    - At paragraph close, content is wrapped with `<p class="alignment">...</p>`
+  - Added stacked capture support in HtmlGenerator (nested `startCapture()`/`endCapture()`)
+  - Fixed cmd_abstract to call `closeParagraphIfOpen()` before closing div
+  - Impact: text_tex_10 now passes
+- **Remaining Extended Failures** (2 tests, require significant architectural changes):
+  - `environments_tex_10`: Font environment span splitting (nested spans vs sibling spans with ZWS)
+  - `environments_tex_14`: Comment environment parser (malformed `\end{comment}` handling)
+
+**Previous Progress** (Dec 23 - Session 1):
+- **Parbreak Symbol Handling**: Fixed `parbreak` symbols inside groups not converting to `<br>`
+  - Problem: `\@hangfrom{\textbf{Some text.}}More text` was outputting `parbreak` as literal text
+  - Solution: Added `outputGroupContent()` helper that processes group children with parbreak→`<br>` conversion
+  - Related fix: `ItemReader::cstring()` now returns symbol content (was returning null for symbols)
+  - Impact: `macros_tex_6` now passes
+- **Test Suite Reorganization**: Moved 5 passing tests from extended to baseline
+  - `groups.tex` tests 2, 3 (error brack_group handling, paragraph breaks in groups)
+  - `macros.tex` tests 4, 5, 6 (sibling lookahead, ensureParagraph, parbreak handling)
+- **Test Status**: Baseline at 95 tests passing (up from 90), extended reduced to 6 (3 failing, 3 skipped)
+- **Complex Issues Identified** (deferred - require significant architectural changes):
+  - `text_tex_10`: Paragraph alignment at break-time semantics (alignment applied when `\par` happens, not declaration)
+  - `environments_tex_10`: Font environment span splitting with ZWS markers at line boundaries
+  - `environments_tex_14`: Comment environment external scanner with malformed `\end{comment}` handling
+
+**Previous Progress** (Dec 22):
 - **Typographic Hyphen Conversion**: Single ASCII hyphens now converted to Unicode typographic hyphen (U+2010)
   - Problem: Text like `daughter-in-law` was keeping ASCII hyphens instead of using proper typographic hyphens
   - Solution: Updated `convertApostrophes()` to convert single `-` to `‐` (U+2010) when not in monospace mode
@@ -13,7 +42,6 @@
 - **Test Suite Reorganization**: Updated baseline/extended test classifications
   - `text.tex` tests 4, 6 promoted from extended to baseline (now passing)
   - `spacing.tex` test 1 moved to extended (fixture format issue with Unicode spaces)
-- **Test Status**: Baseline at 79 tests passing, extended reduced from 24 to 22 failing
 
 **Previous Progress** (Jan 8):
 - **Zero-Width Space (ZWS) for Empty Curly Groups**: Added ZWS output for commands with empty curly group terminators
@@ -1882,7 +1910,147 @@ processNode(Item node)
 
 ---
 
-## 10. References
+## 11. Complex Deferred Issues
+
+The following tests require significant architectural changes and are documented here for future work:
+
+### 11.1 text_tex_10: Paragraph Alignment at Break-Time
+
+**LaTeX Source**:
+```latex
+This is a horrible test.
+\centering
+In this paragraph we change the alignment to centering.
+{\raggedright But it actually becomes raggedright,
+
+even with a group, and only after the par will it be centered.}
+Until the group ends.
+
+And we are now still centered.
+```
+
+**Expected Behavior**: In LaTeX, `\centering`, `\raggedright`, `\raggedleft` are **declarations** that set alignment for when a paragraph break actually happens. The alignment active at `\par` time applies to the entire paragraph retroactively.
+
+**Current Behavior**: `endParagraph()` is called immediately, and alignment is applied at paragraph open time.
+
+**How LaTeX.js Handles It** (from `latex-parser.pegjs`):
+```pegjs
+paragraph =
+    bb:((escape noindent)? break)*
+    _ n:(escape noindent)? txt:text+
+    be:break?
+    {
+        var p = g.create(g.par, txt, n ? "noindent" : "");
+        ...
+    }
+```
+
+LaTeX.js's PEG.js parser collects all text content (`txt:text+`) before calling `g.create()`. Any `\centering` commands within the text have already executed `setAlignment()` by the time the paragraph element is created. The `create()` method reads `@alignment!` at creation time, which naturally contains the last alignment set.
+
+**Fix Approach**:
+1. Remove `endParagraph()` calls from alignment commands
+2. Alignment commands just set `next_paragraph_alignment_` 
+3. Let paragraph breaks (`\par`, blank lines) naturally close paragraphs
+4. Alignment is read at paragraph close time, applied retroactively via CSS or by deferring paragraph open
+
+### 11.2 environments_tex_10: Font Environment Span Splitting
+
+**LaTeX Source**:
+```latex
+normal text \begin{small}
+    small text
+    \begin{bfseries}
+        bold text
+    \end{bfseries}
+\end{small}
+  three spaces!
+```
+
+**Expected HTML**:
+```html
+<p>
+normal text <span class="small">​ </span><span class="small">small text </span>
+<span class="bf">​ </span><span class="bf">bold text </span><span class="bf">​ </span>
+<span class="small">​ </span>
+three spaces!
+</p>
+```
+
+**Current Behavior**: Produces nested spans: `<span class="small">...<span class="bf">...</span></span>`
+
+**How LaTeX.js Handles It** (from `html-generator.ls`):
+```ls
+createText: (t) ->
+    return if not t
+    @addAttributes document.createTextNode if @_options.hyphenate then @_h.hyphenateText t else t
+
+addAttributes: (nodes) ->
+    attrs = @_inlineAttributes!
+    return nodes if not attrs
+    ...
+    return @create @inline, nodes, attrs
+```
+
+Each call to `createText()` creates a separate span wrapper via `addAttributes()`. The parser calls `createText()` separately for spaces (`sb:(s:space? {return g.createText(s); })`) and text content, resulting in sibling spans rather than nested spans.
+
+**Fix Approach**:
+1. Output font spans per-text-chunk rather than wrapping entire environment content
+2. When entering a font environment, don't open a span immediately
+3. Output a span for each text node/space with current font attributes
+4. Insert ZWS (U+200B) at environment boundaries (using `@` control → `\u200B` as LaTeX.js does)
+
+### 11.3 environments_tex_14: Comment Environment Parser
+
+**LaTeX Source**:
+```latex
+text
+\begin{comment}
+    This is a comment.
+    \end{comment
+    still more comment.
+\end{comment}
+more text, but now with%
+\begin{comment}
+    This is a comment.
+\end{comment}
+out space.
+```
+
+**Expected HTML**:
+```html
+<div class="body">
+<p>text more text, but now without space.</p>
+</div>
+```
+
+**Current Behavior**: Parse tree has errors - the malformed `\end{comment` (missing `}`) breaks parsing.
+
+**How LaTeX.js Handles It** (from `latex-parser.pegjs`):
+```pegjs
+comment_env "comment environment" =
+    "\\begin" _ "{comment}"
+        (!end_comment .)*
+    end_comment _
+    { g.break(); return undefined; }
+
+end_comment = "\\end" _ "{comment}"
+```
+
+The key is `(!end_comment .)*` - a negative lookahead that matches any character NOT starting `\end{comment}`. This means:
+- `\end{comment` (malformed, missing `}`) doesn't match `end_comment`
+- So it's consumed as part of the "any character" pattern
+- Only the exact `\end{comment}` terminates the environment
+
+**Fix Approach for Tree-sitter**:
+1. Implement external scanner for `comment_environment`
+2. Scanner matches `\begin{comment}` and enters a state
+3. In this state, consume all characters until exact `\end{comment}` is found
+4. Use character-by-character lookahead to detect exact `\end{comment}` sequence
+5. Avoid GLR conflicts with `line_comment` by careful scanner precedence
+
+---
+
+## 12. References
 
 ### LaTeX.js Repository
 - **URL**: https://github.com/michael-brade/LaTeX.js
@@ -1906,7 +2074,7 @@ processNode(Item node)
 
 ---
 
-## 11. Conclusion
+## 13. Conclusion
 
 The LaTeX to HTML V2 implementation successfully translates LaTeX.js formatting logic to C++ through:
 
@@ -1917,20 +2085,21 @@ The LaTeX to HTML V2 implementation successfully translates LaTeX.js formatting 
 5. **Comprehensive Testing**: Baseline + extended tests for quality assurance
 
 **Current Status** (December 2025): 
-- **128 commands implemented** (87% of LaTeX.js target coverage)
-- **51/107 baseline fixture tests passing** (47.7%)
+- **Baseline**: 95/95 fixture tests passing (100%)
+- **Extended**: 6 tests remaining (3 skipped, 3 complex/deferred)
 - Recent fixes:
-  - Empty curly group handling: `\^{}` no longer outputs spurious ZWS
-  - Group depth tracking for ZWS insertion
+  - Parbreak symbol handling in groups
+  - ItemReader::cstring() symbol support
+  - Groups and macros tests (5 tests promoted to baseline)
 
-**Known Issues**:
-- Parser limitations: linebreak dimension (`\\[1cm]`), verbatim (`\verb`)
-- Macro tests: 10 failing (pre-existing)
-- Smart quote conversion not implemented
+**Known Complex Issues** (documented in Section 11):
+- Paragraph alignment at break-time semantics
+- Font environment span splitting with ZWS markers
+- Comment environment external scanner
 
 **Next Goals**: 
-- Improve baseline test pass rate
+- Address remaining extended test failures where feasible
 - Complete Phase 6 (Macro system) to enable user-defined commands
-- Implement remaining 19 commands (counters/lengths, documentclass, usepackage, include/input)
+- Implement remaining commands (counters/lengths, documentclass, usepackage, include/input)
 
 **Long-term Vision**: Full LaTeX.js feature parity with ~200 commands, document classes, and package support

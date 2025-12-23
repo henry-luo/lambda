@@ -1406,10 +1406,42 @@ static void cmd_textnormal(LatexProcessor* proc, Item elem) {
 // Font Declaration Commands (bfseries, mdseries, rmfamily, etc.)
 // These can operate in two modes:
 // 1. Declaration-style (no children): \bfseries sets font for subsequent text in current scope
-// 2. Environment-style (with children): \begin{bfseries}...\end{bfseries} wraps content in a span
-// Note: When the parser sees \begin{bfseries}, it creates an element with tag "bfseries"
-// and the environment content as children.
+// 2. Command-style (\small{text}): wraps content in a single span
+// 3. Environment-style (\begin{small}...\end{small}): 
+//    - Outputs ZWS spans at boundaries for visual separation
+//    - Text inside gets per-chunk wrapping via processText() based on font state
+// Distinction: Environment-style has paragraph elements as children (from \begin{...})
+// while command-style has direct text/inline content as children.
 // =============================================================================
+
+// Helper: Check if element has a paragraph child (indicates environment syntax)
+static bool hasEnvironmentSyntax(Item elem) {
+    ElementReader reader(elem);
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            if (tag && strcmp(tag, "paragraph") == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Helper: Output a ZWS marker span with current font class
+// Used at font environment boundaries to mark the transition
+static void outputFontBoundaryZWS(LatexProcessor* proc) {
+    HtmlGenerator* gen = proc->generator();
+    std::string font_class = gen->getFontClass(gen->currentFont());
+    if (!font_class.empty()) {
+        gen->span(font_class.c_str());
+        gen->text("\xe2\x80\x8b ");  // ZWS + space
+        gen->closeElement();
+    }
+}
 
 static void cmd_bfseries(LatexProcessor* proc, Item elem) {
     // \bfseries - switch to bold
@@ -1420,12 +1452,20 @@ static void cmd_bfseries(LatexProcessor* proc, Item elem) {
         // Declaration-style: just set font state
         gen->currentFont().series = FontSeries::Bold;
         proc->setStripNextLeadingSpace(true);
+    } else if (hasEnvironmentSyntax(elem)) {
+        // Environment-style (\begin{bfseries}...): ZWS at boundaries, per-chunk wrapping
+        gen->enterGroup();
+        gen->currentFont().series = FontSeries::Bold;
+        outputFontBoundaryZWS(proc);  // ZWS span at start
+        proc->processChildren(elem);
+        outputFontBoundaryZWS(proc);  // ZWS span at end
+        gen->exitGroup();
     } else {
-        // Environment-style: wrap content in a span
+        // Command-style (\bfseries{text}): single span wrapper
         gen->enterGroup();
         gen->currentFont().series = FontSeries::Bold;
         proc->enterStyledSpan();
-        gen->span("bf");  // LaTeX.js uses "bf" not "bfseries"
+        gen->span("bf");
         proc->processChildren(elem);
         gen->closeElement();
         proc->exitStyledSpan();
@@ -2127,7 +2167,16 @@ static void cmd_small(LatexProcessor* proc, Item elem) {
     
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Small;
+    } else if (hasEnvironmentSyntax(elem)) {
+        // Environment-style (\begin{small}...): ZWS at boundaries, per-chunk wrapping
+        gen->enterGroup();
+        gen->currentFont().size = FontSize::Small;
+        outputFontBoundaryZWS(proc);  // ZWS span at start
+        proc->processChildren(elem);
+        outputFontBoundaryZWS(proc);  // ZWS span at end
+        gen->exitGroup();
     } else {
+        // Command-style (\small{text}): single span wrapper
         gen->enterGroup();
         gen->currentFont().size = FontSize::Small;
         proc->enterStyledSpan();
@@ -4492,11 +4541,11 @@ static void cmd_rlap(LatexProcessor* proc, Item elem) {
 
 static void cmd_centering(LatexProcessor* proc, Item elem) {
     // \centering - center alignment (declaration)
-    // This is a paragraph alignment declaration that affects following paragraphs
-    // in the current group scope. It does NOT wrap content in a div.
-    // Instead, we close the current paragraph and set alignment for the next one.
+    // This is a paragraph alignment declaration that affects the current paragraph
+    // (if open) or following paragraphs in the current group scope.
+    // Per LaTeX semantics, alignment is applied at paragraph END, not start.
+    // We set the alignment but do NOT end the paragraph.
     (void)elem;
-    proc->endParagraph();
     proc->setNextParagraphAlignment("centering");
 }
 
@@ -4504,7 +4553,6 @@ static void cmd_raggedright(LatexProcessor* proc, Item elem) {
     // \raggedright - ragged right (left-aligned, declaration)
     // This is a paragraph alignment declaration
     (void)elem;
-    proc->endParagraph();
     proc->setNextParagraphAlignment("raggedright");
 }
 
@@ -4512,7 +4560,6 @@ static void cmd_raggedleft(LatexProcessor* proc, Item elem) {
     // \raggedleft - ragged left (right-aligned, declaration)
     // This is a paragraph alignment declaration
     (void)elem;
-    proc->endParagraph();
     proc->setNextParagraphAlignment("raggedleft");
 }
 
@@ -5721,6 +5768,7 @@ static void cmd_abstract(LatexProcessor* proc, Item elem) {
     gen->currentFont().size = FontSize::Small;  // set small font for content
     proc->processChildren(elem);
     gen->exitGroup();
+    proc->closeParagraphIfOpen();  // Ensure paragraph is closed before closing div
     gen->closeElement();  // close content div
 }
 
@@ -6637,30 +6685,50 @@ bool LatexProcessor::isInlineCommand(const char* cmd_name) {
 void LatexProcessor::ensureParagraph() {
     // Only open paragraph if we're not inside an inline element
     if (!in_paragraph_ && inline_depth_ == 0) {
-        log_debug("ensureParagraph: opening paragraph, restricted=%d", restricted_h_mode_);
-        if (next_paragraph_alignment_) {
-            // Alignment declaration takes precedence
-            gen_->p(next_paragraph_alignment_);
-            // Keep alignment for subsequent paragraphs (until explicitly changed)
-            // next_paragraph_alignment_ is NOT reset here
-        } else if (next_paragraph_is_noindent_) {
-            gen_->p("noindent");
-            next_paragraph_is_noindent_ = false;  // Reset the flag
-        } else if (next_paragraph_is_continue_) {
-            gen_->p("continue");
-            next_paragraph_is_continue_ = false;  // Reset the flag
-        } else {
-            gen_->p();
-        }
+        log_debug("ensureParagraph: starting paragraph buffering, restricted=%d", restricted_h_mode_);
+        // Start capturing paragraph content - we'll wrap it with <p> when we end the paragraph
+        // This allows alignment commands to affect the paragraph retroactively
+        gen_->startCapture();
         in_paragraph_ = true;
     }
 }
 
 void LatexProcessor::closeParagraphIfOpen() {
     if (in_paragraph_) {
-        log_debug("closeParagraphIfOpen: closing paragraph, restricted=%d", restricted_h_mode_);
-        gen_->trimTrailingWhitespace();  // Trim trailing whitespace before closing paragraph
-        gen_->closeElement();
+        log_debug("closeParagraphIfOpen: closing paragraph with alignment=%s, restricted=%d", 
+                  next_paragraph_alignment_ ? next_paragraph_alignment_ : "none", restricted_h_mode_);
+        
+        // Get the captured paragraph content
+        std::string para_content = gen_->endCapture();
+        
+        // Trim trailing whitespace from captured content
+        while (!para_content.empty() && 
+               (para_content.back() == ' ' || para_content.back() == '\t' || 
+                para_content.back() == '\n' || para_content.back() == '\r')) {
+            para_content.pop_back();
+        }
+        
+        // Only output paragraph if it has content
+        if (!para_content.empty()) {
+            // Determine paragraph class
+            const char* para_class = nullptr;
+            if (next_paragraph_alignment_) {
+                para_class = next_paragraph_alignment_;
+                // Keep alignment for subsequent paragraphs (until explicitly changed)
+            } else if (next_paragraph_is_noindent_) {
+                para_class = "noindent";
+                next_paragraph_is_noindent_ = false;
+            } else if (next_paragraph_is_continue_) {
+                para_class = "continue";
+                next_paragraph_is_continue_ = false;
+            }
+            
+            // Write the paragraph with proper class
+            gen_->p(para_class);
+            gen_->writer()->writeRawHtml(para_content.c_str());
+            gen_->closeElement();
+        }
+        
         in_paragraph_ = false;
     }
 }
