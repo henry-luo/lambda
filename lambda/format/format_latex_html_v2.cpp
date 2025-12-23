@@ -8,6 +8,7 @@
 #include "latex_docclass.hpp"
 #include "latex_assets.hpp"
 #include "latex_picture.hpp"
+#include "latex_hyphenation.hpp"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 #include "../input/input.hpp"
@@ -19,6 +20,7 @@
 #include <iomanip>
 #include <cstring>
 #include <cstdlib>
+#include <ctime>
 #include <strings.h>
 #include <map>
 #include <vector>
@@ -425,7 +427,9 @@ public:
           recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), 
           restricted_h_mode_first_text_(false), next_box_frame_(false),
           pending_zws_output_(false), pending_zws_had_trailing_space_(false),
-          group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0) {}
+          group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0),
+          stored_title_({0}), stored_author_({0}), stored_date_({0}),
+          has_title_(false), has_author_(false), has_date_(false) {}
     
     // Process a LaTeX element tree
     void process(Item root);
@@ -531,6 +535,17 @@ public:
     bool isMacro(const std::string& name);
     MacroDefinition* getMacro(const std::string& name);
     Element* expandMacro(const std::string& name, const std::vector<Element*>& args);
+    
+    // Document metadata storage for \title, \author, \date, \maketitle
+    void storeTitle(Item elem) { stored_title_ = elem; has_title_ = true; }
+    void storeAuthor(Item elem) { stored_author_ = elem; has_author_ = true; }
+    void storeDate(Item elem) { stored_date_ = elem; has_date_ = true; }
+    bool hasTitle() const { return has_title_; }
+    bool hasAuthor() const { return has_author_; }
+    bool hasDate() const { return has_date_; }
+    Item getStoredTitle() const { return stored_title_; }
+    Item getStoredAuthor() const { return stored_author_; }
+    Item getStoredDate() const { return stored_date_; }
     
     // Margin paragraph functions
     int addMarginParagraph(const std::string& content);
@@ -639,6 +654,15 @@ private:
     };
     std::vector<MarginParagraph> margin_paragraphs_;
     int margin_par_counter_;  // Counter for generating unique IDs
+    
+    // Document metadata storage for \maketitle
+    // Stores element references so content can be rendered later
+    Item stored_title_;       // Content from \title{}
+    Item stored_author_;      // Content from \author{}
+    Item stored_date_;        // Content from \date{}
+    bool has_title_;
+    bool has_author_;
+    bool has_date_;
     
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
@@ -4857,33 +4881,24 @@ static void cmd_raggedleft(LatexProcessor* proc, Item elem) {
 // =============================================================================
 
 static void cmd_author(LatexProcessor* proc, Item elem) {
-    // \author{name} - set document author
-    HtmlGenerator* gen = proc->generator();
-    // Store author for \maketitle
-    // For now, just output inline with span - \maketitle will format properly later
-    gen->span("latex-author");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \author{name} - store author content for \maketitle
+    // LaTeX.js stores these and renders them in \maketitle
+    proc->storeAuthor(elem);
+    // Don't output anything - \maketitle will render
 }
 
 static void cmd_title(LatexProcessor* proc, Item elem) {
-    // \title{text} - set document title
-    HtmlGenerator* gen = proc->generator();
-    // Store title for \maketitle  
-    // For now, just output inline with span - \maketitle will format properly later
-    gen->span("latex-title");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \title{text} - store title content for \maketitle
+    // LaTeX.js stores these and renders them in \maketitle
+    proc->storeTitle(elem);
+    // Don't output anything - \maketitle will render
 }
 
 static void cmd_date(LatexProcessor* proc, Item elem) {
-    // \date{text} - set document date
-    HtmlGenerator* gen = proc->generator();
-    // Store date for \maketitle
-    // For now, just output inline with span - \maketitle will format properly later
-    gen->span("latex-date");
-    proc->processChildren(elem);
-    gen->closeElement();
+    // \date{text} - store date content for \maketitle
+    // LaTeX.js stores these and renders them in \maketitle
+    proc->storeDate(elem);
+    // Don't output anything - \maketitle will render
 }
 
 static void cmd_thanks(LatexProcessor* proc, Item elem) {
@@ -4895,12 +4910,79 @@ static void cmd_thanks(LatexProcessor* proc, Item elem) {
 }
 
 static void cmd_maketitle(LatexProcessor* proc, Item elem) {
-    // \maketitle - generate title page
+    // \maketitle - generate title block matching LaTeX.js structure
+    // Structure: div.list.center containing:
+    //   - vspace 2em
+    //   - div.title (inline content only, no <p> tags)
+    //   - vspace 1.5em  
+    //   - div.author (inline content only)
+    //   - vspace 1em
+    //   - div.date (inline content only)
+    //   - vspace 1.5em
+    (void)elem;
     HtmlGenerator* gen = proc->generator();
-    gen->div("maketitle");
-    // TODO: Combine stored title, author, date
-    // For now, just create a placeholder
+    
+    // Close any open paragraph before title block
+    proc->closeParagraphIfOpen();
+    
+    // Start the centered title block container
+    // Use raw HTML since we need class="list center" (two classes)
+    gen->writer()->writeRawHtml("<div class=\"list center\">");
+    gen->enterGroup();  // Track element depth
+    
+    // Vertical space before title (2em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:2em");
     gen->closeElement();
+    
+    // Title - enter inline mode to suppress <p> creation
+    if (proc->hasTitle()) {
+        gen->div("title");
+        proc->enterInlineMode();
+        proc->processChildren(proc->getStoredTitle());
+        proc->exitInlineMode();
+        gen->closeElement();
+    }
+    
+    // Vertical space after title (1.5em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:1.5em");
+    gen->closeElement();
+    
+    // Author - enter inline mode to suppress <p> creation
+    if (proc->hasAuthor()) {
+        gen->div("author");
+        proc->enterInlineMode();
+        proc->processChildren(proc->getStoredAuthor());
+        proc->exitInlineMode();
+        gen->closeElement();
+    }
+    
+    // Vertical space after author (1em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:1em");
+    gen->closeElement();
+    
+    // Date (or today's date if not set) - enter inline mode
+    gen->div("date");
+    proc->enterInlineMode();
+    if (proc->hasDate()) {
+        proc->processChildren(proc->getStoredDate());
+    } else {
+        // Default to current date like LaTeX.js \today
+        time_t now = time(nullptr);
+        struct tm* tm_info = localtime(&now);
+        char date_buf[64];
+        strftime(date_buf, sizeof(date_buf), "%B %d, %Y", tm_info);
+        gen->text(date_buf);
+    }
+    proc->exitInlineMode();
+    gen->closeElement();
+    
+    // Vertical space after date (1.5em)
+    gen->spanWithClassAndStyle("vspace", "margin-bottom:1.5em");
+    gen->closeElement();
+    
+    // Close the container
+    gen->writer()->writeRawHtml("</div>");
+    gen->exitGroup();
 }
 
 // =============================================================================
@@ -9407,6 +9489,13 @@ void LatexProcessor::processText(const char* text) {
     // And single hyphen → Unicode hyphen (U+2010)
     // In monospace mode, dash/ligature conversions are skipped
     normalized = convertApostrophes(normalized.c_str(), inMonospaceMode());
+    
+    // Apply hyphenation - insert soft hyphens (U+00AD) at valid break points
+    // This allows the browser to break long words for better text justification
+    // Skip hyphenation in monospace mode (verbatim, code, etc.)
+    if (!inMonospaceMode()) {
+        normalized = Hyphenator::instance().hyphenateText(normalized);
+    }
     
     // Check if result is pure whitespace (multiple spaces/newlines)
     // Don't skip single spaces - they're significant in inline content

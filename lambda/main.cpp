@@ -484,9 +484,9 @@ int exec_convert(int argc, char* argv[]) {
                 // Use LaTeX to HTML v2 converter (hybrid grammar support)
                 printf("Using LaTeX to HTML v2 converter\n");
                 if (full_document) {
-                    // Generate complete HTML document with CSS
-                    printf("Generating full HTML document with embedded CSS\n");
-                    full_doc_output = lambda::format_latex_html_v2_document(input, "article", nullptr, true);
+                    // Generate complete HTML document with external CSS links
+                    printf("Generating full HTML document with external CSS links\n");
+                    full_doc_output = lambda::format_latex_html_v2_document(input, "article", nullptr, false);
                     if (full_doc_output.empty()) {
                         printf("Error: LaTeX to HTML v2 full document conversion failed\n");
                     }
