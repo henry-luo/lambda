@@ -135,8 +135,8 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         CssFontFaceDescriptor* css_desc = css_descs[i];
         if (!css_desc) continue;
 
-        // Skip fonts without a loadable source (e.g., remote URLs)
-        if (!css_desc->src_url && !css_desc->src_local) {
+        // Skip fonts without any loadable source
+        if ((!css_desc->src_urls || css_desc->src_count == 0) && !css_desc->src_url && !css_desc->src_local) {
             clog_debug(font_log, "Skipping @font-face '%s': no local source available",
                        css_desc->family_name ? css_desc->family_name : "(unnamed)");
             css_font_face_descriptor_free(css_desc);
@@ -153,6 +153,20 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
             descriptor->font_display = css_desc->font_display;
             descriptor->is_loaded = false;
 
+            // Copy src_urls array for multi-format fallback
+            if (css_desc->src_urls && css_desc->src_count > 0) {
+                descriptor->src_entries = (FontFaceSrc*)calloc(css_desc->src_count, sizeof(FontFaceSrc));
+                if (descriptor->src_entries) {
+                    descriptor->src_count = css_desc->src_count;
+                    for (int j = 0; j < css_desc->src_count; j++) {
+                        descriptor->src_entries[j].path = css_desc->src_urls[j].url ? strdup(css_desc->src_urls[j].url) : nullptr;
+                        descriptor->src_entries[j].format = css_desc->src_urls[j].format ? strdup(css_desc->src_urls[j].format) : nullptr;
+                    }
+                    clog_debug(font_log, "Copied %d src entries for @font-face '%s'",
+                        descriptor->src_count, descriptor->family_name);
+                }
+            }
+
             register_font_face(uicon, descriptor);
         }
 
@@ -168,11 +182,51 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc) return;
     if (!doc->stylesheets || doc->stylesheet_count == 0) return;
 
-    char* base_path = url_to_local_path(doc->url);
+    // Default base path from document URL (used for inline styles)
+    char* doc_base_path = url_to_local_path(doc->url);
+
     for (int i = 0; i < doc->stylesheet_count; i++) {
-        if (doc->stylesheets[i]) {
-            process_font_face_rules_from_stylesheet(uicon, doc->stylesheets[i], base_path);
+        CssStylesheet* stylesheet = doc->stylesheets[i];
+        if (!stylesheet) continue;
+
+        // Use stylesheet's origin_url if available, otherwise fall back to document URL
+        // This is important for external CSS files where font URLs are relative to the CSS file
+        const char* base_path = doc_base_path;
+        char* stylesheet_path = nullptr;
+
+        if (stylesheet->origin_url) {
+            // origin_url can be either a plain file path or a file:// URL
+            // Check if it starts with "/" (plain file path) or "file://" (URL)
+            if (stylesheet->origin_url[0] == '/') {
+                // Plain file path - use directly
+                stylesheet_path = strdup(stylesheet->origin_url);
+                if (stylesheet_path) {
+                    base_path = stylesheet_path;
+                    clog_debug(font_log, "Using stylesheet origin_url (plain path) for font resolution: %s", base_path);
+                }
+            } else if (strncmp(stylesheet->origin_url, "file://", 7) == 0) {
+                // URL - parse and convert
+                Url* stylesheet_url = url_parse(stylesheet->origin_url);
+                if (stylesheet_url) {
+                    stylesheet_path = url_to_local_path(stylesheet_url);
+                    url_destroy(stylesheet_url);
+                    if (stylesheet_path) {
+                        base_path = stylesheet_path;
+                        clog_debug(font_log, "Using stylesheet origin_url (file URL) for font resolution: %s", base_path);
+                    }
+                }
+            }
         }
+
+        process_font_face_rules_from_stylesheet(uicon, stylesheet, base_path);
+
+        if (stylesheet_path) {
+            free(stylesheet_path);
+        }
+    }
+
+    if (doc_base_path) {
+        free(doc_base_path);
     }
 }
 
@@ -423,26 +477,79 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
             }
         }
 
-        // Load the best matching font
+        // Load the best matching font - try multiple src entries if available
         if (best_match) {
             log_info("Found @font-face match for: %s (score=%.2f, weight=%d, style=%d)",
                       family_name, best_score, best_match->font_weight, best_match->font_style);
 
-            if (best_match->src_local_path) {
-                FT_Face face = load_local_font_file(uicon, best_match->src_local_path, style);
-                if (face) {
-                    best_match->loaded_face = face;
-                    best_match->is_loaded = true;
+            FT_Face face = NULL;
 
-                    if (is_fallback) *is_fallback = false;
-                    log_info("Successfully loaded @font-face: %s from %s",
-                              family_name, best_match->src_local_path);
-                    return face;
+            // Try src_entries array first (multiple formats with fallback)
+            if (best_match->src_entries && best_match->src_count > 0) {
+                // Preferred format order: woff2, woff, truetype/ttf, opentype/otf
+                // Skip embedded-opentype (EOT) as FreeType doesn't support it
+                const char* preferred_formats[] = {"woff2", "woff", "truetype", "opentype", NULL};
+
+                // First pass: try preferred formats in order
+                for (int pref = 0; preferred_formats[pref] && !face; pref++) {
+                    const char* pref_fmt = preferred_formats[pref];
+                    for (int j = 0; j < best_match->src_count && !face; j++) {
+                        if (!best_match->src_entries[j].path) continue;
+
+                        const char* fmt = best_match->src_entries[j].format;
+                        if (fmt && strcasecmp(fmt, pref_fmt) == 0) {
+                            log_debug("Trying preferred format '%s': %s", pref_fmt, best_match->src_entries[j].path);
+                            face = load_local_font_file(uicon, best_match->src_entries[j].path, style);
+                            if (face) {
+                                log_info("Successfully loaded @font-face '%s' from %s (format: %s)",
+                                    family_name, best_match->src_entries[j].path, pref_fmt);
+                            }
+                        }
+                    }
+                }
+
+                // Second pass: try any remaining non-EOT format
+                if (!face) {
+                    for (int j = 0; j < best_match->src_count && !face; j++) {
+                        if (!best_match->src_entries[j].path) continue;
+
+                        const char* fmt = best_match->src_entries[j].format;
+                        // Skip EOT format (FreeType doesn't support it)
+                        if (fmt && strcasecmp(fmt, "embedded-opentype") == 0) {
+                            log_debug("Skipping embedded-opentype format: %s", best_match->src_entries[j].path);
+                            continue;
+                        }
+
+                        log_debug("Trying src entry %d: %s (format: %s)", j,
+                            best_match->src_entries[j].path, fmt ? fmt : "(none)");
+                        face = load_local_font_file(uicon, best_match->src_entries[j].path, style);
+                        if (face) {
+                            log_info("Successfully loaded @font-face '%s' from %s",
+                                family_name, best_match->src_entries[j].path);
+                        }
+                    }
+                }
+            }
+
+            // Fallback to src_local_path if no src_entries or all failed
+            if (!face && best_match->src_local_path) {
+                log_debug("Trying fallback src_local_path: %s", best_match->src_local_path);
+                face = load_local_font_file(uicon, best_match->src_local_path, style);
+                if (face) {
+                    log_info("Successfully loaded @font-face '%s' from fallback: %s",
+                        family_name, best_match->src_local_path);
                 } else {
                     log_warn("Failed to load @font-face file: %s", best_match->src_local_path);
                 }
+            }
+
+            if (face) {
+                best_match->loaded_face = face;
+                best_match->is_loaded = true;
+                if (is_fallback) *is_fallback = false;
+                return face;
             } else {
-                log_warn("No src_local_path for @font-face: %s", family_name);
+                log_warn("All font sources failed for @font-face: %s", family_name);
             }
         }
     }
