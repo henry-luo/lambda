@@ -473,24 +473,28 @@
       ]
     },
     "brack_group": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "["
-        },
-        {
-          "type": "REPEAT",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_group_content"
+      "type": "PREC",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "["
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_group_content"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "]"
           }
-        },
-        {
-          "type": "STRING",
-          "value": "]"
-        }
-      ]
+        ]
+      }
     },
     "_group_content": {
       "type": "CHOICE",
@@ -502,6 +506,14 @@
         {
           "type": "SYMBOL",
           "name": "space"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "paragraph_break"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "line_comment"
         },
         {
           "type": "SYMBOL",
@@ -542,6 +554,18 @@
         {
           "type": "STRING",
           "value": "="
+        },
+        {
+          "type": "STRING",
+          "value": "]"
+        },
+        {
+          "type": "PREC",
+          "value": -1,
+          "content": {
+            "type": "STRING",
+            "value": "["
+          }
         }
       ]
     },
@@ -1104,6 +1128,9 @@
     [
       "controlspace_command",
       "control_symbol"
+    ],
+    [
+      "brack_group"
     ]
   ],
   "precedences": [],

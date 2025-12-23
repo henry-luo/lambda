@@ -516,6 +516,17 @@ public:
     bool hasMarginParagraphs() const;
     void writeMarginParagraphs(HtmlWriter* writer);
     
+    // Helper to get next sibling (skipping whitespace) for command argument collection
+    // Returns true if a sibling was found, sets out_item and out_type
+    bool getNextSiblingArg(int64_t offset, Item* out_item, const char** out_type);
+    
+    // Helper to consume sibling arguments for echo commands
+    // Returns number of siblings consumed
+    int consumeSiblingArgs(std::vector<Item>& brack_args, std::vector<Item>& curly_args);
+    
+    // Helper to output the content of a group with parbreak -> <br> conversion
+    void outputGroupContent(Item group_item);
+    
 private:
     HtmlGenerator* gen_;
     Pool* pool_;
@@ -598,6 +609,15 @@ private:
     
     // Process specific command
     void processCommand(const char* cmd_name, Item elem);
+    
+    // Sibling context for lookahead in command handlers
+    // Set by processChildren before calling processNode/processCommand
+    struct SiblingContext {
+        ElementReader* parent_reader;  // Parent element containing siblings
+        int64_t current_index;         // Current child index being processed
+        int64_t* consumed_count;       // Output: how many extra siblings were consumed
+    };
+    SiblingContext sibling_ctx_;
     
     // Initialize command table
     void initCommandTable();
@@ -2287,7 +2307,7 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
     // Three cases for \empty:
     // 1. \empty (no braces) - produces nothing (null command)
     // 2. \empty{} (empty braces) - output ZWS
-    // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at end
+    // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at boundaries
     
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
@@ -2339,11 +2359,55 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
         }
     }
     
-    // Case 3: Environment with content - process children + ZWS at end
-    // The ZWS at the end prevents the following space from being consumed
+    // Case 3: Environment with content - ZWS at start (if leading whitespace) and end
+    // ZWS at end prevents space after environment content from collapsing
+    // with following content. ZWS at start (before leading whitespace) preserves
+    // the boundary when there's whitespace before the environment content.
     if (has_other_content) {
+        // Check if content starts with whitespace
+        // The empty element may contain a 'paragraph' wrapper, so we need to look inside
+        auto first_iter = reader.children();
+        ItemReader first_child;
+        bool has_leading_whitespace = false;
+        while (first_iter.next(&first_child)) {
+            if (first_child.isString()) {
+                const char* str = first_child.cstring();
+                if (str && str[0] != '\0' && isspace(str[0])) {
+                    has_leading_whitespace = true;
+                }
+                break;
+            } else if (first_child.isElement()) {
+                // If first child is a paragraph element, look inside it
+                ElementReader child_elem(first_child.item());
+                const char* tag = child_elem.tagName();
+                if (tag && strcmp(tag, "paragraph") == 0) {
+                    // Look at the paragraph's first child
+                    auto para_iter = child_elem.children();
+                    ItemReader para_child;
+                    while (para_iter.next(&para_child)) {
+                        if (para_child.isString()) {
+                            const char* str = para_child.cstring();
+                            if (str && str[0] != '\0' && isspace(str[0])) {
+                                has_leading_whitespace = true;
+                            }
+                            break;
+                        } else if (para_child.isElement()) {
+                            break;  // Non-string first child means no leading whitespace
+                        }
+                    }
+                }
+                break;  // First child is element, done checking
+            }
+        }
+        
+        // Output ZWS at start if there's leading whitespace in content
+        if (has_leading_whitespace) {
+            proc->ensureParagraph();
+            gen->text("\xE2\x80\x8B");  // ZWS at start
+        }
+        
         proc->processChildren(elem);
-        gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
+        gen->text("\xE2\x80\x8B");  // ZWS at end
         return;
     }
     
@@ -2583,8 +2647,12 @@ static void cmd_makeatother(LatexProcessor* proc, Item elem) {
 static void cmd_section(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     
-    // End any open paragraph before section heading
-    proc->endParagraph();
+    // Only end paragraph if we're NOT inside a styled span (inline context)
+    // When section appears inside \emph{} or similar, keep inline flow
+    // and let CSS handle the visual appearance (per LaTeX.js behavior)
+    if (!proc->inStyledSpan()) {
+        proc->endParagraph();
+    }
     
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
@@ -2865,6 +2933,8 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
     
     bool in_item = false;
     bool at_item_start = false;  // Track if we're at the very start of an item (for whitespace trimming)
+    bool item_paragraph_open = false;  // Track if we have an open <p> inside item
+    bool next_paragraph_noindent = false;  // Track if next paragraph should have noindent class
     
     for (size_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
@@ -2889,6 +2959,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             // Close previous item if open
                             if (in_item) {
                                 proc->setInParagraph(false);  // Reset paragraph state before closing item
+                                item_paragraph_open = false;  // Reset paragraph tracking
                                 gen->endItem();  // Close li/dd with proper structure
                             }
                             
@@ -2927,12 +2998,29 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                 gen->createItem(nullptr);
                             }
                             proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
+                            item_paragraph_open = true;  // <p> is now open
                             in_item = true;
                             at_item_start = true;  // Next text should be trimmed
+                            next_paragraph_noindent = false;  // Reset noindent flag for new item
                         } else {
                             // Other element within paragraph
                             if (in_item) {
                                 const char* elem_tag = para_child_elem.tagName();
+                                
+                                // Check if this is the noindent command
+                                if (elem_tag && strcmp(elem_tag, "noindent") == 0) {
+                                    // \noindent - close current paragraph and set flag for next
+                                    if (item_paragraph_open) {
+                                        gen->trimTrailingWhitespace();
+                                        gen->closeElement();  // Close <p>
+                                        proc->setInParagraph(false);
+                                        item_paragraph_open = false;
+                                    }
+                                    next_paragraph_noindent = true;
+                                    at_item_start = true;  // Trim leading whitespace
+                                    continue;
+                                }
+                                
                                 // Check if this is a block element (list, etc.)
                                 bool is_block = elem_tag && (
                                     strcmp(elem_tag, "itemize") == 0 ||
@@ -2948,9 +3036,12 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                 
                                 if (is_block) {
                                     // Close <p> before block element
-                                    gen->trimTrailingWhitespace();
-                                    gen->closeElement();  // Close <p>
-                                    proc->setInParagraph(false);  // <p> is now closed
+                                    if (item_paragraph_open) {
+                                        gen->trimTrailingWhitespace();
+                                        gen->closeElement();  // Close <p>
+                                        proc->setInParagraph(false);  // <p> is now closed
+                                        item_paragraph_open = false;
+                                    }
                                     proc->processNode(para_child.item());
                                     // DON'T open new <p> here - let endItem handle it
                                     // The <p> will be opened lazily when text content is encountered
@@ -2965,26 +3056,43 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         // Symbol - check for parbreak
                         String* sym = para_child.asSymbol();
                         if (sym && strcmp(sym->chars, "parbreak") == 0) {
-                            // Paragraph break within list item - close </p> and open <p>
-                            if (in_item) {
+                            // Paragraph break within list item - close </p> only
+                            if (in_item && item_paragraph_open) {
                                 gen->itemParagraphBreak();
+                                item_paragraph_open = false;
+                                proc->setInParagraph(false);
                                 at_item_start = true;  // Trim leading whitespace in new paragraph
                             }
                         }
                     } else if (para_child.isString()) {
                         // Text content
                         const char* text = para_child.cstring();
+                        log_debug("processListItems: text child '%s', at_item_start=%d, item_paragraph_open=%d", 
+                                  text, at_item_start ? 1 : 0, item_paragraph_open ? 1 : 0);
                         if (in_item && text && text[0] != '\0') {
                             // Trim leading whitespace at start of item or after paragraph break
                             if (at_item_start) {
                                 while (*text && isspace((unsigned char)*text)) {
                                     text++;
                                 }
-                                at_item_start = false;
+                                // Only reset at_item_start when we have actual content
+                                // This way multiple whitespace-only text nodes are all skipped
                             }
                             
                             // Skip if now empty after trimming
                             if (text[0] != '\0') {
+                                // Reset at_item_start now that we have actual content
+                                at_item_start = false;
+                                
+                                // Open paragraph if needed (lazy paragraph opening)
+                                if (!item_paragraph_open) {
+                                    log_debug("processListItems: lazy opening p for text '%s'", text);
+                                    const char* p_class = next_paragraph_noindent ? "noindent" : nullptr;
+                                    gen->writer()->openTag("p", p_class);
+                                    item_paragraph_open = true;
+                                    proc->setInParagraph(true);
+                                    next_paragraph_noindent = false;  // Reset flag after use
+                                }
                                 // Convert apostrophes and output text
                                 std::string converted = convertApostrophes(text);
                                 gen->text(converted.c_str());
@@ -3578,13 +3686,22 @@ static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
     // latex.js: args.echoOGO = <[ H o? g o? ]>
     // Pattern: -optional- for optional args, +mandatory+ for mandatory args
     // For \echoOGO[o1]{g}[o2] -> outputs: -o1-+g+-o2-
-    // Note: The parser may put the mandatory arg as direct text child or in a group
+    // 
+    // Parser behavior:
+    // - First curly_group {g} is UNWRAPPED: its content becomes direct children of the command
+    // - If [o1] is directly adjacent (no space), it becomes a child
+    // - If [o2] is separated by space, it becomes a SIBLING
     
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     ElementReader reader(elem);
     
-    bool found_mandatory = false;
+    std::vector<Item> brack_args_children;  // optional args from children (before mandatory)
+    std::vector<Item> brack_args_siblings;  // optional args from siblings (after mandatory)
+    std::vector<Item> curly_args;           // extra mandatory args from siblings (shouldn't normally happen)
+    
+    // Mandatory arg: the unwrapped text content of the command element
+    StringBuf* mandatory_sb = stringbuf_new(pool);
     
     auto iter = reader.children();
     ItemReader child;
@@ -3594,33 +3711,49 @@ static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
             const char* tag = child_elem.tagName();
             
             if (strcmp(tag, "brack_group") == 0) {
-                // Optional argument - output -content-
-                gen->text("-");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("-");
-            } else if (strcmp(tag, "group") == 0 && !found_mandatory) {
-                // Mandatory group argument - output +content+
-                found_mandatory = true;
-                gen->text("+");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("+");
+                // Optional arg as child (before mandatory, i.e. [o1])
+                brack_args_children.push_back(child.item());
+            } else if (strcmp(tag, "group") == 0 || strcmp(tag, "curly_group") == 0) {
+                // Should not happen for echoOGO since only curly is mandatory and gets unwrapped
+                child_elem.textContent(mandatory_sb);
+            } else {
+                // Other element content - add to mandatory
+                child_elem.textContent(mandatory_sb);
             }
-        } else if (child.isString() && !found_mandatory) {
-            // Text child as mandatory argument
-            found_mandatory = true;
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0) {
-                gen->text("+");
-                gen->text(text);
-                gen->text("+");
-            }
+        } else if (child.isString()) {
+            // Text content (unwrapped from {g})
+            stringbuf_append_str(mandatory_sb, child.cstring());
         }
+    }
+    
+    // Then, consume sibling arguments (pattern: o? after mandatory)
+    proc->consumeSiblingArgs(brack_args_siblings, curly_args);
+    
+    // Ensure we're in a paragraph before outputting content
+    proc->ensureParagraph();
+    
+    // Output: -o1- +g+ -o2-
+    
+    // First optional(s) from children (use outputGroupContent to handle parbreak -> <br>)
+    for (size_t i = 0; i < brack_args_children.size(); i++) {
+        gen->text("-");
+        proc->outputGroupContent(brack_args_children[i]);
+        gen->text("-");
+    }
+    
+    // Mandatory (unwrapped text content)
+    String* mandatory = stringbuf_to_string(mandatory_sb);
+    if (mandatory && mandatory->len > 0) {
+        gen->text("+");
+        gen->text(mandatory->chars);
+        gen->text("+");
+    }
+    
+    // Second optional(s) from siblings (use outputGroupContent to handle parbreak -> <br>)
+    for (size_t i = 0; i < brack_args_siblings.size(); i++) {
+        gen->text("-");
+        proc->outputGroupContent(brack_args_siblings[i]);
+        gen->text("-");
     }
 }
 
@@ -3628,13 +3761,22 @@ static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
     // \echoGOG{g1}[o]{g2} - from echo package for testing
     // latex.js: args.echoGOG = <[ H g o? g ]>
     // Pattern: +g1+-o-+g2+ where optional is only if present
-    // Note: The parser may put mandatory args as direct text children or in groups
+    // 
+    // Parser behavior:
+    // - First curly_group {g1} is UNWRAPPED: its content becomes direct children of the command
+    // - If [o] and {g2} are directly adjacent (no space), they become children
+    // - If [o] and {g2} are separated by space, they become SIBLINGS
     
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     ElementReader reader(elem);
     
-    int mandatory_count = 0;
+    std::vector<Item> brack_args;  // optional args (from children and siblings)
+    std::vector<Item> curly_args;  // mandatory args (from siblings only - first is unwrapped)
+    
+    // First mandatory arg: the unwrapped text content of the command element
+    // Collect all non-brack_group, non-curly_group children as the first mandatory
+    StringBuf* first_mandatory_sb = stringbuf_new(pool);
     
     auto iter = reader.children();
     ItemReader child;
@@ -3643,34 +3785,51 @@ static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
             
-            if (strcmp(tag, "group") == 0) {
-                // Mandatory group argument - output +content+
-                mandatory_count++;
-                gen->text("+");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("+");
-            } else if (strcmp(tag, "brack_group") == 0) {
-                // Optional argument - output -content-
-                gen->text("-");
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* str = stringbuf_to_string(sb);
-                gen->text(str->chars);
-                gen->text("-");
+            if (strcmp(tag, "brack_group") == 0) {
+                // Optional arg as child (no space between command and [])
+                brack_args.push_back(child.item());
+            } else if (strcmp(tag, "group") == 0 || strcmp(tag, "curly_group") == 0) {
+                // Additional mandatory arg as child (shouldn't happen with unwrapping, but handle it)
+                curly_args.push_back(child.item());
+            } else {
+                // Other element content - add to first mandatory
+                child_elem.textContent(first_mandatory_sb);
             }
-        } else if (child.isString() && mandatory_count < 2) {
-            // Text child as mandatory argument
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0) {
-                mandatory_count++;
-                gen->text("+");
-                gen->text(text);
-                gen->text("+");
-            }
+        } else if (child.isString()) {
+            // Text content (unwrapped from first curly_group)
+            stringbuf_append_str(first_mandatory_sb, child.cstring());
         }
+    }
+    
+    // Then, consume sibling arguments (optional and second mandatory)
+    proc->consumeSiblingArgs(brack_args, curly_args);
+    
+    // Ensure we're in a paragraph before outputting content
+    proc->ensureParagraph();
+    
+    // Pattern for echoGOG: g o? g
+    // Output: +g1+ -o- +g2+ (or +g1+ +g2+ if no optional)
+    
+    // First mandatory (unwrapped text content)
+    String* first_mandatory = stringbuf_to_string(first_mandatory_sb);
+    if (first_mandatory && first_mandatory->len > 0) {
+        gen->text("+");
+        gen->text(first_mandatory->chars);
+        gen->text("+");
+    }
+    
+    // Optional (if present) - use outputGroupContent to handle parbreak -> <br>
+    for (size_t i = 0; i < brack_args.size(); i++) {
+        gen->text("-");
+        proc->outputGroupContent(brack_args[i]);
+        gen->text("-");
+    }
+    
+    // Second mandatory (from siblings) - use outputGroupContent for consistency
+    for (size_t i = 0; i < curly_args.size(); i++) {
+        gen->text("+");
+        proc->outputGroupContent(curly_args[i]);
+        gen->text("+");
     }
 }
 
@@ -6510,10 +6669,197 @@ void LatexProcessor::endParagraph() {
     closeParagraphIfOpen();
 }
 
+// Helper: Get next sibling argument, skipping whitespace/comments
+bool LatexProcessor::getNextSiblingArg(int64_t offset, Item* out_item, const char** out_type) {
+    if (!sibling_ctx_.parent_reader) return false;
+    
+    int64_t count = sibling_ctx_.parent_reader->childCount();
+    int64_t idx = sibling_ctx_.current_index + offset;
+    
+    while (idx < count) {
+        ItemReader reader = sibling_ctx_.parent_reader->childAt(idx);
+        
+        // Skip whitespace strings
+        if (reader.isString()) {
+            const char* text = reader.cstring();
+            if (text) {
+                bool is_whitespace = true;
+                for (const char* p = text; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                        is_whitespace = false;
+                        break;
+                    }
+                }
+                if (is_whitespace) {
+                    idx++;
+                    continue;
+                }
+            }
+        }
+        
+        // Skip space elements
+        if (reader.isElement()) {
+            ElementReader elem(reader.item());
+            const char* tag = elem.tagName();
+            if (tag && strcmp(tag, "space") == 0) {
+                idx++;
+                continue;
+            }
+            // Found a non-whitespace element
+            *out_item = reader.item();
+            *out_type = tag;
+            return true;
+        }
+        
+        // Any other content - not a valid argument
+        break;
+    }
+    
+    return false;
+}
+
+// Helper: Output the content of a group (brack_group, curly_group, etc.) with parbreak handling
+// This processes children and converts parbreak symbols to <br> tags
+void LatexProcessor::outputGroupContent(Item group_item) {
+    HtmlGenerator* gen = generator();
+    ElementReader reader(group_item);
+    
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && *text) {
+                gen->text(text);
+            }
+        } else if (child.isSymbol()) {
+            const char* sym = child.cstring();
+            if (sym && strcmp(sym, "parbreak") == 0) {
+                // Convert paragraph break to <br>
+                gen->lineBreak(false);
+            } else if (sym) {
+                // Other symbols - output as-is
+                gen->text(sym);
+            }
+        } else if (child.isElement()) {
+            ElementReader elem(child.item());
+            const char* tag = elem.tagName();
+            
+            if (tag && strcmp(tag, "line_comment") == 0) {
+                // Skip line comments in group content
+                continue;
+            }
+            
+            // For other elements, extract text content recursively
+            Pool* pool = this->pool();
+            StringBuf* sb = stringbuf_new(pool);
+            elem.textContent(sb);
+            String* str = stringbuf_to_string(sb);
+            if (str && str->len > 0) {
+                gen->text(str->chars);
+            }
+        }
+    }
+}
+
+// Helper: Consume sibling brack_group and curly_group arguments
+int LatexProcessor::consumeSiblingArgs(std::vector<Item>& brack_args, std::vector<Item>& curly_args) {
+    // Debug logging
+    FILE* debug_f = fopen("/tmp/sibling_debug.txt", "a");
+    if (debug_f) {
+        fprintf(debug_f, "consumeSiblingArgs: parent_reader=%p, current_index=%lld\n", 
+                (void*)sibling_ctx_.parent_reader, (long long)sibling_ctx_.current_index);
+    }
+    
+    if (!sibling_ctx_.parent_reader) {
+        if (debug_f) { fprintf(debug_f, "  -> no parent_reader, returning 0\n"); fclose(debug_f); }
+        return 0;
+    }
+    
+    int consumed = 0;
+    int64_t count = sibling_ctx_.parent_reader->childCount();
+    int64_t idx = sibling_ctx_.current_index + 1;
+    
+    if (debug_f) {
+        fprintf(debug_f, "  -> count=%lld, starting at idx=%lld\n", (long long)count, (long long)idx);
+    }
+    
+    while (idx < count) {
+        ItemReader reader = sibling_ctx_.parent_reader->childAt(idx);
+        
+        // Skip whitespace strings
+        if (reader.isString()) {
+            const char* text = reader.cstring();
+            if (text) {
+                bool is_whitespace = true;
+                for (const char* p = text; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                        is_whitespace = false;
+                        break;
+                    }
+                }
+                if (is_whitespace) {
+                    consumed++;
+                    idx++;
+                    continue;
+                }
+            }
+            // Non-whitespace text - stop consuming
+            break;
+        }
+        
+        // Check for brack_group or curly_group elements
+        if (reader.isElement()) {
+            ElementReader elem(reader.item());
+            const char* tag = elem.tagName();
+            
+            if (tag && strcmp(tag, "space") == 0) {
+                consumed++;
+                idx++;
+                continue;
+            }
+            
+            if (tag && strcmp(tag, "brack_group") == 0) {
+                brack_args.push_back(reader.item());
+                consumed++;
+                idx++;
+                continue;
+            }
+            
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                curly_args.push_back(reader.item());
+                consumed++;
+                idx++;
+                continue;
+            }
+            
+            // Any other element - stop consuming
+            break;
+        }
+        
+        // Any other node type - stop consuming
+        break;
+    }
+    
+    // Update the consumed count so processChildren can skip these siblings
+    if (sibling_ctx_.consumed_count) {
+        *sibling_ctx_.consumed_count = consumed;
+    }
+    
+    if (debug_f) {
+        fprintf(debug_f, "  -> returning consumed=%d, brack_args.size=%zu, curly_args.size=%zu\n", 
+                consumed, brack_args.size(), curly_args.size());
+        fclose(debug_f);
+    }
+    
+    return consumed;
+}
+
 void LatexProcessor::process(Item root) {
     initCommandTable();
     in_paragraph_ = false;  // Reset paragraph state
     depth_exceeded_ = false;  // Reset depth error flag for this processing session
+    sibling_ctx_ = {};  // Reset sibling context
     processNode(root);
     closeParagraphIfOpen();  // Close any open paragraph at the end
 }
@@ -6540,6 +6886,12 @@ void LatexProcessor::processNode(Item node) {
         String* str = reader.asString();
         if (str && str->len > 0) {
             const char* text = str->chars;
+            
+            // Skip EMPTY_STRING sentinel (which has content "lambda.nil")
+            if (str == &EMPTY_STRING || 
+                (str->len == 10 && strncmp(text, "lambda.nil", 10) == 0)) {
+                return;  // skip the empty string sentinel
+            }
             
             // Debug: log "document" string to track where it's coming from
             if (strcmp(text, "document") == 0) {
@@ -6764,6 +7116,13 @@ void LatexProcessor::processNode(Item node) {
             // Get the actual space text from children and normalize to single space
             // In LaTeX, any amount of horizontal whitespace or single newline = one space
             processText(" ");
+            return;
+        }
+        
+        // Handle _seq elements (from error recovery in parser)
+        // These are transparent containers - just process children
+        if (strcmp(tag, "_seq") == 0) {
+            processChildren(node);
             return;
         }
         
@@ -7214,8 +7573,83 @@ void LatexProcessor::processChildren(Item elem) {
             
         }
         
+        // Check if this is a text node containing an embedded command followed by curly_group
+        // This handles cases like \emph{text} where parser produces: ["\x1bmph", curly_group{text}]
+        // The parser encodes \cmd as ESC (0x1B) + cmdname (e.g., \emph → 0x1B + "mph")
+        // We need to combine them so the command handler can process the argument
+        if (child_reader.isString()) {
+            String* str = child_reader.asString();
+            if (str && str->len > 0) {
+                const char* text = str->chars;
+                // Check if text contains an ESC byte (0x1B) indicating embedded command
+                // The parser uses ESC to mark LaTeX commands
+                const char* esc = strchr(text, '\x1b');
+                if (esc && esc[1] != '\0') {
+                    const char* cmd_start = esc + 1;
+                    size_t cmd_len = 0;
+                    while (cmd_start[cmd_len] && isalpha((unsigned char)cmd_start[cmd_len])) {
+                        cmd_len++;
+                    }
+                    
+                    // Check if command ends at end of string (no trailing text after command name)
+                    if (cmd_len > 0 && cmd_start[cmd_len] == '\0') {
+                        // Text ends with a command - check if next sibling is curly_group
+                        if (i + 1 < count) {
+                            ItemReader next_reader = elem_reader.childAt(i + 1);
+                            if (next_reader.isElement()) {
+                                ElementReader next_elem(next_reader.item());
+                                const char* next_tag = next_elem.tagName();
+                                
+                                if (next_tag && strcmp(next_tag, "curly_group") == 0) {
+                                    // Found command + curly_group pattern
+                                    // Process text before command (if any)
+                                    if (esc > text) {
+                                        size_t prefix_len = esc - text;
+                                        char* prefix = (char*)alloca(prefix_len + 1);
+                                        memcpy(prefix, text, prefix_len);
+                                        prefix[prefix_len] = '\0';
+                                        processText(prefix);
+                                    }
+                                    
+                                    // The command name after ESC might be missing the first letter
+                                    // For \emph, we get ESC + "mph", but need to look up "emph"
+                                    // Prepend 'e' to handle common \e... commands (\e → ESC)
+                                    char* cmd_name_with_e = (char*)alloca(cmd_len + 2);
+                                    cmd_name_with_e[0] = 'e';
+                                    memcpy(cmd_name_with_e + 1, cmd_start, cmd_len);
+                                    cmd_name_with_e[cmd_len + 1] = '\0';
+                                    
+                                    // Pass the curly_group as the command's element
+                                    // This allows cmd_emph etc to call processChildren on it
+                                    processCommand(cmd_name_with_e, next_reader.item());
+                                    
+                                    // Skip the curly_group sibling
+                                    i++;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         // Normal processing for other nodes
+        // Set up sibling context so command handlers can access following arguments
+        int64_t consumed_count = 0;
+        sibling_ctx_.parent_reader = &elem_reader;
+        sibling_ctx_.current_index = i;
+        sibling_ctx_.consumed_count = &consumed_count;
+        
         processNode(child_reader.item());
+        
+        // Skip any siblings that were consumed by command handlers
+        if (consumed_count > 0) {
+            i += consumed_count;
+        }
+        
+        // Clear sibling context
+        sibling_ctx_ = {};
         
         // Check if previous node set pending ZWS output flag (curly_group at document level)
         if (pending_zws_output_) {
@@ -7726,6 +8160,11 @@ void LatexProcessor::outputTextWithSpecialChars(const char* text) {
 void LatexProcessor::processText(const char* text) {
     if (!text) return;
     
+    // Skip EMPTY_STRING sentinel ("lambda.nil")
+    if (strlen(text) == 10 && strncmp(text, "lambda.nil", 10) == 0) {
+        return;
+    }
+    
     // Debug: log text content to see what's being processed
     log_debug("processText: '%s' (len=%zu, in_paragraph=%d)", text, strlen(text), in_paragraph_ ? 1 : 0);
     
@@ -7796,6 +8235,13 @@ void LatexProcessor::processText(const char* text) {
     // or special character command should have its leading space stripped
     bool should_strip_leading = strip_next_leading_space_;
     strip_next_leading_space_ = false;  // Reset flag after checking
+    
+    // Also strip leading space if the output already ends with whitespace
+    // This prevents consecutive spaces from adjacent text nodes
+    if (!should_strip_leading && gen_->hasTrailingWhitespace() && 
+        !normalized.empty() && normalized[0] == ' ') {
+        should_strip_leading = true;
+    }
     
     // Strip leading space if flagged (applies to all text, not just font-styled)
     if (should_strip_leading && !normalized.empty() && normalized[0] == ' ') {
@@ -8175,8 +8621,10 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     
     // Handle block vs inline commands differently
     // In restricted horizontal mode (inside \mbox), block commands should NOT close paragraph
-    if (isBlockCommand(cmd_name) && !restricted_h_mode_) {
-        // Close paragraph before block commands
+    // Also, when inside a styled span (like \emph{}), block commands should stay inline
+    // to allow CSS to handle the visual appearance (per LaTeX.js behavior)
+    if (isBlockCommand(cmd_name) && !restricted_h_mode_ && !inStyledSpan()) {
+        // Close paragraph before block commands (only when not in inline context)
         closeParagraphIfOpen();
     } else if (isInlineCommand(cmd_name)) {
         // Ensure paragraph is open before inline commands

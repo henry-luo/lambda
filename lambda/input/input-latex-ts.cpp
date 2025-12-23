@@ -17,6 +17,18 @@ extern "C" {
 
 using namespace lambda;
 
+// Helper: Check if an item is EMPTY_STRING (the lambda.nil sentinel)
+// Returns true if the item should be skipped when adding to elements
+static bool is_empty_string_sentinel(Item item) {
+    if (get_type_id(item) != LMD_TYPE_STRING) return false;
+    String* str = item.get_string();
+    if (!str) return false;
+    // Check for EMPTY_STRING sentinel (has content "lambda.nil" or length 0)
+    if (str->len == 0) return true;
+    if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) return true;
+    return false;
+}
+
 // Tree-sitter language declaration
 extern "C" {
     const TSLanguage* tree_sitter_latex(void);
@@ -537,6 +549,14 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
         return elem.final();
     }
     
+    // Handle anonymous bracket tokens (literal [ and ] at document level)
+    // These are literal punctuation, not part of optional argument syntax
+    if (strcmp(node_type, "[") == 0 || strcmp(node_type, "]") == 0) {
+        // Return as a string containing the literal bracket
+        MarkBuilder& builder = ctx.builder;
+        return {.item = s2it(builder.createString(node_type))};
+    }
+    
     NodeCategory category = classify_node_type(node_type);
     
     switch (category) {
@@ -567,7 +587,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     // Scanner now handles \verb properly, no special workarounds needed
                     
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL) {
+                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
                         root_builder.child(child_item);
                     }
                 }
@@ -629,7 +649,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
                     
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL) {
+                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
                         doc_builder.child(child_item);
                     }
                 }
@@ -692,7 +712,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
                     
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL) {
+                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
                         section_builder.child(child_item);
                     }
                 }
@@ -822,6 +842,135 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 return elem_builder.final();
             }
             
+            // Special case: brack_group that is NOT a command argument
+            // In LaTeX, brackets only have special meaning as optional args after commands.
+            // When a brack_group appears standalone (in paragraph/inline context), or when
+            // it contains parse errors (unbalanced brackets), treat it as plain text.
+            // Check if parent is a command - if not, this is a standalone brack_group
+            // ALSO check if previous sibling is a command - LaTeX allows optional args after whitespace
+            if (strcmp(node_type, "brack_group") == 0) {
+                // Check for parse errors (MISSING ']') - if so, treat as literal text
+                // This handles cases like `test[ {t]]ext}` where there's no valid closing bracket
+                if (ts_node_has_error(node)) {
+                    log_debug("latex_ts: brack_group has parse error - converting children to sequence");
+                    MarkBuilder& builder = ctx.builder;
+                    
+                    // Create an element to hold "[" + all children as a sequence
+                    // We use a special "error_brack" tag that the formatter can flatten
+                    ElementBuilder seq_builder = builder.element("_seq");
+                    seq_builder.child({.item = s2it(builder.createString("["))});
+                    
+                    // Process all children (skipping the '[' delimiter)
+                    uint32_t child_count = ts_node_child_count(node);
+                    for (uint32_t i = 0; i < child_count; i++) {
+                        TSNode child = ts_node_child(node, i);
+                        const char* child_type = ts_node_type(child);
+                        // Skip bracket delimiters
+                        if (strcmp(child_type, "[") == 0 || strcmp(child_type, "]") == 0) {
+                            continue;
+                        }
+                        Item child_item = convert_latex_node(ctx, child, source);
+                        if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                            seq_builder.child(child_item);
+                        }
+                    }
+                    
+                    return seq_builder.final();
+                }
+                
+                TSNode parent = ts_node_parent(node);
+                const char* parent_type = ts_node_is_null(parent) ? "" : ts_node_type(parent);
+                
+                // If parent is a command, linebreak_command, or section, this is a proper optional arg
+                bool is_command_arg = (strcmp(parent_type, "command") == 0 ||
+                                       strcmp(parent_type, "linebreak_command") == 0 ||
+                                       strcmp(parent_type, "section") == 0);
+                
+                // Also check if preceded by a command (with optional whitespace/comments between)
+                // LaTeX: \cmd{arg1} [opt] {arg2} - the [opt] is still part of \cmd's arguments
+                if (!is_command_arg) {
+                    TSNode prev = ts_node_prev_sibling(node);
+                    while (!ts_node_is_null(prev)) {
+                        const char* prev_type = ts_node_type(prev);
+                        // Skip whitespace, comments, and curly_groups (previous mandatory args)
+                        if (strcmp(prev_type, "space") == 0 || 
+                            strcmp(prev_type, "line_comment") == 0 ||
+                            strcmp(prev_type, "curly_group") == 0 ||
+                            strcmp(prev_type, "brack_group") == 0) {
+                            prev = ts_node_prev_sibling(prev);
+                            continue;
+                        }
+                        // Also skip text nodes that are pure whitespace (sometimes parser labels " " as text)
+                        if (strcmp(prev_type, "text") == 0) {
+                            uint32_t start = ts_node_start_byte(prev);
+                            uint32_t end = ts_node_end_byte(prev);
+                            bool is_whitespace = true;
+                            for (uint32_t i = start; i < end; i++) {
+                                char c = source[i];
+                                if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                                    is_whitespace = false;
+                                    break;
+                                }
+                            }
+                            if (is_whitespace) {
+                                prev = ts_node_prev_sibling(prev);
+                                continue;
+                            }
+                        }
+                        // If we find a command, this brack_group is an optional arg
+                        if (strcmp(prev_type, "command") == 0) {
+                            is_command_arg = true;
+                            log_debug("latex_ts: brack_group follows command - treating as optional arg");
+                        }
+                        break;
+                    }
+                }
+                
+                if (!is_command_arg) {
+                    // This is a standalone brack_group - convert to text "[" + content + "]"
+                    log_debug("latex_ts: converting standalone brack_group to text (parent=%s)", parent_type);
+                    MarkBuilder& builder = ctx.builder;
+                    
+                    uint32_t start = ts_node_start_byte(node);
+                    uint32_t end = ts_node_end_byte(node);
+                    size_t len = end - start;
+                    
+                    // Return the entire brack_group as raw text, including brackets
+                    return {.item = s2it(builder.createString(source + start, len))};
+                }
+                // Otherwise, fall through to normal container handling for command args
+                // But strip the bracket delimiters
+                {
+                    MarkBuilder& builder = ctx.builder;
+                    ElementBuilder elem_builder = builder.element(node_type);
+                    
+                    uint32_t child_count = ts_node_child_count(node);
+                    for (uint32_t i = 0; i < child_count; i++) {
+                        // LaTeX comment handling
+                        if (should_skip_comment_and_space(node, i)) {
+                            i++;  // Skip both comment and following space
+                            continue;
+                        }
+                        
+                        TSNode child = ts_node_child(node, i);
+                        const char* child_type = ts_node_type(child);
+                        
+                        // Skip bracket delimiters for brack_group
+                        if (strcmp(child_type, "[") == 0 || strcmp(child_type, "]") == 0) {
+                            continue;
+                        }
+                        
+                        Item child_item = convert_latex_node(ctx, child, source);
+                        // Skip NULL items and empty string sentinels
+                        if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                            elem_builder.child(child_item);
+                        }
+                    }
+                    
+                    return elem_builder.final();
+                }
+            }
+            
             // TODO: Add more specific handlers
             // For now, create generic element with node type as tag
             {
@@ -858,7 +1007,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                                     
                                     // First add the controlspace_command (will output ZWS + space)
                                     Item child_item = convert_latex_node(ctx, child, source);
-                                    if (child_item.item != ITEM_NULL) {
+if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
                                         elem_builder.child(child_item);
                                     }
                                     
@@ -874,7 +1023,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
                     
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL) {
+                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
                         elem_builder.child(child_item);
                     }
                 }
@@ -1165,7 +1314,7 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
         }
         
         Item child_item = convert_latex_node(ctx, child, source);
-        if (child_item.item != ITEM_NULL) {
+        if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
             env_elem_builder.child(child_item);
         }
     }
