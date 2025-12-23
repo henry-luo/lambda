@@ -198,6 +198,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_clear_temp_buffer(parser);
                     html5_append_to_temp_buffer(parser, c);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_ATTRIBUTE_NAME);
+                } else if (c == '\0' && html5_is_eof(parser)) {
+                    log_error("html5: eof in tag");
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                    return html5_token_create_eof(parser->pool, parser->arena);
                 } else {
                     html5_clear_temp_buffer(parser);
                     html5_reconsume(parser);
@@ -217,8 +221,16 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c >= 'A' && c <= 'Z') {
                     html5_append_to_temp_buffer(parser, c + 0x20);
                 } else if (c == '\0') {
-                    log_error("html5: unexpected null in attribute name");
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
+                    if (html5_is_eof(parser)) {
+                        // EOF in attribute name - return EOF directly (don't reconsume, it doesn't work at EOF)
+                        log_error("html5: eof in tag");
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        return html5_token_create_eof(parser->pool, parser->arena);
+                    } else {
+                        // actual null character in input
+                        log_error("html5: unexpected null in attribute name");
+                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                    }
                 } else if (c == '"' || c == '\'' || c == '<') {
                     log_error("html5: unexpected character in attribute name");
                     html5_append_to_temp_buffer(parser, c);
@@ -240,6 +252,11 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
                     return token;
+                } else if (c == '\0' && html5_is_eof(parser)) {
+                    // EOF in tag - emit eof token (tag is dropped per spec)
+                    log_error("html5: eof in tag");
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                    return html5_token_create_eof(parser->pool, parser->arena);
                 } else {
                     // start new attribute
                     html5_clear_temp_buffer(parser);
@@ -264,6 +281,11 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
                     return token;
+                } else if (c == '\0' && html5_is_eof(parser)) {
+                    // EOF in tag
+                    log_error("html5: eof in tag");
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                    return html5_token_create_eof(parser->pool, parser->arena);
                 } else {
                     html5_clear_temp_buffer(parser);
                     html5_reconsume(parser);
@@ -279,12 +301,14 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     // TODO: character reference in attribute value
                     html5_append_to_temp_buffer(parser, c);
                 } else if (c == '\0') {
-                    log_error("html5: unexpected null in attribute value");
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in attribute value");
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    return html5_token_create_eof(parser->pool, parser->arena);
+                    if (html5_is_eof(parser)) {
+                        log_error("html5: eof in attribute value");
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        return html5_token_create_eof(parser->pool, parser->arena);
+                    } else {
+                        log_error("html5: unexpected null in attribute value");
+                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                    }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
                 }
@@ -298,12 +322,14 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     // TODO: character reference in attribute value
                     html5_append_to_temp_buffer(parser, c);
                 } else if (c == '\0') {
-                    log_error("html5: unexpected null in attribute value");
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in attribute value");
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    return html5_token_create_eof(parser->pool, parser->arena);
+                    if (html5_is_eof(parser)) {
+                        log_error("html5: eof in attribute value");
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        return html5_token_create_eof(parser->pool, parser->arena);
+                    } else {
+                        log_error("html5: unexpected null in attribute value");
+                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                    }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
                 }
@@ -322,15 +348,17 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     parser->current_token = nullptr;
                     return token;
                 } else if (c == '\0') {
-                    log_error("html5: unexpected null in attribute value");
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
+                    if (html5_is_eof(parser)) {
+                        log_error("html5: eof in attribute value");
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        return html5_token_create_eof(parser->pool, parser->arena);
+                    } else {
+                        log_error("html5: unexpected null in attribute value");
+                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                    }
                 } else if (c == '"' || c == '\'' || c == '<' || c == '=' || c == '`') {
                     log_error("html5: unexpected character in unquoted attribute value");
                     html5_append_to_temp_buffer(parser, c);
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in attribute value");
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    return html5_token_create_eof(parser->pool, parser->arena);
                 } else {
                     html5_append_to_temp_buffer(parser, c);
                 }
@@ -386,16 +414,16 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_clear_temp_buffer(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_START);
                 }
-                // check for "DOCTYPE" (case-insensitive)
-                else if (parser->pos + 6 < parser->length &&
-                         html5_match_string_ci(&parser->html[parser->pos], "doctype", 7)) {
-                    parser->pos += 7;
+                // check for "DOCTYPE" (case-insensitive) - c already has first char
+                else if ((c == 'd' || c == 'D') && parser->pos + 6 <= parser->length &&
+                         html5_match_string_ci(&parser->html[parser->pos - 1], "doctype", 7)) {
+                    parser->pos += 6;  // skip remaining 6 chars (already consumed 'd')
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE);
                 }
                 // check for "[CDATA["
-                else if (parser->pos + 6 < parser->length &&
-                         strncmp(&parser->html[parser->pos], "[CDATA[", 7) == 0) {
-                    parser->pos += 7;
+                else if (c == '[' && parser->pos + 6 <= parser->length &&
+                         strncmp(&parser->html[parser->pos], "CDATA[", 6) == 0) {
+                    parser->pos += 6;
                     html5_switch_tokenizer_state(parser, HTML5_TOK_CDATA_SECTION);
                 }
                 else {
@@ -457,15 +485,17 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '-') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_COMMENT_END_DASH);
                 } else if (c == '\0') {
-                    log_error("html5: unexpected null in comment");
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in comment");
-                    parser->current_token->data = html5_create_string_from_temp_buffer(parser);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    if (html5_is_eof(parser)) {
+                        log_error("html5: eof in comment");
+                        parser->current_token->data = html5_create_string_from_temp_buffer(parser);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        Html5Token* token = parser->current_token;
+                        parser->current_token = nullptr;
+                        return token;
+                    } else {
+                        log_error("html5: unexpected null in comment");
+                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                    }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
                 }
@@ -644,21 +674,23 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_append_to_temp_buffer(parser, c + 0x20);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_NAME);
                 } else if (c == '\0') {
-                    log_error("html5: unexpected null in doctype name");
-                    parser->current_token = html5_token_create_doctype(parser->pool, parser->arena);
-                    html5_clear_temp_buffer(parser);
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_NAME);
+                    if (html5_is_eof(parser)) {
+                        log_error("html5: eof in doctype");
+                        parser->current_token = html5_token_create_doctype(parser->pool, parser->arena);
+                        parser->current_token->force_quirks = true;
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        Html5Token* token = parser->current_token;
+                        parser->current_token = nullptr;
+                        return token;
+                    } else {
+                        log_error("html5: unexpected null in doctype name");
+                        parser->current_token = html5_token_create_doctype(parser->pool, parser->arena);
+                        html5_clear_temp_buffer(parser);
+                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_NAME);
+                    }
                 } else if (c == '>') {
                     log_error("html5: missing doctype name");
-                    parser->current_token = html5_token_create_doctype(parser->pool, parser->arena);
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
                     parser->current_token = html5_token_create_doctype(parser->pool, parser->arena);
                     parser->current_token->force_quirks = true;
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
@@ -687,16 +719,18 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c >= 'A' && c <= 'Z') {
                     html5_append_to_temp_buffer(parser, c + 0x20);
                 } else if (c == '\0') {
-                    log_error("html5: unexpected null in doctype name");
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
-                } else if (html5_is_eof(parser)) {
-                    log_error("html5: eof in doctype");
-                    parser->current_token->doctype_name = html5_create_string_from_temp_buffer(parser);
-                    parser->current_token->force_quirks = true;
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    if (html5_is_eof(parser)) {
+                        log_error("html5: eof in doctype");
+                        parser->current_token->doctype_name = html5_create_string_from_temp_buffer(parser);
+                        parser->current_token->force_quirks = true;
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        Html5Token* token = parser->current_token;
+                        parser->current_token = nullptr;
+                        return token;
+                    } else {
+                        log_error("html5: unexpected null in doctype name");
+                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                    }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
                 }
@@ -735,12 +769,13 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     parser->current_token = nullptr;
                     return token;
                 } else if (c == '\0') {
-                    // ignore null
-                } else if (html5_is_eof(parser)) {
-                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    Html5Token* token = parser->current_token;
-                    parser->current_token = nullptr;
-                    return token;
+                    if (html5_is_eof(parser)) {
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        Html5Token* token = parser->current_token;
+                        parser->current_token = nullptr;
+                        return token;
+                    }
+                    // non-EOF null is ignored per spec
                 }
                 // consume and ignore character
                 break;

@@ -34,18 +34,27 @@ Element* html5_parse(Input* input, const char* html) {
     while (true) {
         Html5Token* token = html5_tokenize_next(parser);
 
+        // Process EOF token through the tree builder (to create implicit elements)
+        // then break out of the loop
+        html5_process_token(parser, token);
+
         if (token->type == HTML5_TOKEN_EOF) {
             break;
         }
-
-        html5_process_token(parser, token);
     }
+
+    // Flush any remaining pending text
+    html5_flush_pending_text(parser);
 
     log_debug("html5: parse complete, mode=%d, open_elements=%zu",
               parser->mode, parser->open_elements->length);
 
     return parser->document;
 }
+
+// forward declarations
+static void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token);
 
 // main token processing dispatcher
 void html5_process_token(Html5Parser* parser, Html5Token* token) {
@@ -72,6 +81,9 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
             break;
         case HTML5_MODE_AFTER_BODY:
             html5_process_in_after_body_mode(parser, token);
+            break;
+        case HTML5_MODE_AFTER_AFTER_BODY:
+            html5_process_in_after_after_body_mode(parser, token);
             break;
         default:
             log_error("html5: unimplemented insertion mode: %d", parser->mode);
@@ -357,10 +369,45 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // block elements
+        // heading elements - h1 through h6
+        // special behavior: if there's a heading element in the stack, close it
+        if (strcmp(tag, "h1") == 0 || strcmp(tag, "h2") == 0 || strcmp(tag, "h3") == 0 ||
+            strcmp(tag, "h4") == 0 || strcmp(tag, "h5") == 0 || strcmp(tag, "h6") == 0) {
+
+            // close any <p> element in button scope
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                // generate implied end tags and pop p
+                while (parser->open_elements->length > 0) {
+                    Element* current = html5_current_node(parser);
+                    const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                    if (strcmp(current_tag, "p") == 0) {
+                        html5_pop_element(parser);
+                        break;
+                    }
+                    html5_pop_element(parser);
+                }
+            }
+
+            // if current node is a heading element (h1-h6), pop it
+            // this is the "has an element in scope that is an HTML element
+            // with the same tag name as the token" check, but for all headings
+            Element* current = html5_current_node(parser);
+            if (current) {
+                const char* current_tag = ((TypeElmt*)current->type)->name.str;
+                if (strcmp(current_tag, "h1") == 0 || strcmp(current_tag, "h2") == 0 ||
+                    strcmp(current_tag, "h3") == 0 || strcmp(current_tag, "h4") == 0 ||
+                    strcmp(current_tag, "h5") == 0 || strcmp(current_tag, "h6") == 0) {
+                    log_error("html5: heading element nested inside another heading");
+                    html5_pop_element(parser);
+                }
+            }
+
+            html5_insert_html_element(parser, token);
+            return;
+        }
+
+        // block elements (except headings which are handled above)
         if (strcmp(tag, "div") == 0 || strcmp(tag, "p") == 0 ||
-            strcmp(tag, "h1") == 0 || strcmp(tag, "h2") == 0 || strcmp(tag, "h3") == 0 ||
-            strcmp(tag, "h4") == 0 || strcmp(tag, "h5") == 0 || strcmp(tag, "h6") == 0 ||
             strcmp(tag, "ul") == 0 || strcmp(tag, "ol") == 0 || strcmp(tag, "li") == 0 ||
             strcmp(tag, "table") == 0 || strcmp(tag, "tr") == 0 || strcmp(tag, "td") == 0 ||
             strcmp(tag, "th") == 0 || strcmp(tag, "tbody") == 0 || strcmp(tag, "thead") == 0 ||
@@ -496,6 +543,45 @@ static void html5_process_in_after_body_mode(Html5Parser* parser, Html5Token* to
 
     // anything else: reprocess in body mode
     log_error("html5: unexpected token in after body mode, switching to body mode");
+    parser->mode = HTML5_MODE_IN_BODY;
+    html5_process_token(parser, token);
+}
+
+// ===== AFTER AFTER BODY MODE =====
+static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token) {
+    // https://html.spec.whatwg.org/#the-after-after-body-insertion-mode
+
+    if (token->type == HTML5_TOKEN_COMMENT) {
+        html5_insert_comment(parser, token);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_DOCTYPE) {
+        log_error("html5: unexpected doctype in after after body mode");
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_CHARACTER) {
+        if (is_whitespace_token(token)) {
+            // process using "in body" rules
+            html5_process_in_body_mode(parser, token);
+            return;
+        }
+    }
+
+    if (token->type == HTML5_TOKEN_START_TAG && strcmp(token->tag_name->chars, "html") == 0) {
+        // process using "in body" rules
+        html5_process_in_body_mode(parser, token);
+        return;
+    }
+
+    if (token->type == HTML5_TOKEN_EOF) {
+        // stop parsing
+        return;
+    }
+
+    // anything else: parse error, switch to body mode
+    log_error("html5: unexpected token in after after body mode, switching to body mode");
     parser->mode = HTML5_MODE_IN_BODY;
     html5_process_token(parser, token);
 }
