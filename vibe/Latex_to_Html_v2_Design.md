@@ -925,6 +925,45 @@ The test suite has been split into two categories with different stability requi
 - **Coverage**: V2 formatter-specific functionality
 - **Categories**: Lists/Envs, Tables, Floats, Special Chars, Bibliography, Graphics/Color, Macros
 
+**Fixture File Coverage** (December 23, 2025):
+
+The baseline test suite includes 16 of 18 available fixture files from `test/latex/fixtures/`:
+
+**Included in Baseline** (16 files):
+- `basic_test.tex` - Basic text formatting
+- `boxes.tex` - Box commands (minipage, raisebox, etc.)
+- `counters.tex` - Counter operations
+- `environments.tex` - Standard environments
+- `fonts.tex` - Font commands and styles
+- `formatting.tex` - Text formatting commands
+- `groups.tex` - Group handling and scope
+- `label-ref.tex` - Labels and cross-references
+- `layout-marginpar.tex` - Margin notes
+- `macros.tex` - Macro definitions and usage
+- `preamble.tex` - Preamble commands
+- `sectioning.tex` - Section hierarchy
+- `spacing.tex` - Spacing commands
+- `symbols.tex` - Special symbols
+- `text.tex` - Text processing
+- `whitespace.tex` - Whitespace handling
+
+**Excluded from Baseline** (2 files):
+- **`math.tex`**: Contains only screenshot tests (`s**`) requiring visual/KaTeX rendering verification
+  - 1 test: "simple inline math" with KaTeX HTML output
+  - Requires visual regression testing infrastructure
+  - Mathematical typesetting quality verification needed
+- **`picture.tex`**: Contains only screenshot tests for picture environment rendering
+  - 11 tests: circles, lines, ovals, bezier curves, grid, vectors, etc.
+  - All marked as screenshot tests (`s**` or `!s**`)
+  - Requires pixel-perfect visual comparison
+  - Specialized graphics rendering verification
+
+**Why Exclude Screenshot Tests?**
+- Baseline focuses on functional HTML structure correctness
+- Screenshot tests require visual rendering pipeline (browser/headless)
+- Mathematical and graphical output needs pixel-level comparison tools
+- These tests belong in separate visual regression test suite
+
 ### 4.4 Fixture Test Format
 
 **File**: `test/latex/fixtures/text.tex`
