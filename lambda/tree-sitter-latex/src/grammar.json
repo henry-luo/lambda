@@ -521,6 +521,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "verb_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "command"
         },
         {
