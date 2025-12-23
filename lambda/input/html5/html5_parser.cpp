@@ -283,12 +283,88 @@ void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
     while (entry_idx < (int)parser->active_formatting->length) {
         Element* old_elem = (Element*)parser->active_formatting->items[entry_idx].element;
 
-        // create new element with same name
+        // create new element with same name and copy attributes
         MarkBuilder builder(parser->input);
         const char* tag_name = ((TypeElmt*)old_elem->type)->name.str;
-        Element* new_elem = builder.element(tag_name).final().element;
+        ElementBuilder elem_builder = builder.element(tag_name);
 
-        // insert into appropriate place in stack
+        // Copy attributes from old element to new element using shape iteration
+        TypeElmt* old_type = (TypeElmt*)old_elem->type;
+        if (old_type && old_type->shape) {
+            ShapeEntry* shape = old_type->shape;
+            while (shape) {
+                if (shape->name) {
+                    // Get attribute value from old element
+                    ConstItem attr_value = old_elem->get_attr(shape->name->str);
+                    TypeId val_type = attr_value.type_id();
+                    if (val_type != LMD_TYPE_NULL) {
+                        // need to cast const away for attr() - the Item will be copied anyway
+                        elem_builder.attr(shape->name->str, *(Item*)&attr_value);
+                    }
+                }
+                shape = shape->next;
+            }
+        }
+
+        Element* new_elem = elem_builder.final().element;
+
+        // Insert into appropriate place - check for foster parenting
+        if (parser->foster_parenting) {
+            // Find the last table element in the stack
+            Element* table_element = nullptr;
+            int table_index = -1;
+
+            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+                Element* el = (Element*)parser->open_elements->items[i].element;
+                const char* el_tag = ((TypeElmt*)el->type)->name.str;
+                if (strcmp(el_tag, "table") == 0) {
+                    table_element = el;
+                    table_index = i;
+                    break;
+                }
+            }
+
+            if (table_element != nullptr) {
+                // Find the table's DOM parent
+                Element* foster_parent = nullptr;
+                int table_pos = -1;
+
+                for (int i = table_index - 1; i >= 0; i--) {
+                    Element* candidate = (Element*)parser->open_elements->items[i].element;
+                    for (size_t j = 0; j < candidate->length; j++) {
+                        if (candidate->items[j].element == table_element) {
+                            foster_parent = candidate;
+                            table_pos = (int)j;
+                            break;
+                        }
+                    }
+                    if (foster_parent != nullptr) {
+                        break;
+                    }
+                }
+
+                if (foster_parent != nullptr && table_pos >= 0) {
+                    // Insert before the table
+                    log_debug("html5_reconstruct_foster: inserting <%s> before table at pos %d", tag_name, table_pos);
+                    MarkEditor editor(parser->input);
+                    editor.array_insert(Item{.element = foster_parent}, table_pos, Item{.element = new_elem});
+                    html5_push_element(parser, new_elem);
+                    parser->active_formatting->items[entry_idx].element = new_elem;
+                    entry_idx++;
+                    continue;
+                } else if (table_index > 0) {
+                    // Fallback: append to element before table in stack
+                    foster_parent = (Element*)parser->open_elements->items[table_index - 1].element;
+                    array_append(foster_parent, Item{.element = new_elem}, parser->pool, parser->arena);
+                    html5_push_element(parser, new_elem);
+                    parser->active_formatting->items[entry_idx].element = new_elem;
+                    entry_idx++;
+                    continue;
+                }
+            }
+        }
+
+        // Normal insertion: append to current node
         Element* parent = html5_current_node(parser);
         array_append(parent, Item{.element = new_elem}, parser->pool, parser->arena);
         html5_push_element(parser, new_elem);
