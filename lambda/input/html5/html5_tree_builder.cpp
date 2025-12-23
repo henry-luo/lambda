@@ -1113,7 +1113,7 @@ static void html5_process_in_cell_mode(Html5Parser* parser, Html5Token* token) {
 // helper: close the current cell (td/th)
 void html5_close_cell(Html5Parser* parser) {
     html5_generate_implied_end_tags(parser);
-    
+
     // pop until td or th
     while (parser->open_elements->length > 0) {
         Element* popped = html5_pop_element(parser);
