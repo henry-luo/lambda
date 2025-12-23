@@ -1,12 +1,66 @@
 # HTML5 Parser WPT Compliance Fix Proposal
 
 **Goal**: Achieve 100% compliance with W3C/WHATWG HTML5 Web Platform Tests (WPT)
-**Current Status**: 14/112 tests passing (12.5%)
-**Target**: 112/112 tests passing (100%)
+**Current Status**: 107/364 tests passing (29.4%) ✅ IN PROGRESS
+**Target**: 364/364 tests passing (100%)
 
 ## Executive Summary
 
-Our HTML parser currently handles simple HTML5 document wrapping but lacks the sophisticated state machine and parsing rules required by the HTML5 specification. This document provides a structural analysis of the 98 failing tests and proposes a phased implementation plan to achieve full WPT compliance.
+**UPDATE December 23, 2025**: Significant progress has been made. We implemented a new HTML5 tree builder with tokenizer state machine and achieved **29.4% pass rate** (up from 0% with the fragment parser).
+
+### Progress History
+
+| Date | Passed | Total | Pass Rate | Milestone |
+|------|--------|-------|-----------|----------|
+| Dec 23 (baseline) | 0 | 112 | 0% | Fragment parser only |
+| Dec 23 (tree builder) | 91 | 364 | 25% | HTML5 tree builder implemented |
+| Dec 23 (hr/p fix) | 94 | 364 | 25.8% | Fixed `<hr>` and `</p>` handling |
+| Dec 23 (attributes) | 107 | 364 | **29.4%** | Fixed attribute handling |
+
+### What's Been Implemented ✅
+
+1. **HTML5 Tokenizer** (`lambda/input/html5/html5_tokenizer.cpp`)
+   - Full state machine with 20+ tokenizer states
+   - Attribute name/value parsing
+   - Comment and DOCTYPE handling
+   - Start/end tag token emission
+
+2. **HTML5 Tree Builder** (`lambda/input/html5/html5_tree_builder.cpp`)
+   - Insertion modes: INITIAL, BEFORE_HTML, BEFORE_HEAD, IN_HEAD, AFTER_HEAD, IN_BODY
+   - Open elements stack with push/pop operations
+   - Active formatting elements list (partial)
+   - Implicit element creation (html, head, body)
+
+3. **Element Handling**
+   - Block elements closing `<p>` in button scope
+   - `<hr>` closing `<p>` correctly
+   - Heading auto-closing (`<h1>` closed by `<h2>`, etc.)
+   - Void element handling (`<br>`, `<hr>`, `<img>`, etc.)
+   - Attribute parsing and transfer to elements
+
+### Remaining Work ❌
+
+1. **Table Mode** (~10-15% improvement expected)
+   - IN_TABLE, IN_TABLE_BODY, IN_ROW, IN_CELL modes
+   - Implicit `<tbody>` and `<tr>` creation
+   - Foster parenting
+
+2. **Adoption Agency Algorithm** (~5-10% improvement expected)
+   - Same-element nesting (e.g., `<a>` inside `<a>`)
+   - Formatting element reconstruction
+
+3. **Character Entity References** (~5-10% improvement expected)
+   - Named entities (`&amp;`, `&lt;`, `&gt;`, `&nbsp;`, etc.)
+   - Numeric entities (`&#123;`, `&#x7B;`)
+
+4. **Other Edge Cases**
+   - RAWTEXT/RCDATA for `<script>`, `<style>`, `<textarea>`
+   - Foreign content (SVG, MathML)
+   - Template element handling
+
+---
+
+## Original Analysis (for reference)
 
 ## Test Failure Analysis
 
@@ -220,23 +274,28 @@ f158c8b44e - <!DOCTYPE html><li>hello<li>world<ul>how<li>do</ul>you</body><!--do
 ## Current Implementation Gap Analysis
 
 ### What We Have ✓
-1. **Basic HTML5 wrapping**: Creates `<html><head><body>` when completely absent
-2. **Tree-sitter parsing**: Tokenizes HTML into CST (Concrete Syntax Tree)
-3. **Element creation**: MarkBuilder constructs Lambda data structures
-4. **Implicit tbody**: Creates `<tbody>` for table rows
-5. **HTML 1.0 normalization**: Handles `<HEADER>` and `<BODY>` siblings
+1. **HTML5 Tokenizer**: Character-by-character tokenization with state machine (html5_tokenizer.cpp)
+2. **Token Types**: Start tag, end tag, character, comment, DOCTYPE, EOF tokens
+3. **Attribute Collection**: Token attributes properly stored and transferred to elements
+4. **Tree Builder Skeleton**: Basic tree construction with insertion mode framework
+5. **Open Elements Stack**: Basic stack implementation for tracking open elements
+6. **Basic Insertion Modes**: Initial, before HTML, before head, in head, after head, in body, after body implemented
+7. **Implicit Element Creation**: Auto-creates `<html>`, `<head>`, `<body>` as needed
+8. **Auto-closing Rules**: Basic auto-close for `<p>`, `<li>`, heading tags
+9. **Void Elements**: Proper handling of self-closing elements (br, hr, img, etc.)
+10. **MarkBuilder Integration**: Proper Lambda data structure construction
 
 ### What We're Missing ✗
-1. **State machine**: No implementation of HTML5's 80+ parser states
-2. **Insertion modes**: Missing all 27 insertion modes (e.g., "in body", "in head", "in table")
-3. **Active formatting elements**: No stack to track formatting elements
-4. **Open elements stack**: No proper stack of open elements with scope checking
-5. **Foster parenting**: No mechanism for table content violations
-6. **Adoption agency**: No algorithm for restructuring misplaced formatting elements
-7. **Implicit element creation**: No rules for when to insert elements automatically
-8. **Auto-closing rules**: No logic for when elements should implicitly close
-9. **RCDATA/RAWTEXT states**: No special handling for script/style content
-10. **Tokenizer states**: Missing bogus comment state and many others
+1. **Table Insertion Modes**: "in table", "in table body", "in row", "in cell" modes incomplete
+2. **Implicit Table Elements**: `<tbody>`, `<tr>` not auto-created when `<td>` appears in `<table>`
+3. **Adoption Agency Algorithm**: Not implemented for handling misnested formatting elements
+4. **Active Formatting Elements**: List not properly maintained for AAA
+5. **Foster Parenting**: Not implemented for content appearing in wrong table context
+6. **Select Modes**: "in select", "in select in table" modes not implemented
+7. **RCDATA/RAWTEXT States**: Script/style content not properly handled as raw text
+8. **Character References**: Entity decoding in attribute values incomplete
+9. **Template Handling**: Template element not properly supported
+10. **Scope Checking**: Element scope algorithms not fully implemented
 
 ## Architectural Recommendations
 
@@ -845,14 +904,24 @@ Given the decision for Option A, we will follow the 7-phase implementation plan:
 
 ### Next Steps
 
-1. **Week 1**: Set up core data structures (Phase 1)
-2. **Week 2**: Implement tokenizer state machine (Phase 2)
-3. **Week 3**: Tree constructor basics (Phase 3)
-4. **Week 4**: Checkpoint review - assess progress, adjust if needed
-5. **Week 5**: Auto-closing and special elements (Phase 4)
-6. **Week 6**: Adoption agency algorithm (Phase 5)
-7. **Week 7**: Script/style handling and edge cases (Phase 6)
-8. **Week 8**: Testing, optimization, documentation (Phase 7)
+**Completed:**
+- ✅ **Phase 1**: Core data structures (tokens, parser state, stacks)
+- ✅ **Phase 2**: Tokenizer state machine (20+ states, attribute parsing)
+- ✅ **Phase 3**: Tree constructor basics (insertion modes, implicit elements)
+
+**In Progress:**
+- 🔄 **Phase 4**: Table mode handling (implicit tbody/tr creation)
+- 🔄 **Phase 5**: Adoption Agency Algorithm for formatting elements
+
+**Remaining:**
+- ⏳ **Phase 6**: Script/style RAWTEXT handling
+- ⏳ **Phase 7**: Character entity references
+- ⏳ **Final**: Testing, optimization, edge cases
+
+**Immediate Priority (to reach 50%+ pass rate):**
+1. Implement table insertion modes (in_table, in_table_body, in_row, in_cell)
+2. Auto-create `<tbody>` and `<tr>` when `<td>` appears directly in `<table>`
+3. Implement foster parenting for misplaced table content
 
 ### Approval
 
