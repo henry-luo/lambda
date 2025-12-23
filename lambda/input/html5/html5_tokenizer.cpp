@@ -248,6 +248,138 @@ static const NamedEntity named_entities[] = {
     {"yacute", "\xC3\xBD"}, // ý
     {"thorn", "\xC3\xBE"},  // þ
     {"yuml", "\xC3\xBF"},   // ÿ
+    // Mathematical symbols
+    {"notin", "\xE2\x88\x89"}, // ∉
+    {"isin", "\xE2\x88\x88"},  // ∈ (element of)
+    {"ni", "\xE2\x88\x8B"},    // ∋ (contains as member)
+    {"prod", "\xE2\x88\x8F"}, // ∏ (product)
+    {"sum", "\xE2\x88\x91"},  // ∑ (summation)
+    {"minus", "\xE2\x88\x92"}, // − (minus sign)
+    {"radic", "\xE2\x88\x9A"}, // √ (square root)
+    {"infin", "\xE2\x88\x9E"}, // ∞ (infinity)
+    {"ang", "\xE2\x88\xA0"},   // ∠ (angle)
+    {"and", "\xE2\x88\xA7"},   // ∧ (logical and)
+    {"or", "\xE2\x88\xA8"},    // ∨ (logical or)
+    {"cap", "\xE2\x88\xA9"},   // ∩ (intersection)
+    {"cup", "\xE2\x88\xAA"},   // ∪ (union)
+    {"int", "\xE2\x88\xAB"},   // ∫ (integral)
+    {"there4", "\xE2\x88\xB4"}, // ∴ (therefore)
+    {"sim", "\xE2\x88\xBC"},   // ∼ (similar to)
+    {"ne", "\xE2\x89\xA0"},    // ≠ (not equal)
+    {"equiv", "\xE2\x89\xA1"}, // ≡ (equivalent)
+    {"le", "\xE2\x89\xA4"},    // ≤ (less than or equal)
+    {"ge", "\xE2\x89\xA5"},    // ≥ (greater than or equal)
+    {"sub", "\xE2\x8A\x82"},   // ⊂ (subset)
+    {"sup", "\xE2\x8A\x83"},   // ⊃ (superset)
+    {"nsub", "\xE2\x8A\x84"},  // ⊄ (not subset)
+    {"sube", "\xE2\x8A\x86"},  // ⊆ (subset or equal)
+    {"supe", "\xE2\x8A\x87"},  // ⊇ (superset or equal)
+    {"oplus", "\xE2\x8A\x95"}, // ⊕ (circled plus)
+    {"otimes", "\xE2\x8A\x97"}, // ⊗ (circled times)
+    {"perp", "\xE2\x8A\xA5"},  // ⊥ (perpendicular)
+    // Greek letters
+    {"Alpha", "\xCE\x91"},    // Α
+    {"Beta", "\xCE\x92"},     // Β
+    {"Gamma", "\xCE\x93"},    // Γ
+    {"Delta", "\xCE\x94"},    // Δ
+    {"Epsilon", "\xCE\x95"},  // Ε
+    {"Zeta", "\xCE\x96"},     // Ζ
+    {"Eta", "\xCE\x97"},      // Η
+    {"Theta", "\xCE\x98"},    // Θ
+    {"Iota", "\xCE\x99"},     // Ι
+    {"Kappa", "\xCE\x9A"},    // Κ
+    {"Lambda", "\xCE\x9B"},   // Λ
+    {"Mu", "\xCE\x9C"},       // Μ
+    {"Nu", "\xCE\x9D"},       // Ν
+    {"Xi", "\xCE\x9E"},       // Ξ
+    {"Omicron", "\xCE\x9F"},  // Ο
+    {"Pi", "\xCE\xA0"},       // Π
+    {"Rho", "\xCE\xA1"},      // Ρ
+    {"Sigma", "\xCE\xA3"},    // Σ
+    {"Tau", "\xCE\xA4"},      // Τ
+    {"Upsilon", "\xCE\xA5"},  // Υ
+    {"Phi", "\xCE\xA6"},      // Φ
+    {"Chi", "\xCE\xA7"},      // Χ
+    {"Psi", "\xCE\xA8"},      // Ψ
+    {"Omega", "\xCE\xA9"},    // Ω
+    {"alpha", "\xCE\xB1"},    // α
+    {"beta", "\xCE\xB2"},     // β
+    {"gamma", "\xCE\xB3"},    // γ
+    {"delta", "\xCE\xB4"},    // δ
+    {"epsilon", "\xCE\xB5"},  // ε
+    {"zeta", "\xCE\xB6"},     // ζ
+    {"eta", "\xCE\xB7"},      // η
+    {"theta", "\xCE\xB8"},    // θ
+    {"iota", "\xCE\xB9"},     // ι
+    {"kappa", "\xCE\xBA"},    // κ
+    {"lambda", "\xCE\xBB"},   // λ
+    {"mu", "\xCE\xBC"},       // μ
+    {"nu", "\xCE\xBD"},       // ν
+    {"xi", "\xCE\xBE"},       // ξ
+    {"omicron", "\xCE\xBF"},  // ο
+    {"pi", "\xCF\x80"},       // π
+    {"rho", "\xCF\x81"},      // ρ
+    {"sigmaf", "\xCF\x82"},   // ς (final sigma)
+    {"sigma", "\xCF\x83"},    // σ
+    {"tau", "\xCF\x84"},      // τ
+    {"upsilon", "\xCF\x85"},  // υ
+    {"phi", "\xCF\x86"},      // φ
+    {"chi", "\xCF\x87"},      // χ
+    {"psi", "\xCF\x88"},      // ψ
+    {"omega", "\xCF\x89"},    // ω
+    {"thetasym", "\xCF\x91"}, // ϑ
+    {"upsih", "\xCF\x92"},    // ϒ
+    {"piv", "\xCF\x96"},      // ϖ
+    // Arrows
+    {"larr", "\xE2\x86\x90"}, // ← (left arrow)
+    {"uarr", "\xE2\x86\x91"}, // ↑ (up arrow)
+    {"rarr", "\xE2\x86\x92"}, // → (right arrow)
+    {"darr", "\xE2\x86\x93"}, // ↓ (down arrow)
+    {"harr", "\xE2\x86\x94"}, // ↔ (left right arrow)
+    {"crarr", "\xE2\x86\xB5"}, // ↵ (carriage return arrow)
+    {"lArr", "\xE2\x87\x90"}, // ⇐ (double left arrow)
+    {"uArr", "\xE2\x87\x91"}, // ⇑ (double up arrow)
+    {"rArr", "\xE2\x87\x92"}, // ⇒ (double right arrow)
+    {"dArr", "\xE2\x87\x93"}, // ⇓ (double down arrow)
+    {"hArr", "\xE2\x87\x94"}, // ⇔ (double left right arrow)
+    // Misc symbols
+    {"bull", "\xE2\x80\xA2"}, // • (bullet)
+    {"hellip", "\xE2\x80\xA6"}, // … (horizontal ellipsis)
+    {"prime", "\xE2\x80\xB2"}, // ′ (prime)
+    {"Prime", "\xE2\x80\xB3"}, // ″ (double prime)
+    {"oline", "\xE2\x80\xBE"}, // ‾ (overline)
+    {"frasl", "\xE2\x81\x84"}, // ⁄ (fraction slash)
+    {"euro", "\xE2\x82\xAC"}, // € (euro)
+    {"image", "\xE2\x84\x91"}, // ℑ (imaginary part)
+    {"weierp", "\xE2\x84\x98"}, // ℘ (Weierstrass p)
+    {"real", "\xE2\x84\x9C"}, // ℜ (real part)
+    {"alefsym", "\xE2\x84\xB5"}, // ℵ (alef symbol)
+    {"spades", "\xE2\x99\xA0"}, // ♠
+    {"clubs", "\xE2\x99\xA3"},  // ♣
+    {"hearts", "\xE2\x99\xA5"}, // ♥
+    {"diams", "\xE2\x99\xA6"},  // ♦
+    // More punctuation
+    {"lsquo", "\xE2\x80\x98"}, // '
+    {"rsquo", "\xE2\x80\x99"}, // '
+    {"sbquo", "\xE2\x80\x9A"}, // ‚
+    {"ldquo", "\xE2\x80\x9C"}, // "
+    {"rdquo", "\xE2\x80\x9D"}, // "
+    {"bdquo", "\xE2\x80\x9E"}, // „
+    {"dagger", "\xE2\x80\xA0"}, // †
+    {"Dagger", "\xE2\x80\xA1"}, // ‡
+    {"permil", "\xE2\x80\xB0"}, // ‰
+    {"lsaquo", "\xE2\x80\xB9"}, // ‹
+    {"rsaquo", "\xE2\x80\xBA"}, // ›
+    {"ndash", "\xE2\x80\x93"}, // –
+    {"mdash", "\xE2\x80\x94"}, // —
+    // Spacing
+    {"ensp", "\xE2\x80\x82"},  // en space
+    {"emsp", "\xE2\x80\x83"},  // em space
+    {"thinsp", "\xE2\x80\x89"}, // thin space
+    {"zwnj", "\xE2\x80\x8C"},  // zero width non-joiner
+    {"zwj", "\xE2\x80\x8D"},   // zero width joiner
+    {"lrm", "\xE2\x80\x8E"},   // left-to-right mark
+    {"rlm", "\xE2\x80\x8F"},   // right-to-left mark
     {nullptr, nullptr}
 };
 
@@ -334,7 +466,8 @@ static uint32_t html5_windows1252_replacement(uint32_t codepoint) {
 
 // Try to consume and decode a character reference starting after '&'
 // Returns number of characters to emit (stored in out_chars), or 0 if not a valid reference
-static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars, int* out_len) {
+// in_attribute: true if we're in an attribute value context (affects entity boundary rules)
+static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars, int* out_len, bool in_attribute) {
     size_t start_pos = parser->pos;
     char c = html5_peek_char(parser, 0);
 
@@ -352,19 +485,44 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
         // Parse digits
         uint32_t codepoint = 0;
         int digits = 0;
+        bool overflowed = false;
         while (true) {
             c = html5_peek_char(parser, 0);
             if (is_hex) {
                 if (c >= '0' && c <= '9') {
-                    codepoint = codepoint * 16 + (c - '0');
+                    if (!overflowed) {
+                        uint32_t digit = c - '0';
+                        if (codepoint > (0x10FFFF / 16)) {
+                            overflowed = true;
+                        } else {
+                            codepoint = codepoint * 16 + digit;
+                            if (codepoint > 0x10FFFF) overflowed = true;
+                        }
+                    }
                     digits++;
                     parser->pos++;
                 } else if (c >= 'a' && c <= 'f') {
-                    codepoint = codepoint * 16 + (c - 'a' + 10);
+                    if (!overflowed) {
+                        uint32_t digit = c - 'a' + 10;
+                        if (codepoint > (0x10FFFF / 16)) {
+                            overflowed = true;
+                        } else {
+                            codepoint = codepoint * 16 + digit;
+                            if (codepoint > 0x10FFFF) overflowed = true;
+                        }
+                    }
                     digits++;
                     parser->pos++;
                 } else if (c >= 'A' && c <= 'F') {
-                    codepoint = codepoint * 16 + (c - 'A' + 10);
+                    if (!overflowed) {
+                        uint32_t digit = c - 'A' + 10;
+                        if (codepoint > (0x10FFFF / 16)) {
+                            overflowed = true;
+                        } else {
+                            codepoint = codepoint * 16 + digit;
+                            if (codepoint > 0x10FFFF) overflowed = true;
+                        }
+                    }
                     digits++;
                     parser->pos++;
                 } else {
@@ -372,15 +530,25 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
                 }
             } else {
                 if (c >= '0' && c <= '9') {
-                    codepoint = codepoint * 10 + (c - '0');
+                    if (!overflowed) {
+                        uint32_t digit = c - '0';
+                        if (codepoint > (0x10FFFF / 10)) {
+                            overflowed = true;
+                        } else {
+                            codepoint = codepoint * 10 + digit;
+                            if (codepoint > 0x10FFFF) overflowed = true;
+                        }
+                    }
                     digits++;
                     parser->pos++;
                 } else {
                     break;
                 }
             }
-            // Prevent overflow
-            if (codepoint > 0x10FFFF) codepoint = 0xFFFD;
+        }
+
+        if (overflowed) {
+            codepoint = 0xFFFD;
         }
 
         if (digits == 0) {
@@ -427,8 +595,9 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
         return 0;
     }
 
-    // Check for optional semicolon
-    bool has_semicolon = (html5_peek_char(parser, 0) == ';');
+    // Check for semicolon and what follows
+    char next_char = html5_peek_char(parser, 0);
+    bool has_semicolon = (next_char == ';');
     if (has_semicolon) {
         parser->pos++;  // consume ';'
     }
@@ -436,6 +605,18 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
     // Look up entity
     const char* replacement = html5_lookup_named_entity(entity_name, name_len);
     if (replacement != nullptr) {
+        // In attribute context, named entities without semicolons are only decoded
+        // if the next character is NOT alphanumeric or '=' (per HTML5 spec)
+        if (in_attribute && !has_semicolon) {
+            if ((next_char >= 'a' && next_char <= 'z') ||
+                (next_char >= 'A' && next_char <= 'Z') ||
+                (next_char >= '0' && next_char <= '9') ||
+                next_char == '=') {
+                // Don't decode - restore position and return failure
+                parser->pos = start_pos;
+                return 0;
+            }
+        }
         size_t rep_len = strlen(replacement);
         memcpy(out_chars, replacement, rep_len);
         *out_len = (int)rep_len;
@@ -458,7 +639,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     // Try to decode character reference
                     char decoded[8];
                     int decoded_len = 0;
-                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len)) {
+                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, false)) {
                         // Emit decoded characters
                         return html5_token_create_character_string(parser->pool, parser->arena, decoded, decoded_len);
                     } else {
@@ -498,9 +679,17 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_clear_temp_buffer(parser);
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_COMMENT);
+                } else if (c == '\0' && html5_is_eof(parser)) {
+                    // parse error: eof before tag name
+                    log_error("html5: eof before tag name");
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                    // Emit '<' then let DATA handle EOF
+                    return html5_token_create_character(parser->pool, parser->arena, '<');
                 } else {
                     // parse error: invalid first character of tag name
+                    // emit '<' and reconsume current character in DATA state
                     log_error("html5: invalid first character of tag name");
+                    html5_reconsume(parser);  // reconsume the invalid character
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     return html5_token_create_character(parser->pool, parser->arena, '<');
                 }
@@ -519,9 +708,11 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     // parse error: eof before tag name
+                    // emit '<' and '/', then switch to DATA state where EOF will be handled
                     log_error("html5: eof before tag name");
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
-                    return html5_token_create_character(parser->pool, parser->arena, '<');
+                    // Don't back up - next call will emit EOF from DATA state
+                    return html5_token_create_character_string(parser->pool, parser->arena, "</", 2);
                 } else {
                     // parse error: invalid first character of tag name
                     log_error("html5: invalid first character of tag name");
@@ -688,8 +879,16 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '"') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED);
                 } else if (c == '&') {
-                    // TODO: character reference in attribute value
-                    html5_append_to_temp_buffer(parser, c);
+                    // character reference in attribute value
+                    char decoded[8];
+                    int decoded_len = 0;
+                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
+                        for (int i = 0; i < decoded_len; i++) {
+                            html5_append_to_temp_buffer(parser, decoded[i]);
+                        }
+                    } else {
+                        html5_append_to_temp_buffer(parser, c);
+                    }
                 } else if (c == '\0') {
                     if (html5_is_eof(parser)) {
                         log_error("html5: eof in attribute value");
@@ -709,8 +908,16 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '\'') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED);
                 } else if (c == '&') {
-                    // TODO: character reference in attribute value
-                    html5_append_to_temp_buffer(parser, c);
+                    // character reference in attribute value
+                    char decoded[8];
+                    int decoded_len = 0;
+                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
+                        for (int i = 0; i < decoded_len; i++) {
+                            html5_append_to_temp_buffer(parser, decoded[i]);
+                        }
+                    } else {
+                        html5_append_to_temp_buffer(parser, c);
+                    }
                 } else if (c == '\0') {
                     if (html5_is_eof(parser)) {
                         log_error("html5: eof in attribute value");
@@ -732,8 +939,16 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_commit_attribute(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                 } else if (c == '&') {
-                    // TODO: character reference in attribute value
-                    html5_append_to_temp_buffer(parser, c);
+                    // character reference in attribute value
+                    char decoded[8];
+                    int decoded_len = 0;
+                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, true)) {
+                        for (int i = 0; i < decoded_len; i++) {
+                            html5_append_to_temp_buffer(parser, decoded[i]);
+                        }
+                    } else {
+                        html5_append_to_temp_buffer(parser, c);
+                    }
                 } else if (c == '>') {
                     // commit and emit tag
                     html5_commit_attribute(parser);
