@@ -1,5 +1,7 @@
 #include "html5_tokenizer.h"
+#include "html5_token.h"
 #include "../../../lib/log.h"
+#include "../../mark_builder.hpp"
 #include <string.h>
 #include <ctype.h>
 
@@ -63,6 +65,63 @@ static void html5_append_to_temp_buffer(Html5Parser* parser, char c) {
 // helper: clear temp buffer
 static void html5_clear_temp_buffer(Html5Parser* parser) {
     parser->temp_buffer_len = 0;
+}
+
+// helper: append to attribute name buffer
+static void html5_append_to_attr_name(Html5Parser* parser, char c) {
+    if (parser->current_attr_name == nullptr) {
+        parser->current_attr_name_capacity = 32;
+        parser->current_attr_name = (char*)arena_alloc(parser->arena, parser->current_attr_name_capacity);
+        parser->current_attr_name_len = 0;
+    }
+    if (parser->current_attr_name_len >= parser->current_attr_name_capacity - 1) {
+        size_t new_capacity = parser->current_attr_name_capacity * 2;
+        char* new_buffer = (char*)arena_alloc(parser->arena, new_capacity);
+        memcpy(new_buffer, parser->current_attr_name, parser->current_attr_name_len);
+        parser->current_attr_name = new_buffer;
+        parser->current_attr_name_capacity = new_capacity;
+    }
+    parser->current_attr_name[parser->current_attr_name_len++] = c;
+    parser->current_attr_name[parser->current_attr_name_len] = '\0';
+}
+
+// helper: clear attribute name buffer
+static void html5_clear_attr_name(Html5Parser* parser) {
+    parser->current_attr_name_len = 0;
+    if (parser->current_attr_name) {
+        parser->current_attr_name[0] = '\0';
+    }
+}
+
+// helper: commit current attribute to token
+static void html5_commit_attribute(Html5Parser* parser) {
+    if (parser->current_token == nullptr || parser->current_attr_name_len == 0) {
+        log_debug("html5: commit_attribute - skipping (no token or no attr name)");
+        return;
+    }
+    
+    log_debug("html5: commit_attribute - name='%s' value_len=%zu", 
+              parser->current_attr_name, parser->temp_buffer_len);
+    
+    // Create String for attribute name
+    MarkBuilder builder(parser->input);
+    String* attr_name = builder.createString(parser->current_attr_name, parser->current_attr_name_len);
+    
+    // Create String for attribute value (empty or from temp buffer)
+    String* attr_value;
+    if (parser->temp_buffer_len > 0) {
+        parser->temp_buffer[parser->temp_buffer_len] = '\0';
+        attr_value = builder.createString(parser->temp_buffer, parser->temp_buffer_len);
+    } else {
+        attr_value = builder.createString("");
+    }
+    
+    // Add attribute to token
+    html5_token_add_attribute(parser->current_token, attr_name, attr_value, parser->input);
+    
+    // Clear for next attribute
+    html5_clear_attr_name(parser);
+    html5_clear_temp_buffer(parser);
 }
 
 // helper: check if string matches (case insensitive)
@@ -195,15 +254,17 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 } else if (c == '=') {
                     // parse error: unexpected equals sign
                     log_error("html5: unexpected equals sign before attribute name");
-                    html5_clear_temp_buffer(parser);
-                    html5_append_to_temp_buffer(parser, c);
+                    html5_clear_attr_name(parser);
+                    html5_clear_temp_buffer(parser);  // clear value buffer
+                    html5_append_to_attr_name(parser, c);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_ATTRIBUTE_NAME);
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     log_error("html5: eof in tag");
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     return html5_token_create_eof(parser->pool, parser->arena);
                 } else {
-                    html5_clear_temp_buffer(parser);
+                    html5_clear_attr_name(parser);
+                    html5_clear_temp_buffer(parser);  // clear value buffer for new attribute
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_ATTRIBUTE_NAME);
                 }
@@ -212,14 +273,15 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
 
             case HTML5_TOK_ATTRIBUTE_NAME: {
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ' || c == '/' || c == '>') {
-                    // attribute name complete
+                    // attribute name complete (value-less attribute)
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_AFTER_ATTRIBUTE_NAME);
                 } else if (c == '=') {
                     // attribute name complete, value follows
+                    html5_clear_temp_buffer(parser);  // prepare for value
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_VALUE);
                 } else if (c >= 'A' && c <= 'Z') {
-                    html5_append_to_temp_buffer(parser, c + 0x20);
+                    html5_append_to_attr_name(parser, c + 0x20);  // lowercase
                 } else if (c == '\0') {
                     if (html5_is_eof(parser)) {
                         // EOF in attribute name - return EOF directly (don't reconsume, it doesn't work at EOF)
@@ -229,13 +291,13 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         // actual null character in input
                         log_error("html5: unexpected null in attribute name");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_to_attr_name(parser, 0xFFFD);
                     }
                 } else if (c == '"' || c == '\'' || c == '<') {
                     log_error("html5: unexpected character in attribute name");
-                    html5_append_to_temp_buffer(parser, c);
+                    html5_append_to_attr_name(parser, c);
                 } else {
-                    html5_append_to_temp_buffer(parser, c);
+                    html5_append_to_attr_name(parser, c);
                 }
                 break;
             }
@@ -244,10 +306,15 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
                     // ignore whitespace
                 } else if (c == '/') {
+                    // commit value-less attribute before self-closing
+                    html5_commit_attribute(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                 } else if (c == '=') {
+                    html5_clear_temp_buffer(parser);  // prepare for value
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_VALUE);
                 } else if (c == '>') {
+                    // commit value-less attribute and emit tag
+                    html5_commit_attribute(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
@@ -258,8 +325,9 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     return html5_token_create_eof(parser->pool, parser->arena);
                 } else {
-                    // start new attribute
-                    html5_clear_temp_buffer(parser);
+                    // start new attribute - commit previous value-less attribute first
+                    html5_commit_attribute(parser);
+                    html5_clear_attr_name(parser);
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_ATTRIBUTE_NAME);
                 }
@@ -277,6 +345,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_ATTRIBUTE_VALUE_SINGLE_QUOTED);
                 } else if (c == '>') {
                     log_error("html5: missing attribute value");
+                    html5_commit_attribute(parser);  // commit empty value
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
@@ -338,11 +407,15 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
 
             case HTML5_TOK_ATTRIBUTE_VALUE_UNQUOTED: {
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
+                    // commit and move to next attribute
+                    html5_commit_attribute(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                 } else if (c == '&') {
                     // TODO: character reference in attribute value
                     html5_append_to_temp_buffer(parser, c);
                 } else if (c == '>') {
+                    // commit and emit tag
+                    html5_commit_attribute(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
@@ -366,6 +439,9 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
             }
 
             case HTML5_TOK_AFTER_ATTRIBUTE_VALUE_QUOTED: {
+                // commit the attribute that was just finished
+                html5_commit_attribute(parser);
+                
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                 } else if (c == '/') {
