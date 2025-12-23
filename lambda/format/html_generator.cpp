@@ -222,6 +222,12 @@ void HtmlGenerator::textWithClass(const char* content, const char* css_class) {
     writer_->closeTag("span");
 }
 
+void HtmlGenerator::rawHtml(const char* html) {
+    // Write raw HTML without escaping - used for SVG and other pre-rendered content
+    if (!html) return;
+    writer_->writeRawHtml(html);
+}
+
 // =============================================================================
 // Length and Style Methods (html-generator.ls lines 152-200)
 // =============================================================================

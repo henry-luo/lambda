@@ -7,6 +7,7 @@
 #include "latex_packages.hpp"
 #include "latex_docclass.hpp"
 #include "latex_assets.hpp"
+#include "latex_picture.hpp"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 #include "../input/input.hpp"
@@ -546,6 +547,13 @@ public:
     
     // Helper to output the content of a group with parbreak -> <br> conversion
     void outputGroupContent(Item group_item);
+    
+    // Sibling context accessors for \begin{...} handling
+    ElementReader* getSiblingParent() { return sibling_ctx_.parent_reader; }
+    int64_t getSiblingCurrentIndex() { return sibling_ctx_.current_index; }
+    void setSiblingConsumed(int64_t count) { 
+        if (sibling_ctx_.consumed_count) *sibling_ctx_.consumed_count = count; 
+    }
     
 private:
     HtmlGenerator* gen_;
@@ -5069,6 +5077,722 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
 }
 
 // =============================================================================
+// Picture Environment - SVG graphics rendering
+// =============================================================================
+
+// Picture environment state - per-processor instance
+static thread_local PictureContext g_picture_ctx;
+static thread_local PictureRenderer* g_picture_renderer = nullptr;
+
+// Helper: Parse coordinate pair from string like "(60,50)" or "(60, 50)"
+// Returns pointer to character after closing paren, or nullptr on failure
+static const char* parsePicCoordAdvance(const char* str, double* x, double* y) {
+    if (!str || !x || !y) return nullptr;
+    
+    // skip leading whitespace
+    while (*str && (*str == ' ' || *str == '\t' || *str == '\n')) str++;
+    if (*str != '(') return nullptr;
+    str++;
+    
+    char* end;
+    *x = strtod(str, &end);
+    if (end == str) return nullptr;
+    str = end;
+    
+    // skip comma and whitespace
+    while (*str && (*str == ' ' || *str == '\t' || *str == ',')) str++;
+    
+    *y = strtod(str, &end);
+    if (end == str) return nullptr;
+    str = end;
+    
+    // skip to closing paren
+    while (*str && *str != ')') str++;
+    if (*str == ')') str++;
+    
+    return str;
+}
+
+static bool parsePicCoord(const char* str, double* x, double* y) {
+    return parsePicCoordAdvance(str, x, y) != nullptr;
+}
+
+// Forward declaration for cmd_picture (used by cmd_begin)
+static void cmd_picture(LatexProcessor* proc, Item elem);
+
+// Structure to hold parsed picture items for sequential processing
+struct PictureItem {
+    enum Type { TEXT, PUT, LINE, VECTOR, CIRCLE, CIRCLE_FILLED, OVAL, QBEZIER, 
+                MULTIPUT, THICKLINES, THINLINES, LINETHICKNESS, CURLY_GROUP, BRACK_GROUP, UNKNOWN };
+    Type type;
+    std::string text;
+    Item elem;
+    
+    PictureItem() : type(UNKNOWN), elem(ItemNull) {}
+    PictureItem(Type t, const std::string& txt = "") : type(t), text(txt), elem(ItemNull) {}
+    PictureItem(Type t, Item e) : type(t), elem(e) {}
+};
+
+// Flatten picture children into a sequential list
+static void flattenPictureChildren(Item elem, std::vector<PictureItem>& items, Pool* pool) {
+    ElementReader elem_reader(elem);
+    
+    auto iter = elem_reader.children();
+    ItemReader child;
+    
+    while (iter.next(&child)) {
+        TypeId type = child.getType();
+        
+        if (type == LMD_TYPE_STRING) {
+            String* str = (String*)child.item().string_ptr;
+            items.push_back(PictureItem(PictureItem::TEXT, str->chars));
+            continue;
+        }
+        
+        if (type != LMD_TYPE_ELEMENT) continue;
+        
+        ElementReader child_elem(child.item());
+        const char* tag = child_elem.tagName();
+        
+        if (!tag) continue;
+        
+        if (strcmp(tag, "paragraph") == 0) {
+            // Recurse into paragraphs
+            flattenPictureChildren(child.item(), items, pool);
+        }
+        else if (strcmp(tag, "put") == 0) {
+            items.push_back(PictureItem(PictureItem::PUT, child.item()));
+        }
+        else if (strcmp(tag, "line") == 0) {
+            items.push_back(PictureItem(PictureItem::LINE, child.item()));
+        }
+        else if (strcmp(tag, "vector") == 0) {
+            items.push_back(PictureItem(PictureItem::VECTOR, child.item()));
+        }
+        else if (strcmp(tag, "circle") == 0) {
+            items.push_back(PictureItem(PictureItem::CIRCLE, child.item()));
+        }
+        else if (strcmp(tag, "circle*") == 0) {
+            items.push_back(PictureItem(PictureItem::CIRCLE_FILLED, child.item()));
+        }
+        else if (strcmp(tag, "oval") == 0) {
+            items.push_back(PictureItem(PictureItem::OVAL, child.item()));
+        }
+        else if (strcmp(tag, "qbezier") == 0) {
+            items.push_back(PictureItem(PictureItem::QBEZIER, child.item()));
+        }
+        else if (strcmp(tag, "multiput") == 0) {
+            items.push_back(PictureItem(PictureItem::MULTIPUT, child.item()));
+        }
+        else if (strcmp(tag, "thicklines") == 0) {
+            items.push_back(PictureItem(PictureItem::THICKLINES));
+        }
+        else if (strcmp(tag, "thinlines") == 0) {
+            items.push_back(PictureItem(PictureItem::THINLINES));
+        }
+        else if (strcmp(tag, "linethickness") == 0) {
+            items.push_back(PictureItem(PictureItem::LINETHICKNESS, child.item()));
+        }
+        else if (strcmp(tag, "curly_group") == 0) {
+            items.push_back(PictureItem(PictureItem::CURLY_GROUP, child.item()));
+        }
+        else if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "bracket_group") == 0) {
+            items.push_back(PictureItem(PictureItem::BRACK_GROUP, child.item()));
+        }
+        else {
+            log_debug("picture flatten: unknown '%s'", tag);
+            items.push_back(PictureItem(PictureItem::UNKNOWN, child.item()));
+        }
+    }
+}
+
+// Process flattened picture items
+static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& items) {
+    Pool* pool = proc->pool();
+    size_t i = 0;
+    
+    while (i < items.size()) {
+        PictureItem& item = items[i];
+        
+        switch (item.type) {
+            case PictureItem::THICKLINES:
+                if (g_picture_renderer) g_picture_renderer->thicklines();
+                i++;
+                break;
+                
+            case PictureItem::THINLINES:
+                if (g_picture_renderer) g_picture_renderer->thinlines();
+                i++;
+                break;
+                
+            case PictureItem::LINETHICKNESS: {
+                // \linethickness{value}
+                // The value is in the element's children or next curly_group
+                double thickness = 0.4;  // default in pt
+                
+                if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
+                    ElementReader lt_elem(item.elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    lt_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        char* end;
+                        thickness = strtod(str->chars, &end);
+                    }
+                }
+                
+                // Also check for next curly_group
+                if (thickness <= 0 && i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        char* end;
+                        thickness = strtod(str->chars, &end);
+                    }
+                    i++;
+                }
+                
+                if (g_picture_renderer && thickness > 0) {
+                    g_picture_renderer->linethickness(thickness);
+                }
+                log_debug("linethickness: %.2fpt", thickness);
+                i++;
+                break;
+            }
+                
+            case PictureItem::PUT: {
+                // \put(x,y){content}
+                // Next items should be: TEXT with "(x,y)", then CURLY_GROUP with content
+                double x = 0, y = 0;
+                
+                // Look for coordinates in next TEXT item
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &x, &y)) {
+                        i++;  // consume the coord text
+                    }
+                }
+                
+                // Set the current position for nested commands
+                if (g_picture_renderer) {
+                    g_picture_renderer->setPosition(x, y);
+                }
+                
+                // Look for content in next CURLY_GROUP
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    // Check if curly_group contains picture commands
+                    ElementReader grp(items[i+1].elem);
+                    std::vector<PictureItem> nested_items;
+                    flattenPictureChildren(items[i+1].elem, nested_items, pool);
+                    
+                    bool has_nested_commands = false;
+                    for (const auto& ni : nested_items) {
+                        if (ni.type == PictureItem::LINE || ni.type == PictureItem::VECTOR ||
+                            ni.type == PictureItem::CIRCLE || ni.type == PictureItem::CIRCLE_FILLED ||
+                            ni.type == PictureItem::OVAL || ni.type == PictureItem::QBEZIER) {
+                            has_nested_commands = true;
+                            break;
+                        }
+                    }
+                    
+                    if (has_nested_commands) {
+                        // Process nested picture commands at position (x, y)
+                        log_debug("put: (%.2f,%.2f) processing nested commands", x, y);
+                        processPictureItems(proc, nested_items);
+                    } else {
+                        // Just text content
+                        StringBuf* sb = stringbuf_new(pool);
+                        grp.textContent(sb);
+                        String* str = stringbuf_to_string(sb);
+                        std::string content = str->chars;
+                        if (g_picture_renderer && !content.empty()) {
+                            g_picture_renderer->put(x, y, content);
+                        }
+                        log_debug("put: (%.2f,%.2f) text='%s'", x, y, content.c_str());
+                    }
+                    i++;  // consume the curly group
+                }
+                
+                i++;
+                break;
+            }
+            
+            case PictureItem::LINE: {
+                // \line(slope_x,slope_y){length}
+                double sx = 0, sy = 0, len = 0;
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &sx, &sy)) {
+                        i++;
+                    }
+                }
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    char* end;
+                    len = strtod(str->chars, &end);
+                    i++;
+                }
+                
+                if (g_picture_renderer) {
+                    g_picture_renderer->line(sx, sy, len);
+                }
+                log_debug("line: slope=(%.2f,%.2f) len=%.2f", sx, sy, len);
+                i++;
+                break;
+            }
+            
+            case PictureItem::VECTOR: {
+                // \vector(slope_x,slope_y){length}
+                double sx = 0, sy = 0, len = 0;
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &sx, &sy)) {
+                        i++;
+                    }
+                }
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    char* end;
+                    len = strtod(str->chars, &end);
+                    i++;
+                }
+                
+                if (g_picture_renderer) {
+                    g_picture_renderer->vector(sx, sy, len);
+                }
+                log_debug("vector: slope=(%.2f,%.2f) len=%.2f", sx, sy, len);
+                i++;
+                break;
+            }
+            
+            case PictureItem::CIRCLE: {
+                // \circle{diameter} or \circle*{diameter}
+                // The diameter might be:
+                // 1. A child of the circle element itself (when parsed as {$: "circle", _: ["10"]})
+                // 2. A sibling curly_group (when parsed separately)
+                double diameter = 0;
+                bool filled = false;
+                
+                // First, check if the circle element has children with the diameter
+                if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
+                    ElementReader circle_elem(item.elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    circle_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        const char* txt = str->chars;
+                        // Check for * prefix
+                        while (*txt == ' ' || *txt == '\t' || *txt == '\n') txt++;
+                        if (*txt == '*') {
+                            filled = true;
+                            txt++;
+                        }
+                        char* end;
+                        diameter = strtod(txt, &end);
+                    }
+                }
+                
+                // If diameter still 0, check for sibling items
+                if (diameter == 0) {
+                    // Check for * in next text
+                    if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                        const char* txt = items[i+1].text.c_str();
+                        while (*txt == ' ' || *txt == '\t' || *txt == '\n') txt++;
+                        if (*txt == '*') {
+                            filled = true;
+                            i++;  // consume the *
+                        }
+                    }
+                    
+                    if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                        ElementReader grp(items[i+1].elem);
+                        StringBuf* sb = stringbuf_new(pool);
+                        grp.textContent(sb);
+                        String* str = stringbuf_to_string(sb);
+                        char* end;
+                        diameter = strtod(str->chars, &end);
+                        i++;
+                    }
+                }
+                
+                if (g_picture_renderer && diameter > 0) {
+                    g_picture_renderer->circle(diameter, filled);
+                }
+                log_debug("circle: diameter=%.2f filled=%d", diameter, filled);
+                i++;
+                break;
+            }
+            
+            case PictureItem::CIRCLE_FILLED: {
+                // \circle*{diameter} - filled circle (parsed as separate command)
+                double diameter = 0;
+                
+                // Check if the circle* element has children with the diameter
+                if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
+                    ElementReader circle_elem(item.elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    circle_elem.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    if (str && strlen(str->chars) > 0) {
+                        char* end;
+                        diameter = strtod(str->chars, &end);
+                    }
+                }
+                
+                // If diameter still 0, check for sibling curly_group
+                if (diameter == 0 && i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    char* end;
+                    diameter = strtod(str->chars, &end);
+                    i++;
+                }
+                
+                if (g_picture_renderer && diameter > 0) {
+                    g_picture_renderer->circle(diameter, true);  // always filled
+                }
+                log_debug("circle* (filled): diameter=%.2f", diameter);
+                i++;
+                break;
+            }
+            
+            case PictureItem::OVAL: {
+                // \oval(width,height)[portion]
+                double w = 0, h = 0;
+                std::string portion;
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    if (parsePicCoord(items[i+1].text.c_str(), &w, &h)) {
+                        i++;
+                    }
+                }
+                
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::BRACK_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    portion = str->chars;
+                    i++;
+                }
+                
+                if (g_picture_renderer && (w > 0 || h > 0)) {
+                    g_picture_renderer->oval(w, h, portion);
+                }
+                log_debug("oval: (%.2f,%.2f) portion='%s'", w, h, portion.c_str());
+                i++;
+                break;
+            }
+            
+            case PictureItem::QBEZIER: {
+                // \qbezier(x1,y1)(cx,cy)(x2,y2)
+                double x1 = 0, y1 = 0, cx = 0, cy = 0, x2 = 0, y2 = 0;
+                int coords = 0;
+                
+                // Look for three coordinate pairs in following TEXT items
+                while (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT && coords < 3) {
+                    double tx, ty;
+                    if (parsePicCoord(items[i+1].text.c_str(), &tx, &ty)) {
+                        if (coords == 0) { x1 = tx; y1 = ty; }
+                        else if (coords == 1) { cx = tx; cy = ty; }
+                        else { x2 = tx; y2 = ty; }
+                        coords++;
+                        i++;
+                    } else {
+                        break;
+                    }
+                }
+                
+                if (g_picture_renderer && coords >= 3) {
+                    g_picture_renderer->qbezier(x1, y1, cx, cy, x2, y2);
+                }
+                log_debug("qbezier: (%f,%f)-(%f,%f)-(%f,%f)", x1, y1, cx, cy, x2, y2);
+                i++;
+                break;
+            }
+            
+            case PictureItem::MULTIPUT: {
+                // \multiput(x,y)(dx,dy){n}{object}
+                double x = 0, y = 0, dx = 0, dy = 0;
+                int n = 0;
+                
+                // Parse coordinates from following TEXT items
+                // The text might contain both coordinates like "(0,0)(1,0)"
+                while (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
+                    const char* text = items[i+1].text.c_str();
+                    
+                    // Try to parse first coordinate pair
+                    const char* after_first = parsePicCoordAdvance(text, &x, &y);
+                    if (after_first) {
+                        // Try to parse second coordinate pair from remainder
+                        const char* after_second = parsePicCoordAdvance(after_first, &dx, &dy);
+                        if (after_second) {
+                            // Successfully parsed both coordinates
+                            i++;
+                            break;
+                        }
+                    }
+                    
+                    // If we can't parse anything, stop
+                    if (after_first == nullptr) break;
+                    i++;
+                }
+                
+                // Get n from first curly group
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    ElementReader grp(items[i+1].elem);
+                    StringBuf* sb = stringbuf_new(pool);
+                    grp.textContent(sb);
+                    String* str = stringbuf_to_string(sb);
+                    n = atoi(str->chars);
+                    i++;
+                }
+                
+                // Get object from second curly group - process nested picture commands
+                std::vector<PictureItem> nested_items;
+                if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
+                    flattenPictureChildren(items[i+1].elem, nested_items, pool);
+                    i++;
+                }
+                
+                log_debug("multiput: start=(%.2f,%.2f) delta=(%.2f,%.2f) n=%d nested=%zu", 
+                         x, y, dx, dy, n, nested_items.size());
+                
+                // Process n copies of the nested content with position offset
+                if (g_picture_renderer && n > 0) {
+                    for (int copy = 0; copy < n; copy++) {
+                        double pos_x = x + copy * dx;
+                        double pos_y = y + copy * dy;
+                        g_picture_renderer->setPosition(pos_x, pos_y);
+                        
+                        // Process nested items (similar to main loop)
+                        for (size_t ni = 0; ni < nested_items.size(); ni++) {
+                            const auto& item = nested_items[ni];
+                            
+                            if (item.type == PictureItem::LINE) {
+                                // Process nested line: LINE, TEXT(slope), CURLY_GROUP(length)
+                                double sx = 0, sy = 0, len = 0;
+                                
+                                // Check next item for slope text
+                                if (ni + 1 < nested_items.size() && nested_items[ni+1].type == PictureItem::TEXT) {
+                                    parsePicCoord(nested_items[ni+1].text.c_str(), &sx, &sy);
+                                    ni++;
+                                }
+                                
+                                // Check next item for length curly_group
+                                if (ni + 1 < nested_items.size() && nested_items[ni+1].type == PictureItem::CURLY_GROUP) {
+                                    ElementReader grp(nested_items[ni+1].elem);
+                                    StringBuf* sb = stringbuf_new(pool);
+                                    grp.textContent(sb);
+                                    String* str = stringbuf_to_string(sb);
+                                    char* end;
+                                    len = strtod(str->chars, &end);
+                                    ni++;
+                                }
+                                
+                                if (len > 0) {
+                                    g_picture_renderer->line(sx, sy, len);
+                                }
+                            } else if (item.type == PictureItem::CIRCLE || item.type == PictureItem::CIRCLE_FILLED) {
+                                // Process nested circle
+                                double diameter = 0;
+                                
+                                // Diameter might be in element content or following curly_group
+                                ElementReader circ_elem(item.elem);
+                                StringBuf* sb = stringbuf_new(pool);
+                                circ_elem.textContent(sb);
+                                String* str = stringbuf_to_string(sb);
+                                if (str && strlen(str->chars) > 0) {
+                                    char* end;
+                                    diameter = strtod(str->chars, &end);
+                                }
+                                
+                                if (diameter == 0 && ni + 1 < nested_items.size() && 
+                                    nested_items[ni+1].type == PictureItem::CURLY_GROUP) {
+                                    ElementReader grp(nested_items[ni+1].elem);
+                                    StringBuf* sb2 = stringbuf_new(pool);
+                                    grp.textContent(sb2);
+                                    String* str2 = stringbuf_to_string(sb2);
+                                    char* end;
+                                    diameter = strtod(str2->chars, &end);
+                                    ni++;
+                                }
+                                
+                                if (diameter > 0) {
+                                    g_picture_renderer->circle(diameter, item.type == PictureItem::CIRCLE_FILLED);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                i++;
+                break;
+            }
+            
+            case PictureItem::TEXT:
+            case PictureItem::CURLY_GROUP:
+            case PictureItem::BRACK_GROUP:
+            case PictureItem::UNKNOWN:
+            default:
+                // Skip text and orphaned groups
+                i++;
+                break;
+        }
+    }
+}
+
+// Handler for \begin{...} when parsed as a standalone command (inside curly groups)
+// This collects siblings until matching \end{...} and dispatches to appropriate handler
+static void cmd_begin(LatexProcessor* proc, Item elem) {
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    
+    // Extract environment name from \begin element content
+    ElementReader elem_reader(elem);
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* str = stringbuf_to_string(sb);
+    const char* env_name = str ? str->chars : "";
+    
+    log_debug("cmd_begin: environment='%s'", env_name);
+    
+    // Only handle picture environment specially
+    if (strcmp(env_name, "picture") != 0) {
+        // For other environments, just process children
+        proc->processChildren(elem);
+        return;
+    }
+    
+    // For picture environment, we need to collect siblings until \end{picture}
+    // Use sibling context to consume following elements
+    
+    // Create a synthetic element to hold the picture content
+    MarkBuilder builder(proc->input());
+    ElementBuilder pic_elem = builder.element("picture");
+    
+    // Consume following siblings until \end{picture}
+    int64_t consumed = 0;
+    bool found_end = false;
+    
+    // Access sibling context through proc's internal method
+    ElementReader* parent = proc->getSiblingParent();
+    int64_t current_idx = proc->getSiblingCurrentIndex();
+    
+    if (parent) {
+        int64_t count = parent->childCount();
+        for (int64_t i = current_idx + 1; i < count; i++) {
+            ItemReader sibling = parent->childAt(i);
+            consumed++;
+            
+            // Check if this is \end{picture}
+            if (sibling.isElement()) {
+                ElementReader sib_elem = sibling.asElement();
+                const char* tag = sib_elem.tagName();
+                if (tag && strcmp(tag, "end") == 0) {
+                    // Check if it's \end{picture}
+                    StringBuf* end_sb = stringbuf_new(pool);
+                    sib_elem.textContent(end_sb);
+                    String* end_str = stringbuf_to_string(end_sb);
+                    if (end_str && strcmp(end_str->chars, "picture") == 0) {
+                        found_end = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Add this sibling to the picture element
+            pic_elem.child(sibling.item());
+        }
+    }
+    
+    if (!found_end) {
+        log_warn("cmd_begin: no matching \\end{picture} found");
+    }
+    
+    // Tell processChildren how many siblings we consumed
+    proc->setSiblingConsumed(consumed);
+    
+    // Create the picture element and process it
+    Item picture_item = pic_elem.final();
+    cmd_picture(proc, picture_item);
+}
+
+static void cmd_picture(LatexProcessor* proc, Item elem) {
+    // \begin{picture}(width,height)(x_offset,y_offset)
+    // Parser gives: {"$":"picture", "_":[paragraph with coords and commands]}
+    HtmlGenerator* gen = proc->generator();
+    Pool* pool = proc->pool();
+    
+    // Initialize picture context
+    g_picture_ctx = PictureContext();
+    g_picture_renderer = new PictureRenderer(g_picture_ctx);
+    
+    // Flatten picture children into sequential list
+    std::vector<PictureItem> items;
+    flattenPictureChildren(elem, items, pool);
+    
+    // Parse picture dimensions from first text content
+    double width = 100, height = 100;  // default
+    double x_off = 0, y_off = 0;
+    
+    for (size_t i = 0; i < items.size(); i++) {
+        if (items[i].type == PictureItem::TEXT) {
+            const char* text = items[i].text.c_str();
+            const char* next = parsePicCoordAdvance(text, &width, &height);
+            if (next) {
+                // Check for offset
+                parsePicCoord(next, &x_off, &y_off);
+                break;
+            }
+        }
+    }
+    
+    log_debug("cmd_picture: size=(%.2f,%.2f) offset=(%.2f,%.2f)", width, height, x_off, y_off);
+    
+    // Begin picture with parsed dimensions
+    g_picture_renderer->beginPicture(width, height, x_off, y_off);
+    
+    // Process picture items
+    processPictureItems(proc, items);
+    
+    // End picture and get HTML output
+    std::string html = g_picture_renderer->endPicture();
+    
+    // Output directly as raw HTML
+    gen->rawHtml(html.c_str());
+    
+    // Cleanup
+    delete g_picture_renderer;
+    g_picture_renderer = nullptr;
+}
+
+static void cmd_thicklines(LatexProcessor* proc, Item elem) {
+    // \thicklines - set thick line mode for picture
+    if (g_picture_renderer) {
+        g_picture_renderer->thicklines();
+    }
+}
+
+static void cmd_thinlines(LatexProcessor* proc, Item elem) {
+    // \thinlines - set thin line mode for picture
+    if (g_picture_renderer) {
+        g_picture_renderer->thinlines();
+    }
+}
+
+// =============================================================================
 // Color Commands
 // =============================================================================
 
@@ -6677,6 +7401,16 @@ void LatexProcessor::initCommandTable() {
     command_table_["graphics_include"] = cmd_includegraphics;
     command_table_["includegraphics"] = cmd_includegraphics;
     
+    // Picture environment (LaTeX picture graphics)
+    command_table_["picture"] = cmd_picture;
+    command_table_["begin"] = cmd_begin;  // Handle \begin{picture} inside curly groups
+    command_table_["end"] = [](LatexProcessor* proc, Item elem) {
+        // \end{...} is consumed by cmd_begin, skip orphaned ones
+        (void)proc; (void)elem;
+    };
+    command_table_["thicklines"] = cmd_thicklines;
+    command_table_["thinlines"] = cmd_thinlines;
+    
     // Color commands
     command_table_["color_reference"] = cmd_color_reference;  // Tree-sitter node for \textcolor and \colorbox
     command_table_["textcolor"] = cmd_textcolor;
@@ -6756,6 +7490,7 @@ bool LatexProcessor::isBlockCommand(const char* cmd_name) {
             strcmp(cmd_name, "tabular") == 0 ||
             strcmp(cmd_name, "equation") == 0 ||
             strcmp(cmd_name, "displaymath") == 0 ||
+            strcmp(cmd_name, "picture") == 0 ||
             strcmp(cmd_name, "par") == 0 ||
             strcmp(cmd_name, "newpage") == 0 ||
             strcmp(cmd_name, "maketitle") == 0 ||
