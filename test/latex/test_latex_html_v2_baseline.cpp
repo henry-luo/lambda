@@ -207,11 +207,11 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
         // layout-marginpar.tex: All tests pass! (marginpar implementation complete)
         // macros.tex: Tests 4, 5, 6 pass! (sibling lookahead + parbreak->br + cstring() fix)
         // sectioning.tex: All tests pass! test 3 fixed with inStyledSpan() check
-        {"spacing.tex", {1}},  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
+        {"spacing.tex", {1}}  // fixture needs Unicode thin space update (U+2009 vs ASCII space)
         // symbols.tex test 2 PASSES (^^ unicode notation) - removed from exclusions
         // text.tex test 10 now passes (paragraph alignment buffering fix)
-        // whitespace.tex test 5 now passes (mbox ZWS at start when newline) - moved to baseline
-        {"whitespace.tex", {7, 8}}  // test 21 fixed (ZWS at horizontal env boundaries)
+        // whitespace.tex: test 5 passes (mbox ZWS at start), tests 7-8 skipped (match latex-js)
+        // All whitespace tests now in baseline (7-8 have ! prefix in fixture - aspirational tests)
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
