@@ -113,7 +113,9 @@ static void html5_commit_attribute(Html5Parser* parser) {
         parser->temp_buffer[parser->temp_buffer_len] = '\0';
         attr_value = builder.createString(parser->temp_buffer, parser->temp_buffer_len);
     } else {
-        attr_value = builder.createString("");
+        // Use TRUE_EMPTY_STRING for boolean attributes (has len=0, chars="")
+        // not EMPTY_STRING which has "lambda.nil" content
+        attr_value = &TRUE_EMPTY_STRING;
     }
 
     // Add attribute to token
@@ -122,6 +124,28 @@ static void html5_commit_attribute(Html5Parser* parser) {
     // Clear for next attribute
     html5_clear_attr_name(parser);
     html5_clear_temp_buffer(parser);
+}
+
+// helper: save the last start tag name (for RCDATA/RAWTEXT end tag matching)
+static void html5_save_last_start_tag(Html5Parser* parser, const char* name, size_t len) {
+    // Allocate or reuse buffer
+    if (parser->last_start_tag_name == nullptr || len > parser->last_start_tag_name_len) {
+        parser->last_start_tag_name = (char*)arena_alloc(parser->arena, len + 1);
+    }
+    memcpy(parser->last_start_tag_name, name, len);
+    parser->last_start_tag_name[len] = '\0';
+    parser->last_start_tag_name_len = len;
+}
+
+// helper: check if temp buffer matches last start tag (for appropriate end tag)
+static bool html5_is_appropriate_end_tag(Html5Parser* parser) {
+    if (!parser->last_start_tag_name || parser->last_start_tag_name_len == 0) {
+        return false;
+    }
+    if (parser->temp_buffer_len != parser->last_start_tag_name_len) {
+        return false;
+    }
+    return memcmp(parser->temp_buffer, parser->last_start_tag_name, parser->temp_buffer_len) == 0;
 }
 
 // helper: check if string matches (case insensitive)
@@ -662,6 +686,202 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 break;
             }
 
+            case HTML5_TOK_RCDATA: {
+                // RCDATA state - for <title>, <textarea>
+                // Only recognizes & for entities and < for potential end tag
+                if (c == '&') {
+                    // Try to decode character reference
+                    char decoded[8];
+                    int decoded_len = 0;
+                    if (html5_try_decode_char_reference(parser, decoded, &decoded_len, false)) {
+                        return html5_token_create_character_string(parser->pool, parser->arena, decoded, decoded_len);
+                    } else {
+                        return html5_token_create_character(parser->pool, parser->arena, c);
+                    }
+                } else if (c == '<') {
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_LESS_THAN_SIGN);
+                } else if (c == '\0') {
+                    if (html5_is_eof(parser)) {
+                        return html5_token_create_eof(parser->pool, parser->arena);
+                    } else {
+                        log_error("html5: unexpected null in RCDATA");
+                        return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
+                    }
+                } else {
+                    return html5_token_create_character(parser->pool, parser->arena, c);
+                }
+                break;
+            }
+
+            case HTML5_TOK_RCDATA_LESS_THAN_SIGN: {
+                // Saw '<' in RCDATA, looking for '/' to start potential end tag
+                if (c == '/') {
+                    html5_clear_temp_buffer(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_END_TAG_OPEN);
+                } else {
+                    // Not an end tag, emit '<' and reconsume
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
+                    return html5_token_create_character(parser->pool, parser->arena, '<');
+                }
+                break;
+            }
+
+            case HTML5_TOK_RCDATA_END_TAG_OPEN: {
+                // Saw '</' in RCDATA, check if this starts a valid end tag
+                if (isalpha(c)) {
+                    parser->current_token = html5_token_create_end_tag(parser->pool, parser->arena, nullptr);
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA_END_TAG_NAME);
+                } else {
+                    // Not a valid end tag, emit '</' and reconsume
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
+                    return html5_token_create_character_string(parser->pool, parser->arena, "</", 2);
+                }
+                break;
+            }
+
+            case HTML5_TOK_RCDATA_END_TAG_NAME: {
+                // Building end tag name in RCDATA
+                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
+                    // Check if this is the appropriate end tag
+                    if (html5_is_appropriate_end_tag(parser)) {
+                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
+                    } else {
+                        // Not appropriate, emit as text
+                        goto rcdata_emit_as_text;
+                    }
+                } else if (c == '/') {
+                    if (html5_is_appropriate_end_tag(parser)) {
+                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
+                    } else {
+                        goto rcdata_emit_as_text;
+                    }
+                } else if (c == '>') {
+                    if (html5_is_appropriate_end_tag(parser)) {
+                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        Html5Token* token = parser->current_token;
+                        parser->current_token = nullptr;
+                        return token;
+                    } else {
+                        goto rcdata_emit_as_text;
+                    }
+                } else if (c >= 'A' && c <= 'Z') {
+                    html5_append_to_temp_buffer(parser, c + 0x20);  // lowercase
+                } else if (c >= 'a' && c <= 'z') {
+                    html5_append_to_temp_buffer(parser, c);
+                } else {
+                    // Not a valid end tag name character
+                    rcdata_emit_as_text:
+                    // Emit '</' + temp_buffer contents as text
+                    parser->current_token = nullptr;
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RCDATA);
+                    // Build the string "</" + temp_buffer
+                    size_t len = 2 + parser->temp_buffer_len;
+                    char* text = (char*)arena_alloc(parser->arena, len + 1);
+                    text[0] = '<';
+                    text[1] = '/';
+                    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
+                    text[len] = '\0';
+                    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+                }
+                break;
+            }
+
+            case HTML5_TOK_RAWTEXT: {
+                // RAWTEXT state - for <style>, <script>, <xmp>, <iframe>, <noembed>, <noframes>
+                // Similar to RCDATA but doesn't recognize &
+                if (c == '<') {
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_LESS_THAN_SIGN);
+                } else if (c == '\0') {
+                    if (html5_is_eof(parser)) {
+                        return html5_token_create_eof(parser->pool, parser->arena);
+                    } else {
+                        log_error("html5: unexpected null in RAWTEXT");
+                        return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
+                    }
+                } else {
+                    return html5_token_create_character(parser->pool, parser->arena, c);
+                }
+                break;
+            }
+
+            case HTML5_TOK_RAWTEXT_LESS_THAN_SIGN: {
+                if (c == '/') {
+                    html5_clear_temp_buffer(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_END_TAG_OPEN);
+                } else {
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
+                    return html5_token_create_character(parser->pool, parser->arena, '<');
+                }
+                break;
+            }
+
+            case HTML5_TOK_RAWTEXT_END_TAG_OPEN: {
+                if (isalpha(c)) {
+                    parser->current_token = html5_token_create_end_tag(parser->pool, parser->arena, nullptr);
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT_END_TAG_NAME);
+                } else {
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
+                    return html5_token_create_character_string(parser->pool, parser->arena, "</", 2);
+                }
+                break;
+            }
+
+            case HTML5_TOK_RAWTEXT_END_TAG_NAME: {
+                // Building end tag name in RAWTEXT (same logic as RCDATA)
+                if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
+                    if (html5_is_appropriate_end_tag(parser)) {
+                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
+                    } else {
+                        goto rawtext_emit_as_text;
+                    }
+                } else if (c == '/') {
+                    if (html5_is_appropriate_end_tag(parser)) {
+                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
+                    } else {
+                        goto rawtext_emit_as_text;
+                    }
+                } else if (c == '>') {
+                    if (html5_is_appropriate_end_tag(parser)) {
+                        parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                        html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
+                        Html5Token* token = parser->current_token;
+                        parser->current_token = nullptr;
+                        return token;
+                    } else {
+                        goto rawtext_emit_as_text;
+                    }
+                } else if (c >= 'A' && c <= 'Z') {
+                    html5_append_to_temp_buffer(parser, c + 0x20);
+                } else if (c >= 'a' && c <= 'z') {
+                    html5_append_to_temp_buffer(parser, c);
+                } else {
+                    rawtext_emit_as_text:
+                    parser->current_token = nullptr;
+                    html5_reconsume(parser);
+                    html5_switch_tokenizer_state(parser, HTML5_TOK_RAWTEXT);
+                    size_t len = 2 + parser->temp_buffer_len;
+                    char* text = (char*)arena_alloc(parser->arena, len + 1);
+                    text[0] = '<';
+                    text[1] = '/';
+                    memcpy(text + 2, parser->temp_buffer, parser->temp_buffer_len);
+                    text[len] = '\0';
+                    return html5_token_create_character_string(parser->pool, parser->arena, text, len);
+                }
+                break;
+            }
+
             case HTML5_TOK_TAG_OPEN: {
                 if (c == '!') {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_MARKUP_DECLARATION_OPEN);
@@ -736,6 +956,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
+                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
+                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+                    }
                     return token;
                 } else if (c >= 'A' && c <= 'Z') {
                     // convert uppercase to lowercase
@@ -830,6 +1054,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
+                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
+                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+                    }
                     return token;
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     // EOF in tag - emit eof token (tag is dropped per spec)
@@ -861,6 +1089,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
+                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
+                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+                    }
                     return token;
                 } else if (c == '\0' && html5_is_eof(parser)) {
                     // EOF in tag
@@ -955,6 +1187,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
+                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
+                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+                    }
                     return token;
                 } else if (c == '\0') {
                     if (html5_is_eof(parser)) {
@@ -986,6 +1222,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
+                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
+                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+                    }
                     return token;
                 } else if (html5_is_eof(parser)) {
                     log_error("html5: eof after attribute value");
@@ -1005,6 +1245,10 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
+                    // Save last start tag name for RCDATA/RAWTEXT end tag matching
+                    if (token->type == HTML5_TOKEN_START_TAG && token->tag_name) {
+                        html5_save_last_start_tag(parser, token->tag_name->chars, token->tag_name->len);
+                    }
                     return token;
                 } else if (html5_is_eof(parser)) {
                     log_error("html5: eof in tag");
@@ -1042,7 +1286,12 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     log_error("html5: incorrectly opened comment");
                     parser->current_token = html5_token_create_comment(parser->pool, parser->arena, nullptr);
                     html5_clear_temp_buffer(parser);
-                    html5_reconsume(parser);
+                    // Only reconsume if not at EOF - at EOF there's nothing to reconsume
+                    // and reconsuming would cause the previous character to be added
+                    // to the comment content incorrectly
+                    if (!(c == '\0' && html5_is_eof(parser))) {
+                        html5_reconsume(parser);
+                    }
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BOGUS_COMMENT);
                 }
                 break;
@@ -1241,7 +1490,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     Html5Token* token = parser->current_token;
                     parser->current_token = nullptr;
                     return token;
-                } else if (html5_is_eof(parser)) {
+                } else if (c == '\0' && html5_is_eof(parser)) {
                     parser->current_token->data = html5_create_string_from_temp_buffer(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                     Html5Token* token = parser->current_token;

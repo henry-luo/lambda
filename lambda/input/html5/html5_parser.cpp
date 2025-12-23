@@ -36,6 +36,10 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     parser->text_buffer = stringbuf_new(pool);
     parser->pending_text_parent = nullptr;
 
+    // last start tag (for RCDATA/RAWTEXT end tag matching)
+    parser->last_start_tag_name = nullptr;
+    parser->last_start_tag_name_len = 0;
+
     return parser;
 }
 
@@ -581,8 +585,9 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
     const char* subject = token->tag_name->chars;
     log_debug("html5: running adoption agency for </%s>", subject);
 
-    // Flush any pending text before restructuring the tree
-    html5_flush_pending_text(parser);
+    // Note: We don't flush text at the start. We only flush when we're about to
+    // restructure the tree. This allows text before an unmatched end tag like
+    // </i> to merge with text after it.
 
     // Outer loop limit
     int outer_loop_counter = 0;
@@ -602,6 +607,8 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
                 const char* node_tag = ((TypeElmt*)node->type)->name.str;
 
                 if (strcmp(node_tag, subject) == 0) {
+                    // Found matching element - flush text and process
+                    html5_flush_pending_text(parser);
                     html5_generate_implied_end_tags_except(parser, subject);
                     while ((int)parser->open_elements->length > i) {
                         html5_pop_element(parser);
@@ -610,11 +617,15 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
                 }
 
                 if (html5_is_special_element(node_tag)) {
-                    return;  // parse error, ignore token
+                    // Hit special element - ignore token, don't flush text
+                    return;
                 }
             }
             return;
         }
+
+        // We found a formatting element - flush pending text before restructuring
+        html5_flush_pending_text(parser);
 
         Element* formatting_element = (Element*)parser->active_formatting->items[formatting_element_idx].element;
 
