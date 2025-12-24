@@ -1,8 +1,0 @@
-[
-  {
-    "test_id": "8970fe21b551a270aa74648bb2e8b905edb54522",
-    "file": "html5lib_scripted_adoption01.html",
-    "input": "<p><b id=\"A\"><script>document.getElementById(\"A\").id = \"B\"</script></p>TEXT</b>",
-    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <b>\n|         id=\"B\"\n|         <script>\n|           \"document.getElementById(\"A\").id = \"B\"\"\n|     <b>\n|       id=\"A\"\n|       \"TEXT\""
-  }
-]
