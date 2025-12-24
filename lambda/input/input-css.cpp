@@ -3,10 +3,11 @@
 #include "css/css_engine.hpp"
 #include "css/css_formatter.hpp"
 #include "../../lib/log.h"
+#include "log.h"
 
 // Parse CSS using the new CSS engine
 void parse_css(Input* input, const char* css_string) {
-    printf("css_parse (stylesheet) - using new CSS engine\n");
+    log_debug("css_parse (stylesheet) - using new CSS engine\n");
 
     // Use the new CSS engine for parsing
     CssEngine* engine = css_engine_create(input->pool);
@@ -31,5 +32,5 @@ void parse_css(Input* input, const char* css_string) {
     uint64_t marker = 0xCC; // CSS stylesheet marker
     input->root = {.item = (marker << 56) | ((uint64_t)stylesheet & 0x00FFFFFFFFFFFFFF)};
 
-    printf("CSS parsing complete: %zu rules\n", stylesheet->rule_count);
+    log_debug("CSS parsing complete: %zu rules\n", stylesheet->rule_count);
 }

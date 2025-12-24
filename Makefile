@@ -1348,12 +1348,14 @@ tidy-printf:
 		echo "  make tidy-printf FILE='lambda/lambda-eval.cpp' BACKUP=1"; \
 		echo "  make tidy-printf FILE='lambda/*.cpp' DRY_RUN=1"; \
 		echo "  make tidy-printf FILE='lib/*.c' BACKUP=1"; \
-		echo "  make tidy-printf FILE='include/*.h' DRY_RUN=1 BACKUP=1"; \
+		echo "  make tidy-printf FILE='lambda/input/input*.cpp' BACKUP=1"; \
 		echo ""; \
 		echo "Options:"; \
-		echo "  FILE=pattern   File pattern with wildcards (required)"; \
-		echo "  DRY_RUN=1      Preview changes without modifying files"; \
-		echo "  BACKUP=1       Create .bak backup files before modifying"; \
+		echo "  FILE='pattern'  File pattern with wildcards (MUST be quoted!)"; \
+		echo "  DRY_RUN=1       Preview changes without modifying files"; \
+		echo "  BACKUP=1        Create .bak backup files before modifying"; \
+		echo ""; \
+		echo "Note: Always quote wildcards to prevent shell expansion!"; \
 		exit 1; \
 	fi; \
 	DRY_RUN_FLAG=""; \

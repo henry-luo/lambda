@@ -1,5 +1,6 @@
 #include "input-graph.h"
 #include <string.h>
+#include "log.h"
 
 // Main graph parser function that dispatches to specific flavors
 void parse_graph(Input* input, const char* graph_string, const char* flavor) {
@@ -14,7 +15,7 @@ void parse_graph(Input* input, const char* graph_string, const char* flavor) {
     } else if (strcmp(flavor, "d2") == 0) {
         parse_graph_d2(input, graph_string);
     } else {
-        printf("Unknown graph flavor: %s\n", flavor);
+        log_debug("Unknown graph flavor: %s\n", flavor);
         // Default to DOT parser
         parse_graph_dot(input, graph_string);
     }
