@@ -301,8 +301,15 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     else {
         block->scroller->has_vt_overflow = false;
     }
-    block->scroller->has_clip = block->scroller->has_vt_overflow || block->scroller->has_hz_overflow;
-    if (block->scroller->has_clip) {
+    // Always clip when overflow is hidden/clip, even without actual overflow
+    // This is needed for border-radius clipping to work correctly
+    bool should_clip = block->scroller->has_vt_overflow || block->scroller->has_hz_overflow ||
+                       block->scroller->overflow_x == CSS_VALUE_HIDDEN ||
+                       block->scroller->overflow_x == CSS_VALUE_CLIP ||
+                       block->scroller->overflow_y == CSS_VALUE_HIDDEN ||
+                       block->scroller->overflow_y == CSS_VALUE_CLIP;
+    if (should_clip) {
+        block->scroller->has_clip = true;
         block->scroller->clip.left = block->bound->border ? block->bound->border->width.left : 0;
         block->scroller->clip.top = block->bound->border ? block->bound->border->width.top : 0;
         block->scroller->clip.right = block->width - (block->bound->border ? block->bound->border->width.right : 0);
