@@ -38,7 +38,7 @@ Item input_markup(Input *input, const char* content);
 
 // Import MarkupFormat enum from markup-parser.h
 #include "markup-parser.h"
-#include "log.h"
+#include "lib/log.h"
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
 
 __thread Context* input_context = NULL;

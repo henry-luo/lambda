@@ -3,7 +3,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
-#include "log.h"
+#include "lib/log.h"
 
 using namespace lambda;
 
