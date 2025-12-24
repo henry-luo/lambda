@@ -1,4 +1,14 @@
 <svg class="logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
     <circle cx="50" cy="50" r="40" stroke="white" stroke-width="5" fill="none" />
-    <text x="18" y="62" font-size="28" text-anchor="start" fill="white" font-family="Arial">VIBE</text>
+    <!-- VIBE text converted to paths for compatibility -->
+    <g fill="white" transform="translate(18, 62)">
+        <!-- V -->
+        <path d="M0,-20 L6,-20 L10,-6 L14,-20 L20,-20 L12,0 L8,0 Z"/>
+        <!-- I -->
+        <path d="M22,-20 L28,-20 L28,0 L22,0 Z"/>
+        <!-- B -->
+        <path d="M32,-20 L42,-20 Q48,-20 48,-14 Q48,-10 44,-10 Q48,-10 48,-4 Q48,0 42,0 L32,0 Z M38,-16 L38,-12 L40,-12 Q42,-12 42,-14 Q42,-16 40,-16 Z M38,-8 L38,-4 L40,-4 Q42,-4 42,-6 Q42,-8 40,-8 Z"/>
+        <!-- E -->
+        <path d="M52,-20 L66,-20 L66,-16 L58,-16 L58,-12 L64,-12 L64,-8 L58,-8 L58,-4 L66,-4 L66,0 L52,0 Z"/>
+    </g>
 </svg>
