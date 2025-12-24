@@ -2,9 +2,11 @@
 #include "render_img.hpp"
 #include "render_border.hpp"
 #include "render_background.hpp"
+#include "layout.hpp"
 #include "../lib/log.h"
 #include "../lib/avl_tree.h"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/dom_element.hpp"
 #include <string.h>
 #include <math.h>
 #include <chrono>
@@ -148,6 +150,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     CssEnum white_space = get_white_space_value(text_view);
     bool preserve_spaces = ws_preserve_spaces(white_space);
 
+    // Get text-transform from parent elements
+    CssEnum text_transform = CSS_VALUE_NONE;
+    DomNode* parent = text_view->parent;
+    while (parent) {
+        if (parent->is_element()) {
+            DomElement* elem = (DomElement*)parent;
+            CssEnum transform = get_text_transform_from_block(elem->blk);
+            if (transform != CSS_VALUE_NONE) {
+                text_transform = transform;
+                break;
+            }
+        }
+        parent = parent->parent;
+    }
+
     // Check if parent inline element has a background color to render
     DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
     Color* bg_color = nullptr;
@@ -217,6 +234,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
         // Render the text with adjusted spacing
         bool has_space = false;  uint32_t codepoint;
+        bool is_word_start = true;  // Track word boundaries for capitalize
         while (p < end) {
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
@@ -228,6 +246,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     x += space_width;  // Use adjusted space width for justified text
                 }
                 // else  // skip consecutive spaces
+                is_word_start = true;  // Next non-space is word start
                 p++;
             }
             else {
@@ -235,6 +254,10 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 int bytes = utf8_to_codepoint(p, &codepoint);
                 if (bytes <= 0) { p++;  codepoint = 0; }
                 else { p += bytes; }
+
+                // Apply text-transform before loading glyph
+                codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+                is_word_start = false;
 
                 FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, codepoint, true);
                 if (!glyph) {
