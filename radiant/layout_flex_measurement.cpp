@@ -731,12 +731,22 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
     log_debug("Calculating intrinsic sizes for item %p (%s)", item, item->node_name());
 
+    // CRITICAL FIX: Set up font for the flex item BEFORE measuring text
+    // This ensures text measurement uses the correct font (e.g., bold, specific size)
+    LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
+    FontBox saved_font;  // Save current font to restore later
+    bool font_changed = false;
+    if (lycon && item->font) {
+        saved_font = lycon->font;
+        setup_font(lycon->ui_context, &lycon->font, item->font);
+        font_changed = true;
+    }
+
     // Initialize to zero
     // Use float to preserve precision from text measurement (avoids truncation)
     float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
 
     // Check if this is a replaced element (img, video) - needs special handling
-    LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
     uintptr_t elmt_name = item->tag();
     bool is_replaced = (elmt_name == HTM_TAG_IMG || elmt_name == HTM_TAG_VIDEO ||
                         elmt_name == HTM_TAG_IFRAME || elmt_name == HTM_TAG_CANVAS);
@@ -812,6 +822,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         item->fi->has_intrinsic_height = true;
 
         log_debug("calculate_item_intrinsic_sizes: image final intrinsic=%.1fx%.1f", max_width, max_height);
+        
+        // Restore font before returning
+        if (font_changed) {
+            lycon->font = saved_font;
+        }
         return;
     }
 
@@ -1109,6 +1124,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
     log_debug("Intrinsic sizes calculated: width=[%d, %d], height=[%d, %d]",
               min_width, max_width, min_height, max_height);
+
+    // Restore font after measurement
+    if (font_changed) {
+        lycon->font = saved_font;
+    }
 }
 
 // Measure block intrinsic sizes (full implementation)

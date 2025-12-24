@@ -758,7 +758,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (!flex_item) return;
 
     log_enter();
-    log_info("SUB-PASS 2: Layout flex item content: item=%p (%s), size=%dx%d",
+    log_info("SUB-PASS 2: Layout flex item content: item=%p (%s), size=%.1fx%.1f",
              flex_item, flex_item->node_name(), flex_item->width, flex_item->height);
 
     log_debug("Flex item=%p, first_child=%p", flex_item, flex_item->first_child);
@@ -907,7 +907,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         // Include both block and inline-block flex items
         if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* flex_item = (ViewBlock*)child;
-            log_debug("Final layout for flex item %p: %dx%d", flex_item, flex_item->width, flex_item->height);
+            log_debug("Final layout for flex item %p: %.1fx%.1f", flex_item, flex_item->width, flex_item->height);
 
             // Final layout of flex item contents with determined sizes
             layout_flex_item_content(lycon, flex_item);
