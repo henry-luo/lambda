@@ -20,7 +20,6 @@ void parse_properties(Input* input, const char* prop_string);
 void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
-void parse_html_impl(Input* input, const char* html_string, const char* flavor);  // Internal - use input_from_source()
 Element* html5_parse(Input* input, const char* html);  // HTML5 compliant parser
 extern "C" void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser (default)
 void parse_rtf(Input* input, const char* rtf_string);
@@ -584,16 +583,9 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             input->root = input_markup(input, source);
         }
         else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
-            const char* html_flavor = (flavor && flavor->chars) ? flavor->chars : "html5";
-
-            // Use HTML5 compliant parser by default
-            if (strcmp(html_flavor, "html5") == 0 || strcmp(html_flavor, "html") == 0) {
-                Element* doc = html5_parse(input, source);
-                input->root = (Item){.element = doc};
-            } else {
-                // Fall back to old parser for other flavors
-                parse_html_impl(input, source, html_flavor);
-            }
+            // Use HTML5 compliant parser
+            Element* doc = html5_parse(input, source);
+            input->root = (Item){.element = doc};
         }
         else if (strcmp(effective_type, "latex") == 0 || strcmp(effective_type, "latex-ts") == 0) {
             // Tree-sitter LaTeX parser (default)
@@ -889,4 +881,127 @@ void InputManager::destroy_global() {
         delete g_input_manager;
         g_input_manager = nullptr;
     }
+}
+
+// Get the <html> element from the #document tree
+extern "C" Element* input_get_html_element(Input* input) {
+    if (!input) return nullptr;
+
+    TypeId root_type = get_type_id(input->root);
+
+    if (root_type == LMD_TYPE_ELEMENT) {
+        Element* elem = input->root.element;
+        TypeElmt* type = (TypeElmt*)elem->type;
+
+        // If it's a #document node, get the html child
+        if (strcmp(type->name.str, "#document") == 0) {
+            List* doc_children = elem;
+            if (doc_children->length > 0) {
+                Item html_item = doc_children->items[0];
+                if (html_item.type_id() == LMD_TYPE_ELEMENT) {
+                    return html_item.element;
+                }
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+// Get fragment element (extracts from body for fragments, returns html for full docs)
+extern "C" Element* input_get_html_fragment_element(Input* input, const char* original_html) {
+    if (!input) return nullptr;
+
+    TypeId root_type = get_type_id(input->root);
+
+    if (root_type == LMD_TYPE_ELEMENT) {
+        Element* elem = input->root.element;
+        TypeElmt* type = (TypeElmt*)elem->type;
+
+        // If it's a #document node from HTML5 parser
+        if (strcmp(type->name.str, "#document") == 0) {
+            List* doc_children = elem;
+            if (doc_children->length > 0) {
+                Item html_item = doc_children->items[0];
+                if (html_item.type_id() == LMD_TYPE_ELEMENT) {
+                    Element* html_elem = html_item.element;
+                    TypeElmt* html_type = (TypeElmt*)html_elem->type;
+
+                    if (strcmp(html_type->name.str, "html") == 0) {
+                        // Check if original HTML explicitly starts with <html>
+                        if (original_html) {
+                            const char* p = original_html;
+                            while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+
+                            bool has_explicit_html = (strncmp(p, "<html", 5) == 0);
+
+                            // If <html> was explicit in source, return it
+                            if (has_explicit_html) {
+                                return html_elem;
+                            }
+                        }
+
+                        // Otherwise, extract the actual fragment from body
+                        List* html_children = html_elem;
+
+                        for (int64_t i = 0; i < html_children->length; i++) {
+                            Item child = html_children->items[i];
+                            if (child.type_id() == LMD_TYPE_ELEMENT) {
+                                Element* child_elem = child.element;
+                                TypeElmt* child_type = (TypeElmt*)child_elem->type;
+
+                                if (strcmp(child_type->name.str, "body") == 0) {
+                                    List* body_children = child_elem;
+
+                                    // Count element children (skip text nodes)
+                                    int element_count = 0;
+                                    Element* first_element = nullptr;
+                                    for (int64_t j = 0; j < body_children->length; j++) {
+                                        Item body_child = body_children->items[j];
+                                        if (body_child.type_id() == LMD_TYPE_ELEMENT) {
+                                            if (!first_element) {
+                                                first_element = body_child.element;
+                                            }
+                                            element_count++;
+                                        }
+                                    }
+
+                                    // If body has exactly one element child, return it
+                                    if (element_count == 1 && first_element) {
+                                        return first_element;
+                                    }
+
+                                    // Multiple element children -> not a simple fragment, return html
+                                    return html_elem;
+                                }
+                            }
+                        }
+
+                        return html_elem;
+                    }
+                }
+            }
+        }
+
+        // Fallback
+        return elem;
+    }
+    else if (root_type == LMD_TYPE_LIST) {
+        List* root_list = input->root.list;
+        for (int64_t i = 0; i < root_list->length; i++) {
+            Item item = root_list->items[i];
+            if (item.type_id() == LMD_TYPE_ELEMENT) {
+                Element* elem = item.element;
+                TypeElmt* type = (TypeElmt*)elem->type;
+
+                // Skip DOCTYPE and comments
+                if (strcmp(type->name.str, "!DOCTYPE") != 0 &&
+                    strcmp(type->name.str, "!--") != 0) {
+                    return elem;
+                }
+            }
+        }
+    }
+
+    return nullptr;
 }
