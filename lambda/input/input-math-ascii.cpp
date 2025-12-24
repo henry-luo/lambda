@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include "log.h"
+#include "lib/log.h"
 
 using namespace lambda;
 

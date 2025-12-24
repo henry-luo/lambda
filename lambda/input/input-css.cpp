@@ -3,7 +3,7 @@
 #include "css/css_engine.hpp"
 #include "css/css_formatter.hpp"
 #include "../../lib/log.h"
-#include "log.h"
+#include "lib/log.h"
 
 // Parse CSS using the new CSS engine
 void parse_css(Input* input, const char* css_string) {

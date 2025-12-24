@@ -189,15 +189,22 @@ std::string applyReplacements(const std::string& source, std::vector<Replacement
     return result;
 }
 
-std::string addIncludeIfNeeded(const std::string& source, const std::string& include_file) {
-    // Check if include already exists
-    std::string include_directive = "#include \"" + include_file + "\"";
-    if (source.find(include_directive) != std::string::npos) {
-        return source;
-    }
+std::string getRelativeLogInclude(const std::string& filepath) {
+    // The build system adds -Ilib to include paths, so we can always use lib/log.h
+    // regardless of where the file is located
+    return "lib/log.h";
+}
+
+std::string addIncludeIfNeeded(const std::string& source, const std::string& include_file, const std::string& filepath) {
+    // Calculate the correct relative path for the include
+    std::string include_path = getRelativeLogInclude(filepath);
+    std::string include_directive = "#include \"" + include_path + "\"";
     
-    std::string alt_include = "#include <" + include_file + ">";
-    if (source.find(alt_include) != std::string::npos) {
+    // Check if any form of log.h include already exists
+    if (source.find("#include \"log.h\"") != std::string::npos ||
+        source.find("#include <log.h>") != std::string::npos ||
+        source.find("#include \"lib/log.h\"") != std::string::npos ||
+        source.find("#include <lib/log.h>") != std::string::npos) {
         return source;
     }
     
@@ -310,14 +317,15 @@ bool processFile(const std::string& filepath, bool dry_run, bool backup) {
     
     // Add includes if needed
     for (const auto& include : ctx.includes_needed) {
-        new_source = addIncludeIfNeeded(new_source, include);
+        new_source = addIncludeIfNeeded(new_source, include, filepath);
     }
     
     // Report changes
     std::cout << "\n" << (dry_run ? "[DRY RUN] " : "") << "Changes in " << filepath << ":" << std::endl;
     std::cout << "  - Converted " << ctx.changes_count << " printf/fprintf calls to log_debug()" << std::endl;
     if (!ctx.includes_needed.empty()) {
-        std::cout << "  - Added #include \"log.h\"" << std::endl;
+        std::string log_path = getRelativeLogInclude(filepath);
+        std::cout << "  - Added #include \"" << log_path << "\"" << std::endl;
     }
     
     if (dry_run) {
