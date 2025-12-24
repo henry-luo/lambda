@@ -471,6 +471,12 @@ class RadiantLayoutTester {
             const skipTags = ['head', 'script', 'style', 'meta', 'title', 'link'];
             if (skipTags.includes(child.node.tag)) return false;
 
+            // Skip display: none elements - Radiant doesn't create views for these
+            // since they don't participate in layout
+            if (child.node.computed && child.node.computed.display === 'none') {
+                return false;
+            }
+
             return true;
         });
     }

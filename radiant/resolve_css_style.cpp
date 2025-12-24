@@ -4915,9 +4915,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->fi->flex_basis_is_percent = false;
                 log_debug("[CSS] flex-basis: %.2fpx", basis_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                span->fi->flex_basis = (int)value->data.percentage.value;
+                // DEBUG: log raw percentage value to diagnose parsing issue
+                log_debug("[CSS DEBUG] flex-basis percentage raw: %f", value->data.percentage.value);
+                span->fi->flex_basis = (float)value->data.percentage.value;
                 span->fi->flex_basis_is_percent = true;
-                log_debug("[CSS] flex-basis: %d%%", span->fi->flex_basis);
+                log_debug("[CSS] flex-basis: %.1f%% (stored as %.1f)", value->data.percentage.value, span->fi->flex_basis);
             }
             break;
         }
