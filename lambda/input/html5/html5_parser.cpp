@@ -723,6 +723,11 @@ void html5_flush_pending_text(Html5Parser* parser) {
         return;  // nothing to flush
     }
 
+    log_debug("html5_flush_pending_text: flushing %zu chars: '%.*s'",
+              parser->text_buffer->length,
+              (int)parser->text_buffer->length,
+              parser->text_buffer->str->chars);
+
     Element* parent = parser->pending_text_parent;
     if (parent == nullptr) {
         parent = html5_current_node(parser);
@@ -736,6 +741,7 @@ void html5_flush_pending_text(Html5Parser* parser) {
 
     // Convert buffer to String and create text node
     String* text_str = stringbuf_to_string(parser->text_buffer);
+    log_debug("html5_flush_pending_text: created String with len=%zu", text_str->len);
     Item text_node = {.item = s2it(text_str)};
     array_append((Array*)parent, text_node, parser->pool, parser->arena);
 
@@ -757,6 +763,7 @@ void html5_insert_character(Html5Parser* parser, char c) {
     }
 
     // Buffer the character
+    log_debug("html5_insert_character: appending '%c' (0x%02x), buffer_len before=%zu", c, (unsigned char)c, parser->text_buffer->length);
     stringbuf_append_char(parser->text_buffer, c);
     parser->pending_text_parent = parent;
 }
@@ -1207,9 +1214,7 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // We found a formatting element - flush pending text before restructuring
-        html5_flush_pending_text(parser);
-
+        // We found a formatting element
         Element* formatting_element = (Element*)parser->active_formatting->items[formatting_element_idx].element;
 
         // Step 2: If formatting element not in stack of open elements
@@ -1257,6 +1262,21 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
             html5_remove_from_active_formatting(parser, formatting_element_idx);
             return;
         }
+
+        // Check if furthest block is a form-associated element
+        // In standards mode (not quirks), form controls create a barrier for AAA
+        const char* fb_tag = ((TypeElmt*)furthest_block->type)->name.str;
+        log_debug("html5: AAA - furthest block is <%s>", fb_tag);
+        if (!parser->quirks_mode &&
+            (strcmp(fb_tag, "button") == 0 || strcmp(fb_tag, "input") == 0 ||
+             strcmp(fb_tag, "select") == 0 || strcmp(fb_tag, "textarea") == 0 ||
+             strcmp(fb_tag, "keygen") == 0 || strcmp(fb_tag, "output") == 0)) {
+            log_debug("html5: AAA - furthest block is form control in standards mode, ignoring end tag");
+            return;  // Don't restructure across form controls - don't flush text either
+        }
+
+        // If we reach here, we're going to restructure the tree - flush pending text now
+        html5_flush_pending_text(parser);
 
         // Step 7: Get common ancestor (element before formatting element in stack)
         Element* common_ancestor = (Element*)parser->open_elements->items[fe_stack_idx - 1].element;
