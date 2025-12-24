@@ -1561,7 +1561,9 @@ void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout) {
 // Helper function to check if a view is a valid flex item
 bool is_valid_flex_item(ViewBlock* item) {
     if (!item) return false;
-    return item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK;
+    // CSS treats list-item as block-level for flex layout purposes
+    return item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
+           item->view_type == RDT_VIEW_LIST_ITEM;
 }
 
 // Helper function for clamping values with min/max constraints
