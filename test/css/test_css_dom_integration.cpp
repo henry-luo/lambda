@@ -149,9 +149,30 @@ protected:
         return build_dom_tree_from_element(lambda_root, parse_doc, nullptr);
     }
 
-    // Helper: Get HTML root element (skip DOCTYPE)
+    // Helper: Get HTML root element (skip DOCTYPE and #document wrapper)
     Element* get_html_root_element(Input* input) {
-        if (input->root.type_id() == LMD_TYPE_LIST) {
+        // HTML5 parser returns #document as root element
+        if (input->root.type_id() == LMD_TYPE_ELEMENT) {
+            Element* doc = input->root.element;
+            TypeElmt* doc_type = (TypeElmt*)doc->type;
+
+            // Check if this is #document
+            if (doc_type && doc_type->name.str && strcmp(doc_type->name.str, "#document") == 0) {
+                // Search for <html> element in #document's children
+                for (int64_t i = 0; i < doc->length; i++) {
+                    Item child = doc->items[i];
+                    if (child.type_id() == LMD_TYPE_ELEMENT) {
+                        Element* child_elem = child.element;
+                        TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                        if (child_type && child_type->name.str && strcasecmp(child_type->name.str, "html") == 0) {
+                            return child_elem;
+                        }
+                    }
+                }
+            }
+        }
+        // Fallback: handle old parser format (list of elements)
+        else if (input->root.type_id() == LMD_TYPE_LIST) {
             List* root_list = input->root.list;
             for (int64_t i = 0; i < root_list->length; i++) {
                 Item item = root_list->items[i];
