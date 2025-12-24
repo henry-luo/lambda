@@ -6,6 +6,208 @@
 #include "../../mark_editor.hpp"
 #include <string.h>
 
+// ============================================================================
+// QUIRKS MODE DETECTION
+// Per WHATWG HTML5 spec section 13.2.6.4.1
+// https://html.spec.whatwg.org/multipage/parsing.html#the-initial-insertion-mode
+// ============================================================================
+
+// Public identifier prefixes that trigger quirks mode
+static const char* quirks_mode_public_id_prefixes[] = {
+    "+//Silmaril//dtd html Pro v0r11 19970101//",
+    "-//AS//DTD HTML 3.0 asWedit + extensions//",
+    "-//AdvaSoft Ltd//DTD HTML 3.0 asWedit + extensions//",
+    "-//IETF//DTD HTML 2.0 Level 1//",
+    "-//IETF//DTD HTML 2.0 Level 2//",
+    "-//IETF//DTD HTML 2.0 Strict Level 1//",
+    "-//IETF//DTD HTML 2.0 Strict Level 2//",
+    "-//IETF//DTD HTML 2.0 Strict//",
+    "-//IETF//DTD HTML 2.0//",
+    "-//IETF//DTD HTML 2.1E//",
+    "-//IETF//DTD HTML 3.0//",
+    "-//IETF//DTD HTML 3.2 Final//",
+    "-//IETF//DTD HTML 3.2//",
+    "-//IETF//DTD HTML 3//",
+    "-//IETF//DTD HTML Level 0//",
+    "-//IETF//DTD HTML Level 1//",
+    "-//IETF//DTD HTML Level 2//",
+    "-//IETF//DTD HTML Level 3//",
+    "-//IETF//DTD HTML Strict Level 0//",
+    "-//IETF//DTD HTML Strict Level 1//",
+    "-//IETF//DTD HTML Strict Level 2//",
+    "-//IETF//DTD HTML Strict Level 3//",
+    "-//IETF//DTD HTML Strict//",
+    "-//IETF//DTD HTML//",
+    "-//Metrius//DTD Metrius Presentational//",
+    "-//Microsoft//DTD Internet Explorer 2.0 HTML Strict//",
+    "-//Microsoft//DTD Internet Explorer 2.0 HTML//",
+    "-//Microsoft//DTD Internet Explorer 2.0 Tables//",
+    "-//Microsoft//DTD Internet Explorer 3.0 HTML Strict//",
+    "-//Microsoft//DTD Internet Explorer 3.0 HTML//",
+    "-//Microsoft//DTD Internet Explorer 3.0 Tables//",
+    "-//Netscape Comm. Corp.//DTD HTML//",
+    "-//Netscape Comm. Corp.//DTD Strict HTML//",
+    "-//O'Reilly and Associates//DTD HTML 2.0//",
+    "-//O'Reilly and Associates//DTD HTML Extended 1.0//",
+    "-//O'Reilly and Associates//DTD HTML Extended Relaxed 1.0//",
+    "-//SQ//DTD HTML 2.0 HoTMetaL + extensions//",
+    "-//SoftQuad Software//DTD HoTMetaL PRO 6.0::19990601::extensions to HTML 4.0//",
+    "-//SoftQuad//DTD HoTMetaL PRO 4.0::19971010::extensions to HTML 4.0//",
+    "-//Spyglass//DTD HTML 2.0 Extended//",
+    "-//Sun Microsystems Corp.//DTD HotJava HTML//",
+    "-//Sun Microsystems Corp.//DTD HotJava Strict HTML//",
+    "-//W3C//DTD HTML 3 1995-03-24//",
+    "-//W3C//DTD HTML 3.2 Draft//",
+    "-//W3C//DTD HTML 3.2 Final//",
+    "-//W3C//DTD HTML 3.2//",
+    "-//W3C//DTD HTML 3.2S Draft//",
+    "-//W3C//DTD HTML 4.0 Frameset//",
+    "-//W3C//DTD HTML 4.0 Transitional//",
+    "-//W3C//DTD HTML Experimental 19960712//",
+    "-//W3C//DTD HTML Experimental 970421//",
+    "-//W3C//DTD W3 HTML//",
+    "-//W3O//DTD W3 HTML 3.0//",
+    "-//WebTechs//DTD Mozilla HTML 2.0//",
+    "-//WebTechs//DTD Mozilla HTML//",
+    nullptr
+};
+
+// Exact public identifiers that trigger quirks mode
+static const char* quirks_mode_public_ids[] = {
+    "-//W3O//DTD W3 HTML Strict 3.0//EN//",
+    "-/W3C/DTD HTML 4.0 Transitional/EN",
+    "HTML",
+    nullptr
+};
+
+// System identifier that triggers quirks mode
+static const char* quirks_mode_system_id =
+    "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd";
+
+// Public ID prefixes that trigger quirks when system ID is missing
+static const char* quirks_if_no_system_id_prefixes[] = {
+    "-//W3C//DTD HTML 4.01 Frameset//",
+    "-//W3C//DTD HTML 4.01 Transitional//",
+    nullptr
+};
+
+// Public ID prefixes that trigger limited quirks mode
+static const char* limited_quirks_public_id_prefixes[] = {
+    "-//W3C//DTD XHTML 1.0 Frameset//",
+    "-//W3C//DTD XHTML 1.0 Transitional//",
+    nullptr
+};
+
+// Public ID prefixes that trigger limited quirks when system ID is present
+static const char* limited_quirks_with_system_id_prefixes[] = {
+    "-//W3C//DTD HTML 4.01 Frameset//",
+    "-//W3C//DTD HTML 4.01 Transitional//",
+    nullptr
+};
+
+// Case-insensitive string comparison
+static bool strcasecmp_eq(const char* a, const char* b) {
+    if (a == nullptr || b == nullptr) return a == b;
+    while (*a && *b) {
+        char ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a;
+        char cb = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;
+        if (ca != cb) return false;
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+// Case-insensitive prefix check
+static bool strcasecmp_prefix(const char* str, const char* prefix) {
+    if (str == nullptr || prefix == nullptr) return false;
+    while (*prefix) {
+        char cs = *str >= 'A' && *str <= 'Z' ? *str + 32 : *str;
+        char cp = *prefix >= 'A' && *prefix <= 'Z' ? *prefix + 32 : *prefix;
+        if (cs != cp) return false;
+        str++;
+        prefix++;
+    }
+    return true;
+}
+
+// Check if public_id starts with any prefix in the list
+static bool public_id_matches_prefix_list(const char* public_id, const char* const* prefixes) {
+    if (public_id == nullptr) return false;
+    for (const char* const* p = prefixes; *p != nullptr; p++) {
+        if (strcasecmp_prefix(public_id, *p)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Check if public_id exactly matches any in the list
+static bool public_id_matches_list(const char* public_id, const char* const* ids) {
+    if (public_id == nullptr) return false;
+    for (const char* const* p = ids; *p != nullptr; p++) {
+        if (strcasecmp_eq(public_id, *p)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Determine quirks mode from DOCTYPE token
+// Returns: 0 = no-quirks (standards), 1 = quirks, 2 = limited-quirks
+static int html5_determine_quirks_mode(Html5Token* token) {
+    // Per WHATWG spec 13.2.6.4.1:
+    // 1. If force-quirks flag is set -> quirks mode
+    if (token->force_quirks) {
+        return 1;
+    }
+
+    const char* name = token->doctype_name ? token->doctype_name->chars : nullptr;
+    const char* public_id = token->public_identifier ? token->public_identifier->chars : nullptr;
+    const char* system_id = token->system_identifier ? token->system_identifier->chars : nullptr;
+
+    // 2. If name is not "html" (case-insensitive) -> quirks mode
+    if (name == nullptr || !strcasecmp_eq(name, "html")) {
+        return 1;
+    }
+
+    // 3. If public identifier matches certain values -> quirks mode
+    if (public_id_matches_prefix_list(public_id, quirks_mode_public_id_prefixes)) {
+        return 1;
+    }
+
+    if (public_id_matches_list(public_id, quirks_mode_public_ids)) {
+        return 1;
+    }
+
+    // 4. If system identifier matches IBM URL -> quirks mode
+    if (system_id && strcasecmp_eq(system_id, quirks_mode_system_id)) {
+        return 1;
+    }
+
+    // 5. If no system identifier and public ID matches certain prefixes -> quirks mode
+    if (system_id == nullptr && public_id_matches_prefix_list(public_id, quirks_if_no_system_id_prefixes)) {
+        return 1;
+    }
+
+    // 6. Limited quirks mode checks
+    if (public_id_matches_prefix_list(public_id, limited_quirks_public_id_prefixes)) {
+        return 2;
+    }
+
+    if (system_id != nullptr && public_id_matches_prefix_list(public_id, limited_quirks_with_system_id_prefixes)) {
+        return 2;
+    }
+
+    // 7. Otherwise -> no-quirks (standards mode)
+    return 0;
+}
+
+// ============================================================================
+// TREE BUILDER
+// ============================================================================
+
+
 // forward declarations for insertion mode handlers
 static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_before_html_mode(Html5Parser* parser, Html5Token* token);
@@ -165,26 +367,39 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
 
     if (token->type == HTML5_TOKEN_DOCTYPE) {
         // insert DOCTYPE node as child of document
-        log_debug("html5: doctype name=%s", token->doctype_name ? token->doctype_name->chars : "null");
+        log_debug("html5: doctype name=%s public_id=%s system_id=%s",
+                  token->doctype_name ? token->doctype_name->chars : "null",
+                  token->public_identifier ? token->public_identifier->chars : "null",
+                  token->system_identifier ? token->system_identifier->chars : "null");
 
         MarkBuilder builder(parser->input);
         ElementBuilder eb = builder.element("#doctype");
         if (token->doctype_name) {
             eb.attr("name", token->doctype_name->chars);
         }
+        if (token->public_identifier) {
+            eb.attr("publicId", token->public_identifier->chars);
+        }
+        if (token->system_identifier) {
+            eb.attr("systemId", token->system_identifier->chars);
+        }
         Element* doctype = eb.final().element;
         array_append(parser->document, Item{.element = doctype}, parser->pool, parser->arena);
 
         // Set quirks mode based on DOCTYPE per WHATWG spec 13.2.6.4.1
-        // For simplicity: "<!DOCTYPE html>" (with public/system id empty) = standards mode
-        // Missing DOCTYPE name or legacy DOCTYPEs = quirks mode
-        if (token->doctype_name && strcmp(token->doctype_name->chars, "html") == 0) {
-            // Standards mode or limited quirks - simplified check
-            // Full spec check would examine public/system identifiers
-            parser->quirks_mode = false;
-        } else {
-            // Missing or wrong doctype name = quirks mode
+        int quirks = html5_determine_quirks_mode(token);
+        if (quirks == 1) {
             parser->quirks_mode = true;
+            parser->limited_quirks_mode = false;
+            log_debug("html5: quirks mode enabled");
+        } else if (quirks == 2) {
+            parser->quirks_mode = false;
+            parser->limited_quirks_mode = true;
+            log_debug("html5: limited quirks mode enabled");
+        } else {
+            parser->quirks_mode = false;
+            parser->limited_quirks_mode = false;
+            log_debug("html5: standards mode (no quirks)");
         }
 
         parser->mode = HTML5_MODE_BEFORE_HTML;
@@ -194,6 +409,7 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
     // anything else: missing doctype, switch to before html mode
     log_error("html5: missing doctype, switching to before html mode");
     parser->quirks_mode = true;  // no DOCTYPE = quirks mode
+    parser->limited_quirks_mode = false;
     parser->mode = HTML5_MODE_BEFORE_HTML;
     html5_process_token(parser, token);  // reprocess in new mode
 }
