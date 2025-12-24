@@ -294,7 +294,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
 Element* get_html_root_element(Input* input) {
     if (!input) return nullptr;
     TypeId root_type = get_type_id(input->root);
-    
+
     if (root_type == LMD_TYPE_LIST) {
         // Old parser: root is a list, search for HTML element
         List* root_list = input->root.list;
@@ -317,35 +317,35 @@ Element* get_html_root_element(Input* input) {
     else if (root_type == LMD_TYPE_ELEMENT) {
         Element* root_elem = input->root.element;
         TypeElmt* root_type_elmt = (TypeElmt*)root_elem->type;
-        
+
         log_debug("Root element type: '%.*s'", (int)root_type_elmt->name.length, root_type_elmt->name.str);
-        
+
         // HTML5 parser: root is #document, find html child
         if (strview_equal(&root_type_elmt->name, "#document")) {
             log_debug("HTML5 parser detected: root is #document, searching for html element");
-            
+
             // Search all children of #document for the html element
             // NOTE: HTML5 parser stores children as "attributes" not content
             List* doc_list = (List*)root_elem;
-            
-            log_debug("#document: list->length=%lld, content_length=%lld", 
+
+            log_debug("#document: list->length=%lld, content_length=%lld",
                       (long long)doc_list->length,
                       (long long)root_type_elmt->content_length);
-            
+
             // Iterate through all items (HTML5 parser doesn't use content_length correctly)
             for (int64_t i = 0; i < doc_list->length; i++) {
                 Item child = doc_list->items[i];
                 TypeId child_type = get_type_id(child);
-                
+
                 log_debug("Child %lld: type_id=%d", (long long)i, child_type);
-                
+
                 if (child_type == LMD_TYPE_ELEMENT) {
                     Element* child_elem = child.element;
                     TypeElmt* child_type_elmt = (TypeElmt*)child_elem->type;
-                    
-                    log_debug("  Element name: '%.*s'", 
+
+                    log_debug("  Element name: '%.*s'",
                              (int)child_type_elmt->name.length, child_type_elmt->name.str);
-                    
+
                     // Return the html element (skip #doctype, comments, etc.)
                     if (strview_equal(&child_type_elmt->name, "html")) {
                         log_debug("Found html element inside #document");
@@ -353,11 +353,11 @@ Element* get_html_root_element(Input* input) {
                     }
                 }
             }
-            
+
             log_warn("No html element found inside #document");
             return nullptr;
         }
-        
+
         // Old parser or direct html element
         return root_elem;
     }
@@ -1318,11 +1318,11 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         pool_destroy(pool);
         return NULL;
     }
-    
+
     // Detect file type by extension
     const char* ext = strrchr(doc_url, '.');
     DomDocument* doc = nullptr;
-    
+
     if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
         // Load LaTeX document: parse LaTeX → convert to HTML → layout
         log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
@@ -1331,7 +1331,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
     }
-    
+
     return doc;
 }
 
@@ -1513,7 +1513,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
 
     log_debug("[Lambda LaTeX] Parsed LaTeX document to Lambda Element tree");
-    
+
     // DEBUG: Dump the LaTeX tree
     log_debug("[Lambda LaTeX] Dumping LaTeX input tree:");
     log_root_item(latex_input->root);
@@ -1523,7 +1523,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     log_debug("[Lambda LaTeX] Converting LaTeX to HTML using format_latex_html_v2...");
     // TEMPORARY: Use text mode to test
     Item html_item = lambda::format_latex_html_v2(latex_input, true);  // true = return HTML string for debugging
-    
+
     if (!html_item.item) {
         log_error("Failed to convert LaTeX to HTML");
         return nullptr;
@@ -1539,18 +1539,18 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         // we need to parse the HTML string
         log_debug("[Lambda LaTeX] format_latex_html_v2 returned string, parsing HTML...");
         String* html_string = html_item.get_string();
-        
+
         // Create new input for HTML parsing
         String* type_str = (String*)malloc(sizeof(String) + 5);
         type_str->len = 4;
         strcpy(type_str->chars, "html");
-        
+
         Input* html_input = input_from_source(html_string->chars, latex_url, type_str, nullptr);
         if (!html_input) {
             log_error("Failed to parse generated HTML");
             return nullptr;
         }
-        
+
         html_root = get_html_root_element(html_input);
         // Replace latex_input with html_input since we need the HTML tree
         latex_input = html_input;
@@ -1623,25 +1623,25 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 7: Apply CSS cascade to DOM tree
     SelectorMatcher* matcher = selector_matcher_create(pool);
-    
+
     // Apply LaTeX stylesheet first if available
     if (latex_stylesheet && latex_stylesheet->rule_count > 0) {
         log_debug("[Lambda LaTeX] Applying LaTeX stylesheet...");
         apply_stylesheet_to_dom_tree_fast(dom_root, latex_stylesheet, matcher, pool, css_engine);
     }
-    
+
     // Apply inline stylesheets from LaTeX-generated HTML
     for (int i = 0; i < inline_stylesheet_count; i++) {
         if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
-            log_debug("[Lambda LaTeX] Applying inline stylesheet %d with %zu rules", 
+            log_debug("[Lambda LaTeX] Applying inline stylesheet %d with %zu rules",
                      i, inline_stylesheets[i]->rule_count);
             apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
         }
     }
-    
+
     // Apply inline style="" attributes (highest priority)
     apply_inline_styles_to_tree(dom_root, html_root, pool);
-    
+
     log_debug("[Lambda LaTeX] CSS cascade complete");
 
     // Step 8: Populate DomDocument structure
@@ -1769,11 +1769,11 @@ int cmd_layout(int argc, char** argv) {
     // get cwd
     Url* cwd = get_current_dir();
     Url* input_url = url_parse_with_base(opts.input_file, cwd);
-    
+
     // Detect file type by extension and load appropriate document
     DomDocument* doc = nullptr;
     const char* ext = strrchr(opts.input_file, '.');
-    
+
     if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
         // Load LaTeX document: parse LaTeX → convert to HTML → layout
         log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
