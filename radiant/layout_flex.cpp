@@ -1298,11 +1298,56 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
     if (is_horizontal && item->blk && item->blk->given_width > 0) {
         log_debug("calculate_flex_basis - using explicit width: %f", item->blk->given_width);
         item->fi->has_explicit_width = 1;
+
+        // CRITICAL FIX: For IMG elements with explicit dimensions, still load the image for rendering
+        // Even though we have explicit size, we need the image data to display it
+        uintptr_t elmt_name = item->tag();
+        if (elmt_name == HTM_TAG_IMG && flex_layout && flex_layout->lycon) {
+            const char* src_value = item->get_attribute("src");
+            if (src_value && (!item->embed || !item->embed->img)) {
+                if (!item->embed) {
+                    item->embed = (EmbedProp*)alloc_prop(flex_layout->lycon, sizeof(EmbedProp));
+                }
+                item->embed->img = load_image(flex_layout->lycon->ui_context, src_value);
+                // For SVG images, set max_render_width so render_svg knows the target size
+                if (item->embed->img && item->embed->img->format == IMAGE_FORMAT_SVG) {
+                    item->embed->img->max_render_width = (int)item->blk->given_width;
+                    if (item->blk->given_height > 0) {
+                        item->embed->img->max_render_width = max(item->embed->img->max_render_width,
+                                                                  (int)item->blk->given_height);
+                    }
+                }
+                log_debug("calculate_flex_basis: loaded image for IMG with explicit width: %s", src_value);
+            }
+        }
+
         return item->blk->given_width;
     }
     if (!is_horizontal && item->blk && item->blk->given_height > 0) {
         log_debug("calculate_flex_basis - using explicit height: %f", item->blk->given_height);
         item->fi->has_explicit_height = 1;
+
+        // CRITICAL FIX: For IMG elements with explicit dimensions, still load the image for rendering
+        uintptr_t elmt_name = item->tag();
+        if (elmt_name == HTM_TAG_IMG && flex_layout && flex_layout->lycon) {
+            const char* src_value = item->get_attribute("src");
+            if (src_value && (!item->embed || !item->embed->img)) {
+                if (!item->embed) {
+                    item->embed = (EmbedProp*)alloc_prop(flex_layout->lycon, sizeof(EmbedProp));
+                }
+                item->embed->img = load_image(flex_layout->lycon->ui_context, src_value);
+                // For SVG images, set max_render_width so render_svg knows the target size
+                if (item->embed->img && item->embed->img->format == IMAGE_FORMAT_SVG) {
+                    item->embed->img->max_render_width = (int)item->blk->given_height;
+                    if (item->blk->given_width > 0) {
+                        item->embed->img->max_render_width = max(item->embed->img->max_render_width,
+                                                                  (int)item->blk->given_width);
+                    }
+                }
+                log_debug("calculate_flex_basis: loaded image for IMG with explicit height: %s", src_value);
+            }
+        }
+
         return item->blk->given_height;
     }
 

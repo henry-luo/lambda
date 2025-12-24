@@ -690,6 +690,10 @@ void render_svg(ImageSurface* surface) {
         return;
     }
 
+    // CRITICAL: Clear the buffer to transparent before rendering SVG
+    // Without this, the SVG renders on top of garbage memory data
+    memset(surface->pixels, 0, width * height * sizeof(uint32_t));
+
     // Set the canvas target to the buffer
     if (tvg_swcanvas_set_target(canvas, (uint32_t*)surface->pixels, width, width, height,
         TVG_COLORSPACE_ABGR8888) != TVG_RESULT_SUCCESS) {
