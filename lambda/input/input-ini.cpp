@@ -2,6 +2,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "log.h"
 
 using namespace lambda;
 
@@ -236,7 +237,7 @@ static Item parse_typed_value(InputContext& ctx, String* value_str) {
 }
 
 static Map* parse_section(InputContext& ctx, const char **ini, String* section_name) {
-    printf("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
+    log_debug("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
 
     SourceTracker& tracker = ctx.tracker;
     Input* input = ctx.input();

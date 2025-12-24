@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include "log.h"
 
 using namespace lambda;
 
@@ -793,26 +794,26 @@ Item parse_ascii_math(Input* input, const char* math_text) {
     // create unified InputContext with source tracking
     InputContext ctx(input, math_text, strlen(math_text));
 
-    printf("DEBUG: ASCII math parsing: '%s'\n", math_text);
+    log_debug("DEBUG: ASCII math parsing: '%s'\n", math_text);
 
     size_t token_count;
     ASCIIToken* tokens = ascii_tokenize(math_text, &token_count);
     if (!tokens) {
         ctx.addError(ctx.tracker.location(), "Failed to tokenize ASCII math expression");
-        printf("DEBUG: Tokenization failed\n");
+        log_debug("DEBUG: Tokenization failed\n");
         return {.item = ITEM_ERROR};
     }
 
-    printf("DEBUG: Tokenized into %zu tokens\n", token_count);
+    log_debug("DEBUG: Tokenized into %zu tokens\n", token_count);
     for (size_t i = 0; i < token_count; i++) {
-        printf("DEBUG: Token %zu: type=%d, text='%.*s'\n", i, tokens[i].type, (int)tokens[i].length, tokens[i].start);
+        log_debug("DEBUG: Token %zu: type=%d, text='%.*s'\n", i, tokens[i].type, (int)tokens[i].length, tokens[i].start);
     }
 
     // Parse expression
     size_t pos = 0;
-    printf("DEBUG: About to parse ASCII expression\n");
+    log_debug("DEBUG: About to parse ASCII expression\n");
     Item result = parse_ascii_expression(ctx, tokens, &pos, token_count);
-    printf("DEBUG: Parse result: item=0x%lx\n", result.item);
+    log_debug("DEBUG: Parse result: item=0x%lx\n", result.item);
 
     if (ctx.hasErrors()) {
         // errors occurred during parsing

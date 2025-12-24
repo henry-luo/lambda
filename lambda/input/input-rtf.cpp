@@ -2,6 +2,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "log.h"
 
 using namespace lambda;
 
@@ -426,7 +427,7 @@ static Item parse_rtf_content(InputContext& ctx, const char **rtf) {
 }
 
 void parse_rtf(Input* input, const char* rtf_string) {
-    printf("rtf_parse\n");
+    log_debug("rtf_parse\n");
     InputContext ctx(input, rtf_string, strlen(rtf_string));
     MarkBuilder& builder = ctx.builder;
 
@@ -436,7 +437,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
     // RTF documents must start with {\rtf
     if (strncmp(rtf, "{\\rtf", 5) != 0) {
         ctx.addError(ctx.tracker.location(), "Invalid RTF format: document must start with '{\\rtf'");
-        printf("Error: Invalid RTF format - must start with {\\rtf\n");
+        log_debug("Error: Invalid RTF format - must start with {\\rtf\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }

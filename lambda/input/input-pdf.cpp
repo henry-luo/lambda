@@ -3,6 +3,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "log.h"
 
 using namespace lambda;
 
@@ -304,7 +305,7 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
 
     // prevent runaway recursion - much lower limit for safety
     if (call_count > 10) {
-        printf("Warning: too many parse calls, stopping recursion\n");
+        log_debug("Warning: too many parse calls, stopping recursion\n");
         call_count--;
         return {.item = ITEM_NULL};
     }
@@ -930,7 +931,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
 }
 
 void parse_pdf(Input* input, const char* pdf_string) {
-    printf("pdf_parse\n");
+    log_debug("pdf_parse\n");
 
     // create unified InputContext with source tracking
     InputContext ctx(input, pdf_string, strlen(pdf_string));
@@ -942,7 +943,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     // Validate input
     if (!pdf_string || !*pdf_string) {
         ctx.addError(ctx.tracker.location(), "Empty PDF content");
-        printf("Error: Empty PDF content\n");
+        log_debug("Error: Empty PDF content\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
@@ -950,7 +951,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {
         ctx.addError(ctx.tracker.location(), "Invalid PDF format - must start with %%PDF-");
-        printf("Error: Invalid PDF format - must start with %%PDF-\n");
+        log_debug("Error: Invalid PDF format - must start with %%PDF-\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
@@ -959,7 +960,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     Map* pdf_info = map_pooled(input->pool);
     if (!pdf_info) {
         ctx.addError(ctx.tracker.location(), "Failed to allocate PDF info map");
-        printf("Error: Failed to allocate PDF info map\n");
+        log_debug("Error: Failed to allocate PDF info map\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
@@ -975,7 +976,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
         if ((*pdf >= '0' && *pdf <= '9') || *pdf == '.') {
             stringbuf_append_char(version_sb, *pdf);
         } else {
-            printf("Warning: Non-standard character in PDF version: %c\n", *pdf);
+            log_debug("Warning: Non-standard character in PDF version: %c\n", *pdf);
         }
         pdf++;
         counter++;
@@ -1074,7 +1075,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                         const char* xref_start = scan_pdf;
                         xref_table = parse_pdf_xref_table(ctx, &scan_pdf);
                         if (xref_table .item != ITEM_ERROR) {
-                            printf("Found and parsed xref table at offset %lld\n", (long long)(xref_start - pdf_string));
+                            log_debug("Found and parsed xref table at offset %lld\n", (long long)(xref_start - pdf_string));
                         }
                         continue;
                     }
@@ -1086,7 +1087,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                         const char* trailer_start = scan_pdf;
                         trailer = parse_pdf_trailer(ctx, &scan_pdf);
                         if (trailer .item != ITEM_ERROR) {
-                            printf("Found and parsed trailer at offset %lld\n", (long long)(trailer_start - pdf_string));
+                            log_debug("Found and parsed trailer at offset %lld\n", (long long)(trailer_start - pdf_string));
                         }
                         if (trailer .item != ITEM_ERROR) break; // Done after finding trailer
                     }
@@ -1099,7 +1100,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     // Try to parse the xref offset number
                     if (isdigit(*scan_pdf)) {
                         long xref_offset = strtol(scan_pdf, (char**)&scan_pdf, 10);
-                        printf("Found startxref pointing to offset %ld\n", xref_offset);
+                        log_debug("Found startxref pointing to offset %ld\n", xref_offset);
                         // If we haven't found xref yet, try looking at that specific offset
                         if (xref_table .item == ITEM_NULL && xref_offset > 0 && xref_offset < scan_limit) {
                             const char* xref_pos = pdf_string + xref_offset;
@@ -1107,7 +1108,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                                 const char* xref_parse_pos = xref_pos;
                                 xref_table = parse_pdf_xref_table(ctx, &xref_parse_pos);
                                 if (xref_table .item != ITEM_ERROR) {
-                                    printf("Successfully parsed xref table from startxref offset\n");
+                                    log_debug("Successfully parsed xref table from startxref offset\n");
                                 }
                             }
                         }

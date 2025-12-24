@@ -38,6 +38,7 @@ Item input_markup(Input *input, const char* content);
 
 // Import MarkupFormat enum from markup-parser.h
 #include "markup-parser.h"
+#include "log.h"
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
 
 __thread Context* input_context = NULL;
@@ -177,7 +178,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         break;
     }
     default:
-        printf("unknown type %d\n", value._type_id);
+        log_debug("unknown type %d\n", value._type_id);
         return;
     }
 }
@@ -239,7 +240,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         break;
     }
     default:
-        printf("unknown type %d\n", value._type_id);
+        log_debug("unknown type %d\n", value._type_id);
     }
 }
 
@@ -525,15 +526,15 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             const char* detected_mime = detect_mime_type(detector, abs_url->pathname ? abs_url->pathname->chars : "", source, strlen(source));
             if (detected_mime) {
                 effective_type = mime_to_parser_type(detected_mime);
-                printf("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
+                log_debug("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
             } else {
                 effective_type = "text";
-                printf("MIME detection failed, defaulting to text\n");
+                log_debug("MIME detection failed, defaulting to text\n");
             }
             mime_detector_destroy(detector);
         } else {
             effective_type = "text";
-            printf("Failed to initialize MIME detector, defaulting to text\n");
+            log_debug("Failed to initialize MIME detector, defaulting to text\n");
         }
     } else {
         effective_type = type->chars;
@@ -661,7 +662,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_graph(input, source, graph_flavor);
         }
         else {
-            printf("Unknown input type: %s\n", effective_type);
+            log_debug("Unknown input type: %s\n", effective_type);
         }
         input_context = pa_input_context;
     }
@@ -773,12 +774,12 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     }
     else if (abs_url->scheme == URL_SCHEME_SYS) {
         // Handle sys:// URLs for system information
-        printf("sys:// URL detected, using system information provider\n");
+        log_debug("sys:// URL detected, using system information provider\n");
 
         // Create a variable pool for the input
         Pool* pool = pool_create();
         if (pool == NULL) {
-            printf("Failed to create variable pool for sys:// URL\n");
+            log_debug("Failed to create variable pool for sys:// URL\n");
             url_destroy(abs_url);
             return NULL;
         }
@@ -791,7 +792,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         return input;
     }
     else {
-        printf("Unsupported URL scheme for: %s\n", url ? url->chars : "null");
+        log_debug("Unsupported URL scheme for: %s\n", url ? url->chars : "null");
         url_destroy(abs_url);
         return NULL;
     }
