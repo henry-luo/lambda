@@ -858,6 +858,8 @@ typedef struct StateStore {
 typedef struct {
     float x, y;  // abs x, y relative to entire canvas/screen
     Bound clip;  // clipping rect
+    Corner clip_radius;  // rounded corner clipping (for overflow:hidden with border-radius)
+    bool has_clip_radius;  // true if clip_radius should be applied
 } BlockBlot;
 
 typedef struct {
