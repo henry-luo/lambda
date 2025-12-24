@@ -349,8 +349,14 @@ static bool is_whitespace_token(Html5Token* token) {
     if (token->data == nullptr || token->data->len == 0) {
         return false;
     }
-    char c = token->data->chars[0];
-    return c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ';
+    // Check if ALL characters are whitespace, not just the first one
+    for (size_t i = 0; i < token->data->len; i++) {
+        char c = token->data->chars[i];
+        if (!(c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ')) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // ===== INITIAL MODE =====
@@ -498,9 +504,64 @@ static void html5_process_in_before_head_mode(Html5Parser* parser, Html5Token* t
 
 // ===== IN HEAD MODE =====
 static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
-    if (is_whitespace_token(token)) {
-        html5_insert_character(parser, token->data->chars[0]);
-        return;
+    // Handle CHARACTER tokens with special whitespace splitting
+    if (token->type == HTML5_TOKEN_CHARACTER) {
+        if (token->data && token->data->len > 0) {
+            // Check if entire token is whitespace
+            bool all_ws = true;
+            for (size_t i = 0; i < token->data->len; i++) {
+                char c = token->data->chars[i];
+                if (!(c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ')) {
+                    all_ws = false;
+                    break;
+                }
+            }
+
+            // If entire token is whitespace, insert all and return
+            if (all_ws) {
+                for (size_t i = 0; i < token->data->len; i++) {
+                    html5_insert_character(parser, token->data->chars[i]);
+                }
+                return;
+            }
+
+            // Token contains non-whitespace: process character-by-character
+            // to correctly split whitespace (goes in head) from non-whitespace (triggers body)
+            size_t first_non_ws = token->data->len;
+            for (size_t i = 0; i < token->data->len; i++) {
+                char c = token->data->chars[i];
+                if (!(c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ')) {
+                    first_non_ws = i;
+                    break;
+                }
+            }
+
+            // Insert leading whitespace into head
+            for (size_t i = 0; i < first_non_ws; i++) {
+                html5_insert_character(parser, token->data->chars[i]);
+            }
+            html5_flush_pending_text(parser);  // Create text node in head
+
+            // Close head and switch to AFTER_HEAD
+            html5_pop_element(parser);  // pop <head>
+            parser->mode = HTML5_MODE_AFTER_HEAD;
+
+            // Create implicit body (as per AFTER_HEAD "anything else" rule)
+            MarkBuilder builder(parser->input);
+            Element* body = builder.element("body").final().element;
+            array_append(parser->html_element, Item{.element = body}, parser->pool, parser->arena);
+            html5_push_element(parser, body);
+            parser->mode = HTML5_MODE_IN_BODY;
+
+            // Insert remaining non-whitespace characters into body
+            for (size_t i = first_non_ws; i < token->data->len; i++) {
+                html5_insert_character(parser, token->data->chars[i]);
+            }
+            // Don't flush here - let the text accumulate across multiple tokens
+
+            return;
+        }
+        return;  // Empty character token, ignore
     }
 
     if (token->type == HTML5_TOKEN_COMMENT) {
@@ -576,7 +637,10 @@ static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
 // ===== AFTER HEAD MODE =====
 void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token) {
     if (is_whitespace_token(token)) {
-        html5_insert_character(parser, token->data->chars[0]);
+        // Insert all whitespace characters, not just the first one
+        for (size_t i = 0; i < token->data->len; i++) {
+            html5_insert_character(parser, token->data->chars[i]);
+        }
         return;
     }
 
@@ -2637,7 +2701,10 @@ static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token
 static void html5_process_in_column_group_mode(Html5Parser* parser, Html5Token* token) {
     // Whitespace
     if (token->type == HTML5_TOKEN_CHARACTER && is_whitespace_token(token)) {
-        html5_insert_character(parser, token->data->chars[0]);
+        // Insert all whitespace characters, not just the first one
+        for (size_t i = 0; i < token->data->len; i++) {
+            html5_insert_character(parser, token->data->chars[i]);
+        }
         return;
     }
 
