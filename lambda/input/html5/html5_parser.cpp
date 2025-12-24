@@ -221,6 +221,9 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     parser->last_start_tag_name = nullptr;
     parser->last_start_tag_name_len = 0;
 
+    // error collection
+    html5_error_list_init(&parser->errors, arena);
+
     return parser;
 }
 
