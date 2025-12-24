@@ -3338,17 +3338,34 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
 static float measure_flex_content_height(ViewElement* elem) {
     if (!elem) return 0;
 
-    // Check for explicit height first
+    // Check for explicit height first (given_height is border-box)
     if (elem->blk && elem->blk->given_height > 0) {
-        return elem->blk->given_height;
+        // Explicit height is border-box, need to subtract padding/border to get content
+        float padding_border = 0;
+        if (elem->bound) {
+            padding_border += elem->bound->padding.top + elem->bound->padding.bottom;
+            if (elem->bound->border) {
+                padding_border += elem->bound->border->width.top + elem->bound->border->width.bottom;
+            }
+        }
+        return elem->blk->given_height - padding_border;
     }
-    if (elem->height > 0) {
-        return (float)elem->height;
-    }
+    // Prefer content_height (which is the actual content size without padding)
     if (elem->content_height > 0) {
         return (float)elem->content_height;
     }
-    // Check if intrinsic height was calculated
+    // elem->height is border-box, so subtract padding/border
+    if (elem->height > 0) {
+        float padding_border = 0;
+        if (elem->bound) {
+            padding_border += elem->bound->padding.top + elem->bound->padding.bottom;
+            if (elem->bound->border) {
+                padding_border += elem->bound->border->width.top + elem->bound->border->width.bottom;
+            }
+        }
+        return (float)elem->height - padding_border;
+    }
+    // Check if intrinsic height was calculated (intrinsic_height is content-based)
     if (elem->fi && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
         return (float)elem->fi->intrinsic_height.max_content;
     }
