@@ -1,8 +1,0 @@
-[
-  {
-    "test_id": "8afa8d082dc447be5cab2eeb3e13efb07ec72aa6",
-    "file": "html5lib_pending-spec-changes-plain-text-unsafe.html",
-    "input": "<body><table>\u0000filler\u0000text\u0000",
-    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"fillertext\"\n|     <table>"
-  }
-]
