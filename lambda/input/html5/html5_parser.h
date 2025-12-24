@@ -5,6 +5,132 @@
 #include "html5_token.h"
 #include "../../../lib/stringbuf.h"
 
+// ============================================================================
+// UTF-8 ITERATOR
+// Based on Gumbo's Utf8Iterator for proper Unicode handling
+// ============================================================================
+
+// Unicode replacement character for invalid UTF-8
+#define HTML5_REPLACEMENT_CHAR 0xFFFD
+
+// Source position in the document
+typedef struct Html5SourcePosition {
+    int line;       // 1-based line number
+    int column;     // 1-based column number (character, not byte)
+    size_t offset;  // byte offset from start
+} Html5SourcePosition;
+
+// UTF-8 iterator state
+typedef struct Html5Utf8Iterator {
+    const char* start;      // start of current codepoint
+    const char* mark;       // marked position for backtracking
+    const char* end;        // end of input buffer
+    int current;            // current codepoint (-1 for EOF)
+    int width;              // byte width of current codepoint
+    Html5SourcePosition pos;      // current position
+    Html5SourcePosition mark_pos; // marked position
+} Html5Utf8Iterator;
+
+// UTF-8 iterator functions
+void html5_utf8iter_init(Html5Utf8Iterator* iter, const char* input, size_t length);
+void html5_utf8iter_next(Html5Utf8Iterator* iter);
+int  html5_utf8iter_current(const Html5Utf8Iterator* iter);
+void html5_utf8iter_mark(Html5Utf8Iterator* iter);
+void html5_utf8iter_reset(Html5Utf8Iterator* iter);
+const char* html5_utf8iter_get_char_pointer(const Html5Utf8Iterator* iter);
+bool html5_utf8iter_maybe_consume_match(Html5Utf8Iterator* iter, const char* prefix, size_t length, bool case_sensitive);
+
+// ============================================================================
+// HTML5 PARSE ERRORS
+// Per WHATWG spec: https://html.spec.whatwg.org/multipage/parsing.html#parse-errors
+// ============================================================================
+
+// Parse error types (subset of WHATWG parse errors)
+typedef enum Html5ErrorType {
+    // Input stream errors
+    HTML5_ERR_UNEXPECTED_NULL_CHARACTER,
+    HTML5_ERR_CONTROL_CHARACTER_IN_INPUT_STREAM,
+    HTML5_ERR_NONCHARACTER_IN_INPUT_STREAM,
+    HTML5_ERR_SURROGATE_IN_INPUT_STREAM,
+
+    // Tokenizer errors
+    HTML5_ERR_UNEXPECTED_CHARACTER_IN_ATTRIBUTE_NAME,
+    HTML5_ERR_UNEXPECTED_EQUALS_SIGN_BEFORE_ATTRIBUTE_NAME,
+    HTML5_ERR_UNEXPECTED_CHARACTER_IN_UNQUOTED_ATTRIBUTE_VALUE,
+    HTML5_ERR_MISSING_WHITESPACE_BETWEEN_ATTRIBUTES,
+    HTML5_ERR_UNEXPECTED_SOLIDUS_IN_TAG,
+    HTML5_ERR_EOF_BEFORE_TAG_NAME,
+    HTML5_ERR_EOF_IN_TAG,
+    HTML5_ERR_EOF_IN_SCRIPT_HTML_COMMENT_LIKE_TEXT,
+    HTML5_ERR_INVALID_FIRST_CHARACTER_OF_TAG_NAME,
+    HTML5_ERR_MISSING_END_TAG_NAME,
+
+    // Comment errors
+    HTML5_ERR_ABRUPT_CLOSING_OF_EMPTY_COMMENT,
+    HTML5_ERR_EOF_IN_COMMENT,
+    HTML5_ERR_NESTED_COMMENT,
+    HTML5_ERR_INCORRECTLY_CLOSED_COMMENT,
+
+    // DOCTYPE errors
+    HTML5_ERR_MISSING_DOCTYPE_NAME,
+    HTML5_ERR_MISSING_WHITESPACE_BEFORE_DOCTYPE_NAME,
+    HTML5_ERR_MISSING_DOCTYPE_PUBLIC_IDENTIFIER,
+    HTML5_ERR_MISSING_DOCTYPE_SYSTEM_IDENTIFIER,
+    HTML5_ERR_EOF_IN_DOCTYPE,
+
+    // Character reference errors
+    HTML5_ERR_UNKNOWN_NAMED_CHARACTER_REFERENCE,
+    HTML5_ERR_MISSING_SEMICOLON_AFTER_CHARACTER_REFERENCE,
+    HTML5_ERR_ABSENCE_OF_DIGITS_IN_NUMERIC_CHARACTER_REFERENCE,
+    HTML5_ERR_NULL_CHARACTER_REFERENCE,
+    HTML5_ERR_CHARACTER_REFERENCE_OUTSIDE_UNICODE_RANGE,
+    HTML5_ERR_SURROGATE_CHARACTER_REFERENCE,
+    HTML5_ERR_NONCHARACTER_CHARACTER_REFERENCE,
+    HTML5_ERR_CONTROL_CHARACTER_REFERENCE,
+
+    // Tree construction errors
+    HTML5_ERR_UNEXPECTED_START_TAG,
+    HTML5_ERR_UNEXPECTED_END_TAG,
+    HTML5_ERR_MISSING_REQUIRED_END_TAG,
+    HTML5_ERR_NON_VOID_HTML_ELEMENT_START_TAG_WITH_TRAILING_SOLIDUS,
+
+    HTML5_ERR_COUNT  // Number of error types
+} Html5ErrorType;
+
+// Parse error entry with source position
+typedef struct Html5Error {
+    Html5ErrorType type;
+    Html5SourcePosition position;
+    const char* original_text;  // pointer to error location in input
+    union {
+        int codepoint;          // for character errors
+        const char* tag_name;   // for tag errors
+        const char* entity_name; // for entity errors
+    } v;
+} Html5Error;
+
+// Error list for collecting parse errors
+typedef struct Html5ErrorList {
+    Html5Error* errors;
+    size_t count;
+    size_t capacity;
+    Arena* arena;  // for string allocations
+} Html5ErrorList;
+
+// Error list functions
+void html5_error_list_init(Html5ErrorList* list, Arena* arena);
+void html5_error_list_add(Html5ErrorList* list, Html5ErrorType type,
+                          Html5SourcePosition pos, const char* original_text);
+void html5_error_list_add_codepoint(Html5ErrorList* list, Html5ErrorType type,
+                                    Html5SourcePosition pos, int codepoint);
+void html5_error_list_add_tag(Html5ErrorList* list, Html5ErrorType type,
+                              Html5SourcePosition pos, const char* tag_name);
+const char* html5_error_type_name(Html5ErrorType type);
+
+// ============================================================================
+// HTML5 INSERTION MODES
+// ============================================================================
+
 // HTML5 insertion modes as defined in WHATWG spec section 12.2.6
 enum Html5InsertionMode {
     HTML5_MODE_INITIAL,
@@ -93,6 +219,9 @@ typedef struct Html5Parser {
     // Last emitted start tag name (for RCDATA/RAWTEXT end tag matching)
     char* last_start_tag_name;
     size_t last_start_tag_name_len;
+
+    // Error collection
+    Html5ErrorList errors;
 } Html5Parser;
 
 // Parser lifecycle
