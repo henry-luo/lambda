@@ -5,6 +5,350 @@
 #include <string.h>
 #include <ctype.h>
 
+// ============================================================================
+// FAST TEXT SCANNING - Batch ASCII Processing
+// ============================================================================
+
+// Scan a run of ASCII text characters that don't need special handling.
+// Returns the number of bytes that can be consumed as a single text token.
+// Stops at: '<', '&', '\0', EOF, or non-ASCII bytes (>= 0x80 for UTF-8)
+static size_t html5_scan_text_run(Html5Parser* parser) {
+    const char* start = parser->html + parser->pos;
+    const char* end = parser->html + parser->length;
+    const char* p = start;
+
+    while (p < end) {
+        unsigned char c = (unsigned char)*p;
+        // Stop at delimiters or non-ASCII (UTF-8 continuation)
+        if (c == '<' || c == '&' || c == '\0' || c >= 0x80) {
+            break;
+        }
+        p++;
+    }
+    return p - start;
+}
+
+// Scan RCDATA text (stops at '<' and '&' only, allows NULL with error)
+static size_t html5_scan_rcdata_run(Html5Parser* parser) {
+    const char* start = parser->html + parser->pos;
+    const char* end = parser->html + parser->length;
+    const char* p = start;
+
+    while (p < end) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '<' || c == '&' || c == '\0' || c >= 0x80) {
+            break;
+        }
+        p++;
+    }
+    return p - start;
+}
+
+// Scan RAWTEXT (stops at '<' only)
+static size_t html5_scan_rawtext_run(Html5Parser* parser) {
+    const char* start = parser->html + parser->pos;
+    const char* end = parser->html + parser->length;
+    const char* p = start;
+
+    while (p < end) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '<' || c == '\0' || c >= 0x80) {
+            break;
+        }
+        p++;
+    }
+    return p - start;
+}
+
+// ============================================================================
+// UTF-8 ITERATOR IMPLEMENTATION
+// Based on Bjoern Hoehrmann's DFA-based UTF-8 decoder
+// http://bjoern.hoehrmann.de/utf-8/decoder/dfa/
+// ============================================================================
+
+#define UTF8_ACCEPT 0
+#define UTF8_REJECT 12
+
+// UTF-8 DFA state transition table
+static const uint8_t utf8d[] = {
+    // Character class lookup table (first 256 entries)
+    // Maps bytes to character classes to reduce transition table size
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+
+    // State transition table (12 states x 12 classes)
+    0,12,24,36,60,96,84,12,12,12,48,72,  12,12,12,12,12,12,12,12,12,12,12,12,
+    12,0,12,12,12,12,12,0,12,0,12,12,    12,24,12,12,12,12,12,24,12,24,12,12,
+    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+    12,36,12,12,12,12,12,12,12,12,12,12,
+};
+
+// Decode one byte of UTF-8 sequence
+static inline uint32_t utf8_decode(uint32_t* state, uint32_t* codep, uint32_t byte) {
+    uint32_t type = utf8d[byte];
+    *codep = (*state != UTF8_ACCEPT)
+        ? (byte & 0x3fu) | (*codep << 6)
+        : (0xff >> type) & byte;
+    *state = utf8d[256 + *state + type];
+    return *state;
+}
+
+// Check if codepoint is invalid per HTML5 spec
+static bool html5_is_invalid_codepoint(int c) {
+    // Control characters that are parse errors
+    return (c >= 0x01 && c <= 0x08) ||
+           c == 0x0B ||
+           (c >= 0x0E && c <= 0x1F) ||
+           (c >= 0x7F && c <= 0x9F) ||
+           (c >= 0xFDD0 && c <= 0xFDEF) ||
+           ((c & 0xFFFF) == 0xFFFE) ||
+           ((c & 0xFFFF) == 0xFFFF);
+}
+
+// Read the next UTF-8 character from iterator
+static void html5_utf8iter_read_char(Html5Utf8Iterator* iter) {
+    if (iter->start >= iter->end) {
+        // EOF
+        iter->current = -1;
+        iter->width = 0;
+        return;
+    }
+
+    uint32_t codepoint = 0;
+    uint32_t state = UTF8_ACCEPT;
+
+    for (const char* c = iter->start; c < iter->end; ++c) {
+        utf8_decode(&state, &codepoint, (uint32_t)(unsigned char)(*c));
+
+        if (state == UTF8_ACCEPT) {
+            iter->width = (int)(c - iter->start + 1);
+
+            // HTML5 spec: normalize CR and CRLF to LF
+            if (codepoint == '\r') {
+                const char* next = c + 1;
+                if (next < iter->end && *next == '\n') {
+                    // Skip CR in CRLF sequence
+                    iter->start++;
+                    iter->pos.offset++;
+                }
+                codepoint = '\n';
+            }
+
+            // Check for invalid codepoints (parse error, but continue)
+            if (html5_is_invalid_codepoint((int)codepoint)) {
+                codepoint = HTML5_REPLACEMENT_CHAR;
+            }
+
+            iter->current = (int)codepoint;
+            return;
+        } else if (state == UTF8_REJECT) {
+            // Invalid UTF-8 sequence - emit replacement character
+            iter->width = (int)(c - iter->start + (c == iter->start ? 1 : 0));
+            iter->current = HTML5_REPLACEMENT_CHAR;
+            return;
+        }
+    }
+
+    // Truncated UTF-8 sequence at end of input
+    iter->current = HTML5_REPLACEMENT_CHAR;
+    iter->width = (int)(iter->end - iter->start);
+}
+
+// Update position after consuming a character
+static void html5_utf8iter_update_position(Html5Utf8Iterator* iter) {
+    iter->pos.offset += iter->width;
+    if (iter->current == '\n') {
+        iter->pos.line++;
+        iter->pos.column = 1;
+    } else if (iter->current == '\t') {
+        // Tab stop at every 8 columns (configurable)
+        iter->pos.column = ((iter->pos.column / 8) + 1) * 8;
+    } else if (iter->current != -1) {
+        iter->pos.column++;
+    }
+}
+
+// Initialize UTF-8 iterator
+void html5_utf8iter_init(Html5Utf8Iterator* iter, const char* input, size_t length) {
+    iter->start = input;
+    iter->end = input + length;
+    iter->mark = input;
+    iter->pos.line = 1;
+    iter->pos.column = 1;
+    iter->pos.offset = 0;
+    iter->mark_pos = iter->pos;
+    html5_utf8iter_read_char(iter);
+}
+
+// Advance to next character
+void html5_utf8iter_next(Html5Utf8Iterator* iter) {
+    html5_utf8iter_update_position(iter);
+    iter->start += iter->width;
+    html5_utf8iter_read_char(iter);
+}
+
+// Get current codepoint
+int html5_utf8iter_current(const Html5Utf8Iterator* iter) {
+    return iter->current;
+}
+
+// Mark current position for potential backtracking
+void html5_utf8iter_mark(Html5Utf8Iterator* iter) {
+    iter->mark = iter->start;
+    iter->mark_pos = iter->pos;
+}
+
+// Reset to marked position
+void html5_utf8iter_reset(Html5Utf8Iterator* iter) {
+    iter->start = iter->mark;
+    iter->pos = iter->mark_pos;
+    html5_utf8iter_read_char(iter);
+}
+
+// Get pointer to start of current character
+const char* html5_utf8iter_get_char_pointer(const Html5Utf8Iterator* iter) {
+    return iter->start;
+}
+
+// Try to consume a string match (case-sensitive or insensitive)
+bool html5_utf8iter_maybe_consume_match(Html5Utf8Iterator* iter, const char* prefix,
+                                        size_t length, bool case_sensitive) {
+    if (iter->start + length > iter->end) {
+        return false;
+    }
+
+    bool matched;
+    if (case_sensitive) {
+        matched = (strncmp(iter->start, prefix, length) == 0);
+    } else {
+        matched = (strncasecmp(iter->start, prefix, length) == 0);
+    }
+
+    if (matched) {
+        // Consume the matched bytes
+        for (size_t i = 0; i < length; ++i) {
+            html5_utf8iter_next(iter);
+        }
+        return true;
+    }
+    return false;
+}
+
+// ============================================================================
+// ERROR LIST IMPLEMENTATION
+// ============================================================================
+
+// Error type names for debugging/reporting
+static const char* error_type_names[] = {
+    "unexpected-null-character",
+    "control-character-in-input-stream",
+    "noncharacter-in-input-stream",
+    "surrogate-in-input-stream",
+    "unexpected-character-in-attribute-name",
+    "unexpected-equals-sign-before-attribute-name",
+    "unexpected-character-in-unquoted-attribute-value",
+    "missing-whitespace-between-attributes",
+    "unexpected-solidus-in-tag",
+    "eof-before-tag-name",
+    "eof-in-tag",
+    "eof-in-script-html-comment-like-text",
+    "invalid-first-character-of-tag-name",
+    "missing-end-tag-name",
+    "abrupt-closing-of-empty-comment",
+    "eof-in-comment",
+    "nested-comment",
+    "incorrectly-closed-comment",
+    "missing-doctype-name",
+    "missing-whitespace-before-doctype-name",
+    "missing-doctype-public-identifier",
+    "missing-doctype-system-identifier",
+    "eof-in-doctype",
+    "unknown-named-character-reference",
+    "missing-semicolon-after-character-reference",
+    "absence-of-digits-in-numeric-character-reference",
+    "null-character-reference",
+    "character-reference-outside-unicode-range",
+    "surrogate-character-reference",
+    "noncharacter-character-reference",
+    "control-character-reference",
+    "unexpected-start-tag",
+    "unexpected-end-tag",
+    "missing-required-end-tag",
+    "non-void-html-element-start-tag-with-trailing-solidus",
+};
+
+const char* html5_error_type_name(Html5ErrorType type) {
+    if (type >= 0 && type < HTML5_ERR_COUNT) {
+        return error_type_names[type];
+    }
+    return "unknown-error";
+}
+
+void html5_error_list_init(Html5ErrorList* list, Arena* arena) {
+    list->errors = nullptr;
+    list->count = 0;
+    list->capacity = 0;
+    list->arena = arena;
+}
+
+static void html5_error_list_grow(Html5ErrorList* list) {
+    size_t new_capacity = list->capacity == 0 ? 16 : list->capacity * 2;
+    Html5Error* new_errors = (Html5Error*)arena_alloc(list->arena,
+                                                       new_capacity * sizeof(Html5Error));
+    if (list->errors && list->count > 0) {
+        memcpy(new_errors, list->errors, list->count * sizeof(Html5Error));
+    }
+    list->errors = new_errors;
+    list->capacity = new_capacity;
+}
+
+void html5_error_list_add(Html5ErrorList* list, Html5ErrorType type,
+                          Html5SourcePosition pos, const char* original_text) {
+    if (list->count >= list->capacity) {
+        html5_error_list_grow(list);
+    }
+    Html5Error* err = &list->errors[list->count++];
+    err->type = type;
+    err->position = pos;
+    err->original_text = original_text;
+    err->v.codepoint = 0;
+}
+
+void html5_error_list_add_codepoint(Html5ErrorList* list, Html5ErrorType type,
+                                    Html5SourcePosition pos, int codepoint) {
+    if (list->count >= list->capacity) {
+        html5_error_list_grow(list);
+    }
+    Html5Error* err = &list->errors[list->count++];
+    err->type = type;
+    err->position = pos;
+    err->original_text = nullptr;
+    err->v.codepoint = codepoint;
+}
+
+void html5_error_list_add_tag(Html5ErrorList* list, Html5ErrorType type,
+                              Html5SourcePosition pos, const char* tag_name) {
+    if (list->count >= list->capacity) {
+        html5_error_list_grow(list);
+    }
+    Html5Error* err = &list->errors[list->count++];
+    err->type = type;
+    err->position = pos;
+    err->original_text = nullptr;
+    err->v.tag_name = tag_name;
+}
+
+// ============================================================================
+// CHARACTER CONSUMPTION HELPERS
+// ============================================================================
+
 // helper: consume next character from input
 char html5_consume_next_char(Html5Parser* parser) {
     if (parser->pos >= parser->length) {
@@ -2658,6 +3002,35 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
 // main tokenizer function - returns next token
 Html5Token* html5_tokenize_next(Html5Parser* parser) {
     while (true) {
+        // OPTIMIZATION: Try batch scanning for text-heavy states first
+        if (parser->tokenizer_state == HTML5_TOK_DATA) {
+            // Fast path: scan run of plain ASCII text
+            size_t run_len = html5_scan_text_run(parser);
+            if (run_len > 0) {
+                // Emit entire text run as single token
+                const char* text_start = parser->html + parser->pos;
+                parser->pos += run_len;
+                return html5_token_create_character_string(parser->pool, parser->arena, text_start, (int)run_len);
+            }
+            // Fall through to character-by-character for special chars
+        } else if (parser->tokenizer_state == HTML5_TOK_RCDATA) {
+            // Fast path for RCDATA (title, textarea content)
+            size_t run_len = html5_scan_rcdata_run(parser);
+            if (run_len > 0) {
+                const char* text_start = parser->html + parser->pos;
+                parser->pos += run_len;
+                return html5_token_create_character_string(parser->pool, parser->arena, text_start, (int)run_len);
+            }
+        } else if (parser->tokenizer_state == HTML5_TOK_RAWTEXT) {
+            // Fast path for RAWTEXT (style, script content)
+            size_t run_len = html5_scan_rawtext_run(parser);
+            if (run_len > 0) {
+                const char* text_start = parser->html + parser->pos;
+                parser->pos += run_len;
+                return html5_token_create_character_string(parser->pool, parser->arena, text_start, (int)run_len);
+            }
+        }
+
         char c = html5_consume_next_char(parser);
 
         switch (parser->tokenizer_state) {
@@ -2684,6 +3057,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
                     }
                 } else {
+                    // Single character (non-ASCII or after batch scan)
                     return html5_token_create_character(parser->pool, parser->arena, c);
                 }
                 break;
