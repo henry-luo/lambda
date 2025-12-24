@@ -904,8 +904,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // Layout content within each flex item with their final sizes
     View* child = flex_container->first_child;
     while (child) {
-        // Include both block and inline-block flex items
-        if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK) {
+        // Include block, inline-block, and list-item flex items
+        // CSS treats list-item as block-level for flex layout purposes
+        if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK ||
+            child->view_type == RDT_VIEW_LIST_ITEM) {
             ViewBlock* flex_item = (ViewBlock*)child;
             log_debug("Final layout for flex item %p: %.1fx%.1f", flex_item, flex_item->width, flex_item->height);
 
