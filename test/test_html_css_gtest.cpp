@@ -35,7 +35,7 @@ extern "C" {
     ASSERT_NE(input, nullptr) << "Failed to parse HTML file";
 
     // Extract root element (handles DOCTYPE, comments, etc.)
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     ASSERT_NE(root_elem, nullptr) << "No root element found in parsed HTML";
 
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
@@ -282,7 +282,7 @@ protected:
 
     // Helper: Extract the root HTML Element from parsed Input
     // HTML parsing may produce a List containing DOCTYPE, comments, and the actual HTML element
-    Element* get_root_element(Input* input) {
+    Element* get_content_element(Input* input) {
         if (!input) return nullptr;
         TypeId root_type = input->root.type_id();
 
@@ -311,8 +311,52 @@ protected:
             }
         }
         else if (root_type == LMD_TYPE_ELEMENT) {
-            // Direct element (simpler HTML without DOCTYPE/comments)
-            return input->root.element;
+            Element* root_elem = input->root.element;
+            TypeElmt* root_type_info = (TypeElmt*)root_elem->type;
+
+            // Check if this is #document (HTML5 parser wrapper)
+            if (root_type_info && root_type_info->name.str &&
+                strcmp(root_type_info->name.str, "#document") == 0) {
+                // Navigate through #document to find the actual content element
+                // Structure: #document > html > head, body > actual content
+
+                // First, try to find <html> element
+                for (int64_t i = 0; i < root_elem->length; i++) {
+                    Item child = root_elem->items[i];
+                    if (child.type_id() == LMD_TYPE_ELEMENT) {
+                        Element* child_elem = child.element;
+                        TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                        if (child_type && child_type->name.str) {
+                            if (strcasecmp(child_type->name.str, "html") == 0) {
+                                // Found <html>, now look for <body>
+                                for (int64_t j = 0; j < child_elem->length; j++) {
+                                    Item body_child = child_elem->items[j];
+                                    if (body_child.type_id() == LMD_TYPE_ELEMENT) {
+                                        Element* body_elem = body_child.element;
+                                        TypeElmt* body_type = (TypeElmt*)body_elem->type;
+                                        if (body_type && body_type->name.str &&
+                                            strcasecmp(body_type->name.str, "body") == 0) {
+                                            // Found <body>, return its first child if it exists
+                                            if (body_elem->length > 0) {
+                                                Item first_child = body_elem->items[0];
+                                                if (first_child.type_id() == LMD_TYPE_ELEMENT) {
+                                                    return first_child.element;
+                                                }
+                                            }
+                                            // If body is empty, return body itself
+                                            return body_elem;
+                                        }
+                                    }
+                                }
+                                // If no body found, return html
+                                return child_elem;
+                            }
+                        }
+                    }
+                }
+            }
+            // Direct element (simpler HTML without #document wrapper)
+            return root_elem;
         }
 
         return nullptr;
@@ -355,7 +399,7 @@ TEST_F(HtmlCssIntegrationTest, ParseSimpleHTML) {
     ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
@@ -384,7 +428,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithAttributes) {
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
     ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
@@ -419,7 +463,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithInlineStyles) {
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
     ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
@@ -467,13 +511,15 @@ TEST_F(HtmlCssIntegrationTest, ExtractCSSFromStyleTag) {
     ASSERT_NE(input, nullptr);
     ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "Failed to parse HTML - root is NULL";
 
-    Element* root_elem = get_root_element(input);
-    ASSERT_EQ(root_elem->type_id, LMD_TYPE_ELEMENT) << "Root should be an element";
+    // Use input_get_html_element() to get the <html> element (needed to access <head> with <style>)
+    Element* html_elem = input_get_html_element(input);
+    ASSERT_NE(html_elem, nullptr) << "Failed to get HTML element";
+    ASSERT_EQ(html_elem->type_id, LMD_TYPE_ELEMENT) << "HTML should be an element";
 
-    TypeElmt* root_type = (TypeElmt*)root_elem->type;
-    printf("DEBUG: Root tag name: %s\n", root_type->name.str);
+    TypeElmt* html_type = (TypeElmt*)html_elem->type;
+    printf("DEBUG: HTML element tag name: %s\n", html_type->name.str);
 
-    std::string css = extract_css_from_html(root_elem);
+    std::string css = extract_css_from_html(html_elem);
 
     printf("DEBUG: Extracted CSS length: %zu\n", css.length());
     if (!css.empty()) {
@@ -524,7 +570,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr);
 
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     ASSERT_NE(root_elem, nullptr);
 
     DomElement* div = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
@@ -604,7 +650,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Step 2: Convert to DomElement
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
@@ -649,7 +695,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_WithInlineStyle) {
     ASSERT_NE(input, nullptr) << "HTML parsing failed";
 
     // Step 2: Convert to DomElement
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
@@ -682,7 +728,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_NestedElements) {
     ASSERT_NE(input, nullptr) << "HTML parsing failed";
 
     // Step 2: Convert to DomElement
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
@@ -719,7 +765,7 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
     EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     printf("DEBUG: Root element type_id=%d (expected %d for ELEMENT)\n", root_elem ? root_elem->type_id : -1, LMD_TYPE_ELEMENT);
 
     // Check if root is actually a List containing the document
@@ -761,7 +807,7 @@ TEST_F(HtmlCssIntegrationTest, LoadAndParseSampleHTML) {
     EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
@@ -786,7 +832,7 @@ TEST_F(HtmlCssIntegrationTest, VerifyInlineStylesInSampleHTML) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
 
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -830,7 +876,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
 
         processed++;
 
-        Element* root_elem = get_root_element(input);
+        Element* root_elem = get_content_element(input);
         DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
@@ -870,7 +916,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
 
         processed++;
 
-        Element* root_elem = get_root_element(input);
+        Element* root_elem = get_content_element(input);
         DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
@@ -919,7 +965,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_AllPageFiles) {
         }
         parsed++;
 
-        Element* root_elem = get_root_element(input);
+        Element* root_elem = get_content_element(input);
         DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
@@ -966,7 +1012,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_EmptyDocument) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -979,7 +1025,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_SingleDiv) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -996,7 +1042,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_FlexContainer) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1014,7 +1060,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_DisplayTypes) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1027,7 +1073,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_BoxModel) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1052,7 +1098,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_BasicLayout) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1070,7 +1116,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_WrapAlignment) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1083,7 +1129,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_NestedContent) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1100,7 +1146,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_BasicLayout) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1118,7 +1164,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_TemplateAreas) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1131,7 +1177,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_NestedGrid) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1148,7 +1194,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Table_BasicTable) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1167,7 +1213,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Table_BorderCollapse) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1180,7 +1226,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Table_ColspanRowspan) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1197,7 +1243,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Position_FloatLeft) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1215,7 +1261,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Position_Absolute) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1228,7 +1274,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Position_Combined) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1245,7 +1291,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Box_FloatClear) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1258,7 +1304,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Box_Borders) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1276,7 +1322,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Box_Overflow) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1293,7 +1339,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_FontFamilies) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1311,7 +1357,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_Wrapping) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1328,7 +1374,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Page_Sample2) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1344,7 +1390,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Page_Sample5) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1361,7 +1407,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Medium_DocumentStructure) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1381,7 +1427,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Medium_NestedLists) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1398,7 +1444,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Colors) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1416,7 +1462,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Margins) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1429,7 +1475,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Images) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
@@ -1492,7 +1538,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
         }
         parsed++;
 
-        Element* root_elem = get_root_element(input);
+        Element* root_elem = get_content_element(input);
         DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
@@ -1630,7 +1676,7 @@ TEST_F(HtmlCssIntegrationTest, NestedElements_StyleInheritance) {
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr);
 
-    Element* root_elem = get_root_element(input);
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
@@ -1662,13 +1708,14 @@ TEST_F(HtmlCssIntegrationTest, CompleteFlow_HTMLWithCSSAndInlineStyles) {
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr);
 
-    // 2. Convert to DomElement
-    Element* root_elem = get_root_element(input);
+    // 2. Convert to DomElement (get root element for body content)
+    Element* root_elem = get_content_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
-    // 3. Extract CSS (would be parsed separately in full implementation)
-    std::string css = extract_css_from_html(root_elem);
+    // 3. Extract CSS (need html element to access <head> with <style>)
+    Element* html_elem = input_get_html_element(input);
+    std::string css = extract_css_from_html(html_elem);
     EXPECT_FALSE(css.empty());
 
     // 4. Find the styled div (would need full traversal in complete implementation)
