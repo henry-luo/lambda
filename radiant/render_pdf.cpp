@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
+#include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/pdf_writer.h"
@@ -118,15 +119,78 @@ void pdf_render_text(PdfRenderContext* ctx, const char* text, float x, float y, 
 void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
 
+    // Get text-transform from parent elements
+    CssEnum text_transform = CSS_VALUE_NONE;
+    DomNode* parent = text->parent;
+    while (parent) {
+        if (parent->is_element()) {
+            DomElement* elem = (DomElement*)parent;
+            CssEnum transform = get_text_transform_from_block(elem->blk);
+            if (transform != CSS_VALUE_NONE) {
+                text_transform = transform;
+                break;
+            }
+        }
+        parent = parent->parent;
+    }
+
     // Calculate absolute position using block context (like SVG renderer)
     // Extract the text content
     unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     NEXT_RECT:
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
-    char* text_content = (char*)malloc(text_rect->length + 1);
-    strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
-    text_content[text_rect->length] = '\0';
+    
+    // Apply text-transform if needed
+    char* text_content = (char*)malloc(text_rect->length * 4 + 1);  // Extra space for UTF-8 expansion
+    if (text_transform != CSS_VALUE_NONE) {
+        unsigned char* src = str + text_rect->start_index;
+        unsigned char* src_end = src + text_rect->length;
+        char* dst = text_content;
+        bool is_word_start = true;
+        
+        while (src < src_end) {
+            uint32_t codepoint = *src;
+            int bytes = 1;
+            
+            if (codepoint >= 128) {
+                bytes = utf8_to_codepoint(src, &codepoint);
+                if (bytes <= 0) bytes = 1;
+            }
+            
+            if (is_space(codepoint)) {
+                is_word_start = true;
+                *dst++ = *src;
+                src += bytes;
+                continue;
+            }
+            
+            uint32_t transformed = apply_text_transform(codepoint, text_transform, is_word_start);
+            is_word_start = false;
+            
+            // Encode back to UTF-8
+            if (transformed < 0x80) {
+                *dst++ = (char)transformed;
+            } else if (transformed < 0x800) {
+                *dst++ = (char)(0xC0 | (transformed >> 6));
+                *dst++ = (char)(0x80 | (transformed & 0x3F));
+            } else if (transformed < 0x10000) {
+                *dst++ = (char)(0xE0 | (transformed >> 12));
+                *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
+                *dst++ = (char)(0x80 | (transformed & 0x3F));
+            } else {
+                *dst++ = (char)(0xF0 | (transformed >> 18));
+                *dst++ = (char)(0x80 | ((transformed >> 12) & 0x3F));
+                *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
+                *dst++ = (char)(0x80 | (transformed & 0x3F));
+            }
+            src += bytes;
+        }
+        *dst = '\0';
+    } else {
+        strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
+        text_content[text_rect->length] = '\0';
+    }
 
     if (strlen(text_content) == 0) {
         free(text_content);
