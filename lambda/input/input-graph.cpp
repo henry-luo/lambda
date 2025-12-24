@@ -1,6 +1,6 @@
 #include "input-graph.h"
 #include <string.h>
-#include "log.h"
+#include "lib/log.h"
 
 // Main graph parser function that dispatches to specific flavors
 void parse_graph(Input* input, const char* graph_string, const char* flavor) {

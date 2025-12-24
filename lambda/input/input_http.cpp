@@ -12,7 +12,7 @@
 #include "input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
-#include "log.h"
+#include "lib/log.h"
 
 // Structure to hold response data
 typedef struct {
