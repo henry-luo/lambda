@@ -389,6 +389,21 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         block->scroller->clip.right = block->width;
         block->scroller->clip.bottom = block->height;
     }
+    // Also enable clipping when overflow is hidden/clip, even without actual overflow
+    // This is needed for border-radius clipping to work correctly
+    if (block->scroller && !block->scroller->has_clip) {
+        if (block->scroller->overflow_x == CSS_VALUE_HIDDEN ||
+            block->scroller->overflow_x == CSS_VALUE_CLIP ||
+            block->scroller->overflow_y == CSS_VALUE_HIDDEN ||
+            block->scroller->overflow_y == CSS_VALUE_CLIP) {
+            block->scroller->has_clip = true;
+            block->scroller->clip.left = 0;
+            block->scroller->clip.top = 0;
+            block->scroller->clip.right = block->width;
+            block->scroller->clip.bottom = block->height;
+            log_debug("finalize: enabling clip for overflow:hidden, wd:%f, hg:%f", block->width, block->height);
+        }
+    }
     log_debug("finalized block wd:%f, hg:%f", block->width, block->height);
 }
 
