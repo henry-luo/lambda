@@ -5756,12 +5756,39 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     int stop_idx = 0;
                     for (int i = arg_idx; i < func->arg_count && stop_idx < lg->stop_count; i++) {
                         CssValue* arg = func->args[i];
-                        if (arg && arg->type == CSS_VALUE_TYPE_COLOR) {
+                        if (!arg) continue;
+                        
+                        log_debug("[CSS Gradient] arg %d type=%d", i, arg->type);
+                        
+                        if (arg->type == CSS_VALUE_TYPE_COLOR) {
+                            // Simple color without position
                             lg->stops[stop_idx].color = resolve_color_value(arg);
                             lg->stops[stop_idx].position = -1;  // auto position
                             log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x", stop_idx,
                                 lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
                             stop_idx++;
+                        } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
+                            // Color stop with position: [color, position]
+                            CssValue** items = arg->data.list.values;
+                            if (items[0] && items[0]->type == CSS_VALUE_TYPE_COLOR) {
+                                lg->stops[stop_idx].color = resolve_color_value(items[0]);
+                                lg->stops[stop_idx].position = -1;  // default auto
+                                
+                                // Parse position if present
+                                if (arg->data.list.count >= 2 && items[1]) {
+                                    CssValue* pos_val = items[1];
+                                    if (pos_val->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                        lg->stops[stop_idx].position = pos_val->data.percentage.value / 100.0f;
+                                    } else if (pos_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                        lg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
+                                    }
+                                }
+                                
+                                log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x pos=%.2f", stop_idx,
+                                    lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, 
+                                    lg->stops[stop_idx].color.b, lg->stops[stop_idx].position);
+                                stop_idx++;
+                            }
                         }
                     }
                     lg->stop_count = stop_idx;

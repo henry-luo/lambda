@@ -1,5 +1,7 @@
 #include "render.hpp"
 #include "render_img.hpp"
+#include "render_border.hpp"
+#include "render_background.hpp"
 #include "../lib/log.h"
 #include "../lib/avl_tree.h"
 #include "../lambda/input/css/css_style.hpp"
@@ -390,124 +392,17 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
 }
 
 // Helper function to render linear gradient
-static void render_linear_gradient(RenderContext* rdcon, Rect* rect, BackgroundProp* bg, Bound* clip) {
-    LinearGradient* lg = bg->linear_gradient;
-    if (!lg || lg->stop_count < 2) return;
-
-    ImageSurface* surface = rdcon->ui_context->surface;
-
-    // Convert angle to radians (CSS: 0deg = to top, 90deg = to right)
-    // CSS angle convention: 0 = up, increases clockwise
-    float angle_rad = (lg->angle - 90.0f) * 3.14159265f / 180.0f;
-
-    // Calculate gradient direction vector
-    float dx = cosf(angle_rad);
-    float dy = sinf(angle_rad);
-
-    // Calculate the gradient line length for this rect
-    // The gradient line goes through the center and extends to corners
-    float half_w = rect->width / 2.0f;
-    float half_h = rect->height / 2.0f;
-    float gradient_length = fabsf(dx) * rect->width + fabsf(dy) * rect->height;
-
-    // Fill the rectangle with gradient
-    int x0 = (int)rect->x;
-    int y0 = (int)rect->y;
-    int x1 = (int)(rect->x + rect->width);
-    int y1 = (int)(rect->y + rect->height);
-
-    // Clipping
-    if (clip) {
-        x0 = max(x0, (int)clip->left);
-        y0 = max(y0, (int)clip->top);
-        x1 = min(x1, (int)clip->right);
-        y1 = min(y1, (int)clip->bottom);
-    }
-
-    // Center of the gradient
-    float cx = rect->x + half_w;
-    float cy = rect->y + half_h;
-
-    // Draw pixel by pixel
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pitch = surface->pitch / 4;  // pitch in pixels
-
-    for (int y = y0; y < y1; y++) {
-        for (int x = x0; x < x1; x++) {
-            // Calculate position along gradient line (0.0 to 1.0)
-            float px = (float)x - cx;
-            float py = (float)y - cy;
-            float proj = (px * dx + py * dy) / (gradient_length / 2.0f);
-            float t = (proj + 1.0f) / 2.0f;  // normalize to 0..1
-            t = fmaxf(0.0f, fminf(1.0f, t));
-
-            // Find the two color stops to interpolate between
-            Color c1 = lg->stops[0].color;
-            Color c2 = lg->stops[lg->stop_count - 1].color;
-            float t1 = 0.0f, t2 = 1.0f;
-
-            for (int i = 0; i < lg->stop_count - 1; i++) {
-                if (t >= lg->stops[i].position && t <= lg->stops[i + 1].position) {
-                    c1 = lg->stops[i].color;
-                    c2 = lg->stops[i + 1].color;
-                    t1 = lg->stops[i].position;
-                    t2 = lg->stops[i + 1].position;
-                    break;
-                }
-            }
-
-            // Interpolate between the two colors
-            float local_t = (t2 > t1) ? (t - t1) / (t2 - t1) : 0.0f;
-            uint8_t r = (uint8_t)(c1.r + local_t * (c2.r - c1.r));
-            uint8_t g = (uint8_t)(c1.g + local_t * (c2.g - c1.g));
-            uint8_t b = (uint8_t)(c1.b + local_t * (c2.b - c1.b));
-            uint8_t a = (uint8_t)(c1.a + local_t * (c2.a - c1.a));
-
-            // Pack color (RGBA format, same as fill_surface_rect)
-            uint32_t color = (r << 24) | (g << 16) | (b << 8) | a;
-            pixels[y * pitch + x] = color;
-        }
-    }
-    log_debug("Rendered linear gradient: angle=%.1f, %d stops, rect=(%.0f,%.0f,%.0f,%.0f)",
-        lg->angle, lg->stop_count, rect->x, rect->y, rect->width, rect->height);
-}
-
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.width = view->width;  rect.height = view->height;
 
-    // Check for gradient background first
-    if (view->bound->background && view->bound->background->gradient_type == GRADIENT_LINEAR &&
-        view->bound->background->linear_gradient) {
-        render_linear_gradient(rdcon, &rect, view->bound->background, &rdcon->block.clip);
-    }
-    // fill background, if bg-color is non-transparent
-    else if (view->bound->background && (view->bound->background->color.a)) {
-        if (view->bound->border && (view->bound->border->radius.top_left > 0 ||
-            view->bound->border->radius.top_right > 0 || view->bound->border->radius.bottom_left > 0 ||
-            view->bound->border->radius.bottom_right > 0)) {
-            // fill the background with rounded corners
-            tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
-            Tvg_Paint* bg_shape = tvg_shape_new();
-            tvg_shape_append_rect(bg_shape, rect.x, rect.y, rect.width, rect.height,
-                view->bound->border->radius.top_left, view->bound->border->radius.top_right);
-            Color bgcolor = view->bound->background->color;
-            tvg_shape_set_fill_color(bg_shape, bgcolor.r, bgcolor.g, bgcolor.b, bgcolor.a);
-            // clip the svg picture
-            Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
-            tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
-            tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
-            tvg_paint_set_mask_method(bg_shape, clip_rect, TVG_MASK_METHOD_ALPHA);
-            tvg_canvas_push(rdcon->canvas, bg_shape);
-            tvg_canvas_draw(rdcon->canvas, false);
-            tvg_canvas_sync(rdcon->canvas);
-        } else {
-            fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
-        }
+    // Render background (gradient or solid color) using new rendering system
+    if (view->bound->background) {
+        render_background(rdcon, view, rect);
     }
 
-    // Render background image if present
+    // Load background image if specified
     if (view->bound->background && view->bound->background->image) {
         const char* image_url = view->bound->background->image;
         log_debug("[RENDER] background-image on %s: loading '%s' (size: %.0fx%.0f) bg_ptr=%p",
@@ -573,6 +468,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         }
     }
 
+    // Render borders using new rendering system
     if (view->bound->border) {
         log_debug("render border");
 
@@ -595,7 +491,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         }
 
         if (use_resolved) {
-            // Render collapsed borders using resolved border data
+            // Render collapsed borders using resolved border data (table cells)
             if (resolved_left && resolved_left->style != CSS_VALUE_NONE && resolved_left->color.a) {
                 Rect border_rect = rect;
                 border_rect.width = resolved_left->width;
@@ -619,29 +515,8 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                 fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_bottom->color.c, &rdcon->block.clip);
             }
         } else {
-            // Render normal borders using BorderProp
-            if (view->bound->border->left_color.a) {
-                Rect border_rect = rect;
-                border_rect.width = view->bound->border->width.left;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->left_color.c, &rdcon->block.clip);
-            }
-            if (view->bound->border->right_color.a) {
-                Rect border_rect = rect;
-                border_rect.x = rect.x + rect.width - view->bound->border->width.right;
-                border_rect.width = view->bound->border->width.right;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->right_color.c, &rdcon->block.clip);
-            }
-            if (view->bound->border->top_color.a) {
-                Rect border_rect = rect;
-                border_rect.height = view->bound->border->width.top;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->top_color.c, &rdcon->block.clip);
-            }
-            if (view->bound->border->bottom_color.a) {
-                Rect border_rect = rect;
-                border_rect.y = rect.y + rect.height - view->bound->border->width.bottom;
-                border_rect.height = view->bound->border->width.bottom;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->bottom_color.c, &rdcon->block.clip);
-            }
+            // Use new comprehensive border rendering
+            render_border(rdcon, view, rect);
         }
     }
 }
@@ -679,6 +554,19 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
         rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top);
         rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right);
         rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + block->scroller->clip.bottom);
+        
+        // Copy border-radius for rounded corner clipping when overflow:hidden
+        if (block->bound && block->bound->border) {
+            BorderProp* border = block->bound->border;
+            if (border->radius.top_left > 0 || border->radius.top_right > 0 ||
+                border->radius.bottom_left > 0 || border->radius.bottom_right > 0) {
+                rdcon->block.has_clip_radius = true;
+                rdcon->block.clip_radius = border->radius;
+                log_debug("setup rounded clip: tl=%f, tr=%f, bl=%f, br=%f",
+                    border->radius.top_left, border->radius.top_right,
+                    border->radius.bottom_left, border->radius.bottom_right);
+            }
+        }
     }
     if (block->scroller->pane) {
         rdcon->block.x -= block->scroller->pane->h_scroll_position;

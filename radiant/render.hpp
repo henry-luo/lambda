@@ -1,3 +1,4 @@
+#pragma once
 #include "view.hpp"
 
 // format to SDL_PIXELFORMAT_ARGB8888
