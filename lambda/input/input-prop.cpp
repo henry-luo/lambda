@@ -2,6 +2,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "log.h"
 
 using namespace lambda;
 
@@ -289,8 +290,8 @@ void parse_properties(Input* input, const char* prop_string) {
     }
 
     if (ctx.hasErrors()) {
-        printf("Properties parsing completed with errors\n");
+        log_debug("Properties parsing completed with errors\n");
     } else {
-        printf("Properties parsing completed\n");
+        log_debug("Properties parsing completed\n");
     }
 }

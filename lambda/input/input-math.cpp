@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include "log.h"
 
 using namespace lambda;
 
@@ -1176,9 +1177,9 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
             }
 
             // For unknown environments, try to parse as generic environment
-            printf("WARNING: Unknown LaTeX environment: ");
+            log_debug("WARNING: Unknown LaTeX environment: ");
             fwrite(env_start, 1, env_len, stdout);
-            printf("\n");
+            log_debug("\n");
         }
     }
 
@@ -1203,7 +1204,7 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
 
     if (sb->length == 0) {
         stringbuf_reset(sb);
-        printf("ERROR: Empty or invalid LaTeX command\n");
+        log_debug("ERROR: Empty or invalid LaTeX command\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -1494,10 +1495,10 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
         return {.item = ITEM_ERROR};
     } else {
         // Use new group-based parsing system
-        printf("DEBUG: Looking up LaTeX command: '%s'\n", cmd_string->chars);
+        log_debug("DEBUG: Looking up LaTeX command: '%s'\n", cmd_string->chars);
         const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
         if (def) {
-            printf("DEBUG: Found definition for '%s': element_name='%s'\n", cmd_string->chars, def->element_name);
+            log_debug("DEBUG: Found definition for '%s': element_name='%s'\n", cmd_string->chars, def->element_name);
             stringbuf_reset(sb);
 
             // Find the appropriate group parser
@@ -1520,7 +1521,7 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
         }
 
         // Fallback for unrecognized commands - treat as symbol
-        printf("DEBUG: Command '%s' not found, falling back to symbol\n", cmd_string->chars);
+        log_debug("DEBUG: Command '%s' not found, falling back to symbol\n", cmd_string->chars);
         stringbuf_reset(sb);
         MarkBuilder builder(input);
         String* symbol_string = builder.createString(cmd_string->chars);
@@ -2891,7 +2892,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
 
     // Simplified matrix syntax: \matrix{content}
     if (**math != '{') {
-        printf("ERROR: Expected '{' after matrix command\n");
+        log_debug("ERROR: Expected '{' after matrix command\n");
         return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
@@ -2899,14 +2900,14 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
     // Create the matrix element
     Element* matrix_element = create_math_element(input, matrix_type);
     if (!matrix_element) {
-        printf("ERROR: Failed to create matrix element\n");
+        log_debug("ERROR: Failed to create matrix element\n");
         return {.item = ITEM_ERROR};
     }
 
     // Parse matrix rows (separated by \\)
     Element* current_row = create_math_element(input, "row");
     if (!current_row) {
-        printf("ERROR: Failed to create matrix row element\n");
+        log_debug("ERROR: Failed to create matrix row element\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -2938,7 +2939,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
             if (row_count == 0) {
                 col_count = current_col + (((List*)current_row)->length > 0 ? 1 : 0);
             } else if (current_col + (((List*)current_row)->length > 0 ? 1 : 0) != col_count) {
-                printf("WARNING: Inconsistent column count in matrix row %d\n", row_count + 1);
+                log_debug("WARNING: Inconsistent column count in matrix row %d\n", row_count + 1);
             }
 
             // Add current row to matrix
@@ -2950,7 +2951,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
             // Start new row
             current_row = create_math_element(input, "row");
             if (!current_row) {
-                printf("ERROR: Failed to create matrix row element\n");
+                log_debug("ERROR: Failed to create matrix row element\n");
                 return {.item = ITEM_ERROR};
             }
             skip_whitespace(math);
@@ -2968,7 +2969,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
         // Parse matrix cell content
         Item cell = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
         if (cell .item == ITEM_ERROR) {
-            printf("ERROR: Failed to parse matrix cell at row %d, col %d\n", row_count + 1, current_col + 1);
+            log_debug("ERROR: Failed to parse matrix cell at row %d, col %d\n", row_count + 1, current_col + 1);
             return {.item = ITEM_ERROR};
         }
 
@@ -2986,7 +2987,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
     }
 
     if (**math != '}') {
-        printf("ERROR: Expected '}' to close matrix\n");
+        log_debug("ERROR: Expected '}' to close matrix\n");
         return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
@@ -2995,7 +2996,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
     if (((List*)current_row)->length > 0) {
         // Validate final row column count
         if (row_count > 0 && current_col + 1 != col_count) {
-            printf("WARNING: Inconsistent column count in final matrix row\n");
+            log_debug("WARNING: Inconsistent column count in final matrix row\n");
         }
         ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
         list_push((List*)matrix_element, {.item = (uint64_t)current_row});
@@ -3021,7 +3022,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
 
     // Skip \begin{
     if (strncmp(*math, "\\begin{", 7) != 0) {
-        printf("ERROR: Expected \\begin{ for matrix environment\n");
+        log_debug("ERROR: Expected \\begin{ for matrix environment\n");
         return {.item = ITEM_ERROR};
     }
     *math += 7;
@@ -3033,7 +3034,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
     }
 
     if (**math != '}') {
-        printf("ERROR: Expected '}' after \\begin{environment\n");
+        log_debug("ERROR: Expected '}' after \\begin{environment\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3045,7 +3046,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
         char env_name[32];
         strncpy(env_name, env_start, env_len < 31 ? env_len : 31);
         env_name[env_len < 31 ? env_len : 31] = '\0';
-        printf("WARNING: Environment name '%s' doesn't match expected '%s'\n", env_name, matrix_type);
+        log_debug("WARNING: Environment name '%s' doesn't match expected '%s'\n", env_name, matrix_type);
     }
 
     skip_whitespace(math);
@@ -3053,7 +3054,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
     // Create the matrix element
     Element* matrix_element = create_math_element(input, matrix_type);
     if (!matrix_element) {
-        printf("ERROR: Failed to create matrix environment element\n");
+        log_debug("ERROR: Failed to create matrix environment element\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3062,7 +3063,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
     // Parse matrix content (same as simplified syntax but without outer braces)
     Element* current_row = create_math_element(input, "row");
     if (!current_row) {
-        printf("ERROR: Failed to create matrix row element\n");
+        log_debug("ERROR: Failed to create matrix row element\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3086,7 +3087,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
             if (row_count == 0) {
                 col_count = current_col + (((List*)current_row)->length > 0 ? 1 : 0);
             } else if (current_col + (((List*)current_row)->length > 0 ? 1 : 0) != col_count) {
-                printf("WARNING: Inconsistent column count in matrix row %d\n", row_count + 1);
+                log_debug("WARNING: Inconsistent column count in matrix row %d\n", row_count + 1);
             }
 
             // Add current row to matrix
@@ -3098,7 +3099,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
             // Start new row
             current_row = create_math_element(input, "row");
             if (!current_row) {
-                printf("ERROR: Failed to create matrix row element\n");
+                log_debug("ERROR: Failed to create matrix row element\n");
                 return {.item = ITEM_ERROR};
             }
             skip_whitespace(math);
@@ -3129,7 +3130,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
         size_t cell_len = cell_end - cell_start;
         char* cell_content = (char*)malloc(cell_len + 1);
         if (!cell_content) {
-            printf("ERROR: Memory allocation failed for matrix cell\n");
+            log_debug("ERROR: Memory allocation failed for matrix cell\n");
             return {.item = ITEM_ERROR};
         }
 
@@ -3147,8 +3148,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
             const char* cell_ptr = cell_content;
             cell = parse_math_expression(ctx, &cell_ptr, MATH_FLAVOR_LATEX);
             if (cell .item == ITEM_ERROR) {
-                printf("ERROR: Failed to parse matrix cell at row %d, col %d: '%s'\n",
-                       row_count + 1, current_col + 1, cell_content);
+                log_debug("ERROR: Failed to parse matrix cell at row %d, col %d: '%s'\n", row_count + 1, current_col + 1, cell_content);
                 free(cell_content);
                 return {.item = ITEM_ERROR};
             }
@@ -3166,7 +3166,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
 
     // Parse \end{environment}
     if (strncmp(*math, "\\end{", 5) != 0) {
-        printf("ERROR: Expected \\end{%s} to close matrix environment\n", matrix_type);
+        log_debug("ERROR: Expected \\end{%s} to close matrix environment\n", matrix_type);
         return {.item = ITEM_ERROR};
     }
     *math += 5;
@@ -3178,7 +3178,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
     }
 
     if (**math != '}') {
-        printf("ERROR: Expected '}' after \\end{environment\n");
+        log_debug("ERROR: Expected '}' after \\end{environment\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3189,7 +3189,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
         char end_env_name[32];
         strncpy(end_env_name, end_env_start, end_env_len < 31 ? end_env_len : 31);
         end_env_name[end_env_len < 31 ? end_env_len : 31] = '\0';
-        printf("ERROR: Mismatched environment: \\begin{%s} but \\end{%s}\n", matrix_type, end_env_name);
+        log_debug("ERROR: Mismatched environment: \\begin{%s} but \\end{%s}\n", matrix_type, end_env_name);
         return {.item = ITEM_ERROR};
     }
 
@@ -3197,7 +3197,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
     if (((List*)current_row)->length > 0) {
         // Validate final row column count
         if (row_count > 0 && current_col + 1 != col_count) {
-            printf("WARNING: Inconsistent column count in final matrix row\n");
+            log_debug("WARNING: Inconsistent column count in final matrix row\n");
         }
         ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
         list_push((List*)matrix_element, {.item = (uint64_t)current_row});
@@ -3293,12 +3293,12 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
     if (strncmp(*math, "\\begin{", 7) == 0) {
         // Skip \begin{equation}
         if (strncmp(*math, "\\begin{equation}", 16) != 0) {
-            printf("ERROR: Expected \\begin{equation} for equation environment\n");
+            log_debug("ERROR: Expected \\begin{equation} for equation environment\n");
             return {.item = ITEM_ERROR};
         }
         *math += 16;
     } else {
-        printf("ERROR: Expected \\begin{equation} for equation environment\n");
+        log_debug("ERROR: Expected \\begin{equation} for equation environment\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3307,7 +3307,7 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
     // Create the equation element
     Element* eq_element = create_math_element(input, "equation");
     if (!eq_element) {
-        printf("ERROR: Failed to create equation element\n");
+        log_debug("ERROR: Failed to create equation element\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3319,7 +3319,7 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
     const char* content_end = strstr(*math, "\\end{equation}");
 
     if (!content_end) {
-        printf("ERROR: Expected \\end{equation} to close equation environment\n");
+        log_debug("ERROR: Expected \\end{equation} to close equation environment\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3327,7 +3327,7 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
     size_t content_length = content_end - content_start;
     char* temp_content = ((char*)malloc(content_length + 1));
     if (!temp_content) {
-        printf("ERROR: Failed to allocate memory for equation content\n");
+        log_debug("ERROR: Failed to allocate memory for equation content\n");
         return {.item = ITEM_ERROR};
     }
     strncpy(temp_content, content_start, content_length);
@@ -3339,7 +3339,7 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
     free(temp_content);
 
     if (content .item == ITEM_ERROR) {
-        printf("ERROR: Failed to parse equation content\n");
+        log_debug("ERROR: Failed to parse equation content\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3352,7 +3352,7 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
 
     // Parse \end{equation}
     if (strncmp(*math, "\\end{equation}", 14) != 0) {
-        printf("ERROR: Expected \\end{equation} to close equation environment\n");
+        log_debug("ERROR: Expected \\end{equation} to close equation environment\n");
         return {.item = ITEM_ERROR};
     }
     *math += 14;
@@ -3370,12 +3370,12 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
     if (strncmp(*math, "\\begin{", 7) == 0) {
         // Skip \begin{align}
         if (strncmp(*math, "\\begin{align}", 13) != 0) {
-            printf("ERROR: Expected \\begin{align} for align environment\n");
+            log_debug("ERROR: Expected \\begin{align} for align environment\n");
             return {.item = ITEM_ERROR};
         }
         *math += 13;
     } else {
-        printf("ERROR: Expected \\begin{align} for align environment\n");
+        log_debug("ERROR: Expected \\begin{align} for align environment\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3384,7 +3384,7 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
     // Create the align element
     Element* align_element = create_math_element(input, "align");
     if (!align_element) {
-        printf("ERROR: Failed to create align element\n");
+        log_debug("ERROR: Failed to create align element\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3406,14 +3406,14 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
         // Create an equation row element
         Element* eq_row = create_math_element(input, "equation");
         if (!eq_row) {
-            printf("ERROR: Failed to create align row element\n");
+            log_debug("ERROR: Failed to create align row element\n");
             return {.item = ITEM_ERROR};
         }
 
         // Parse left side of alignment
         Item left_expr = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
         if (left_expr .item == ITEM_ERROR) {
-            printf("ERROR: Failed to parse left side of align equation %d\n", eq_count + 1);
+            log_debug("ERROR: Failed to parse left side of align equation %d\n", eq_count + 1);
             return {.item = ITEM_ERROR};
         }
 
@@ -3431,7 +3431,7 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
             // Parse right side of alignment
             Item right_expr = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
             if (right_expr .item == ITEM_ERROR) {
-                printf("ERROR: Failed to parse right side of align equation %d\n", eq_count + 1);
+                log_debug("ERROR: Failed to parse right side of align equation %d\n", eq_count + 1);
                 return {.item = ITEM_ERROR};
             }
 
@@ -3476,12 +3476,12 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
     if (strncmp(*math, "\\begin{", 7) == 0) {
         // Skip \begin{aligned}
         if (strncmp(*math, "\\begin{aligned}", 15) != 0) {
-            printf("ERROR: Expected \\begin{aligned} for aligned environment\n");
+            log_debug("ERROR: Expected \\begin{aligned} for aligned environment\n");
             return {.item = ITEM_ERROR};
         }
         *math += 15;
     } else {
-        printf("ERROR: Expected \\begin{aligned} for aligned environment\n");
+        log_debug("ERROR: Expected \\begin{aligned} for aligned environment\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3490,7 +3490,7 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
     // Create the aligned element
     Element* aligned_element = create_math_element(input, "aligned");
     if (!aligned_element) {
-        printf("ERROR: Failed to create aligned element\n");
+        log_debug("ERROR: Failed to create aligned element\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3512,14 +3512,14 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
         // Create an equation row element
         Element* eq_row = create_math_element(input, "equation");
         if (!eq_row) {
-            printf("ERROR: Failed to create aligned row element\n");
+            log_debug("ERROR: Failed to create aligned row element\n");
             return {.item = ITEM_ERROR};
         }
 
         // Parse left side of alignment
         Item left_expr = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
         if (left_expr .item == ITEM_ERROR) {
-            printf("ERROR: Failed to parse left side of aligned equation %d\n", eq_count + 1);
+            log_debug("ERROR: Failed to parse left side of aligned equation %d\n", eq_count + 1);
             return {.item = ITEM_ERROR};
         }
 
@@ -3537,7 +3537,7 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
             // Parse right side of alignment
             Item right_expr = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
             if (right_expr .item == ITEM_ERROR) {
-                printf("ERROR: Failed to parse right side of aligned equation %d\n", eq_count + 1);
+                log_debug("ERROR: Failed to parse right side of aligned equation %d\n", eq_count + 1);
                 return {.item = ITEM_ERROR};
             }
 
@@ -3582,12 +3582,12 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
     if (strncmp(*math, "\\begin{", 7) == 0) {
         // Skip \begin{gather}
         if (strncmp(*math, "\\begin{gather}", 14) != 0) {
-            printf("ERROR: Expected \\begin{gather} for gather environment\n");
+            log_debug("ERROR: Expected \\begin{gather} for gather environment\n");
             return {.item = ITEM_ERROR};
         }
         *math += 14;
     } else {
-        printf("ERROR: Expected \\begin{gather} for gather environment\n");
+        log_debug("ERROR: Expected \\begin{gather} for gather environment\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3596,7 +3596,7 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
     // Create the gather element
     Element* gather_element = create_math_element(input, "gather");
     if (!gather_element) {
-        printf("ERROR: Failed to create gather element\n");
+        log_debug("ERROR: Failed to create gather element\n");
         return {.item = ITEM_ERROR};
     }
 
@@ -3619,14 +3619,14 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
         // Create an equation element
         Element* eq_element = create_math_element(input, "equation");
         if (!eq_element) {
-            printf("ERROR: Failed to create gather equation element\n");
+            log_debug("ERROR: Failed to create gather equation element\n");
             return {.item = ITEM_ERROR};
         }
 
         // Parse the equation content
         Item eq_expr = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
         if (eq_expr .item == ITEM_ERROR) {
-            printf("ERROR: Failed to parse gather equation %d\n", eq_count + 1);
+            log_debug("ERROR: Failed to parse gather equation %d\n", eq_count + 1);
             return {.item = ITEM_ERROR};
         }
 
@@ -3785,7 +3785,7 @@ static Item parse_latex_abs(InputContext& ctx, const char **math) {
 
         // Expect closing brace
         if (**math != '}') {
-            printf("ERROR: Expected } for absolute value, found: %.10s\n", *math);
+            log_debug("ERROR: Expected } for absolute value, found: %.10s\n", *math);
             return {.item = ITEM_ERROR};
         }
         (*math)++; // skip closing brace
@@ -3801,7 +3801,7 @@ static Item parse_latex_abs(InputContext& ctx, const char **math) {
 
         // Expect \right|
         if (strncmp(*math, "\\right|", 7) != 0) {
-            printf("ERROR: Expected \\right| for absolute value, found: %.10s\n", *math);
+            log_debug("ERROR: Expected \\right| for absolute value, found: %.10s\n", *math);
             return {.item = ITEM_ERROR};
         }
         *math += 7;
@@ -3833,7 +3833,7 @@ static Item parse_latex_norm(InputContext& ctx, const char **math) {
 
     // Expect \rVert
     if (strncmp(*math, "\\rVert", 6) != 0) {
-        printf("ERROR: Expected \\rVert for norm, found: %.10s\n", *math);
+        log_debug("ERROR: Expected \\rVert for norm, found: %.10s\n", *math);
         return {.item = ITEM_ERROR};
     }
     *math += 6;
@@ -3885,7 +3885,7 @@ static Item parse_latex_angle_brackets(InputContext& ctx, const char **math) {
 
     // Expect \rangle
     if (strncmp(*math, "\\rangle", 7) != 0) {
-        printf("ERROR: Expected \\rangle for angle brackets, found: %.10s\n", *math);
+        log_debug("ERROR: Expected \\rangle for angle brackets, found: %.10s\n", *math);
         return {.item = ITEM_ERROR};
     }
     *math += 7;
@@ -3918,7 +3918,7 @@ static Item parse_latex_ceil_floor(InputContext& ctx, const char **math, const c
     } else if (strcmp(func_name, "floor") == 0 && strncmp(*math, "\\rfloor", 7) == 0) {
         *math += 7;
     } else {
-        printf("ERROR: Expected closing delimiter for %s, found: %.10s\n", func_name, *math);
+        log_debug("ERROR: Expected closing delimiter for %s, found: %.10s\n", func_name, *math);
         return {.item = ITEM_ERROR};
     }
 
@@ -4726,7 +4726,7 @@ static MathFlavor get_math_flavor(const char* flavor_str) {
 
 // main parser function
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
-    printf("parse_math called with: '%s', flavor: '%s' (length: %zu)\n", math_string, flavor_str ? flavor_str : "null", strlen(math_string));
+    log_debug("parse_math called with: '%s', flavor: '%s' (length: %zu)\n", math_string, flavor_str ? flavor_str : "null", strlen(math_string));
 
     // create unified InputContext with source tracking
     InputContext ctx(input, math_string, strlen(math_string));
@@ -4738,15 +4738,15 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     // Debug: print the last 5 characters and their codes
     size_t len = strlen(math_string);
     for (size_t i = (len >= 5) ? len - 5 : 0; i < len; i++) {
-        printf("'%c'(%d) ", math_string[i], (int)math_string[i]);
+        log_debug("'%c'(%d) ", math_string[i], (int)math_string[i]);
     }
-    printf("\n");
+    log_debug("\n");
 
     // Create MarkBuilder for StringBuf operations
     const char *math = math_string;
 
     MathFlavor flavor = get_math_flavor(flavor_str);
-    printf("Math flavor resolved to: %d\n", flavor);
+    log_debug("Math flavor resolved to: %d\n", flavor);
 
     // parse the math expression with timeout check
     skip_whitespace(&math);
@@ -4763,7 +4763,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
 
     // Route to appropriate parser based on flavor
     if (flavor == MATH_FLAVOR_ASCII) {
-        printf("DEBUG: Routing to ASCII math parser\n");
+        log_debug("DEBUG: Routing to ASCII math parser\n");
         result = input_ascii_math(input, math_string);
     } else {
         result = parse_math_expression(ctx, &math, flavor);
@@ -4780,12 +4780,12 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
 
     if (result .item == ITEM_ERROR || result .item == ITEM_NULL) {
         ctx.addWarning(ctx.tracker.location(), "Math parsing returned error or null result");
-        printf("Result is error or null, setting input->root to ITEM_ERROR\n");
+        log_debug("Result is error or null, setting input->root to ITEM_ERROR\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
 
-    printf("Setting input->root to result: %lu (0x%lx) (parsing took %.3f seconds)\n", result.item, result.item, elapsed_time);
+    log_debug("Setting input->root to result: %lu (0x%lx) (parsing took %.3f seconds)\n", result.item, result.item, elapsed_time);
     input->root = result;
 
     if (ctx.hasErrors()) {
