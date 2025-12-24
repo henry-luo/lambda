@@ -109,44 +109,109 @@ bool files_are_identical(const char* file1, const char* file2) {
 // ===== SEMANTIC HTML COMPARISON HELPERS =====
 // These allow "good enough" roundtrip testing that ignores known parser limitations
 
-// Normalize HTML entities that are semantically equivalent
-// &quot; -> " and &apos; -> ' (these are equivalent in text content)
+// Entity mapping for common HTML entities
+struct EntityMapping {
+    const char* entity;
+    const char* replacement;
+};
+
+static const EntityMapping entity_mappings[] = {
+    // Basic entities
+    {"&quot;", "\""},
+    {"&apos;", "'"},
+    {"&amp;", "&"},
+    {"&lt;", "<"},
+    {"&gt;", ">"},
+    {"&nbsp;", " "},
+    // Symbols
+    {"&copy;", "\xC2\xA9"},      // ©
+    {"&reg;", "\xC2\xAE"},       // ®
+    {"&trade;", "\xE2\x84\xA2"}, // ™
+    {"&euro;", "\xE2\x82\xAC"},  // €
+    {"&pound;", "\xC2\xA3"},     // £
+    {"&yen;", "\xC2\xA5"},       // ¥
+    {"&cent;", "\xC2\xA2"},      // ¢
+    // Math
+    {"&times;", "\xC3\x97"},     // ×
+    {"&divide;", "\xC3\xB7"},    // ÷
+    {"&plusmn;", "\xC2\xB1"},    // ±
+    {"&frac12;", "\xC2\xBD"},    // ½
+    {"&frac14;", "\xC2\xBC"},    // ¼
+    {"&frac34;", "\xC2\xBE"},    // ¾
+    // Punctuation
+    {"&mdash;", "\xE2\x80\x94"}, // —
+    {"&ndash;", "\xE2\x80\x93"}, // –
+    {"&hellip;", "\xE2\x80\xA6"}, // …
+    {"&lsquo;", "\xE2\x80\x98"}, // '
+    {"&rsquo;", "\xE2\x80\x99"}, // '
+    {"&ldquo;", "\xE2\x80\x9C"}, // "
+    {"&rdquo;", "\xE2\x80\x9D"}, // "
+    {"&bull;", "\xE2\x80\xA2"},  // •
+    {NULL, NULL}
+};
+
+// Normalize HTML entities to their character equivalents for semantic comparison
 char* normalize_entities(const char* html) {
     if (!html) return NULL;
 
     size_t len = strlen(html);
-    char* result = (char*)malloc(len + 1);
+    // Allocate extra space since some entities expand to multi-byte UTF-8
+    char* result = (char*)malloc(len * 4 + 1);
     if (!result) return NULL;
 
     const char* read = html;
     char* write = result;
 
     while (*read) {
-        // Check for &quot;
-        if (strncmp(read, "&quot;", 6) == 0) {
-            *write++ = '"';
-            read += 6;
+        // Check for UTF-8 non-breaking space (U+00A0 = 0xC2 0xA0)
+        if ((unsigned char)*read == 0xC2 && (unsigned char)*(read + 1) == 0xA0) {
+            *write++ = ' ';  // Convert to regular space
+            read += 2;
             continue;
         }
-        // Check for &apos;
-        if (strncmp(read, "&apos;", 6) == 0) {
-            *write++ = '\'';
-            read += 6;
-            continue;
+
+        // Check for entity reference
+        if (*read == '&') {
+            bool matched = false;
+            for (int i = 0; entity_mappings[i].entity; i++) {
+                size_t ent_len = strlen(entity_mappings[i].entity);
+                if (strncmp(read, entity_mappings[i].entity, ent_len) == 0) {
+                    const char* repl = entity_mappings[i].replacement;
+                    while (*repl) {
+                        *write++ = *repl++;
+                    }
+                    read += ent_len;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                *write++ = *read++;
+            }
+        } else {
+            *write++ = *read++;
         }
-        *write++ = *read++;
     }
 
     *write = '\0';
     return result;
 }
 
-// Skip DOCTYPE declaration if present
+// Skip DOCTYPE and XML declaration if present
 const char* skip_doctype(const char* html) {
     const char* p = html;
 
     // Skip leading whitespace
     while (*p && isspace(*p)) p++;
+
+    // Check for XML declaration (<?xml ... ?>)
+    if (strncasecmp(p, "<?xml", 5) == 0) {
+        // Find the end of XML declaration
+        while (*p && !(*p == '?' && *(p+1) == '>')) p++;
+        if (*p == '?' && *(p+1) == '>') p += 2;
+        // Skip trailing whitespace/newlines
+        while (*p && isspace(*p)) p++;
+    }
 
     // Check for DOCTYPE (case-insensitive)
     if (strncasecmp(p, "<!DOCTYPE", 9) == 0) {
@@ -158,6 +223,37 @@ const char* skip_doctype(const char* html) {
     }
 
     return p;
+}
+
+// Remove empty <head></head> tags that HTML5 auto-creates
+char* strip_empty_head(const char* html) {
+    if (!html) return NULL;
+
+    size_t len = strlen(html);
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+
+    const char* read = html;
+    char* write = result;
+
+    while (*read) {
+        // Look for <head></head> or <head> </head> etc
+        if (strncasecmp(read, "<head>", 6) == 0) {
+            const char* check = read + 6;
+            // Skip whitespace inside head
+            while (*check && isspace(*check)) check++;
+            // Check if followed by </head>
+            if (strncasecmp(check, "</head>", 7) == 0) {
+                // Skip the empty head element
+                read = check + 7;
+                continue;
+            }
+        }
+        *write++ = *read++;
+    }
+
+    *write = '\0';
+    return result;
 }
 
 // Remove all HTML comments from a string (modifies in place)
@@ -292,6 +388,41 @@ char* normalize_whitespace(const char* html) {
     return result;
 }
 
+// Strip all whitespace between tags: ><whitespace>< becomes ><
+// This normalizes HTML5's inter-element whitespace rules
+char* strip_inter_tag_whitespace(const char* html) {
+    if (!html) return NULL;
+
+    size_t len = strlen(html);
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+
+    const char* read = html;
+    char* write = result;
+
+    while (*read) {
+        // If we just saw '>' and the next character is whitespace,
+        // check if it's followed by '<'
+        if (*read == '>') {
+            *write++ = *read++;
+
+            // Skip whitespace between tags
+            const char* peek = read;
+            while (*peek && isspace(*peek)) peek++;
+
+            if (*peek == '<') {
+                // Skip the whitespace between tags
+                read = peek;
+            }
+        } else {
+            *write++ = *read++;
+        }
+    }
+
+    *write = '\0';
+    return result;
+}
+
 // Semantic HTML comparison: ignores DOCTYPE, comments, whitespace differences, implicit tbody, and entity variations
 bool are_semantically_equivalent(const char* html1, const char* html2) {
     // Skip DOCTYPE in both
@@ -308,13 +439,27 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
         return false;
     }
 
-    // Normalize entities (&quot; -> ", &apos; -> ')
-    char* entity_norm1 = normalize_entities(tbody_stripped1);
-    char* entity_norm2 = normalize_entities(tbody_stripped2);
+    // Strip empty head elements (HTML5 auto-creates head)
+    char* head_stripped1 = strip_empty_head(tbody_stripped1);
+    char* head_stripped2 = strip_empty_head(tbody_stripped2);
 
     // Free intermediate results
     free(tbody_stripped1);
     free(tbody_stripped2);
+
+    if (!head_stripped1 || !head_stripped2) {
+        free(head_stripped1);
+        free(head_stripped2);
+        return false;
+    }
+
+    // Normalize entities (&quot; -> ", &apos; -> ')
+    char* entity_norm1 = normalize_entities(head_stripped1);
+    char* entity_norm2 = normalize_entities(head_stripped2);
+
+    // Free intermediate results
+    free(head_stripped1);
+    free(head_stripped2);
 
     if (!entity_norm1 || !entity_norm2) {
         free(entity_norm1);
@@ -322,13 +467,27 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
         return false;
     }
 
-    // Normalize whitespace
-    char* norm1 = normalize_whitespace(entity_norm1);
-    char* norm2 = normalize_whitespace(entity_norm2);
+    // Strip inter-tag whitespace (HTML5 normalizes this away)
+    char* inter_tag1 = strip_inter_tag_whitespace(entity_norm1);
+    char* inter_tag2 = strip_inter_tag_whitespace(entity_norm2);
 
     // Free intermediate results
     free(entity_norm1);
     free(entity_norm2);
+
+    if (!inter_tag1 || !inter_tag2) {
+        free(inter_tag1);
+        free(inter_tag2);
+        return false;
+    }
+
+    // Normalize whitespace
+    char* norm1 = normalize_whitespace(inter_tag1);
+    char* norm2 = normalize_whitespace(inter_tag2);
+
+    // Free intermediate results
+    free(inter_tag1);
+    free(inter_tag2);
 
     if (!norm1 || !norm2) {
         free(norm1);
@@ -348,6 +507,13 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
         printf("  After normalization:\n");
         printf("    String 1 (len=%zu): %.200s\n", strlen(norm1), norm1);
         printf("    String 2 (len=%zu): %.200s\n", strlen(norm2), norm2);
+
+        // Write full normalized strings to files for debugging
+        FILE* f1 = fopen("/tmp/norm1.html", "w");
+        FILE* f2 = fopen("/tmp/norm2.html", "w");
+        if (f1) { fwrite(norm1, 1, strlen(norm1), f1); fclose(f1); }
+        if (f2) { fwrite(norm2, 1, strlen(norm2), f2); fclose(f2); }
+        printf("  Debug: Wrote normalized strings to /tmp/norm1.html and /tmp/norm2.html\n");
     }
 
     free(norm1);
