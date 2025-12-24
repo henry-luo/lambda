@@ -363,6 +363,8 @@ project "lambda"
         "radiant/font_lookup_platform.c",
         "radiant/surface.cpp",
         "radiant/render.cpp",
+        "radiant/render_border.cpp",
+        "radiant/render_background.cpp",
         "radiant/render_svg.cpp",
         "radiant/render_pdf.cpp",
         "radiant/render_img.cpp",
