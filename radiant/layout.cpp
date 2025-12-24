@@ -301,9 +301,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
 
-        // Always apply element default styles (handles HTML attributes like <font size="2">)
-        apply_element_default_style(lycon, dom_elem);
-
         if (dom_elem && dom_elem->specified_style) {
             // Check if styles already resolved in this layout pass
             // IMPORTANT: Skip this check during measurement mode (is_measuring=true)
@@ -317,6 +314,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 g_style_resolve_time += duration<double, std::milli>(t_end - t_start).count();
                 return;  // early return - reuse existing styles
             }
+
+            // Apply element default styles ONLY if not already resolved
+            // This must happen BEFORE CSS resolution so CSS can override defaults
+            // (e.g., anchor default blue color overridden by .btn-primary { color: white })
+            apply_element_default_style(lycon, dom_elem);
 
             // Track measurement vs full resolution
             if (lycon->is_measuring) {
@@ -338,6 +340,9 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 log_debug("[CSS] Resolved styles for <%s> in measurement mode - not marking resolved",
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
             }
+        } else {
+            // No specified_style - still apply element default styles for HTML attributes
+            apply_element_default_style(lycon, dom_elem);
         }
     }
 

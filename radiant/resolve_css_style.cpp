@@ -191,6 +191,11 @@ Color resolve_color_value(const CssValue* value) {
 
 // CSS4 has a total of 148 colors
 Color color_name_to_rgb(CssEnum color_name) {
+    // Handle transparent specially - it has alpha = 0
+    if (color_name == CSS_VALUE_TRANSPARENT) {
+        return (Color){ .r = 0, .g = 0, .b = 0, .a = 0 };
+    }
+
     uint32_t c;
     switch (color_name) {
         case CSS_VALUE_ALICEBLUE: c = 0xF0F8FF;  break;

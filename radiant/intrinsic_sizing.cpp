@@ -76,7 +76,17 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
-            prev_glyph = 0;
+
+            // Get space glyph for kerning continuity (matching layout_text.cpp)
+            FT_UInt space_glyph = FT_Get_Char_Index(lycon->font.ft_face, ch);
+
+            // Apply kerning between prev character and space (matching layout_text.cpp)
+            if (has_kerning && prev_glyph && space_glyph) {
+                FT_Vector kern;
+                FT_Get_Kerning(lycon->font.ft_face, prev_glyph, space_glyph,
+                              FT_KERNING_DEFAULT, &kern);
+                total_width += kern.x / 64.0f;
+            }
 
             // Use the same space_width as layout_text.cpp for consistency
             // This is pre-calculated in font.cpp using FT_Load_Char with FT_LOAD_NO_HINTING
@@ -84,7 +94,16 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             if (lycon->font.style && lycon->font.style->space_width > 0) {
                 space_width = lycon->font.style->space_width;
             }
+            // Apply letter-spacing to spaces as well (matching layout_text.cpp)
+            // letter-spacing is applied after each character including spaces, except the last
+            if (i + 1 < length && lycon->font.style) {
+                space_width += lycon->font.style->letter_spacing;
+            }
+
             total_width += space_width;
+
+            // Keep tracking glyph for kerning continuity (layout_text.cpp doesn't reset)
+            prev_glyph = space_glyph;
             continue;
         }
 
@@ -113,6 +132,13 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
         if (FT_Load_Glyph(lycon->font.ft_face, glyph_index, load_flags) == 0) {
             float advance = lycon->font.ft_face->glyph->advance.x / 64.0f + kerning;
+
+            // Apply letter-spacing (CSS spec: applied between characters, not after last)
+            // Check if there are more characters after this one
+            if (i + 1 < length && lycon->font.style) {
+                advance += lycon->font.style->letter_spacing;
+            }
+
             current_word += advance;
             total_width += advance;
         } else {
