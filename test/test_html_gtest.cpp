@@ -62,12 +62,12 @@ protected:
         if (!input) {
             return Item{.item = ITEM_NULL};
         }
-        
+
         Element* extracted = input_get_html_fragment_element(input, html);
         if (extracted) {
             return Item{.element = extracted};
         }
-        
+
         return input->root;
     }
 
@@ -394,7 +394,7 @@ TEST_F(HtmlParserTest, DoctypeLowercase) {
 }
 
 // ============================================================================
-// Comment Tests  
+// Comment Tests
 // ============================================================================
 
 TEST_F(HtmlParserTest, CommentBeforeRoot) {
@@ -559,12 +559,12 @@ TEST_F(HtmlParserTest, AriaAttributesLiveRegion) {
 
 TEST_F(HtmlParserTest, MixedDataAndAriaAttributes) {
     Item result = parseHtml(R"(
-        <div 
-            data-component="modal" 
-            data-visible="true" 
-            role="dialog" 
-            aria-modal="true" 
-            aria-labelledby="modal-title" 
+        <div
+            data-component="modal"
+            data-visible="true"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
             aria-hidden="false">
         </div>
     )");
