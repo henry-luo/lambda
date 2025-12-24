@@ -1255,7 +1255,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         ensure_flex_items_capacity(flex_layout, item_count + 1);
         flex_layout->flex_items[item_count] = (View*)child;
 
-        log_debug("Added flex item %d: %s, size=%dx%d",
+        log_debug("Added flex item %d: %s, size=%.1fx%.1f",
                   item_count, child->node_name(), item->width, item->height);
         item_count++;
 
@@ -1473,11 +1473,19 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
         } else {
             // Row layout: height is cross axis
             // Use intrinsic height to prevent shrinking below content during stretch
+            // IMPORTANT: Add padding and border to get border-box min-height
             if (!item->fi->has_intrinsic_height) {
                 calculate_item_intrinsic_sizes(item, flex_layout);
             }
             min_height = item->fi->intrinsic_height.min_content;
-            log_debug("resolve_flex_item_constraints: row layout, cross-axis min-height = intrinsic %d", min_height);
+            // Add padding and border to intrinsic content height
+            if (item->bound) {
+                min_height += (int)(item->bound->padding.top + item->bound->padding.bottom);
+                if (item->bound->border) {
+                    min_height += (int)(item->bound->border->width.top + item->bound->border->width.bottom);
+                }
+            }
+            log_debug("resolve_flex_item_constraints: row layout, cross-axis min-height = intrinsic %d (with padding/border)", min_height);
         }
     }
 
@@ -3424,12 +3432,20 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                     // This handles nested flex containers properly
                     float measured_height = measure_flex_content_height(item);
                     if (measured_height > 0) {
-                        hypothetical_cross = measured_height;
+                        // Add padding and border to content height to get border-box height
+                        float padding_border_height = 0;
+                        if (item->bound) {
+                            padding_border_height += item->bound->padding.top + item->bound->padding.bottom;
+                            if (item->bound->border) {
+                                padding_border_height += item->bound->border->width.top + item->bound->border->width.bottom;
+                            }
+                        }
+                        hypothetical_cross = measured_height + padding_border_height;
                         // Update item dimensions so alignment uses correct size
-                        item->height = (int)measured_height;
+                        item->height = (int)hypothetical_cross;
                         item->content_height = (int)measured_height;
-                        log_debug("HYPOTHETICAL_CROSS: item[%d][%d] measured height=%.1f",
-                                  i, j, measured_height);
+                        log_debug("HYPOTHETICAL_CROSS: item[%d][%d] measured height=%.1f + padding/border=%.1f = %.1f",
+                                  i, j, measured_height, padding_border_height, hypothetical_cross);
                     } else {
                         // use measured/content height
                         hypothetical_cross = item->height > 0 ? item->height : item->content_height;
