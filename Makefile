@@ -346,7 +346,7 @@ clean-tree-sitter-minimal:
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
 	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal \
-	    capture-layout test-layout layout count-loc
+	    capture-layout test-layout layout count-loc tidy-printf
 
 # Help target - shows available commands
 help:
@@ -418,6 +418,8 @@ help:
 	@echo "  tidy          - Run clang-tidy analysis on C++ files"
 	@echo "  tidy-full     - Comprehensive clang-tidy with compile database"
 	@echo "  tidy-fix      - Run clang-tidy with automatic fixes (interactive)"
+	@echo "  tidy-printf   - Convert printf/fprintf(stderr) to log_debug() using Clang AST"
+	@echo "                  Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]"
 	@echo "  check         - Run basic code checks (TODO/FIXME finder)"
 	@echo "  format        - Format source code with clang-format"
 	@echo "  lint          - Run linter (cppcheck) on source files"
@@ -1330,6 +1332,56 @@ tidy-fix:
 	else \
 		echo "Cancelled."; \
 	fi
+
+# Refactor printf/fprintf to log_debug using clang-based tool
+# Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]
+tidy-printf:
+	@if [ ! -f "utils/refactor_to_log_debug" ]; then \
+		echo "Building refactor_to_log_debug tool..."; \
+		cd utils && ./build_refactor_tool.sh || exit 1; \
+	fi; \
+	if [ -z "$(FILE)" ]; then \
+		echo "Usage: make tidy-printf FILE='pattern' [DRY_RUN=1] [BACKUP=1]"; \
+		echo ""; \
+		echo "Examples:"; \
+		echo "  make tidy-printf FILE='include/mir-bitmap.h' DRY_RUN=1"; \
+		echo "  make tidy-printf FILE='lambda/lambda-eval.cpp' BACKUP=1"; \
+		echo "  make tidy-printf FILE='lambda/*.cpp' DRY_RUN=1"; \
+		echo "  make tidy-printf FILE='lib/*.c' BACKUP=1"; \
+		echo "  make tidy-printf FILE='include/*.h' DRY_RUN=1 BACKUP=1"; \
+		echo ""; \
+		echo "Options:"; \
+		echo "  FILE=pattern   File pattern with wildcards (required)"; \
+		echo "  DRY_RUN=1      Preview changes without modifying files"; \
+		echo "  BACKUP=1       Create .bak backup files before modifying"; \
+		exit 1; \
+	fi; \
+	DRY_RUN_FLAG=""; \
+	BACKUP_FLAG=""; \
+	if [ "$(DRY_RUN)" = "1" ]; then \
+		DRY_RUN_FLAG="--dry-run"; \
+	fi; \
+	if [ "$(BACKUP)" = "1" ]; then \
+		BACKUP_FLAG="--backup"; \
+	fi; \
+	FILES=$$(eval echo $(FILE)); \
+	if [ -z "$$FILES" ]; then \
+		echo "No files found matching pattern: $(FILE)"; \
+		exit 1; \
+	fi; \
+	FILE_COUNT=$$(echo $$FILES | wc -w | tr -d ' '); \
+	echo "Found $$FILE_COUNT file(s) matching pattern: $(FILE)"; \
+	echo ""; \
+	for file in $$FILES; do \
+		if [ ! -f "$$file" ]; then \
+			echo "Skipping non-existent file: $$file"; \
+			continue; \
+		fi; \
+		echo "Processing $$file..."; \
+		./utils/refactor_to_log_debug "$$file" $$DRY_RUN_FLAG $$BACKUP_FLAG; \
+		echo ""; \
+	done; \
+	echo "✓ Completed processing $$FILE_COUNT file(s)"
 
 # Installation targets (optional)
 install: build
