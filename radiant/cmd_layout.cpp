@@ -289,12 +289,14 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
 /**
  * Extract the root HTML element from parsed input
  * Skips DOCTYPE, comments, and other non-element nodes
+ * Handles both old parser (list root) and HTML5 parser (#document root)
  */
 Element* get_html_root_element(Input* input) {
     if (!input) return nullptr;
     TypeId root_type = get_type_id(input->root);
+    
     if (root_type == LMD_TYPE_LIST) {
-        // root is a list, search for HTML element
+        // Old parser: root is a list, search for HTML element
         List* root_list = input->root.list;
         for (int64_t i = 0; i < root_list->length; i++) {
             Item item = root_list->items[i];
@@ -313,7 +315,51 @@ Element* get_html_root_element(Input* input) {
         }
     }
     else if (root_type == LMD_TYPE_ELEMENT) {
-        return input->root.element;
+        Element* root_elem = input->root.element;
+        TypeElmt* root_type_elmt = (TypeElmt*)root_elem->type;
+        
+        log_debug("Root element type: '%.*s'", (int)root_type_elmt->name.length, root_type_elmt->name.str);
+        
+        // HTML5 parser: root is #document, find html child
+        if (strview_equal(&root_type_elmt->name, "#document")) {
+            log_debug("HTML5 parser detected: root is #document, searching for html element");
+            
+            // Search all children of #document for the html element
+            // NOTE: HTML5 parser stores children as "attributes" not content
+            List* doc_list = (List*)root_elem;
+            
+            log_debug("#document: list->length=%lld, content_length=%lld", 
+                      (long long)doc_list->length,
+                      (long long)root_type_elmt->content_length);
+            
+            // Iterate through all items (HTML5 parser doesn't use content_length correctly)
+            for (int64_t i = 0; i < doc_list->length; i++) {
+                Item child = doc_list->items[i];
+                TypeId child_type = get_type_id(child);
+                
+                log_debug("Child %lld: type_id=%d", (long long)i, child_type);
+                
+                if (child_type == LMD_TYPE_ELEMENT) {
+                    Element* child_elem = child.element;
+                    TypeElmt* child_type_elmt = (TypeElmt*)child_elem->type;
+                    
+                    log_debug("  Element name: '%.*s'", 
+                             (int)child_type_elmt->name.length, child_type_elmt->name.str);
+                    
+                    // Return the html element (skip #doctype, comments, etc.)
+                    if (strview_equal(&child_type_elmt->name, "html")) {
+                        log_debug("Found html element inside #document");
+                        return child_elem;
+                    }
+                }
+            }
+            
+            log_warn("No html element found inside #document");
+            return nullptr;
+        }
+        
+        // Old parser or direct html element
+        return root_elem;
     }
     else {
         log_debug("Unexpected root type_id=%d in input", root_type);
