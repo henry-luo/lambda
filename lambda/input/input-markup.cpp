@@ -8,6 +8,7 @@
 #include <vector>
 #include <algorithm>
 #include <string>
+#include "log.h"
 
 using namespace lambda;
 
@@ -3598,7 +3599,7 @@ static Item parse_inline_math(MarkupParser* parser, const char** text) {
 // Parse ASCII math with prefix (asciimath:: or AM::)
 static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     const char* start = *text;
-    printf("*** DEBUG: ENTERING parse_ascii_math_prefix with text: '%.20s' ***\n", start);
+    log_debug("*** DEBUG: ENTERING parse_ascii_math_prefix with text: '%.20s' ***\n", start);
 
     // Check for asciimath:: or AM:: prefix
     bool is_asciimath = false;
@@ -3608,24 +3609,24 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     if (strncmp(pos, "asciimath::", 11) == 0) {
         pos += 11;
         is_asciimath = true;
-        printf("DEBUG: Found asciimath:: prefix\n");
+        log_debug("DEBUG: Found asciimath:: prefix\n");
     } else if (strncmp(pos, "AM::", 4) == 0) {
         pos += 4;
         is_asciimath = true;
         is_am_prefix = true;
-        printf("DEBUG: Found AM:: prefix\n");
+        log_debug("DEBUG: Found AM:: prefix\n");
     }
 
     if (!is_asciimath) {
-        printf("DEBUG: No ASCII math prefix found, returning error\n");
+        log_debug("DEBUG: No ASCII math prefix found, returning error\n");
         return (Item){.item = ITEM_ERROR};
     }
 
-    printf("DEBUG: ASCII math prefix detected, is_am_prefix = %s\n", is_am_prefix ? "true" : "false");
+    log_debug("DEBUG: ASCII math prefix detected, is_am_prefix = %s\n", is_am_prefix ? "true" : "false");
 
     // Find the end of the math expression (end of line or whitespace)
     const char* content_start = pos;
-    printf("DEBUG: Content starts at: '%.20s'\n", content_start);
+    log_debug("DEBUG: Content starts at: '%.20s'\n", content_start);
     while (*pos && *pos != '\n' && *pos != '\r') {
         pos++;
     }
@@ -3637,13 +3638,13 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
 
     if (pos == content_start) {
         // No content after prefix
-        printf("DEBUG: No content after prefix\n");
+        log_debug("DEBUG: No content after prefix\n");
         return (Item){.item = ITEM_ERROR};
     }
 
     // Extract content
     size_t content_len = pos - content_start;
-    printf("DEBUG: Content length: %zu\n", content_len);
+    log_debug("DEBUG: Content length: %zu\n", content_len);
 
     // Create math element
     Element* math_elem = create_element(parser, "math");
@@ -3655,10 +3656,10 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     add_attribute_to_element(parser, math_elem, "type", "ascii");
     // Set flavor based on the prefix used
     if (is_am_prefix) {
-        printf("DEBUG: Setting flavor to 'AM' for AM:: prefix\n");
+        log_debug("DEBUG: Setting flavor to 'AM' for AM:: prefix\n");
         add_attribute_to_element(parser, math_elem, "flavor", "AM");
     } else {
-        printf("DEBUG: Setting flavor to 'ascii' for asciimath:: prefix\n");
+        log_debug("DEBUG: Setting flavor to 'ascii' for asciimath:: prefix\n");
         add_attribute_to_element(parser, math_elem, "flavor", "ascii");
     }
 
@@ -3670,13 +3671,12 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     strncpy(content, content_start, content_len);
     content[content_len] = '\0';
 
-    printf("DEBUG: Extracted content: '%s'\n", content);
+    log_debug("DEBUG: Extracted content: '%s'\n", content);
 
     // Parse the math content using ASCII flavor
     InputContext math_ctx(parser->input(), content, content_len);
     Item parsed_math = parse_math_content(math_ctx, content, "ascii");
-    printf("DEBUG: Math parsing result: %s\n",
-           (parsed_math.item == ITEM_ERROR) ? "ERROR" :
+    log_debug("DEBUG: Math parsing result: %s\n", (parsed_math.item == ITEM_ERROR) ? "ERROR" :
            (parsed_math.item == ITEM_UNDEFINED) ? "UNDEFINED" : "SUCCESS");
 
     if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {

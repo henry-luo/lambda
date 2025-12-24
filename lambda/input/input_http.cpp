@@ -12,6 +12,7 @@
 #include "input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
+#include "log.h"
 
 // Structure to hold response data
 typedef struct {
@@ -120,7 +121,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     }
 
     // Perform the request
-    printf("HTTP: Downloading %s\n", url);
+    log_debug("HTTP: Downloading %s\n", url);
     res = curl_easy_perform(curl);
 
     if (res != CURLE_OK) {
@@ -141,8 +142,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
         return NULL;
     }
 
-    printf("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n",
-           response.size, url, response_code);
+    log_debug("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n", response.size, url, response_code);
 
     if (content_size) {
         *content_size = response.size;
@@ -172,7 +172,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     // Check if file already exists in cache
     struct stat st;
     if (stat(cache_filename, &st) == 0) {
-        printf("HTTP: Using cached file %s\n", cache_filename);
+        log_debug("HTTP: Using cached file %s\n", cache_filename);
 
         // Read cached file
         FILE* file = fopen(cache_filename, "rb");
@@ -212,7 +212,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     if (cache_file) {
         fwrite(content, 1, content_size, cache_file);
         fclose(cache_file);
-        printf("HTTP: Cached content to %s\n", cache_filename);
+        log_debug("HTTP: Cached content to %s\n", cache_filename);
     } else {
         fprintf(stderr, "HTTP: Failed to write cache file %s: %s\n",
                 cache_filename, strerror(errno));
