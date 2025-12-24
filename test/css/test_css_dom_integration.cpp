@@ -155,7 +155,7 @@ protected:
         if (input->root.type_id() == LMD_TYPE_ELEMENT) {
             Element* doc = input->root.element;
             TypeElmt* doc_type = (TypeElmt*)doc->type;
-            
+
             // Check if this is #document
             if (doc_type && doc_type->name.str && strcmp(doc_type->name.str, "#document") == 0) {
                 // Search for <html> element in #document's children
