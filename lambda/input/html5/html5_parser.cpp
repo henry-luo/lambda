@@ -6,6 +6,179 @@
 #include <string.h>
 #include <assert.h>
 
+// ============================================================================
+// SVG/MathML NAMESPACE HANDLING
+// Per WHATWG HTML5 spec: https://html.spec.whatwg.org/multipage/parsing.html#creating-and-inserting-nodes
+// ============================================================================
+
+// SVG attribute name replacements (lowercase -> correct case)
+// HTML5 tokenizer lowercases all attribute names, but SVG requires specific casing
+static const char* svg_attribute_replacements[][2] = {
+    {"attributename", "attributeName"},
+    {"attributetype", "attributeType"},
+    {"basefrequency", "baseFrequency"},
+    {"baseprofile", "baseProfile"},
+    {"calcmode", "calcMode"},
+    {"clippathunits", "clipPathUnits"},
+    {"diffuseconstant", "diffuseConstant"},
+    {"edgemode", "edgeMode"},
+    {"filterunits", "filterUnits"},
+    {"glyphref", "glyphRef"},
+    {"gradienttransform", "gradientTransform"},
+    {"gradientunits", "gradientUnits"},
+    {"kernelmatrix", "kernelMatrix"},
+    {"kernelunitlength", "kernelUnitLength"},
+    {"keypoints", "keyPoints"},
+    {"keysplines", "keySplines"},
+    {"keytimes", "keyTimes"},
+    {"lengthadjust", "lengthAdjust"},
+    {"limitingconeangle", "limitingConeAngle"},
+    {"markerheight", "markerHeight"},
+    {"markerunits", "markerUnits"},
+    {"markerwidth", "markerWidth"},
+    {"maskcontentunits", "maskContentUnits"},
+    {"maskunits", "maskUnits"},
+    {"numoctaves", "numOctaves"},
+    {"pathlength", "pathLength"},
+    {"patterncontentunits", "patternContentUnits"},
+    {"patterntransform", "patternTransform"},
+    {"patternunits", "patternUnits"},
+    {"pointsatx", "pointsAtX"},
+    {"pointsaty", "pointsAtY"},
+    {"pointsatz", "pointsAtZ"},
+    {"preservealpha", "preserveAlpha"},
+    {"preserveaspectratio", "preserveAspectRatio"},
+    {"primitiveunits", "primitiveUnits"},
+    {"refx", "refX"},
+    {"refy", "refY"},
+    {"repeatcount", "repeatCount"},
+    {"repeatdur", "repeatDur"},
+    {"requiredextensions", "requiredExtensions"},
+    {"requiredfeatures", "requiredFeatures"},
+    {"specularconstant", "specularConstant"},
+    {"specularexponent", "specularExponent"},
+    {"spreadmethod", "spreadMethod"},
+    {"startoffset", "startOffset"},
+    {"stddeviation", "stdDeviation"},
+    {"stitchtiles", "stitchTiles"},
+    {"surfacescale", "surfaceScale"},
+    {"systemlanguage", "systemLanguage"},
+    {"tablevalues", "tableValues"},
+    {"targetx", "targetX"},
+    {"targety", "targetY"},
+    {"textlength", "textLength"},
+    {"viewbox", "viewBox"},
+    {"viewtarget", "viewTarget"},
+    {"xchannelselector", "xChannelSelector"},
+    {"ychannelselector", "yChannelSelector"},
+    {"zoomandpan", "zoomAndPan"},
+    {nullptr, nullptr}
+};
+
+// SVG tag name replacements (lowercase -> correct case)
+static const char* svg_tag_replacements[][2] = {
+    {"altglyph", "altGlyph"},
+    {"altglyphdef", "altGlyphDef"},
+    {"altglyphitem", "altGlyphItem"},
+    {"animatecolor", "animateColor"},
+    {"animatemotion", "animateMotion"},
+    {"animatetransform", "animateTransform"},
+    {"clippath", "clipPath"},
+    {"feblend", "feBlend"},
+    {"fecolormatrix", "feColorMatrix"},
+    {"fecomponenttransfer", "feComponentTransfer"},
+    {"fecomposite", "feComposite"},
+    {"feconvolvematrix", "feConvolveMatrix"},
+    {"fediffuselighting", "feDiffuseLighting"},
+    {"fedisplacementmap", "feDisplacementMap"},
+    {"fedistantlight", "feDistantLight"},
+    {"fedropshadow", "feDropShadow"},
+    {"feflood", "feFlood"},
+    {"fefunca", "feFuncA"},
+    {"fefuncb", "feFuncB"},
+    {"fefuncg", "feFuncG"},
+    {"fefuncr", "feFuncR"},
+    {"fegaussianblur", "feGaussianBlur"},
+    {"feimage", "feImage"},
+    {"femerge", "feMerge"},
+    {"femergenode", "feMergeNode"},
+    {"femorphology", "feMorphology"},
+    {"feoffset", "feOffset"},
+    {"fepointlight", "fePointLight"},
+    {"fespecularlighting", "feSpecularLighting"},
+    {"fespotlight", "feSpotLight"},
+    {"fetile", "feTile"},
+    {"feturbulence", "feTurbulence"},
+    {"foreignobject", "foreignObject"},
+    {"glyphref", "glyphRef"},
+    {"lineargradient", "linearGradient"},
+    {"radialgradient", "radialGradient"},
+    {"textpath", "textPath"},
+    {nullptr, nullptr}
+};
+
+// Foreign namespace attribute handling (xlink:, xml:, xmlns:)
+// These attributes need to preserve their namespace prefixes
+static const char* foreign_attributes[][2] = {
+    {"xlink:actuate", "xlink:actuate"},
+    {"xlink:arcrole", "xlink:arcrole"},
+    {"xlink:href", "xlink:href"},
+    {"xlink:role", "xlink:role"},
+    {"xlink:show", "xlink:show"},
+    {"xlink:title", "xlink:title"},
+    {"xlink:type", "xlink:type"},
+    {"xml:base", "xml:base"},
+    {"xml:lang", "xml:lang"},
+    {"xml:space", "xml:space"},
+    {nullptr, nullptr}
+};
+
+// Lookup SVG tag name replacement (returns corrected name or original if no replacement)
+static const char* html5_lookup_svg_tag(const char* tag_name) {
+    for (int i = 0; svg_tag_replacements[i][0] != nullptr; i++) {
+        if (strcmp(tag_name, svg_tag_replacements[i][0]) == 0) {
+            return svg_tag_replacements[i][1];
+        }
+    }
+    return tag_name;  // no replacement, return original
+}
+
+// Lookup SVG attribute name replacement (returns corrected name or original if no replacement)
+static const char* html5_lookup_svg_attr(const char* attr_name) {
+    for (int i = 0; svg_attribute_replacements[i][0] != nullptr; i++) {
+        if (strcmp(attr_name, svg_attribute_replacements[i][0]) == 0) {
+            return svg_attribute_replacements[i][1];
+        }
+    }
+    // Also check foreign attributes
+    for (int i = 0; foreign_attributes[i][0] != nullptr; i++) {
+        if (strcmp(attr_name, foreign_attributes[i][0]) == 0) {
+            return foreign_attributes[i][1];
+        }
+    }
+    return attr_name;  // no replacement, return original
+}
+
+// Check if element is in SVG namespace (based on parent chain)
+static bool html5_is_in_svg_namespace(Html5Parser* parser) {
+    // Walk up the stack looking for an SVG element
+    for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+        Element* elem = (Element*)parser->open_elements->items[i].element;
+        const char* tag_name = ((TypeElmt*)elem->type)->name.str;
+
+        // Found svg element - we're in SVG namespace
+        if (strcmp(tag_name, "svg") == 0) {
+            return true;
+        }
+        // Found html element - we've exited SVG namespace
+        if (strcmp(tag_name, "html") == 0 || strcmp(tag_name, "body") == 0 ||
+            strcmp(tag_name, "head") == 0 || strcmp(tag_name, "foreignObject") == 0) {
+            return false;
+        }
+    }
+    return false;
+}
+
 // parser lifecycle
 Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     Html5Parser* parser = (Html5Parser*)pool_calloc(pool, sizeof(Html5Parser));
@@ -47,6 +220,9 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     // last start tag (for RCDATA/RAWTEXT end tag matching)
     parser->last_start_tag_name = nullptr;
     parser->last_start_tag_name_len = 0;
+
+    // error collection
+    html5_error_list_init(&parser->errors, arena);
 
     return parser;
 }
@@ -547,6 +723,11 @@ void html5_flush_pending_text(Html5Parser* parser) {
         return;  // nothing to flush
     }
 
+    log_debug("html5_flush_pending_text: flushing %zu chars: '%.*s'",
+              parser->text_buffer->length,
+              (int)parser->text_buffer->length,
+              parser->text_buffer->str->chars);
+
     Element* parent = parser->pending_text_parent;
     if (parent == nullptr) {
         parent = html5_current_node(parser);
@@ -560,6 +741,7 @@ void html5_flush_pending_text(Html5Parser* parser) {
 
     // Convert buffer to String and create text node
     String* text_str = stringbuf_to_string(parser->text_buffer);
+    log_debug("html5_flush_pending_text: created String with len=%zu", text_str->len);
     Item text_node = {.item = s2it(text_str)};
     array_append((Array*)parent, text_node, parser->pool, parser->arena);
 
@@ -581,6 +763,7 @@ void html5_insert_character(Html5Parser* parser, char c) {
     }
 
     // Buffer the character
+    log_debug("html5_insert_character: appending '%c' (0x%02x), buffer_len before=%zu", c, (unsigned char)c, parser->text_buffer->length);
     stringbuf_append_char(parser->text_buffer, c);
     parser->pending_text_parent = parent;
 }
@@ -837,9 +1020,20 @@ bool html5_is_special_element(const char* tag_name) {
 }
 
 // Create element for token (without inserting into tree)
+// Applies SVG/MathML namespace corrections per WHATWG spec
 Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) {
     MarkBuilder builder(parser->input);
-    ElementBuilder eb = builder.element(token->tag_name->chars);
+
+    // Check if we're in SVG namespace and need tag name correction
+    const char* tag_name = token->tag_name->chars;
+    bool in_svg = html5_is_in_svg_namespace(parser);
+
+    if (in_svg) {
+        // Apply SVG tag name correction (e.g., "clippath" -> "clipPath")
+        tag_name = html5_lookup_svg_tag(tag_name);
+    }
+
+    ElementBuilder eb = builder.element(tag_name);
 
     // Copy attributes from token to element
     if (token->attributes != nullptr) {
@@ -849,11 +1043,17 @@ Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) 
         ItemReader value;
         while (it.next(&key, &value)) {
             if (key && value.isString()) {
+                // Apply SVG attribute name correction if in SVG namespace
+                const char* attr_name = key;
+                if (in_svg) {
+                    attr_name = html5_lookup_svg_attr(key);
+                }
+
                 // Get the actual String* pointer to preserve empty strings properly
                 // (going through cstring() would cause empty strings to be recreated as EMPTY_STRING)
                 String* str_value = value.asString();
                 if (str_value) {
-                    eb.attr(key, Item{.item = s2it(str_value)});
+                    eb.attr(attr_name, Item{.item = s2it(str_value)});
                 }
             }
         }
@@ -1014,9 +1214,7 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
-        // We found a formatting element - flush pending text before restructuring
-        html5_flush_pending_text(parser);
-
+        // We found a formatting element
         Element* formatting_element = (Element*)parser->active_formatting->items[formatting_element_idx].element;
 
         // Step 2: If formatting element not in stack of open elements
@@ -1064,6 +1262,21 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
             html5_remove_from_active_formatting(parser, formatting_element_idx);
             return;
         }
+
+        // Check if furthest block is a form-associated element
+        // In standards mode (not quirks), form controls create a barrier for AAA
+        const char* fb_tag = ((TypeElmt*)furthest_block->type)->name.str;
+        log_debug("html5: AAA - furthest block is <%s>", fb_tag);
+        if (!parser->quirks_mode &&
+            (strcmp(fb_tag, "button") == 0 || strcmp(fb_tag, "input") == 0 ||
+             strcmp(fb_tag, "select") == 0 || strcmp(fb_tag, "textarea") == 0 ||
+             strcmp(fb_tag, "keygen") == 0 || strcmp(fb_tag, "output") == 0)) {
+            log_debug("html5: AAA - furthest block is form control in standards mode, ignoring end tag");
+            return;  // Don't restructure across form controls - don't flush text either
+        }
+
+        // If we reach here, we're going to restructure the tree - flush pending text now
+        html5_flush_pending_text(parser);
 
         // Step 7: Get common ancestor (element before formatting element in stack)
         Element* common_ancestor = (Element*)parser->open_elements->items[fe_stack_idx - 1].element;
