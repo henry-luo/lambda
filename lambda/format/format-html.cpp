@@ -23,11 +23,31 @@ static const char* raw_text_elements[] = {
     "noframes", "noscript", "plaintext", NULL
 };
 
+// HTML5 boolean attributes (attributes that can appear without a value)
+// See: https://html.spec.whatwg.org/multipage/indices.html#attributes-3
+static const char* boolean_attributes[] = {
+    "async", "autofocus", "autoplay", "checked", "controls", "default",
+    "defer", "disabled", "formnovalidate", "hidden", "ismap", "loop",
+    "multiple", "muted", "nomodule", "novalidate", "open", "playsinline",
+    "readonly", "required", "reversed", "selected", NULL
+};
+
 // Helper function to check if an element is a void element
 static bool is_void_element(const char* tag_name, size_t tag_len) {
     for (int i = 0; void_elements[i]; i++) {
         size_t void_len = strlen(void_elements[i]);
         if (tag_len == void_len && strncasecmp(tag_name, void_elements[i], tag_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper function to check if an attribute is a boolean attribute
+static bool is_boolean_attribute(const char* attr_name, size_t attr_len) {
+    for (int i = 0; boolean_attributes[i]; i++) {
+        size_t bool_len = strlen(boolean_attributes[i]);
+        if (attr_len == bool_len && strncasecmp(attr_name, boolean_attributes[i], attr_len) == 0) {
             return true;
         }
     }
@@ -66,7 +86,7 @@ String* format_html(Pool* pool, Item root_item) {
     Pool* ctx_pool = pool_create();
     HtmlContext ctx(ctx_pool, sb);
 
-    // check if root is already an HTML element, if so, format as-is
+    // check if root is already an HTML element or #document, if so, format as-is
     if (root_item.item) {
         TypeId type = get_type_id(root_item);
 
@@ -101,10 +121,12 @@ String* format_html(Pool* pool, Item root_item) {
                     Element* element = first_item.element;
                     if (element && element->type) {
                         TypeElmt* elmt_type = (TypeElmt*)element->type;
-                        // check if this is an HTML element
-                        if (elmt_type->name.length == 4 &&
-                            strncmp(elmt_type->name.str, "html", 4) == 0) {
-                            // format the HTML element directly without wrapping
+                        // check if this is an HTML or #document element
+                        if ((elmt_type->name.length == 4 &&
+                             strncmp(elmt_type->name.str, "html", 4) == 0) ||
+                            (elmt_type->name.length == 9 &&
+                             strncmp(elmt_type->name.str, "#document", 9) == 0)) {
+                            // format the element directly without wrapping
                             ItemReader first_reader(first_item.to_const());
                             format_item_reader(ctx, first_reader, 0, false);
                             pool_destroy(ctx_pool);
@@ -117,10 +139,12 @@ String* format_html(Pool* pool, Item root_item) {
             Element* element = root_item.element;
             if (element && element->type) {
                 TypeElmt* elmt_type = (TypeElmt*)element->type;
-                // check if this is an HTML element
-                if (elmt_type->name.length == 4 &&
-                    strncmp(elmt_type->name.str, "html", 4) == 0) {
-                    // format the HTML element directly without wrapping
+                // check if this is an HTML or #document element
+                if ((elmt_type->name.length == 4 &&
+                     strncmp(elmt_type->name.str, "html", 4) == 0) ||
+                    (elmt_type->name.length == 9 &&
+                     strncmp(elmt_type->name.str, "#document", 9) == 0)) {
+                    // format the element directly without wrapping
                     ItemReader root_reader(root_item.to_const());
                     format_item_reader(ctx, root_reader, 0, false);
                     pool_destroy(ctx_pool);
@@ -166,7 +190,54 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
 
     size_t tag_len = strlen(tag_name);
 
-    // special handling for HTML comments (tag name "!--")
+    // special handling for #document (HTML5 parser document root)
+    // output children directly without any wrapper tags
+    if (tag_len == 9 && memcmp(tag_name, "#document", 9) == 0) {
+        auto it = elem.children();
+        ItemReader child_item;
+        while (it.next(&child_item)) {
+            format_item_reader(ctx, child_item, depth, false);
+        }
+        return;
+    }
+
+    // special handling for #doctype (HTML5 parser DOCTYPE element)
+    // format as <!DOCTYPE name>
+    if (tag_len == 8 && memcmp(tag_name, "#doctype", 8) == 0) {
+        stringbuf_append_str(ctx.output(), "<!DOCTYPE ");
+        // get the "name" attribute
+        ItemReader name_attr = elem.get_attr("name");
+        if (name_attr.isString()) {
+            String* str = name_attr.asString();
+            if (str && str->chars) {
+                stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
+            }
+        } else {
+            // default to "html" if no name specified
+            stringbuf_append_str(ctx.output(), "html");
+        }
+        stringbuf_append_char(ctx.output(), '>');
+        return;
+    }
+
+    // special handling for #comment (HTML5 parser comment element)
+    // format as <!--data-->
+    if (tag_len == 8 && memcmp(tag_name, "#comment", 8) == 0) {
+        stringbuf_append_str(ctx.output(), "<!--");
+        // get the "data" attribute
+        ItemReader data_attr = elem.get_attr("data");
+        if (data_attr.isString()) {
+            String* str = data_attr.asString();
+            if (str && str->chars) {
+                // output comment content as-is (no escaping)
+                stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
+            }
+        }
+        stringbuf_append_str(ctx.output(), "-->");
+        return;
+    }
+
+    // special handling for HTML comments (tag name "!--") - old parser format
     if (tag_len == 3 && memcmp(tag_name, "!--", 3) == 0) {
         // this is a comment element - format as <!--content-->
         stringbuf_append_str(ctx.output(), "<!--");
@@ -260,11 +331,20 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                     // string attribute or NULL (empty string)
                     String* str = *(String**)data;
                     stringbuf_append_char(ctx.output(), ' ');
-                    stringbuf_append_format(ctx.output(), "%.*s=\"", field_name_len, field_name);
-                    if (str && str->chars) {
+                    stringbuf_append_format(ctx.output(), "%.*s", field_name_len, field_name);
+                    // HTML5 boolean attributes can be output without ="value" if empty
+                    // Regular attributes should always have ="value" even if empty
+                    bool is_bool_attr = is_boolean_attribute(field_name, field_name_len);
+                    if (str && str->len > 0) {
+                        stringbuf_append_char(ctx.output(), '=');
+                        stringbuf_append_char(ctx.output(), '"');
                         format_html_string_safe(ctx.output(), str, true);  // true = is_attribute
+                        stringbuf_append_char(ctx.output(), '"');
+                    } else if (!is_bool_attr) {
+                        // Non-boolean attribute with empty value: output =""
+                        stringbuf_append_str(ctx.output(), "=\"\"");
                     }
-                    stringbuf_append_char(ctx.output(), '"');
+                    // Boolean attribute with empty value: output just the name (no ="" part)
                 }
             }
             field = field->next;

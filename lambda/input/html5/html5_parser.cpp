@@ -803,7 +803,7 @@ void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
 bool html5_is_formatting_element(const char* tag_name) {
     static const char* formatting_elements[] = {
         "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small",
-        "strike", "strong", "tt", "u"
+        "span", "strike", "strong", "tt", "u"
     };
     for (size_t i = 0; i < sizeof(formatting_elements)/sizeof(formatting_elements[0]); i++) {
         if (strcmp(tag_name, formatting_elements[i]) == 0) {
