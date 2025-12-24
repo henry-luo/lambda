@@ -13,7 +13,7 @@ private:
     Pool* global_pool;
     ArrayList* inputs;              // track all created inputs for cleanup
     mpd_context_t* decimal_ctx;     // libmpdec context for decimal operations
-    
+
     // Private constructor for singleton pattern
     InputManager();
     ~InputManager();
@@ -122,6 +122,14 @@ bool is_sys_url(const char* url);
 void parse_graph(Input* input, const char* graph_string, const char* flavor);
 void parse_graph_dot(Input* input, const char* dot_string);
 void parse_graph_mermaid(Input* input, const char* mermaid_string);
+
+// HTML element extraction functions (from input.cpp)
+// Get the <html> element from #document tree built by HTML5 parser
+Element* input_get_html_element(Input* input);
+
+// Get fragment element - extracts single element from body for fragments,
+// or returns <html> element for full documents
+Element* input_get_html_fragment_element(Input* input, const char* original_html);
 
 #ifdef __cplusplus
 }

@@ -72,6 +72,8 @@ protected:
     }
 
     // Helper: Parse HTML string using Lambda parser and build DomElement tree
+    // For fragments like <div>...</div>, extracts the fragment from body
+    // For full documents like <html>...</html>, returns the html element
     DomElement* parse_html_and_build_dom(const char* html_content) {
         String* type_str = create_lambda_string("html");
         Url* url = url_parse("file://test.html");
@@ -82,8 +84,8 @@ protected:
 
         if (!input) return nullptr;
 
-        // Get root element from Lambda parser
-        Element* lambda_root = get_html_root_element(input);
+        // Get fragment element from parser (handles both fragments and full docs)
+        Element* lambda_root = input_get_html_fragment_element(input, html_content);
         if (!lambda_root) return nullptr;
 
         // Create DomDocument for this parse
@@ -94,30 +96,10 @@ protected:
         return build_dom_tree_from_element(lambda_root, parse_doc, nullptr);
     }
 
-    // Helper: Get HTML root element (skip DOCTYPE)
-    Element* get_html_root_element(Input* input) {
-        TypeId root_type = get_type_id(input->root);
-        if (root_type == LMD_TYPE_LIST) {
-            List* root_list = input->root.list;
-            for (int64_t i = 0; i < root_list->length; i++) {
-                Item item = root_list->items[i];
-                if (item.type_id() == LMD_TYPE_ELEMENT) {
-                    Element* elem = item.element;
-                    TypeElmt* type = (TypeElmt*)elem->type;
-
-                    // Skip DOCTYPE and comments
-                    if (strcmp(type->name.str, "!DOCTYPE") != 0 &&
-                        strcmp(type->name.str, "!--") != 0) {
-                        return elem;
-                    }
-                }
-            }
-        }
-        else if (root_type == LMD_TYPE_ELEMENT) {
-            return input->root.element;
-        }
-        return nullptr;
-    }
+    // Note: HTML element extraction functions are now part of the input API:
+    // - input_get_html_element() returns the <html> element from #document tree
+    // - input_get_html_fragment_element() extracts fragment or returns html element
+    // See lambda/input/input.hpp for API details
 };
 
 TEST_F(DomNodeBaseTest, CreateDomElement) {
