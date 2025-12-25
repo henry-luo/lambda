@@ -1328,7 +1328,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
     // Handle form controls FIRST (they don't have fi)
     if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
         float basis = is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
-        
+
         // For form controls, add padding and border to get border-box size
         // CSS uses box-sizing: border-box for form controls by default
         if (item->bound) {
@@ -1344,7 +1344,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
                 }
             }
         }
-        
+
         log_debug("calculate_flex_basis - form control (border-box): %.1f", basis);
         return basis;
     }
