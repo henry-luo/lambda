@@ -125,9 +125,10 @@ make clean-all          # Clean all build artifacts
 
 ### Testing Strategy
 ```bash
-make build-test         # Build all test executables
-make test               # Run ALL tests (baseline + extended)
-make test-baseline      # Core functionalities (must pass 100%)
+make build-test               # Build all test executables
+make test                     # Run ALL tests (baseline + extended)
+make test-lambda-baseline     # Lambda core functionalities (must pass 100%, when changes maked to Lambda engine)
+make test-radiant-baseline     # Radiant core functionalities (must pass 100%, when changes maked to Radiant engine)
 ```
 
 **Running single test**: e.g. `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
@@ -174,13 +175,6 @@ MapBuilder mb = builder.createMap();
 mb.put("name", builder.createString("Alice"));
 mb.put("age", builder.createInt(30));
 Item map = mb.final();
-```
-
-**Parsing input**:
-```cpp
-Input* input = input_create(pool, arena);
-parse_json(input, json_string);
-Item doc = input->root;
 ```
 
 **Working with Items**:
@@ -258,13 +252,11 @@ if (type == LMD_TYPE_STRING) {
 ### Windows/MSYS2
 - **Prefer MINGW64** over CLANG64 to avoid Universal CRT dependencies
 - Use `make build-mingw64` to enforce MINGW64 environment
-- Tree-sitter: uses system library (`pacman -S mingw-w64-x86_64-libtree-sitter`)
-- Cross-compilation: `./setup-windows-deps.sh` installs MinGW toolchain
+- Install dependencies: `./setup-windows-deps.sh`
 
 ### macOS
 - Uses Homebrew for dependencies: `./setup-mac-deps.sh`
 - Clang is default compiler
-- ccache enabled if available (faster rebuilds)
 
 ### Linux
 - GCC or Clang supported
@@ -291,7 +283,7 @@ if (type == LMD_TYPE_STRING) {
 3. Run with debugger: `lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- extra CLI arguments`
 
 ## Notes & Constraints
-- C++17 standard (use modern features: `std::optional`, structured bindings, etc.)
+- C++17 standard
 - Grammar regeneration is automatic - don't manually edit `parser.c`
 - Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
 - **Token limit**: 10,000,000 tokens per session. So don't worry about running short of tokens.

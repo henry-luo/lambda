@@ -753,24 +753,6 @@ test-dev:
 		exit 1; \
 	fi
 
-test-sequential: build-test
-	@echo "Running comprehensive test suite (sequential execution)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --sequential; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
-
-test-parallel: build
-	@echo "Running comprehensive test suite (parallel execution)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
-
 test-library: build
 	@echo "Running library test suite..."
 	@if [ -f "test/test_run.sh" ]; then \
@@ -779,7 +761,6 @@ test-library: build
 		echo "Error: No test script found"; \
 		exit 1; \
 	fi
-
 
 test-input: build
 	@echo "Running input processing test suite..."
