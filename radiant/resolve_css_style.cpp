@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "grid.hpp"
+#include "form_control.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font_config.h"
@@ -5124,10 +5125,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
-            alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float grow_value = (float)value->data.number.value;
-                span->fi->flex_grow = grow_value;
+                // Form controls store flex props in FormControlProp
+                if (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form) {
+                    span->form->flex_grow = grow_value;
+                } else {
+                    alloc_flex_item_prop(lycon, span);
+                    span->fi->flex_grow = grow_value;
+                }
                 log_debug("[CSS] flex-grow: %.2f", grow_value);
             }
             break;
@@ -5135,10 +5141,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX_SHRINK: {
             log_debug("[CSS] Processing flex-shrink property");
-            alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float shrink_value = (float)value->data.number.value;
-                span->fi->flex_shrink = shrink_value;
+                // Form controls store flex props in FormControlProp
+                if (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form) {
+                    span->form->flex_shrink = shrink_value;
+                } else {
+                    alloc_flex_item_prop(lycon, span);
+                    span->fi->flex_shrink = shrink_value;
+                }
                 log_debug("[CSS] flex-shrink: %.2f", shrink_value);
             }
             break;
@@ -5146,22 +5157,42 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX_BASIS: {
             log_debug("[CSS] Processing flex-basis property");
-            alloc_flex_item_prop(lycon, span);
+            // Form controls store flex props in FormControlProp
+            bool is_form = (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form);
+            if (!is_form) {
+                alloc_flex_item_prop(lycon, span);
+            }
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                span->fi->flex_basis = -1; // -1 indicates auto
-                span->fi->flex_basis_is_percent = false;
+                if (is_form) {
+                    span->form->flex_basis = -1;
+                    span->form->flex_basis_is_percent = false;
+                } else {
+                    span->fi->flex_basis = -1; // -1 indicates auto
+                    span->fi->flex_basis_is_percent = false;
+                }
                 log_debug("[CSS] flex-basis: auto");
             } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float basis_value = resolve_length_value(lycon, prop_id, value);
-                span->fi->flex_basis = (int)basis_value;
-                span->fi->flex_basis_is_percent = false;
+                if (is_form) {
+                    span->form->flex_basis = (int)basis_value;
+                    span->form->flex_basis_is_percent = false;
+                } else {
+                    span->fi->flex_basis = (int)basis_value;
+                    span->fi->flex_basis_is_percent = false;
+                }
                 log_debug("[CSS] flex-basis: %.2fpx", basis_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // DEBUG: log raw percentage value to diagnose parsing issue
                 log_debug("[CSS DEBUG] flex-basis percentage raw: %f", value->data.percentage.value);
-                span->fi->flex_basis = (float)value->data.percentage.value;
-                span->fi->flex_basis_is_percent = true;
-                log_debug("[CSS] flex-basis: %.1f%% (stored as %.1f)", value->data.percentage.value, span->fi->flex_basis);
+                if (is_form) {
+                    span->form->flex_basis = (float)value->data.percentage.value;
+                    span->form->flex_basis_is_percent = true;
+                } else {
+                    span->fi->flex_basis = (float)value->data.percentage.value;
+                    span->fi->flex_basis_is_percent = true;
+                }
+                log_debug("[CSS] flex-basis: %.1f%% (stored as %.1f)", value->data.percentage.value,
+                    is_form ? span->form->flex_basis : span->fi->flex_basis);
             }
             break;
         }
@@ -5229,7 +5260,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX: {
             log_debug("[CSS] Processing flex shorthand property");
-            alloc_flex_item_prop(lycon, span);
+            // Check if this is a form control - they store flex props in FormControlProp
+            bool is_form = (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form);
+            if (!is_form) {
+                alloc_flex_item_prop(lycon, span);
+            }
             // flex is a shorthand for flex-grow, flex-shrink, and flex-basis
             // Syntax: none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
 
@@ -5259,10 +5294,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] flex: initial -> grow=0 shrink=1 basis=auto");
                 }
 
-                span->fi->flex_grow = flex_grow;
-                span->fi->flex_shrink = flex_shrink;
-                span->fi->flex_basis = flex_basis;
-                span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                if (is_form) {
+                    span->form->flex_grow = flex_grow;
+                    span->form->flex_shrink = flex_shrink;
+                    span->form->flex_basis = flex_basis;
+                    span->form->flex_basis_is_percent = flex_basis_is_percent;
+                } else {
+                    span->fi->flex_grow = flex_grow;
+                    span->fi->flex_shrink = flex_shrink;
+                    span->fi->flex_basis = flex_basis;
+                    span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                }
                 break;
             }
 
@@ -5319,10 +5361,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] flex: <grow> -> grow=%.2f shrink=1 basis=0", flex_grow);
                 }
 
-                span->fi->flex_grow = flex_grow;
-                span->fi->flex_shrink = flex_shrink;
-                span->fi->flex_basis = flex_basis;
-                span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                if (is_form) {
+                    span->form->flex_grow = flex_grow;
+                    span->form->flex_shrink = flex_shrink;
+                    span->form->flex_basis = flex_basis;
+                    span->form->flex_basis_is_percent = flex_basis_is_percent;
+                } else {
+                    span->fi->flex_grow = flex_grow;
+                    span->fi->flex_shrink = flex_shrink;
+                    span->fi->flex_basis = flex_basis;
+                    span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                }
 
                 log_debug("[CSS] flex shorthand resolved: grow=%.2f shrink=%.2f basis=%.2f%s",
                          flex_grow, flex_shrink, flex_basis,
@@ -5334,10 +5383,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 flex_shrink = 1.0f;
                 flex_basis = 0;  // 0px when single unitless number
 
-                span->fi->flex_grow = flex_grow;
-                span->fi->flex_shrink = flex_shrink;
-                span->fi->flex_basis = flex_basis;
-                span->fi->flex_basis_is_percent = false;
+                if (is_form) {
+                    span->form->flex_grow = flex_grow;
+                    span->form->flex_shrink = flex_shrink;
+                    span->form->flex_basis = flex_basis;
+                    span->form->flex_basis_is_percent = false;
+                } else {
+                    span->fi->flex_grow = flex_grow;
+                    span->fi->flex_shrink = flex_shrink;
+                    span->fi->flex_basis = flex_basis;
+                    span->fi->flex_basis_is_percent = false;
+                }
                 log_debug("[CSS] flex: %.2f -> grow=%.2f shrink=1 basis=0", flex_grow, flex_grow);
             }
             break;
