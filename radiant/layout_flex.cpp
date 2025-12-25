@@ -2,6 +2,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "layout_flex_measurement.hpp"
+#include "form_control.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,54 @@ extern "C" {
 // Forward declarations
 float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout);
+
+// ============================================================================
+// Flex Item Intrinsic Size Helpers (support both flex items and form controls)
+// ============================================================================
+
+// Check if an element has intrinsic width available
+static bool has_item_intrinsic_width(ViewElement* item) {
+    if (!item) return false;
+    if (item->fi && item->fi->has_intrinsic_width) return true;
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->intrinsic_width > 0;
+    }
+    return false;
+}
+
+// Check if an element has intrinsic height available
+static bool has_item_intrinsic_height(ViewElement* item) {
+    if (!item) return false;
+    if (item->fi && item->fi->has_intrinsic_height) return true;
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->intrinsic_height > 0;
+    }
+    return false;
+}
+
+// Get intrinsic width (max-content) for flex item or form control
+static float get_item_intrinsic_width(ViewElement* item) {
+    if (!item) return 0;
+    if (item->fi && item->fi->has_intrinsic_width) {
+        return item->fi->intrinsic_width.max_content;
+    }
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->intrinsic_width;
+    }
+    return 0;
+}
+
+// Get intrinsic height (max-content) for flex item or form control
+static float get_item_intrinsic_height(ViewElement* item) {
+    if (!item) return 0;
+    if (item->fi && item->fi->has_intrinsic_height) {
+        return item->fi->intrinsic_height.max_content;
+    }
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->intrinsic_height;
+    }
+    return 0;
+}
 
 // ============================================================================
 // Overflow Alignment Fallback (Yoga-inspired)
@@ -1272,9 +1321,35 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 
 // Calculate flex basis for an item
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
-    if (!item->fi) return 0;
-
     log_debug("calculate_flex_basis for item %p", item);
+
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+
+    // Handle form controls FIRST (they don't have fi)
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        float basis = is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
+        
+        // For form controls, add padding and border to get border-box size
+        // CSS uses box-sizing: border-box for form controls by default
+        if (item->bound) {
+            if (is_horizontal) {
+                basis += item->bound->padding.left + item->bound->padding.right;
+                if (item->bound->border) {
+                    basis += item->bound->border->width.left + item->bound->border->width.right;
+                }
+            } else {
+                basis += item->bound->padding.top + item->bound->padding.bottom;
+                if (item->bound->border) {
+                    basis += item->bound->border->width.top + item->bound->border->width.bottom;
+                }
+            }
+        }
+        
+        log_debug("calculate_flex_basis - form control (border-box): %.1f", basis);
+        return basis;
+    }
+
+    if (!item->fi) return 0;
 
     // Case 1: Explicit flex-basis value (not auto)
     if (item->fi->flex_basis >= 0) {
@@ -1292,7 +1367,6 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
     }
 
     // Case 2: flex-basis: auto - use main axis size if explicit
-    bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
     // Check for explicit width/height in CSS
     if (is_horizontal && item->blk && item->blk->given_width > 0) {
@@ -1353,20 +1427,26 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
 
     // Case 3: flex-basis: auto + no explicit size = use content size (intrinsic sizing)
 
-    // Ensure intrinsic sizes are calculated
-    if (!item->fi->has_intrinsic_width && is_horizontal) {
-        calculate_item_intrinsic_sizes(item, flex_layout);
-    }
-    if (!item->fi->has_intrinsic_height && !is_horizontal) {
-        calculate_item_intrinsic_sizes(item, flex_layout);
+    // Ensure intrinsic sizes are calculated (for non-form flex items)
+    if (item->fi) {
+        if (!item->fi->has_intrinsic_width && is_horizontal) {
+            calculate_item_intrinsic_sizes(item, flex_layout);
+        }
+        if (!item->fi->has_intrinsic_height && !is_horizontal) {
+            calculate_item_intrinsic_sizes(item, flex_layout);
+        }
     }
 
     // Use max-content size as basis for auto (per CSS Flexbox spec)
     float basis;
     if (is_horizontal) {
-        basis = item->fi->intrinsic_width.max_content;
+        basis = item->fi ? item->fi->intrinsic_width.max_content : 0;
+        log_debug("calculate_flex_basis: horizontal, fi=%p, has_intrinsic_width=%d, max_content=%.1f",
+                  item->fi, item->fi ? item->fi->has_intrinsic_width : -1, basis);
     } else {
-        basis = item->fi->intrinsic_height.max_content;
+        basis = item->fi ? item->fi->intrinsic_height.max_content : 0;
+        log_debug("calculate_flex_basis: vertical, fi=%p, has_intrinsic_height=%d, max_content=%.1f",
+                  item->fi, item->fi ? item->fi->has_intrinsic_height : -1, basis);
     }
 
     // Add padding and border to intrinsic content size
@@ -1443,8 +1523,19 @@ float calculate_hypothetical_main_size(ViewElement* item, FlexContainerLayout* f
 
 // Resolve min/max constraints for a flex item
 void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout) {
-    if (!item || !item->fi) {
-        log_debug("resolve_flex_item_constraints: invalid item or no flex properties");
+    if (!item) {
+        log_debug("resolve_flex_item_constraints: invalid item");
+        return;
+    }
+
+    // Form controls don't have fi - they use intrinsic sizes directly
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
+        log_debug("resolve_flex_item_constraints: form control, using intrinsic sizes");
+        return;
+    }
+
+    if (!item->fi) {
+        log_debug("resolve_flex_item_constraints: no flex properties");
         return;
     }
 
@@ -1730,7 +1821,20 @@ float apply_stretch_constraint(
     float container_cross_size,
     FlexContainerLayout* flex_layout
 ) {
-    if (!item || !item->fi) return container_cross_size;
+    if (!item) return container_cross_size;
+
+    // Check for form control - they should use container_cross_size directly
+    bool is_form_control = (item->item_prop_type == DomElement::ITEM_PROP_FORM);
+    if (is_form_control) {
+        log_debug("apply_stretch_constraint: form control, returning container_cross=%.1f", container_cross_size);
+        return container_cross_size;
+    }
+
+    // Non-form-controls without fi should use container_cross_size directly
+    if (!item->fi) {
+        log_debug("apply_stretch_constraint: no fi, returning container_cross=%.1f", container_cross_size);
+        return container_cross_size;
+    }
 
     // Apply cross-axis constraint
     float constrained = apply_flex_constraint(item, container_cross_size, false, flex_layout);
@@ -2614,15 +2718,31 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         log_debug("align_items_cross_axis: Processing item %d", i);
         ViewElement* item = (ViewElement*)line->items[i]->as_element();
         log_debug("align_items_cross_axis: item=%p, item->as_element()=%p", line->items[i], item);
-        // CRITICAL FIX: Use OR (||) not AND (&&) - if item is null, skip without checking fi
-        if (!item || !item->fi) {
-            log_debug("align_items_cross_axis: Skipping item %d (item=%p, fi=%p)", i, item, item ? item->fi : nullptr);
+        if (!item) {
+            log_debug("align_items_cross_axis: Skipping item %d (item is null)", i);
             continue;
         }
-        // CRITICAL FIX: Use align values directly - they're now stored as Lexbor constants
-        int align_type = item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items;
-        log_debug("ALIGN_SELF_RAW - item %d: align_self=%d, ALIGN_AUTO=%d, flex_align_items=%d",
-               i, item->fi->align_self, ALIGN_AUTO, flex_layout->align_items);
+
+        // Check if this is a form control - they don't have fi but should still participate in flex alignment
+        bool is_form_control = (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form);
+
+        // For non-form-control items, require fi
+        if (!is_form_control && !item->fi) {
+            log_debug("align_items_cross_axis: Skipping item %d (non-form item without fi)", i);
+            continue;
+        }
+
+        // Get alignment type - form controls use container's align_items (no align-self)
+        int align_type;
+        if (is_form_control) {
+            align_type = flex_layout->align_items;
+            log_debug("ALIGN_SELF_FORM - item %d: using container align_items=%d", i, align_type);
+        } else {
+            // CRITICAL FIX: Use align values directly - they're now stored as Lexbor constants
+            align_type = item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items;
+            log_debug("ALIGN_SELF_RAW - item %d: align_self=%d, ALIGN_AUTO=%d, flex_align_items=%d",
+                   i, item->fi->align_self, ALIGN_AUTO, flex_layout->align_items);
+        }
 
         // For non-stretch items without explicit cross-axis size, calculate intrinsic size
         // This ensures center/start/end alignment uses content-based size
@@ -2742,18 +2862,28 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                     cross_pos = (available_cross_size - item_cross_size) / 2;
                     break;
                 case ALIGN_STRETCH:
-                    // For stretch, check if item has explicit cross-axis size
+                    // For stretch, check if item has explicit cross-axis size from CSS
+                    // Note: form controls have intrinsic sizes set via given_width/height,
+                    // but these should NOT prevent stretching unless CSS explicitly sets size.
+                    // We check given_*_type to distinguish CSS-specified from intrinsic defaults.
                     {
                         bool has_explicit_cross_size = false;
                         if (is_main_axis_horizontal(flex_layout)) {
                             // Row direction: cross-axis is height
-                            // given_height > 0 means explicit height (0 or negative means auto)
-                            has_explicit_cross_size = (item->blk && item->blk->given_height > 0);
+                            // Check both that height > 0 AND that it was CSS-specified (type != UNDEF)
+                            has_explicit_cross_size = (item->blk && item->blk->given_height > 0 &&
+                                                       item->blk->given_height_type != CSS_VALUE__UNDEF);
                         } else {
                             // Column direction: cross-axis is width
-                            // given_width > 0 means explicit width (0 or negative means auto)
-                            has_explicit_cross_size = (item->blk && item->blk->given_width > 0);
+                            // Check both that width > 0 AND that it was CSS-specified (type != UNDEF)
+                            has_explicit_cross_size = (item->blk && item->blk->given_width > 0 &&
+                                                       item->blk->given_width_type != CSS_VALUE__UNDEF);
                         }
+
+                        log_debug("ALIGN_STRETCH item %d (%s): has_explicit=%d, available=%d, item_cross=%d, blk=%p, given_width=%.1f, type=%d",
+                                  i, item->node_name(), has_explicit_cross_size, available_cross_size, item_cross_size,
+                                  item->blk, item->blk ? item->blk->given_width : -999.0f,
+                                  item->blk ? item->blk->given_width_type : -1);
 
                         if (has_explicit_cross_size) {
                             // Item has explicit size - for wrap-reverse, position at end of line
