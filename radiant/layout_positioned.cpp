@@ -274,6 +274,72 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // calculate position based on offset properties and containing block
     calculate_absolute_position(lycon, block, cb);
 
+    // Load image for IMG elements - same as layout_block does for regular flow
+    uintptr_t elmt_name = block->tag();
+    if (elmt_name == HTM_TAG_IMG) {
+        log_debug("[ABS IMG] Loading image for absolutely positioned IMG element");
+        const char *value = block->get_attribute("src");
+        if (value) {
+            size_t value_len = strlen(value);
+            StrBuf* src = strbuf_new_cap(value_len);
+            strbuf_append_str_n(src, value, value_len);
+            log_debug("[ABS IMG] image src: %s", src->str);
+            if (!block->embed) {
+                block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+            }
+            block->embed->img = load_image(lycon->ui_context, src->str);
+            strbuf_free(src);
+            if (!block->embed->img) {
+                log_debug("[ABS IMG] Failed to load image");
+            }
+        }
+        if (block->embed && block->embed->img) {
+            ImageSurface* img = block->embed->img;
+            float w = img->width * lycon->ui_context->pixel_ratio;
+            float h = img->height * lycon->ui_context->pixel_ratio;
+            log_debug("[ABS IMG] image intrinsic dims: %.1f x %.1f, given: %.1f x %.1f",
+                      w, h, lycon->block.given_width, lycon->block.given_height);
+            
+            // Adjust dimensions based on CSS constraints
+            if (lycon->block.given_width < 0 && lycon->block.given_height < 0) {
+                // Neither width nor height specified - use intrinsic dimensions
+                // But respect max-width if set
+                float max_w = block->blk ? block->blk->given_max_width : -1;
+                if (max_w >= 0 && w > max_w) {
+                    lycon->block.given_width = max_w;
+                    lycon->block.given_height = max_w * h / w;
+                } else {
+                    lycon->block.given_width = w;
+                    lycon->block.given_height = h;
+                }
+            } else if (lycon->block.given_width >= 0 && lycon->block.given_height < 0) {
+                // Width specified, scale height to maintain aspect ratio
+                lycon->block.given_height = lycon->block.given_width * h / w;
+            } else if (lycon->block.given_height >= 0 && lycon->block.given_width < 0) {
+                // Height specified, scale width to maintain aspect ratio
+                lycon->block.given_width = lycon->block.given_height * w / h;
+            }
+            // else both are specified, use them as-is
+            
+            // Update block dimensions
+            block->width = lycon->block.given_width;
+            block->height = lycon->block.given_height;
+            lycon->block.content_width = lycon->block.given_width;
+            lycon->block.content_height = lycon->block.given_height;
+            
+            if (img->format == IMAGE_FORMAT_SVG) {
+                img->max_render_width = max(lycon->block.given_width, img->max_render_width);
+            }
+            log_debug("[ABS IMG] final dimensions: %.1f x %.1f", block->width, block->height);
+        } else {
+            // Failed to load image - use placeholder
+            if (lycon->block.given_width <= 0) lycon->block.given_width = 40;
+            if (lycon->block.given_height <= 0) lycon->block.given_height = 30;
+            block->width = lycon->block.given_width;
+            block->height = lycon->block.given_height;
+        }
+    }
+
     // CSS 2.2 Section 10.6.4: For absolutely positioned elements without explicit top/bottom,
     // use the "static position" - where the element would be in normal flow
     // The static Y position is the parent's current advance_y (where next block would go)
