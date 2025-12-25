@@ -1,0 +1,674 @@
+[
+  {
+    "test_id": "4235382bf15f93f7dd1096832ae74cc71edef4d7",
+    "file": "html5lib_tests1.html",
+    "input": "Test",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"Test\""
+  },
+  {
+    "test_id": "ad8515e9db0abd26469d0d2e46b42cebf606d4f3",
+    "file": "html5lib_tests1.html",
+    "input": "<p>One<p>Two",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       \"One\"\n|     <p>\n|       \"Two\""
+  },
+  {
+    "test_id": "2433aa5c088d78da9e7824e499f639177f56625d",
+    "file": "html5lib_tests1.html",
+    "input": "Line1<br>Line2<br>Line3<br>Line4",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"Line1\"\n|     <br>\n|     \"Line2\"\n|     <br>\n|     \"Line3\"\n|     <br>\n|     \"Line4\""
+  },
+  {
+    "test_id": "c99d322c3502e38e9d18ac6c0180fa5462ce612e",
+    "file": "html5lib_tests1.html",
+    "input": "<html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "d8473f7b5cec9d99526179f980ebf55a0beccbd3",
+    "file": "html5lib_tests1.html",
+    "input": "<head>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "ac7703fbb5c62cadb25024aed762c206c187a919",
+    "file": "html5lib_tests1.html",
+    "input": "<body>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "a00121213e2eb2c846a575f662e8c69389bfc44d",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "447f22e6a43ddbbc308afbc78b64b16452bc7bbb",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head></head>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "cdac424e0f2fb979f21a64f50793d529375c01b3",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head></head><body>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "63587d177231d2478a6ffd25f3c830fed7cc2efe",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head></head><body></body>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "a3e13da13681f9f16c65334099136f3b5c235e6d",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head><body></body></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "b7a06a5aa0c19d7914b853f5ed497743bb269e56",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head></body></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "3d28b753b97f460868ca65ed8fc153021a815b8c",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head><body></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "83cce5b1e1e49c92c618aabf1ed60926a8736456",
+    "file": "html5lib_tests1.html",
+    "input": "<html><body></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "b9e809bc4521004440bf558c7dc5d7dc1ae3dd40",
+    "file": "html5lib_tests1.html",
+    "input": "<body></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "60302916ab9a2128104dbf72629875ad19b5cb16",
+    "file": "html5lib_tests1.html",
+    "input": "<head></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "f4ad8e574fcac3bb08070eeb345855ea7081ea1d",
+    "file": "html5lib_tests1.html",
+    "input": "</head>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "d38fe13d87344a20bdf6e111988b5a09ed247913",
+    "file": "html5lib_tests1.html",
+    "input": "</body>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "e5f2e91cbff6a4bc56149b889f4f9396e455c5ad",
+    "file": "html5lib_tests1.html",
+    "input": "</html>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "18b58d1de184b6866963c902ff8451dd3522f540",
+    "file": "html5lib_tests1.html",
+    "input": "<b><table><td><i></table>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|               <i>"
+  },
+  {
+    "test_id": "88eb93691065e212a4323f55ec326585c7c44262",
+    "file": "html5lib_tests1.html",
+    "input": "<b><table><td></b><i></table>X",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|               <i>\n|       \"X\""
+  },
+  {
+    "test_id": "260db4c31fb80894beb825c4793e6142f178497d",
+    "file": "html5lib_tests1.html",
+    "input": "<h1>Hello<h2>World",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <h1>\n|       \"Hello\"\n|     <h2>\n|       \"World\""
+  },
+  {
+    "test_id": "59d9c5e2941952f7af99ed3e21d66e4fdb1df07c",
+    "file": "html5lib_tests1.html",
+    "input": "<a><p>X<a>Y</a>Z</p></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|     <p>\n|       <a>\n|         \"X\"\n|       <a>\n|         \"Y\"\n|       \"Z\""
+  },
+  {
+    "test_id": "1e788677da8eb26f560409392ff674744c6f8b64",
+    "file": "html5lib_tests1.html",
+    "input": "<b><button>foo</b>bar",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|     <button>\n|       <b>\n|         \"foo\"\n|       \"bar\""
+  },
+  {
+    "test_id": "240ee32b47e30bcf34483c7a7530cfeb99a6d1f1",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html><span><button>foo</span>bar",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <span>\n|       <button>\n|         \"foobar\""
+  },
+  {
+    "test_id": "e85dc012a49630206e6163cd1e0fd6c706865106",
+    "file": "html5lib_tests1.html",
+    "input": "<p><b><div><marquee></p></b></div>X",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <b>\n|     <div>\n|       <b>\n|         <marquee>\n|           <p>\n|           \"X\""
+  },
+  {
+    "test_id": "c440d1f0223d6b3ce85955d8246fdd47ecdfb034",
+    "file": "html5lib_tests1.html",
+    "input": "<script><div></script></div><title><p></title><p><p>",
+    "expected": "#document\n| <html>\n|   <head>\n|     <script>\n|       \"<div>\"\n|     <title>\n|       \"<p>\"\n|   <body>\n|     <p>\n|     <p>"
+  },
+  {
+    "test_id": "9a2ce05a0b342b377ef054385131ad4d1b5ae84b",
+    "file": "html5lib_tests1.html",
+    "input": "<!--><div>--<!-->",
+    "expected": "#document\n| <!--  -->\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"--\"\n|       <!--  -->"
+  },
+  {
+    "test_id": "daa9d8440e2bc4d560536b52123b01e52aa81692",
+    "file": "html5lib_tests1.html",
+    "input": "<p><hr></p>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|     <hr>\n|     <p>"
+  },
+  {
+    "test_id": "0b27e026dd03a356bbd78690fff7fb40cd63b606",
+    "file": "html5lib_tests1.html",
+    "input": "<select><b><option><select><option></b></select>X",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <select>\n|       <b>\n|         <option>\n|     <b>\n|       <option>\n|     \"X\""
+  },
+  {
+    "test_id": "a2d3321d1ea23b55d9117e5c2014e4ab0fa5e224",
+    "file": "html5lib_tests1.html",
+    "input": "<a><table><td><a><table></table><a></tr><a></table><b>X</b>C<a>Y",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       <a>\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|               <a>\n|                 <table>\n|               <a>\n|     <a>\n|       <b>\n|         \"X\"\n|       \"C\"\n|     <a>\n|       \"Y\""
+  },
+  {
+    "test_id": "cc9c12dd44b43fa78ad340a91d20432e3f119c19",
+    "file": "html5lib_tests1.html",
+    "input": "<a X>0<b>1<a Y>2",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       x=\"\"\n|       \"0\"\n|       <b>\n|         \"1\"\n|     <b>\n|       <a>\n|         y=\"\"\n|         \"2\""
+  },
+  {
+    "test_id": "3d0cb9632b521a3fb334f567b3cdec985e85abd7",
+    "file": "html5lib_tests1.html",
+    "input": "<!-----><font><div>hello<table>excite!<b>me!<th><i>please!</tr><!--X-->",
+    "expected": "#document\n| <!-- - -->\n| <html>\n|   <head>\n|   <body>\n|     <font>\n|       <div>\n|         \"helloexcite!\"\n|         <b>\n|           \"me!\"\n|         <table>\n|           <tbody>\n|             <tr>\n|               <th>\n|                 <i>\n|                   \"please!\"\n|             <!-- X -->"
+  },
+  {
+    "test_id": "f158c8b44e4cdf872cc5bb4d148fad3ff27ea03f",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html><li>hello<li>world<ul>how<li>do</ul>you</body><!--do-->",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <li>\n|       \"hello\"\n|     <li>\n|       \"world\"\n|       <ul>\n|         \"how\"\n|         <li>\n|           \"do\"\n|       \"you\"\n|   <!-- do -->"
+  },
+  {
+    "test_id": "1dfb5ce6c1a10d870a35b24314976d887c700c42",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html>A<option>B<optgroup>C<select>D</option>E",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     \"A\"\n|     <option>\n|       \"B\"\n|     <optgroup>\n|       \"C\"\n|       <select>\n|         \"DE\""
+  },
+  {
+    "test_id": "1fc4fad5eead893c51be2b6aa1d705cd58ebcfe9",
+    "file": "html5lib_tests1.html",
+    "input": "<",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"<\""
+  },
+  {
+    "test_id": "f85417e345053cf627abf572911c0f7ffefe16c8",
+    "file": "html5lib_tests1.html",
+    "input": "<#",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"<#\""
+  },
+  {
+    "test_id": "277ea1a5aade6c61a8386ff73086a91160caf5a2",
+    "file": "html5lib_tests1.html",
+    "input": "</",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     \"</\""
+  },
+  {
+    "test_id": "32714c0ca1bae661ba9342ef275b2e6e5e025c34",
+    "file": "html5lib_tests1.html",
+    "input": "</#",
+    "expected": "#document\n| <!-- # -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "619aa593419925064f51b0602000a2b9d13a8bc3",
+    "file": "html5lib_tests1.html",
+    "input": "<?",
+    "expected": "#document\n| <!-- ? -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "40fd9f6e4a08a69596f0dc0846d44ebd39e4913d",
+    "file": "html5lib_tests1.html",
+    "input": "<?#",
+    "expected": "#document\n| <!-- ?# -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "82120b3520ad73b9e11a413631e6f015ed0cf265",
+    "file": "html5lib_tests1.html",
+    "input": "<!",
+    "expected": "#document\n| <!--  -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "a9f265e67b901f8d41ece9bb631696795327ed50",
+    "file": "html5lib_tests1.html",
+    "input": "<!#",
+    "expected": "#document\n| <!-- # -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "6325e1d53c83784c1e5092861c8b0138fb4871ad",
+    "file": "html5lib_tests1.html",
+    "input": "<?COMMENT?>",
+    "expected": "#document\n| <!-- ?COMMENT? -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "451c02faba02d2768e3497fdcc8ffb0dec41640d",
+    "file": "html5lib_tests1.html",
+    "input": "<!COMMENT>",
+    "expected": "#document\n| <!-- COMMENT -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "fefda3429288aa79b4c9e8e9e3ba97897d0783c8",
+    "file": "html5lib_tests1.html",
+    "input": "</ COMMENT >",
+    "expected": "#document\n| <!--  COMMENT  -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "6328f70bb445e1dd692c36d6c92e2a2a7ed6ee0f",
+    "file": "html5lib_tests1.html",
+    "input": "<?COM--MENT?>",
+    "expected": "#document\n| <!-- ?COM--MENT? -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "287320444eec6e3b4481d33738f971b696a2d6f0",
+    "file": "html5lib_tests1.html",
+    "input": "<!COM--MENT>",
+    "expected": "#document\n| <!-- COM--MENT -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "65ea3a80efc973b5cd92c1db5a4520365bbb5478",
+    "file": "html5lib_tests1.html",
+    "input": "</ COM--MENT >",
+    "expected": "#document\n| <!--  COM--MENT  -->\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "d60de29dd2f3e8a080882986d6689d74fb981619",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html><style> EOF",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|     <style>\n|       \" EOF\"\n|   <body>"
+  },
+  {
+    "test_id": "343048017f1928db8ba4c0b45a4f1dd3dadf3063",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html><script> <!-- </script> --> </script> EOF",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|     <script>\n|       \" <!-- \"\n|     \" \"\n|   <body>\n|     \"-->  EOF\""
+  },
+  {
+    "test_id": "cf14f5563275bac3fe2c77f8973e882e51965b5b",
+    "file": "html5lib_tests1.html",
+    "input": "<b><p></b>TEST",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|     <p>\n|       <b>\n|       \"TEST\""
+  },
+  {
+    "test_id": "2d8f9308951237fd0dcba3ff7709369cfd7563fd",
+    "file": "html5lib_tests1.html",
+    "input": "<p id=a><b><p id=b></b>TEST",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       id=\"a\"\n|       <b>\n|     <p>\n|       id=\"b\"\n|       \"TEST\""
+  },
+  {
+    "test_id": "87421a25ca75e2d6a165eb981921235f4de9210a",
+    "file": "html5lib_tests1.html",
+    "input": "<b id=a><p><b id=b></p></b>TEST",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       id=\"a\"\n|       <p>\n|         <b>\n|           id=\"b\"\n|       \"TEST\""
+  },
+  {
+    "test_id": "30d87693aead287d5a63310d2f819623455f4133",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html><title>U-test</title><body><div><p>Test<u></p></div></body>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|     <title>\n|       \"U-test\"\n|   <body>\n|     <div>\n|       <p>\n|         \"Test\"\n|         <u>"
+  },
+  {
+    "test_id": "20d7a996a47fab66aead30ed7012d50b990dc65d",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html><font><table></font></table></font>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <font>\n|       <table>"
+  },
+  {
+    "test_id": "258c0966cc576ec8a563e41e783fa34f6b5c8baf",
+    "file": "html5lib_tests1.html",
+    "input": "<font><p>hello<b>cruel</font>world",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <font>\n|     <p>\n|       <font>\n|         \"hello\"\n|         <b>\n|           \"cruel\"\n|       <b>\n|         \"world\""
+  },
+  {
+    "test_id": "f7ee5b858e93b22e1594d6d8cd0bc0def665ac02",
+    "file": "html5lib_tests1.html",
+    "input": "<b>Test</i>Test",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       \"TestTest\""
+  },
+  {
+    "test_id": "6d9127103f8733d168e69cf04b576a7b0bea3d5c",
+    "file": "html5lib_tests1.html",
+    "input": "<b>A<cite>B<div>C",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       \"A\"\n|       <cite>\n|         \"B\"\n|         <div>\n|           \"C\""
+  },
+  {
+    "test_id": "03db7399a2d674955930611fdbcaad9f4064243a",
+    "file": "html5lib_tests1.html",
+    "input": "<b>A<cite>B<div>C</cite>D",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       \"A\"\n|       <cite>\n|         \"B\"\n|         <div>\n|           \"CD\""
+  },
+  {
+    "test_id": "a0a1dcb330314ce12af02d136319a1be6a1ffa53",
+    "file": "html5lib_tests1.html",
+    "input": "<b>A<cite>B<div>C</b>D",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       \"A\"\n|       <cite>\n|         \"B\"\n|     <div>\n|       <b>\n|         \"C\"\n|       \"D\""
+  },
+  {
+    "test_id": "09b3483ef5f7a83aa9e3224d0335b6f9aa78ac73",
+    "file": "html5lib_tests1.html",
+    "input": "",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>"
+  },
+  {
+    "test_id": "34d56f09a1a9c0f51a8abc41be2f157faf0e8d15",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>"
+  },
+  {
+    "test_id": "dffa0785e6c80af52950a64d8612633de58bbb29",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc\""
+  },
+  {
+    "test_id": "076e6ac3cb344d60f6ce9a5188cf103ff053830c",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>"
+  },
+  {
+    "test_id": "5f14cb9c8502f09105ad83e27842625c70f3857d",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def\""
+  },
+  {
+    "test_id": "25172f395b855b6eeb61ff95a8162a34ca92195e",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>"
+  },
+  {
+    "test_id": "053beabf01d70d03a0ca61b809d5d986ddf2ea3d",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi\""
+  },
+  {
+    "test_id": "bd385dbe93b192c2182e09e75d3664b96845ea0a",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|           <p>"
+  },
+  {
+    "test_id": "2ddaacb4f4e566ae79af5259f57f5b4dd166c19f",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P> jkl",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|           <p>\n|             \" jkl\""
+  },
+  {
+    "test_id": "d430f2fc3bd20e658ed00b55e6c27f14204a7b6f",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P> jkl </B>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|       <i>\n|         <p>\n|           <b>\n|             \" jkl \""
+  },
+  {
+    "test_id": "bbdb0a08b66b0789068ddac96a05ac39e104553d",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P> jkl </B> mno",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|       <i>\n|         <p>\n|           <b>\n|             \" jkl \"\n|           \" mno\""
+  },
+  {
+    "test_id": "37ed2a3a96026e7a78f6675154d11746aa9484e0",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P> jkl </B> mno </I>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|       <i>\n|       <p>\n|         <i>\n|           <b>\n|             \" jkl \"\n|           \" mno \""
+  },
+  {
+    "test_id": "4177a74406cf1c048d2d6d6bcf774445f55ba517",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P> jkl </B> mno </I> pqr",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|       <i>\n|       <p>\n|         <i>\n|           <b>\n|             \" jkl \"\n|           \" mno \"\n|         \" pqr\""
+  },
+  {
+    "test_id": "fc188652d9f486174b21d1919f35ea8c13636ca1",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P> jkl </B> mno </I> pqr </P>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|       <i>\n|       <p>\n|         <i>\n|           <b>\n|             \" jkl \"\n|           \" mno \"\n|         \" pqr \""
+  },
+  {
+    "test_id": "c10f83cc69763e42964e08ddb976a1bd27b51e2f",
+    "file": "html5lib_tests1.html",
+    "input": "<DIV> abc <B> def <I> ghi <P> jkl </B> mno </I> pqr </P> stu",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \" abc \"\n|       <b>\n|         \" def \"\n|         <i>\n|           \" ghi \"\n|       <i>\n|       <p>\n|         <i>\n|           <b>\n|             \" jkl \"\n|           \" mno \"\n|         \" pqr \"\n|       \" stu\""
+  },
+  {
+    "test_id": "64452c62ced87bd3cd8fd88df33a33d5531818d6",
+    "file": "html5lib_tests1.html",
+    "input": "<test attribute---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------->",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <test>\n|       attribute----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------=\"\""
+  },
+  {
+    "test_id": "96dc04673021ad113df40397113df972f090c1f6",
+    "file": "html5lib_tests1.html",
+    "input": "<a href=\"blah\">aba<table><a href=\"foo\">br<tr><td></td></tr>x</table>aoe",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       href=\"blah\"\n|       \"aba\"\n|       <a>\n|         href=\"foo\"\n|         \"br\"\n|       <a>\n|         href=\"foo\"\n|         \"x\"\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|     <a>\n|       href=\"foo\"\n|       \"aoe\""
+  },
+  {
+    "test_id": "26b7eb0b18d9cd0a69d19c7f6ee9f12c2d0b2783",
+    "file": "html5lib_tests1.html",
+    "input": "<a href=\"blah\">aba<table><tr><td><a href=\"foo\">br</td></tr>x</table>aoe",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       href=\"blah\"\n|       \"abax\"\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|               <a>\n|                 href=\"foo\"\n|                 \"br\"\n|       \"aoe\""
+  },
+  {
+    "test_id": "f8d500cd7089942814fa0751c75bd37e63790685",
+    "file": "html5lib_tests1.html",
+    "input": "<table><a href=\"blah\">aba<tr><td><a href=\"foo\">br</td></tr>x</table>aoe",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       href=\"blah\"\n|       \"aba\"\n|     <a>\n|       href=\"blah\"\n|       \"x\"\n|     <table>\n|       <tbody>\n|         <tr>\n|           <td>\n|             <a>\n|               href=\"foo\"\n|               \"br\"\n|     <a>\n|       href=\"blah\"\n|       \"aoe\""
+  },
+  {
+    "test_id": "3b386c205ec767f842e63491d14ec90192f562dd",
+    "file": "html5lib_tests1.html",
+    "input": "<a href=a>aa<marquee>aa<a href=b>bb</marquee>aa",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       href=\"a\"\n|       \"aa\"\n|       <marquee>\n|         \"aa\"\n|         <a>\n|           href=\"b\"\n|           \"bb\"\n|       \"aa\""
+  },
+  {
+    "test_id": "ca8ecc666a82d1f2f48a095d42d9f95700e015bd",
+    "file": "html5lib_tests1.html",
+    "input": "<wbr><strike><code></strike><code><strike></code>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <wbr>\n|     <strike>\n|       <code>\n|     <code>\n|       <code>\n|         <strike>"
+  },
+  {
+    "test_id": "6727ab7c4240bf05f0a5d9ca4b384ca8d61e2d4f",
+    "file": "html5lib_tests1.html",
+    "input": "<!DOCTYPE html><spacer>foo",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <spacer>\n|       \"foo\""
+  },
+  {
+    "test_id": "3ad08edf5b9690be261dc375da3b1d9ec82e499a",
+    "file": "html5lib_tests1.html",
+    "input": "<title><meta></title><link><title><meta></title>",
+    "expected": "#document\n| <html>\n|   <head>\n|     <title>\n|       \"<meta>\"\n|     <link>\n|     <title>\n|       \"<meta>\"\n|   <body>"
+  },
+  {
+    "test_id": "06ed0f32cfd261010c9d810ff8317ef96b47c04c",
+    "file": "html5lib_tests1.html",
+    "input": "<style><!--</style><meta><script>--><link></script>",
+    "expected": "#document\n| <html>\n|   <head>\n|     <style>\n|       \"<!--\"\n|     <meta>\n|     <script>\n|       \"--><link>\"\n|   <body>"
+  },
+  {
+    "test_id": "44ea84c7e4e401c9d3f96d7cc39709e4be81edc8",
+    "file": "html5lib_tests1.html",
+    "input": "<head><meta></head><link>",
+    "expected": "#document\n| <html>\n|   <head>\n|     <meta>\n|     <link>\n|   <body>"
+  },
+  {
+    "test_id": "67af290f1b04c4b1a67131edba1ee832c690432c",
+    "file": "html5lib_tests1.html",
+    "input": "<table><tr><tr><td><td><span><th><span>X</table>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <tbody>\n|         <tr>\n|         <tr>\n|           <td>\n|           <td>\n|             <span>\n|           <th>\n|             <span>\n|               \"X\""
+  },
+  {
+    "test_id": "2f1899f72fafcb062418e8ce892188040de4708c",
+    "file": "html5lib_tests1.html",
+    "input": "<body><body><base><link><meta><title><p></title><body><p></body>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <base>\n|     <link>\n|     <meta>\n|     <title>\n|       \"<p>\"\n|     <p>"
+  },
+  {
+    "test_id": "ed2a4958c832ef6cec993cb52afc808132714d0a",
+    "file": "html5lib_tests1.html",
+    "input": "<textarea><p></textarea>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <textarea>\n|       \"<p>\""
+  },
+  {
+    "test_id": "c7943ccd9d880664b0894a2035e1f2a837f37c7a",
+    "file": "html5lib_tests1.html",
+    "input": "<p><image></p>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <img>"
+  },
+  {
+    "test_id": "bbc836b1f494223d4eb8982930d693489d135740",
+    "file": "html5lib_tests1.html",
+    "input": "<a><table><a></table><p><a><div><a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       <a>\n|       <table>\n|     <p>\n|       <a>\n|     <div>\n|       <a>"
+  },
+  {
+    "test_id": "617fdf08035740698b2f0f4c3874dbb469fd1848",
+    "file": "html5lib_tests1.html",
+    "input": "<head></p><meta><p>",
+    "expected": "#document\n| <html>\n|   <head>\n|     <meta>\n|   <body>\n|     <p>"
+  },
+  {
+    "test_id": "e901fe2093e51eccb4d9d23103214bc527af265c",
+    "file": "html5lib_tests1.html",
+    "input": "<head></html><meta><p>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <meta>\n|     <p>"
+  },
+  {
+    "test_id": "63970995ab6b8aee63de9e7a7667178d4fc86820",
+    "file": "html5lib_tests1.html",
+    "input": "<b><table><td></b><i></table>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|               <i>"
+  },
+  {
+    "test_id": "d7607fdd41625431bcbee319a86db1b73fc49edd",
+    "file": "html5lib_tests1.html",
+    "input": "<h1><h2>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <h1>\n|     <h2>"
+  },
+  {
+    "test_id": "ce31a583a3921e306aaa558b1ea798b34d2bb0dc",
+    "file": "html5lib_tests1.html",
+    "input": "<a><p><a></a></p></a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|     <p>\n|       <a>\n|       <a>"
+  },
+  {
+    "test_id": "04ba864e740f7ef104570ddc6af834e6336031ed",
+    "file": "html5lib_tests1.html",
+    "input": "<b><button></b></button></b>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <b>\n|     <button>\n|       <b>"
+  },
+  {
+    "test_id": "ea6ab4a56efd19cc04b5656583ea6d5c9cfd2752",
+    "file": "html5lib_tests1.html",
+    "input": "<p><b><div><marquee></p></b></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <b>\n|     <div>\n|       <b>\n|         <marquee>\n|           <p>"
+  },
+  {
+    "test_id": "1bb5dfba014f63c0a18b12097ed9a28d64552e07",
+    "file": "html5lib_tests1.html",
+    "input": "<script></script></div><title></title><p><p>",
+    "expected": "#document\n| <html>\n|   <head>\n|     <script>\n|     <title>\n|   <body>\n|     <p>\n|     <p>"
+  },
+  {
+    "test_id": "a2dd4d5a28a61ec99ce9dae35e9d4ffe92812e2f",
+    "file": "html5lib_tests1.html",
+    "input": "<select><b><option><select><option></b></select>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <select>\n|       <b>\n|         <option>\n|     <b>\n|       <option>"
+  },
+  {
+    "test_id": "e26f001557952154c308e3e6f6d1789cf711ef27",
+    "file": "html5lib_tests1.html",
+    "input": "<html><head><title></title><body></body></html>",
+    "expected": "#document\n| <html>\n|   <head>\n|     <title>\n|   <body>"
+  },
+  {
+    "test_id": "34c1f9c212198edd7baf56e658db21d98c59f74c",
+    "file": "html5lib_tests1.html",
+    "input": "<a><table><td><a><table></table><a></tr><a></table><a>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <a>\n|       <a>\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|               <a>\n|                 <table>\n|               <a>\n|     <a>"
+  },
+  {
+    "test_id": "e1c47adbde197e3eaa9504f3582fd9deac1cbbff",
+    "file": "html5lib_tests1.html",
+    "input": "<ul><li></li><div><li></div><li><li><div><li><address><li><b><em></b><li></ul>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ul>\n|       <li>\n|       <div>\n|         <li>\n|       <li>\n|       <li>\n|         <div>\n|       <li>\n|         <address>\n|       <li>\n|         <b>\n|           <em>\n|       <li>"
+  },
+  {
+    "test_id": "0f5aba4c1ed57ac3c6a2774f3bf43ef598bd9915",
+    "file": "html5lib_tests1.html",
+    "input": "<ul><li><ul></li><li>a</li></ul></li></ul>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <ul>\n|       <li>\n|         <ul>\n|           <li>\n|             \"a\""
+  },
+  {
+    "test_id": "d11ff75681c4df2ff24ad731ff244afc3e1c87af",
+    "file": "html5lib_tests1.html",
+    "input": "<frameset><frame><frameset><frame></frameset><noframes></noframes></frameset>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <frameset>\n|     <frame>\n|     <frameset>\n|       <frame>\n|     <noframes>"
+  },
+  {
+    "test_id": "fa392f5dd6f2f6a73635c06208c8989caa874588",
+    "file": "html5lib_tests1.html",
+    "input": "<h1><table><td><h3></table><h3></h1>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <h1>\n|       <table>\n|         <tbody>\n|           <tr>\n|             <td>\n|               <h3>\n|     <h3>"
+  },
+  {
+    "test_id": "5815b2afbb0a7f4756af7914407f71f469658f38",
+    "file": "html5lib_tests1.html",
+    "input": "<table><colgroup><col><colgroup><col><col><col><colgroup><col><col><thead><tr><td></table>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <colgroup>\n|         <col>\n|       <colgroup>\n|         <col>\n|         <col>\n|         <col>\n|       <colgroup>\n|         <col>\n|         <col>\n|       <thead>\n|         <tr>\n|           <td>"
+  },
+  {
+    "test_id": "a100bb6a2a80bec65c418d672144b6f647fbd46b",
+    "file": "html5lib_tests1.html",
+    "input": "<table><col><tbody><col><tr><col><td><col></table><col>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <colgroup>\n|         <col>\n|       <tbody>\n|       <colgroup>\n|         <col>\n|       <tbody>\n|         <tr>\n|       <colgroup>\n|         <col>\n|       <tbody>\n|         <tr>\n|           <td>\n|       <colgroup>\n|         <col>"
+  },
+  {
+    "test_id": "f66797fd63c8b0254b4ef28e9c38c3d4e512c93c",
+    "file": "html5lib_tests1.html",
+    "input": "<table><colgroup><tbody><colgroup><tr><colgroup><td><colgroup></table><colgroup>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <colgroup>\n|       <tbody>\n|       <colgroup>\n|       <tbody>\n|         <tr>\n|       <colgroup>\n|       <tbody>\n|         <tr>\n|           <td>\n|       <colgroup>"
+  },
+  {
+    "test_id": "f10a41faca4cf01e39ed92c4eefff0631d1195dc",
+    "file": "html5lib_tests1.html",
+    "input": "</strong></b></em></i></u></strike></s></blink></tt></pre></big></small></font></select></h1></h2></h3></h4></h5></h6></body></br></a></img></title></span></style></script></table></th></td></tr></frame></area></link></param></hr></input></col></base></meta></basefont></bgsound></embed></spacer></p></dd></dt></caption></colgroup></tbody></tfoot></thead></address></blockquote></center></dir></div></dl></fieldset></listing></menu></ol></ul></li></nobr></wbr></form></button></marquee></object></html></frameset></head></iframe></image></isindex></noembed></noframes></noscript></optgroup></option></plaintext></textarea>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <br>\n|     <p>"
+  },
+  {
+    "test_id": "5d14e20ae19e0b3e14dcb997e3ccad5f0e1956e1",
+    "file": "html5lib_tests1.html",
+    "input": "<table><tr></strong></b></em></i></u></strike></s></blink></tt></pre></big></small></font></select></h1></h2></h3></h4></h5></h6></body></br></a></img></title></span></style></script></table></th></td></tr></frame></area></link></param></hr></input></col></base></meta></basefont></bgsound></embed></spacer></p></dd></dt></caption></colgroup></tbody></tfoot></thead></address></blockquote></center></dir></div></dl></fieldset></listing></menu></ol></ul></li></nobr></wbr></form></button></marquee></object></html></frameset></head></iframe></image></isindex></noembed></noframes></noscript></optgroup></option></plaintext></textarea>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <br>\n|     <table>\n|       <tbody>\n|         <tr>\n|     <p>"
+  },
+  {
+    "test_id": "1949f8c612e660985fb5eb28235b6f9386ed4ffc",
+    "file": "html5lib_tests1.html",
+    "input": "<frameset>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <frameset>"
+  }
+]
