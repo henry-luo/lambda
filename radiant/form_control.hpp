@@ -25,8 +25,9 @@ enum FormControlType {
 // These match Chrome/Firefox UA defaults
 namespace FormDefaults {
     // Text input: ~20 characters wide
-    constexpr float TEXT_WIDTH = 173.0f;
-    constexpr float TEXT_HEIGHT = 21.0f;
+    // Browser shows ~153px for default text input (Chrome/Safari)
+    constexpr float TEXT_WIDTH = 149.0f;  // 153 - 2*border(1) - 2*padding(2) = 149
+    constexpr float TEXT_HEIGHT = 19.0f;  // 21 - 2*border(1) = 19
     constexpr float TEXT_PADDING_H = 2.0f;
     constexpr float TEXT_PADDING_V = 1.0f;
     constexpr int   TEXT_SIZE_CHARS = 20;  // default size attribute
@@ -41,8 +42,9 @@ namespace FormDefaults {
     constexpr float BUTTON_MIN_WIDTH = 52.0f;  // minimum button width
 
     // Select dropdown
-    constexpr float SELECT_WIDTH = 173.0f;
-    constexpr float SELECT_HEIGHT = 21.0f;
+    // Browser shows ~73px for select with short options
+    constexpr float SELECT_WIDTH = 70.0f;  // 73 - 2*border(1) - arrow = ~70 content
+    constexpr float SELECT_HEIGHT = 17.0f;  // 19 - 2*border(1) = 17
     constexpr float SELECT_ARROW_WIDTH = 16.0f;
 
     // Textarea: default cols/rows

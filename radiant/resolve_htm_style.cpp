@@ -691,16 +691,28 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->padding.left = block->bound->padding.right = 2 * lycon->ui_context->pixel_ratio;
         block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
         break;
-    case HTM_TAG_BUTTON:
-        // button: centered text, some padding
+    case HTM_TAG_BUTTON: {
+        // button: centered text, some padding, inline-block display with flow inner
+        float pr = lycon->ui_context->pixel_ratio;
+        block->item_prop_type = DomElement::ITEM_PROP_FORM;
+        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+        new (block->form) FormControlProp();
+        block->form->control_type = FORM_CONTROL_BUTTON;
+        if (block->get_attribute("disabled")) block->form->disabled = 1;
+
+        block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        block->display.inner = CSS_VALUE_FLOW;  // button has flow children
+        // Button sizing is determined by content - will be shrink-to-fit
+
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->padding.top = block->bound->padding.bottom = 1 * lycon->ui_context->pixel_ratio;
-        block->bound->padding.left = block->bound->padding.right = 6 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.top = block->bound->padding.bottom = 1 * pr;
+        block->bound->padding.left = block->bound->padding.right = 6 * pr;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
             block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
         break;
+    }
     case HTM_TAG_INPUT: {
         // Allocate form control prop
         float pr = lycon->ui_context->pixel_ratio;
@@ -741,6 +753,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             block->form->intrinsic_width = FormDefaults::CHECK_SIZE * pr;
             block->form->intrinsic_height = FormDefaults::CHECK_SIZE * pr;
+            // Set given_width/height so layout algorithm uses intrinsic size
+            lycon->block.given_width = block->form->intrinsic_width;
+            lycon->block.given_height = block->form->intrinsic_height;
             break;
         case FORM_CONTROL_BUTTON:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
@@ -750,6 +765,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             block->form->intrinsic_width = FormDefaults::RANGE_WIDTH * pr;
             block->form->intrinsic_height = FormDefaults::RANGE_HEIGHT * pr;
+            // Set given_width/height so layout algorithm uses intrinsic size
+            lycon->block.given_width = block->form->intrinsic_width;
+            lycon->block.given_height = block->form->intrinsic_height;
             // Parse range attributes
             const char* min_attr = block->get_attribute("min");
             const char* max_attr = block->get_attribute("max");
@@ -768,6 +786,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             block->form->intrinsic_width = FormDefaults::TEXT_WIDTH * pr;
             block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * pr;
+            // Set given_width/height so layout algorithm uses intrinsic size
+            lycon->block.given_width = block->form->intrinsic_width;
+            lycon->block.given_height = block->form->intrinsic_height;
             // Default border for text inputs
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
@@ -801,6 +822,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->form->intrinsic_width = FormDefaults::SELECT_WIDTH * pr;
         block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT * pr;
+        // Set given_width/height so layout algorithm uses intrinsic size
+        lycon->block.given_width = block->form->intrinsic_width;
+        lycon->block.given_height = block->form->intrinsic_height;
         // Default border
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
@@ -827,6 +851,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Intrinsic size based on cols/rows - computed in layout with font metrics
         block->form->intrinsic_width = FormDefaults::TEXT_WIDTH * pr;  // placeholder
         block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * 2 * pr;  // 2 rows default
+        // Set given_width/height so layout algorithm uses intrinsic size
+        lycon->block.given_width = block->form->intrinsic_width;
+        lycon->block.given_height = block->form->intrinsic_height;
         // Default border and padding
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
