@@ -1,0 +1,386 @@
+[
+  {
+    "test_id": "cbb5f28bedf4361156ef3c9c37e314c6479be137",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><button>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|       <button>"
+  },
+  {
+    "test_id": "e108a4952601b4664098344189c875934ea2f7ab",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><address>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <address>"
+  },
+  {
+    "test_id": "1ba644a7934a55e4303effe43cae1517ee723e13",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><article>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <article>"
+  },
+  {
+    "test_id": "8999351d1342a9bcf670dc27eb52aa786d916916",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><aside>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <aside>"
+  },
+  {
+    "test_id": "8ecd0d9e2580f78ff920821bd334bd8d04d165e5",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><blockquote>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <blockquote>"
+  },
+  {
+    "test_id": "e6bf9f94617ae9cb7b663b2c9123a37730600e7f",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><center>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <center>"
+  },
+  {
+    "test_id": "c5c9728bb5634f47780efefa09f79419db4257c0",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><details>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <details>"
+  },
+  {
+    "test_id": "5bb84e30031c925aed6eabca8c477d547d522dbb",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><dialog>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <dialog>"
+  },
+  {
+    "test_id": "f1b6f41fa8856b408c3c398b420cbdc40cda555e",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><dir>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <dir>"
+  },
+  {
+    "test_id": "d5ea955e51df6ee9c7801d28dfcd85402b8fa710",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><div>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <div>"
+  },
+  {
+    "test_id": "27f2f34d4101ac4877edf0be8c4065e240aef15c",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><dl>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <dl>"
+  },
+  {
+    "test_id": "dcb10e242981a00dc3f6f874ec33318d6f532fff",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><fieldset>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <fieldset>"
+  },
+  {
+    "test_id": "49781179c56e3e0d4891dfff219a0beda3b86d24",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><figcaption>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <figcaption>"
+  },
+  {
+    "test_id": "86ac23e2828bb147966ee06690f6051345ce312c",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><figure>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <figure>"
+  },
+  {
+    "test_id": "b4eda259a29352b6f8f9cd989e1a0e881793814e",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><footer>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <footer>"
+  },
+  {
+    "test_id": "af0e7b907c6791a73f00b4421fa7fe7df6fe07ee",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><header>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <header>"
+  },
+  {
+    "test_id": "29c71813f1cd5f1ee092548211c8ffaf2d04b4a9",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><hgroup>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <hgroup>"
+  },
+  {
+    "test_id": "92547b083c29d3ea0ba5304953d254c357bcf11a",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><main>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <main>"
+  },
+  {
+    "test_id": "ff10749b8b1aca1fba5d07ba86f49612be43caf9",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><menu>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <menu>"
+  },
+  {
+    "test_id": "67bcf2e6d67c89c4d5d9c605faa6e5b03e77693f",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><nav>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <nav>"
+  },
+  {
+    "test_id": "1e284d72f2de23e31280a0df936043340597d3d0",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><ol>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <ol>"
+  },
+  {
+    "test_id": "323a6d9f8d2f74e7e5b88599a87dc5673fb7a0b4",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><p>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <p>"
+  },
+  {
+    "test_id": "2dd72ef48808b29f998fdd3df6ce7ce18b8753e4",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><search>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <search>"
+  },
+  {
+    "test_id": "c9e061e2d34063857d7332c66ff0d26beb2aced7",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><section>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <section>"
+  },
+  {
+    "test_id": "bae8a941fceb91845187cb545c8e02b03af5570d",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><summary>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <summary>"
+  },
+  {
+    "test_id": "bb36fb89d118b55c66f17b24ffff0ca09ccc939b",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><ul>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <ul>"
+  },
+  {
+    "test_id": "3fed75e1a7f46a6e2a74a078bfd955e7de05de4f",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><h1>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <h1>"
+  },
+  {
+    "test_id": "8cb9d8f92ba130618646d6fd1f307ca73f4e4add",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><h6>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <h6>"
+  },
+  {
+    "test_id": "2b9e6cb75876b4a33b77ae4b1bd3ef5e73c4a40e",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><listing>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <listing>"
+  },
+  {
+    "test_id": "f95c6bf3f935fad9fc354f4cf6e0161d6ebfb08a",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><pre>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <pre>"
+  },
+  {
+    "test_id": "0b07b135bf8399742cc9e6f3d14b2ea32e3354d3",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><form>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <form>"
+  },
+  {
+    "test_id": "076d3588e85ce9566d9575d1564e72e8480fadc8",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><li>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <li>"
+  },
+  {
+    "test_id": "dfad8fc515d74c19bad1ab72e7a03d59a11c7778",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><dd>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <dd>"
+  },
+  {
+    "test_id": "7ff774f225899091d6d64e5512ada13ce32dd72a",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><dt>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <dt>"
+  },
+  {
+    "test_id": "2fd8cab5e3cc4635be76e2d430ad6fe6e79b8167",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><plaintext>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <plaintext>"
+  },
+  {
+    "test_id": "c7399a2e531694b47b436bd153823f60bba9071e",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><table>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <table>"
+  },
+  {
+    "test_id": "bc4092e0e1aaa4b97464005963345b4b38e1f2a1",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><hr>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <hr>"
+  },
+  {
+    "test_id": "d85e49fc5be07a699f3930464996d7ddb6a8e8bd",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button><xmp>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <xmp>"
+  },
+  {
+    "test_id": "09cf43bae3a4d875da56c67a46cf79102b20b456",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><button></p>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <button>\n|         <p>"
+  },
+  {
+    "test_id": "f10ab9901d14c36846c9e6848abce19877f83094",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><button><p></button>x",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <button>\n|       <p>\n|     \"x\""
+  },
+  {
+    "test_id": "aa2a707a627408758a0ee845896ef088d6136013",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><address><button></address>a",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <address>\n|       <button>\n|     \"a\""
+  },
+  {
+    "test_id": "bb0737ce6cdbbcc055771e2400afda545d58778f",
+    "file": "html5lib_tests20.html",
+    "input": "<p><table></p>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <p>\n|       <table>"
+  },
+  {
+    "test_id": "454bb6d0471536f7b91793ddbc786761b5733902",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><svg>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <svg svg>"
+  },
+  {
+    "test_id": "3c8ff013bf2e80392671760c8d444730b1923c0a",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><figcaption>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|     <figcaption>"
+  },
+  {
+    "test_id": "9a4f0cd0bdc672beb1c1c821599a11fc8a3d139d",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><p><summary>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|     <summary>"
+  },
+  {
+    "test_id": "f5ca3a789b7451da3e6030443aee6fae734fc7a1",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><form><table><form>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <form>\n|       <table>"
+  },
+  {
+    "test_id": "ca8826661175c3a1ff7c6f1ebbfe646b238deb75",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><table><form><form>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <form>"
+  },
+  {
+    "test_id": "9e30ae7bbd1193deb0d3599c071960d395ca01f7",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><table><form></table><form>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <table>\n|       <form>"
+  },
+  {
+    "test_id": "4417ddedee8e753fd6e911192458168d3b77d1e8",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><svg><foreignObject><p>",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <svg svg>\n|       <svg foreignObject>\n|         <p>"
+  },
+  {
+    "test_id": "2de333e449ca13c462832e799e13795e2cf6e3e4",
+    "file": "html5lib_tests20.html",
+    "input": "<!doctype html><svg><title>abc",
+    "expected": "#document\n| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n|     <svg svg>\n|       <svg title>\n|         \"abc\""
+  },
+  {
+    "test_id": "23d4d0aee62db4adc7381010d80776270a6db47b",
+    "file": "html5lib_tests20.html",
+    "input": "<option><span><option>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <option>\n|       <span>\n|         <option>"
+  },
+  {
+    "test_id": "5463426618ff46188d19595aa1c7fdd86c6909b3",
+    "file": "html5lib_tests20.html",
+    "input": "<option><option>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <option>\n|     <option>"
+  },
+  {
+    "test_id": "2649b566bd2bccc59813286d647269ad251e2fdf",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml><div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|     <div>"
+  },
+  {
+    "test_id": "5df7907b99976e4051d1dd433e2bdbeb4ce200e3",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml encoding=\"application/svg+xml\"><div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         encoding=\"application/svg+xml\"\n|     <div>"
+  },
+  {
+    "test_id": "a7e70930137ff8338778253ac93dc66f11eef966",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml encoding=\"application/xhtml+xml\"><div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         encoding=\"application/xhtml+xml\"\n|         <div>"
+  },
+  {
+    "test_id": "b92100bddc318e13996fbe96c087c35152cbb4e3",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml encoding=\"aPPlication/xhtmL+xMl\"><div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         encoding=\"aPPlication/xhtmL+xMl\"\n|         <div>"
+  },
+  {
+    "test_id": "f55b68de8cf9ec17e0512a6caae94e0fbf151260",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml encoding=\"text/html\"><div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         encoding=\"text/html\"\n|         <div>"
+  },
+  {
+    "test_id": "7fb0d4342e3ed3fabee650b83ce66ffb2f66c173",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml encoding=\"Text/htmL\"><div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         encoding=\"Text/htmL\"\n|         <div>"
+  },
+  {
+    "test_id": "72a6100cd60dd49f780168137ed09e27a8090b34",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml encoding=\" text/html \"><div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         encoding=\" text/html \"\n|     <div>"
+  },
+  {
+    "test_id": "09ee3f414d08c8a3923e7c72380868617d1a4554",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml> </annotation-xml>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         \" \""
+  },
+  {
+    "test_id": "3b854aa3549b6f5cac96176766fccd25c965b5fe",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml>c</annotation-xml>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         \"c\""
+  },
+  {
+    "test_id": "bbc36dce52efacdede3cf4d94582ace2a3fca9fc",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml><!--foo-->",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         <!-- foo -->"
+  },
+  {
+    "test_id": "d4b924764bf49ceb39aa4f63dc81b7c05bbda84d",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml></svg>x",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         \"x\""
+  },
+  {
+    "test_id": "19a6c1a25813323193c67a54904a41e389918f48",
+    "file": "html5lib_tests20.html",
+    "input": "<math><annotation-xml><svg>x",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <math math>\n|       <math annotation-xml>\n|         <svg svg>\n|           \"x\""
+  }
+]
