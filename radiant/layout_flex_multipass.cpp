@@ -459,11 +459,16 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     }
     // Also check if this container is a flex item whose height was set by parent flex
     // This prevents overwriting heights set by parent column flex's flex-grow
-    if (flex_container->fi && flex_container->height > 0) {
+    // Only check if this element is actually a flex item (has fi or is a form control in flex)
+    bool is_flex_item = flex_container->fi != nullptr ||
+                        (flex_container->item_prop_type == DomElement::ITEM_PROP_FORM && flex_container->form);
+    if (is_flex_item && flex_container->height > 0) {
         // Check if parent set the height via flex sizing
         // If this element is a flex item with flex-grow/shrink and has a non-content height,
         // it was sized by the parent flex container
-        if (flex_container->fi->flex_grow > 0 || flex_container->fi->flex_shrink > 0) {
+        float fg = get_item_flex_grow(flex_container);
+        float fs = get_item_flex_shrink(flex_container);
+        if (fg > 0 || fs > 0) {
             // The parent flex layout sized this element, don't override
             has_explicit_height = true;
             log_debug("AUTO-HEIGHT: container is a flex item with height set by parent flex");
