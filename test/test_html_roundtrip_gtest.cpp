@@ -197,6 +197,85 @@ char* normalize_entities(const char* html) {
     return result;
 }
 
+// Expand self-closing tags: <tag/> or <tag /> -> <tag></tag>
+// This normalizes SVG self-closing tags to explicit close tags
+char* expand_self_closing_tags(const char* html) {
+    if (!html) return NULL;
+
+    size_t len = strlen(html);
+    // Worst case: every self-closing tag expands significantly
+    char* result = (char*)malloc(len * 2 + 1);
+    if (!result) return NULL;
+
+    const char* read = html;
+    char* write = result;
+    
+    while (*read) {
+        if (*read == '<') {
+            // Start of a tag - copy it and find the tag name
+            *write++ = *read++;
+            
+            // Skip whitespace after '<'
+            while (*read && isspace(*read)) {
+                *write++ = *read++;
+            }
+            
+            // Check if it's a closing tag or comment
+            if (*read == '/' || *read == '!') {
+                continue;  // Not a self-closing candidate
+            }
+            
+            // Extract tag name
+            const char* tag_start = read;
+            while (*read && *read != '>' && *read != '/' && !isspace(*read)) {
+                *write++ = *read++;
+            }
+            
+            size_t tag_len = read - tag_start;
+            if (tag_len == 0) continue;
+            
+            // Save tag name for later
+            char tag_name[64];
+            if (tag_len < sizeof(tag_name)) {
+                memcpy(tag_name, tag_start, tag_len);
+                tag_name[tag_len] = '\0';
+            } else {
+                tag_name[0] = '\0';  // Tag name too long, skip
+            }
+            
+            // Copy attributes and look for self-closing />
+            bool is_self_closing = false;
+            while (*read && *read != '>') {
+                if (*read == '/' && *(read + 1) == '>') {
+                    is_self_closing = true;
+                    read += 2;  // Skip />
+                    break;
+                }
+                *write++ = *read++;
+            }
+            
+            if (*read == '>') {
+                *write++ = *read++;
+            }
+            
+            // If it was self-closing, add explicit close tag
+            if (is_self_closing && tag_name[0]) {
+                *write++ = '>';
+                *write++ = '<';
+                *write++ = '/';
+                memcpy(write, tag_name, tag_len);
+                write += tag_len;
+                *write++ = '>';
+            }
+        } else {
+            *write++ = *read++;
+        }
+    }
+
+    *write = '\0';
+    return result;
+}
+
 // Skip DOCTYPE and XML declaration if present
 const char* skip_doctype(const char* html) {
     const char* p = html;
@@ -423,15 +502,92 @@ char* strip_inter_tag_whitespace(const char* html) {
     return result;
 }
 
-// Semantic HTML comparison: ignores DOCTYPE, comments, whitespace differences, implicit tbody, and entity variations
+// Normalize HTML attribute quotes: convert single quotes to double quotes
+// This allows roundtrip testing to handle <div class='x'> vs <div class="x">
+// Also lowercases attribute names for case-insensitive comparison
+char* normalize_attribute_quotes(const char* html) {
+    if (!html) return NULL;
+
+    size_t len = strlen(html);
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+
+    const char* read = html;
+    char* write = result;
+    bool in_tag = false;
+    bool in_attr_name = false;
+    bool after_equal = false;
+
+    while (*read) {
+        if (*read == '<') {
+            in_tag = true;
+            in_attr_name = false;
+            after_equal = false;
+            *write++ = *read++;
+        } else if (*read == '>') {
+            in_tag = false;
+            in_attr_name = false;
+            after_equal = false;
+            *write++ = *read++;
+        } else if (in_tag && *read == '=') {
+            in_attr_name = false;
+            after_equal = true;
+            *write++ = *read++;
+        } else if (in_tag && *read == '\'' && after_equal) {
+            // Convert single quote to double quote in attribute values
+            *write++ = '"';
+            read++;
+        } else if (in_tag && !after_equal && isalpha(*read)) {
+            // Lowercase attribute names (but not values)
+            in_attr_name = true;
+            *write++ = tolower(*read);
+            read++;
+        } else if (in_tag && in_attr_name && (isalnum(*read) || *read == '-' || *read == '_')) {
+            // Continue lowercasing attribute name
+            *write++ = tolower(*read);
+            read++;
+        } else if (in_tag && after_equal && (*read == '"' || *read == '\'')) {
+            // Found start of attribute value, stop lowercasing
+            if (*read == '\'') {
+                *write++ = '"';  // Normalize quotes
+            } else {
+                *write++ = *read;
+            }
+            read++;
+            after_equal = false;
+            in_attr_name = false;
+        } else {
+            *write++ = *read++;
+        }
+    }
+
+    *write = '\0';
+    return result;
+}
+
+// Semantic HTML comparison: ignores DOCTYPE, comments, whitespace differences, implicit tbody, entity variations, quote styles, and self-closing tags
 bool are_semantically_equivalent(const char* html1, const char* html2) {
+    // Expand self-closing tags first (<tag/> -> <tag></tag>)
+    char* expanded1 = expand_self_closing_tags(html1);
+    char* expanded2 = expand_self_closing_tags(html2);
+
+    if (!expanded1 || !expanded2) {
+        free(expanded1);
+        free(expanded2);
+        return false;
+    }
+
     // Skip DOCTYPE in both
-    const char* h1 = skip_doctype(html1);
-    const char* h2 = skip_doctype(html2);
+    const char* h1 = skip_doctype(expanded1);
+    const char* h2 = skip_doctype(expanded2);
 
     // Strip implicit tbody elements (HTML5 normalization)
     char* tbody_stripped1 = strip_implicit_tbody(h1);
     char* tbody_stripped2 = strip_implicit_tbody(h2);
+
+    // Free expanded versions
+    free(expanded1);
+    free(expanded2);
 
     if (!tbody_stripped1 || !tbody_stripped2) {
         free(tbody_stripped1);
@@ -467,13 +623,27 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
         return false;
     }
 
-    // Strip inter-tag whitespace (HTML5 normalizes this away)
-    char* inter_tag1 = strip_inter_tag_whitespace(entity_norm1);
-    char* inter_tag2 = strip_inter_tag_whitespace(entity_norm2);
+    // Normalize attribute quotes (class='x' -> class="x")
+    char* quote_norm1 = normalize_attribute_quotes(entity_norm1);
+    char* quote_norm2 = normalize_attribute_quotes(entity_norm2);
 
     // Free intermediate results
     free(entity_norm1);
     free(entity_norm2);
+
+    if (!quote_norm1 || !quote_norm2) {
+        free(quote_norm1);
+        free(quote_norm2);
+        return false;
+    }
+
+    // Strip inter-tag whitespace (HTML5 normalizes this away)
+    char* inter_tag1 = strip_inter_tag_whitespace(quote_norm1);
+    char* inter_tag2 = strip_inter_tag_whitespace(quote_norm2);
+
+    // Free intermediate results
+    free(quote_norm1);
+    free(quote_norm2);
 
     if (!inter_tag1 || !inter_tag2) {
         free(inter_tag1);
@@ -801,17 +971,17 @@ TEST_F(SimpleHtmlFileTests, TableBasic) {
 class IntermediateHtmlFileTests : public HtmlRoundtripTest {};
 
 TEST_F(IntermediateHtmlFileTests, Sample2) {
-    auto result = test_html_file_roundtrip_cli("./test/html/sample2.html", "sample2");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample2.html", "sample2");
     EXPECT_TRUE(result.success) << "Sample2 HTML with flexbox should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, Sample3) {
-    auto result = test_html_file_roundtrip_cli("./test/html/sample3.html", "sample3");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample3.html", "sample3");
     EXPECT_TRUE(result.success) << "Sample3 HTML with navigation should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, Sample4) {
-    auto result = test_html_file_roundtrip_cli("./test/html/sample4.html", "sample4");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample4.html", "sample4");
     EXPECT_TRUE(result.success) << "Sample4 landing page HTML should succeed";
 }
 
@@ -937,7 +1107,7 @@ TEST_F(AdvancedHtmlFileTests, CssListHtm) {
 class ComplexHtmlFileTests : public HtmlRoundtripTest {};
 
 TEST_F(ComplexHtmlFileTests, Sample5) {
-    auto result = test_html_file_roundtrip_cli("./test/html/sample5.html", "sample5");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample5.html", "sample5");
     EXPECT_TRUE(result.success) << "Sample5 AI CodeX landing page should succeed";
 }
 
@@ -962,14 +1132,15 @@ TEST_F(ComplexHtmlFileTests, PixeRatio) {
 }
 
 TEST_F(ComplexHtmlFileTests, Facatology) {
-    auto result = test_html_file_roundtrip_cli("./test/html/Facatology.html", "Facatology");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/page_facatology.html", "Facatology");
     EXPECT_TRUE(result.success) << "Facatology HTML should succeed";
 }
 
-TEST_F(ComplexHtmlFileTests, Facatology0) {
-    auto result = test_html_file_roundtrip_cli("./test/html/Facatology0.html", "Facatology0");
-    EXPECT_TRUE(result.success) << "Facatology0 HTML should succeed";
-}
+// Disabled: Facatology0.html file not found in repository
+// TEST_F(ComplexHtmlFileTests, Facatology0) {
+//     auto result = test_html_file_roundtrip_cli("./test/html/Facatology0.html", "Facatology0");
+//     EXPECT_TRUE(result.success) << "Facatology0 HTML should succeed";
+// }
 
 // Advanced HTML Features Tests
 class AdvancedHtmlTests : public HtmlRoundtripTest {};
