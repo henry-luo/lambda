@@ -908,7 +908,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
-    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr
+    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr, form controls
         uintptr_t elmt_name = block->tag();
         if (elmt_name == HTM_TAG_IFRAME) {
             layout_iframe(lycon, block, block->display);
@@ -932,11 +932,17 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("hr layout: border-only height=%f", block->height);
             }
         }
-        // else HTM_TAG_IMG
-    } else if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
-        // Form control elements (input, select, textarea) - replaced elements with intrinsic size
+        else if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+                 elmt_name != HTM_TAG_BUTTON) {
+            // Form control elements (input, select, textarea) - replaced elements with intrinsic size
+            // Note: <button> elements have content children, so they go through normal layout flow
+            layout_form_control(lycon, block);
+        }
+        // else HTM_TAG_IMG - handled by layout_block_content width/height
+    } else if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+               block->tag() != HTM_TAG_BUTTON) {
+        // Form control fallback (for cases where display.inner != RDT_DISPLAY_REPLACED)
         layout_form_control(lycon, block);
-        finalize_block_flow(lycon, block, block->display.outer);
     } else {  // layout block child content
         // No longer need separate pseudo-element layout - they're part of child list now
         DomNode *child = nullptr;

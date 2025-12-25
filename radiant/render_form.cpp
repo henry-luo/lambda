@@ -23,27 +23,62 @@ static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, 
     fill_surface_rect(rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip);
 }
 
+// Helper to draw a filled circle using ThorVG
+static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color) {
+    Tvg_Canvas* canvas = rdcon->canvas;
+    Tvg_Paint* shape = tvg_shape_new();
+
+    tvg_shape_append_circle(shape, cx, cy, radius, radius);
+    tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
+
+    tvg_canvas_remove(canvas, NULL);
+    tvg_canvas_push(canvas, shape);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas);
+}
+
+// Helper to draw a circle outline (ring) using ThorVG
+static void stroke_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color, float stroke_width) {
+    Tvg_Canvas* canvas = rdcon->canvas;
+    Tvg_Paint* shape = tvg_shape_new();
+
+    tvg_shape_append_circle(shape, cx, cy, radius, radius);
+    tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
+    tvg_shape_set_stroke_width(shape, stroke_width);
+
+    tvg_canvas_remove(canvas, NULL);
+    tvg_canvas_push(canvas, shape);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas);
+}
+
 // Helper to draw a 3D border effect (inset or outset)
 static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, float h,
                            bool inset, float border_width) {
-    Color light = make_color(255, 255, 255);
-    Color dark = make_color(128, 128, 128);
+    Color dark = make_color(128, 128, 128);   // shadow
+    Color light = make_color(208, 208, 208);  // highlight (visible against white bg)
 
     if (inset) {
-        // Swap colors for inset effect
-        Color tmp = light;
-        light = dark;
-        dark = tmp;
+        // Inset: dark on top/left, light on bottom/right
+        // Top edge
+        fill_rect(rdcon, x, y, w, border_width, dark);
+        // Left edge
+        fill_rect(rdcon, x, y, border_width, h, dark);
+        // Bottom edge
+        fill_rect(rdcon, x, y + h - border_width, w, border_width, light);
+        // Right edge
+        fill_rect(rdcon, x + w - border_width, y, border_width, h, light);
+    } else {
+        // Outset: light on top/left, dark on bottom/right
+        // Top edge
+        fill_rect(rdcon, x, y, w, border_width, light);
+        // Left edge
+        fill_rect(rdcon, x, y, border_width, h, light);
+        // Bottom edge
+        fill_rect(rdcon, x, y + h - border_width, w, border_width, dark);
+        // Right edge
+        fill_rect(rdcon, x + w - border_width, y, border_width, h, dark);
     }
-
-    // Top edge
-    fill_rect(rdcon, x, y, w, border_width, light);
-    // Left edge
-    fill_rect(rdcon, x, y, border_width, h, light);
-    // Bottom edge
-    fill_rect(rdcon, x, y + h - border_width, w, border_width, dark);
-    // Right edge
-    fill_rect(rdcon, x + w - border_width, y, border_width, h, dark);
 }
 
 /**
@@ -54,10 +89,14 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     float y = rdcon->block.y + block->y;
     float w = block->width;
     float h = block->height;
+    float pr = rdcon->ui_context->pixel_ratio;
 
     // Background (white)
     Color bg = make_color(255, 255, 255);
     fill_rect(rdcon, x, y, w, h, bg);
+
+    // 3D inset border (text inputs have inset appearance)
+    draw_3d_border(rdcon, x, y, w, h, true, 1 * pr);
 
     // Draw value or placeholder text
     const char* text = form->value;
@@ -160,24 +199,25 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
     float size = block->width;
     float pr = rdcon->ui_context->pixel_ratio;
 
-    // Background (circle approximated as square for now)
-    Color bg = form->disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
-    fill_rect(rdcon, x, y, size, size, bg);
+    // Calculate center and radius
+    float cx = x + size / 2;
+    float cy = y + size / 2;
+    float radius = size / 2;
 
-    // Border
+    // Background circle
+    Color bg = form->disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
+    fill_circle(rdcon, cx, cy, radius, bg);
+
+    // Border circle
     Color border_color = make_color(118, 118, 118);
     float bw = 1 * pr;
-    fill_rect(rdcon, x, y, size, bw, border_color);  // top
-    fill_rect(rdcon, x, y + size - bw, size, bw, border_color);  // bottom
-    fill_rect(rdcon, x, y, bw, size, border_color);  // left
-    fill_rect(rdcon, x + size - bw, y, bw, size, border_color);  // right
+    stroke_circle(rdcon, cx, cy, radius - bw / 2, border_color, bw);
 
     // Inner dot if checked
     if (form->checked) {
         Color dot_color = make_color(0, 0, 0);
-        float inset = 4 * pr;
-        float dot_size = size - 2 * inset;
-        fill_rect(rdcon, x + inset, y + inset, dot_size, dot_size, dot_color);
+        float dot_radius = radius * 0.4f;  // inner dot is ~40% of radio size
+        fill_circle(rdcon, cx, cy, dot_radius, dot_color);
     }
 
     log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, form->checked);
