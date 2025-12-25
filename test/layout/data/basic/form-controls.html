@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Form Controls Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: inline-block;
+            width: 120px;
+        }
+    </style>
+</head>
+<body>
+    <h1>HTML Form Controls Test</h1>
+
+    <div class="form-group">
+        <label>Text input:</label>
+        <input type="text" value="Sample text" placeholder="Enter text">
+    </div>
+
+    <div class="form-group">
+        <label>Password:</label>
+        <input type="password" value="secret">
+    </div>
+
+    <div class="form-group">
+        <label>Email:</label>
+        <input type="email" placeholder="user@example.com">
+    </div>
+
+    <div class="form-group">
+        <label>Number:</label>
+        <input type="number" value="42">
+    </div>
+
+    <div class="form-group">
+        <label>Checkbox:</label>
+        <input type="checkbox" checked> Checked
+        <input type="checkbox"> Unchecked
+    </div>
+
+    <div class="form-group">
+        <label>Radio:</label>
+        <input type="radio" name="color" checked> Red
+        <input type="radio" name="color"> Green
+        <input type="radio" name="color"> Blue
+    </div>
+
+    <div class="form-group">
+        <label>Button:</label>
+        <button>Click Me</button>
+        <input type="submit" value="Submit">
+        <input type="reset" value="Reset">
+    </div>
+
+    <div class="form-group">
+        <label>Select:</label>
+        <select>
+            <option>Option 1</option>
+            <option selected>Option 2</option>
+            <option>Option 3</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>Range:</label>
+        <input type="range" min="0" max="100" value="50">
+    </div>
+
+    <div class="form-group">
+        <label>Textarea:</label>
+        <textarea rows="4" cols="30" placeholder="Enter multi-line text">Sample text content here.</textarea>
+    </div>
+
+    <div class="form-group">
+        <label>Disabled:</label>
+        <input type="text" value="Disabled field" disabled>
+        <input type="checkbox" disabled>
+    </div>
+</body>
+</html>

@@ -6,6 +6,7 @@
 #include "layout_positioned.hpp"
 #include "intrinsic_sizing.hpp"
 #include "grid.hpp"
+#include "form_control.hpp"
 
 #include "../lib/log.h"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -25,6 +26,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
+void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
 // Counter system functions (from layout_counters.cpp)
@@ -931,6 +933,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
         }
         // else HTM_TAG_IMG
+    } else if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
+        // Form control elements (input, select, textarea) - replaced elements with intrinsic size
+        layout_form_control(lycon, block);
+        finalize_block_flow(lycon, block, block->display.outer);
     } else {  // layout block child content
         // No longer need separate pseudo-element layout - they're part of child list now
         DomNode *child = nullptr;
