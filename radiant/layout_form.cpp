@@ -15,15 +15,17 @@
 static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
-    // Width: size attribute * average char width, or default
-    if (form->size > 0 && font && font->space_width > 0) {
-        // Use ~0.6em per character as approximation
-        form->intrinsic_width = form->size * font->font_size * 0.55f;
+    // Width: size attribute * average char width
+    // Browser default: ~153px for 20 chars at 16px = ~0.48 em per char
+    int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;  // default 20 chars
+    if (font && font->font_size > 0) {
+        form->intrinsic_width = size * font->font_size * 0.48f;
     } else {
         form->intrinsic_width = FormDefaults::TEXT_WIDTH * pr;
     }
 
-    // Height: line-height + padding
+    // Height: browser default is 21px (at 16px font)
+    // Compute as font_size + extra vertical space
     if (font && font->font_size > 0) {
         form->intrinsic_height = font->font_size + 2 * FormDefaults::TEXT_PADDING_V * pr;
     } else {
