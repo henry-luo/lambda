@@ -1,0 +1,26 @@
+[
+  {
+    "test_id": "700e38ecb6ac91e9c5477fd451591b844d51f38e",
+    "file": "html5lib_quirks01.html",
+    "input": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Frameset//EN\"\n\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd\"><p><table>",
+    "expected": "#document\n| <!DOCTYPE html \"-//W3C//DTD XHTML 1.0 Frameset//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd\">\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|     <table>"
+  },
+  {
+    "test_id": "d196aec77885a47ff43166960d48c8c9eb2cbee0",
+    "file": "html5lib_quirks01.html",
+    "input": "<!DOCTYPE html SYSTEM \"http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd\"><p><table>",
+    "expected": "#document\n| <!DOCTYPE html \"\" \"http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd\">\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <table>"
+  },
+  {
+    "test_id": "d4b597fe74a7af1b96750e29cb1180af8b97a1f4",
+    "file": "html5lib_quirks01.html",
+    "input": "<!DOCTYPE html PUBLIC \"html\"><p><table>",
+    "expected": "#document\n| <!DOCTYPE html \"html\" \"\">\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <table>"
+  },
+  {
+    "test_id": "e1bacd20039e6d1bed0de4aff51c37e303762170",
+    "file": "html5lib_quirks01.html",
+    "input": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2//EN\"\n   \"http://www.w3.org/TR/html4/strict.dtd\"><p><table>",
+    "expected": "#document\n| <!DOCTYPE html \"-//W3C//DTD HTML 3.2//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">\n| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <table>"
+  }
+]
