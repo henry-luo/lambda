@@ -452,17 +452,9 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     } else if (grid_item->display.inner == CSS_VALUE_FLEX) {
         log_info(">>> NESTED FLEX DETECTED: item=%p (%s)", grid_item, grid_item->node_name());
 
-        // Initialize views for nested flex children
-        DomNode* child = grid_item->first_child;
-        while (child) {
-            if (child->is_element()) {
-                init_grid_item_view(lycon, child);
-            }
-            child = child->next_sibling;
-        }
-
         // Use flex layout for nested flex container
-        // Import from layout_flex_multipass.cpp
+        // The flex layout will initialize its own flex items with init_flex_item_view
+        // Do NOT call init_grid_item_view for flex children - they are flex items, not grid items!
         extern void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container);
         layout_flex_container_with_nested_content(lycon, grid_item);
 
