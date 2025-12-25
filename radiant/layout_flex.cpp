@@ -2863,21 +2863,20 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                     break;
                 case ALIGN_STRETCH:
                     // For stretch, check if item has explicit cross-axis size from CSS
-                    // Note: form controls have intrinsic sizes set via given_width/height,
-                    // but these should NOT prevent stretching unless CSS explicitly sets size.
-                    // We check given_*_type to distinguish CSS-specified from intrinsic defaults.
+                    // The blk->given_* fields are ONLY set when CSS explicitly specifies the size
+                    // (in resolve_css_style.cpp). Form control intrinsic sizes use lycon->block.given_*
+                    // which is a different field, so checking blk->given_* > 0 correctly identifies
+                    // CSS-specified sizes without false positives from form control defaults.
                     {
                         bool has_explicit_cross_size = false;
                         if (is_main_axis_horizontal(flex_layout)) {
                             // Row direction: cross-axis is height
-                            // Check both that height > 0 AND that it was CSS-specified (type != UNDEF)
-                            has_explicit_cross_size = (item->blk && item->blk->given_height > 0 &&
-                                                       item->blk->given_height_type != CSS_VALUE__UNDEF);
+                            // blk->given_height is set only by CSS height property
+                            has_explicit_cross_size = (item->blk && item->blk->given_height > 0);
                         } else {
                             // Column direction: cross-axis is width
-                            // Check both that width > 0 AND that it was CSS-specified (type != UNDEF)
-                            has_explicit_cross_size = (item->blk && item->blk->given_width > 0 &&
-                                                       item->blk->given_width_type != CSS_VALUE__UNDEF);
+                            // blk->given_width is set only by CSS width property
+                            has_explicit_cross_size = (item->blk && item->blk->given_width > 0);
                         }
 
                         log_debug("ALIGN_STRETCH item %d (%s): has_explicit=%d, available=%d, item_cross=%d, blk=%p, given_width=%.1f, type=%d",
