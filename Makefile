@@ -339,7 +339,7 @@ clean-tree-sitter-minimal:
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-all test-baseline test-extended test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-extended test-input run help install uninstall \
 	    lambda format lint check docs intellisense analyze-size \
 	    build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
@@ -391,7 +391,10 @@ help:
 	@echo "Development:"
 	@echo "  test          - Run ALL test suites (baseline + extended, alias for test-all)"
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
-	@echo "  test-baseline - Run BASELINE test suites only (core functionality, must pass 100%)"
+	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
+	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
+	@echo "  test-input-baseline - Run LIBRARY and INPUT baseline test suites only"
+	@echo "  test-radiant-baseline - Run RADIANT layout baseline test suite only (alias for test-layout-baseline)"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
@@ -687,7 +690,7 @@ test-all: build-test
 		exit 1; \
 	fi
 
-test-baseline: build-test
+test-all-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running BASELINE test suites only..."
@@ -697,6 +700,36 @@ test-baseline: build-test
 		echo "Error: No test suite found"; \
 		exit 1; \
 	fi
+
+test-lambda-baseline: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
+	@echo "Running LAMBDA baseline test suite..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=lambda --category=baseline --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-input-baseline: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
+	@echo "Running LIBRARY and INPUT baseline test suites..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=library --category=baseline --parallel && \
+		./test/test_run.sh --target=input --category=baseline --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-radiant-baseline: test-layout-baseline
+
+test-layout-baseline: build-test
+	@echo "Running Radiant layout BASELINE test suite..."
+	@echo "=============================================================="
+	@node test/layout/test_radiant_layout.js -c baseline
 
 test-extended: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
