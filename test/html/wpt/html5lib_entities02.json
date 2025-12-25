@@ -1,0 +1,158 @@
+[
+  {
+    "test_id": "ea66863900b0b42deee5a77c58a432c2215c32ac",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gt;YY\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ>YY\""
+  },
+  {
+    "test_id": "bc2a229b7c801ad045da76f411faf1d4c89886d0",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&\""
+  },
+  {
+    "test_id": "e30755b30108f65919767f57a2200097b638f2b4",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar='ZZ&'></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&\""
+  },
+  {
+    "test_id": "17c5acad9075755a413541d57d0d135338450834",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=ZZ&></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&\""
+  },
+  {
+    "test_id": "ec40a7216b4ac918c5e16cae66bfb8b69bcfabce",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gt=YY\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&gt=YY\""
+  },
+  {
+    "test_id": "54d2e9d13436e6850a5257e8028122581cf7088d",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gt0YY\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&gt0YY\""
+  },
+  {
+    "test_id": "99c8496d0ea75429a5836de44dd18708974f6de8",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gt9YY\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&gt9YY\""
+  },
+  {
+    "test_id": "7e4e70e57f63968ebba82682a2629158bd053a65",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gtaYY\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&gtaYY\""
+  },
+  {
+    "test_id": "dca2db4f61b5fd60121e3da3e15065654f8d8a0c",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gtZYY\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&gtZYY\""
+  },
+  {
+    "test_id": "fe22904d5f3936bedc1fa110e6bde48895b399a0",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gt YY\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ> YY\""
+  },
+  {
+    "test_id": "6553483a30141fcff05787287c2c212df9f468e8",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&gt\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ>\""
+  },
+  {
+    "test_id": "88d7c74afcb27bbee3e3255d9116dce9c3dc6d73",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar='ZZ&gt'></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ>\""
+  },
+  {
+    "test_id": "db5d22d3350e0a51d675dc17c641c73251a4739d",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=ZZ&gt></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ>\""
+  },
+  {
+    "test_id": "ea08276faa7ba526e612fc1e80047d705cd29885",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&pound_id=23\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ£_id=23\""
+  },
+  {
+    "test_id": "c59d1cfe1b36e75e0f57664e45bef7023a73c9e9",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&prod_id=23\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&prod_id=23\""
+  },
+  {
+    "test_id": "f9d3950620f8adcbe5f9a0542c7967de4be65963",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&pound;_id=23\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ£_id=23\""
+  },
+  {
+    "test_id": "8e35dacd7c296f054e58f1ce83719401c8aff8a0",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&prod;_id=23\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ∏_id=23\""
+  },
+  {
+    "test_id": "48edddaa93bbebc5cd1615cc67422ca6508e47a2",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&pound=23\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&pound=23\""
+  },
+  {
+    "test_id": "9c69a29b53eebd93db20f12d405335274098e662",
+    "file": "html5lib_entities02.html",
+    "input": "<div bar=\"ZZ&prod=23\"></div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       bar=\"ZZ&prod=23\""
+  },
+  {
+    "test_id": "565c5f6744a27602bb466d6df77803a80f064752",
+    "file": "html5lib_entities02.html",
+    "input": "<div>ZZ&pound_id=23</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"ZZ£_id=23\""
+  },
+  {
+    "test_id": "742984a32ecd86cb9cdedffbba47eb212e19c80f",
+    "file": "html5lib_entities02.html",
+    "input": "<div>ZZ&prod_id=23</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"ZZ&prod_id=23\""
+  },
+  {
+    "test_id": "f908b529ac9ca5366e1160856db2c3d17e3898c9",
+    "file": "html5lib_entities02.html",
+    "input": "<div>ZZ&pound;_id=23</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"ZZ£_id=23\""
+  },
+  {
+    "test_id": "1294ffc6bee2ee41f65a60ac48ba445b99504286",
+    "file": "html5lib_entities02.html",
+    "input": "<div>ZZ&prod;_id=23</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"ZZ∏_id=23\""
+  },
+  {
+    "test_id": "ba7d8cdd4b40020f7af6bdde75a3574b5771fac9",
+    "file": "html5lib_entities02.html",
+    "input": "<div>ZZ&pound=23</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"ZZ£=23\""
+  },
+  {
+    "test_id": "ce23051409f58749cbce6836bc4c7c21e9c548cf",
+    "file": "html5lib_entities02.html",
+    "input": "<div>ZZ&prod=23</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"ZZ&prod=23\""
+  },
+  {
+    "test_id": "6bbeec30b849cebd1366ebb2e6d2a6c1790e8c68",
+    "file": "html5lib_entities02.html",
+    "input": "<div>ZZ&AElig=</div>",
+    "expected": "#document\n| <html>\n|   <head>\n|   <body>\n|     <div>\n|       \"ZZÆ=\""
+  }
+]
