@@ -543,6 +543,80 @@ DisplayValue resolve_display_value(void* child) {
                                 display.inner = CSS_VALUE_TABLE_CAPTION;
                                 return display;
                             }
+                        } else if (decl->value->type == CSS_VALUE_TYPE_LIST) {
+                            // Handle CSS Display Level 3 two-value syntax: "display: <outer> <inner>"
+                            // e.g., "display: block flow", "display: inline flow", etc.
+                            CssValue** values = decl->value->data.list.values;
+                            int count = decl->value->data.list.count;
+                            log_debug("[CSS] display LIST value with %d items", count);
+                            
+                            if (count >= 2 && values[0] && values[1] &&
+                                values[0]->type == CSS_VALUE_TYPE_KEYWORD &&
+                                values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum outer_kw = values[0]->data.keyword;
+                                CssEnum inner_kw = values[1]->data.keyword;
+                                log_debug("[CSS] two-value display: outer=%d, inner=%d", outer_kw, inner_kw);
+                                
+                                // Map outer display keyword
+                                if (outer_kw == CSS_VALUE_BLOCK) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                } else if (outer_kw == CSS_VALUE_INLINE) {
+                                    display.outer = CSS_VALUE_INLINE;
+                                } else if (outer_kw == CSS_VALUE_RUN_IN) {
+                                    display.outer = CSS_VALUE_INLINE; // run-in treated as inline fallback
+                                } else {
+                                    display.outer = CSS_VALUE_BLOCK; // default to block
+                                }
+                                
+                                // Map inner display keyword
+                                if (inner_kw == CSS_VALUE_FLOW) {
+                                    display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                                } else if (inner_kw == CSS_VALUE_FLOW_ROOT) {
+                                    display.inner = CSS_VALUE_FLOW_ROOT;
+                                } else if (inner_kw == CSS_VALUE_FLEX) {
+                                    display.inner = CSS_VALUE_FLEX;
+                                } else if (inner_kw == CSS_VALUE_GRID) {
+                                    display.inner = CSS_VALUE_GRID;
+                                } else if (inner_kw == CSS_VALUE_TABLE) {
+                                    display.inner = CSS_VALUE_TABLE;
+                                } else if (inner_kw == CSS_VALUE_RUBY) {
+                                    display.inner = CSS_VALUE_RUBY;
+                                } else {
+                                    display.inner = CSS_VALUE_FLOW; // default to flow
+                                }
+                                
+                                log_debug("[CSS] ✅ Resolved two-value display: outer=%d, inner=%d", 
+                                    display.outer, display.inner);
+                                return display;
+                            } else if (count == 1 && values[0] && 
+                                       values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                                // Single keyword in list (edge case)
+                                CssEnum keyword = values[0]->data.keyword;
+                                log_debug("[CSS] single keyword in list: %d", keyword);
+                                // Handle same as single keyword (fall through to regular logic won't work here)
+                                // Re-use the single keyword logic
+                                if (keyword == CSS_VALUE_BLOCK) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                    display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_INLINE) {
+                                    display.outer = CSS_VALUE_INLINE;
+                                    display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_FLEX) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                    display.inner = CSS_VALUE_FLEX;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_GRID) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                    display.inner = CSS_VALUE_GRID;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_NONE) {
+                                    display.outer = CSS_VALUE_NONE;
+                                    display.inner = CSS_VALUE_NONE;
+                                    return display;
+                                }
+                            }
                         }
                     }
                 }
