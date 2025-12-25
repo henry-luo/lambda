@@ -549,14 +549,14 @@ DisplayValue resolve_display_value(void* child) {
                             CssValue** values = decl->value->data.list.values;
                             int count = decl->value->data.list.count;
                             log_debug("[CSS] display LIST value with %d items", count);
-                            
+
                             if (count >= 2 && values[0] && values[1] &&
                                 values[0]->type == CSS_VALUE_TYPE_KEYWORD &&
                                 values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
                                 CssEnum outer_kw = values[0]->data.keyword;
                                 CssEnum inner_kw = values[1]->data.keyword;
                                 log_debug("[CSS] two-value display: outer=%d, inner=%d", outer_kw, inner_kw);
-                                
+
                                 // Map outer display keyword
                                 if (outer_kw == CSS_VALUE_BLOCK) {
                                     display.outer = CSS_VALUE_BLOCK;
@@ -567,7 +567,7 @@ DisplayValue resolve_display_value(void* child) {
                                 } else {
                                     display.outer = CSS_VALUE_BLOCK; // default to block
                                 }
-                                
+
                                 // Map inner display keyword
                                 if (inner_kw == CSS_VALUE_FLOW) {
                                     display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
@@ -584,11 +584,11 @@ DisplayValue resolve_display_value(void* child) {
                                 } else {
                                     display.inner = CSS_VALUE_FLOW; // default to flow
                                 }
-                                
-                                log_debug("[CSS] ✅ Resolved two-value display: outer=%d, inner=%d", 
+
+                                log_debug("[CSS] ✅ Resolved two-value display: outer=%d, inner=%d",
                                     display.outer, display.inner);
                                 return display;
-                            } else if (count == 1 && values[0] && 
+                            } else if (count == 1 && values[0] &&
                                        values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
                                 // Single keyword in list (edge case)
                                 CssEnum keyword = values[0]->data.keyword;
