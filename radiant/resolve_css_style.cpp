@@ -655,7 +655,11 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_HR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE || tag_id == HTM_TAG_SVG ||
+        } else if (tag_id == HTM_TAG_SVG) {
+            // SVG elements are inline replaced elements by default
+            display.outer = CSS_VALUE_INLINE;
+            display.inner = RDT_DISPLAY_REPLACED;
+        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE ||
             tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
             tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
             tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA ||
