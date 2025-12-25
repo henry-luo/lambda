@@ -149,20 +149,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         break;
     }
 
-    // Apply CSS width/height if specified, otherwise use intrinsic
-    float width = form->intrinsic_width;
-    float height = form->intrinsic_height;
-
-    if (block->blk) {
-        if (block->blk->given_width >= 0) {
-            width = block->blk->given_width;
-        }
-        if (block->blk->given_height >= 0) {
-            height = block->blk->given_height;
-        }
-    }
-
-    // Account for border and padding in content size
+    // Calculate border and padding sizes
     float border_h = 0, border_v = 0;
     float padding_h = 0, padding_v = 0;
 
@@ -175,16 +162,58 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         padding_v = block->bound->padding.top + block->bound->padding.bottom;
     }
 
-    log_debug("[FORM] layout: intrinsic=%.1fx%.1f, given=%.1fx%.1f, border=%.1f/%.1f, padding=%.1f/%.1f",
+    // Check box-sizing model (default is content-box per CSS spec)
+    bool is_border_box = (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+
+    // Apply CSS width/height if specified, otherwise use intrinsic
+    // Note: intrinsic sizes are border-box (include default border/padding)
+    // CSS width/height follows box-sizing model
+    float width = form->intrinsic_width;
+    float height = form->intrinsic_height;
+    float content_width, content_height;
+
+    if (block->blk && block->blk->given_width >= 0) {
+        // CSS specifies width
+        if (is_border_box) {
+            // border-box: CSS width is total border-box width
+            width = block->blk->given_width;
+            content_width = width - border_h - padding_h;
+        } else {
+            // content-box (default): CSS width is content width only
+            content_width = block->blk->given_width;
+            width = content_width + border_h + padding_h;
+        }
+    } else {
+        // Use intrinsic - treat as border-box
+        content_width = width - border_h - padding_h;
+    }
+
+    if (block->blk && block->blk->given_height >= 0) {
+        // CSS specifies height
+        if (is_border_box) {
+            // border-box: CSS height is total border-box height
+            height = block->blk->given_height;
+            content_height = height - border_v - padding_v;
+        } else {
+            // content-box (default): CSS height is content height only
+            content_height = block->blk->given_height;
+            height = content_height + border_v + padding_v;
+        }
+    } else {
+        // Use intrinsic - treat as border-box
+        content_height = height - border_v - padding_v;
+    }
+
+    log_debug("[FORM] layout: intrinsic=%.1fx%.1f, given=%.1fx%.1f, border=%.1f/%.1f, padding=%.1f/%.1f, box_sizing=%s",
               form->intrinsic_width, form->intrinsic_height,
               block->blk ? block->blk->given_width : -1, block->blk ? block->blk->given_height : -1,
-              border_h, border_v, padding_h, padding_v);
+              border_h, border_v, padding_h, padding_v, is_border_box ? "border-box" : "content-box");
 
-    // Set final dimensions (border-box sizing for form controls)
+    // Set final dimensions
     block->width = width;
     block->height = height;
-    block->content_width = width - border_h - padding_h;
-    block->content_height = height - border_v - padding_v;
+    block->content_width = content_width;
+    block->content_height = content_height;
 
     if (block->content_width < 0) block->content_width = 0;
     if (block->content_height < 0) block->content_height = 0;
