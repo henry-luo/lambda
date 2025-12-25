@@ -866,6 +866,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_LABEL:
         // label is inline by default, no special styling
         break;
+    case HTM_TAG_OPTION:
+    case HTM_TAG_OPTGROUP:
+        // Option and optgroup elements inside <select> should not participate in normal layout
+        // Browsers don't lay these out - the select renders its dropdown internally
+        block->display.outer = CSS_VALUE_NONE;
+        block->display.inner = CSS_VALUE_NONE;
+        break;
     // ========== Semantic/sectioning elements with no visual default ==========
     case HTM_TAG_ARTICLE:  case HTM_TAG_SECTION:  case HTM_TAG_NAV:
     case HTM_TAG_ASIDE:  case HTM_TAG_HEADER:  case HTM_TAG_FOOTER:
