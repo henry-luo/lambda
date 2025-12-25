@@ -88,6 +88,7 @@ typedef struct PseudoContentProp PseudoContentProp;
 typedef struct EmbedProp EmbedProp;
 typedef struct TableCellProp TableCellProp;
 typedef struct TableProp TableProp;
+typedef struct FormControlProp FormControlProp;
 typedef struct ViewBlock ViewBlock;
 
 /**
@@ -137,13 +138,14 @@ struct DomElement : DomNode {
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
 
-    // Item property type indicator (fi, gi, tb, td share union)
+    // Item property type indicator (fi, gi, tb, td, form share union)
     enum ItemPropType : uint8_t {
         ITEM_PROP_NONE = 0,
         ITEM_PROP_FLEX = 1,    // fi (FlexItemProp)
         ITEM_PROP_GRID = 2,    // gi (GridItemProp)
         ITEM_PROP_TABLE = 3,   // tb (TableProp)
-        ITEM_PROP_CELL = 4     // td (TableCellProp)
+        ITEM_PROP_CELL = 4,    // td (TableCellProp)
+        ITEM_PROP_FORM = 5     // form (FormControlProp)
     } item_prop_type = ITEM_PROP_NONE;
 
     union {
@@ -151,6 +153,7 @@ struct DomElement : DomNode {
         GridItemProp* gi;
         TableProp* tb;  // table specific properties
         TableCellProp* td;  // table cell specific properties
+        FormControlProp* form;  // form control properties
     };
 
     // block properties

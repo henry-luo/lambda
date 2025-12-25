@@ -368,6 +368,8 @@ project "lambda"
         "radiant/render_svg.cpp",
         "radiant/render_pdf.cpp",
         "radiant/render_img.cpp",
+        "radiant/render_form.cpp",
+        "radiant/layout_form.cpp",
         "radiant/pdf/operators.cpp",
         "radiant/pdf/pdf_to_view.cpp",
         "radiant/pdf/coords.cpp",
