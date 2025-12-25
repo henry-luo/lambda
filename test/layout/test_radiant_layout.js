@@ -1466,12 +1466,14 @@ class RadiantLayoutTester {
                     errorFiles.forEach(file => console.log(`      - ${file}`));
                 }
 
-                // List failed tests at the end
-                if (failedTests.length > 0) {
+                // List failed tests at the end (only if 10 or fewer)
+                if (failedTests.length > 0 && failedTests.length <= 10) {
                     console.log(`\n❌ Failed Tests:`);
                     failedTests.forEach(test => {
                         console.log(`   - ${test.name}: ${test.reason}`);
                     });
+                } else if (failedTests.length > 10) {
+                    console.log(`\n⚠️  Too many failures (${failedTests.length}) - detailed list omitted`);
                 }
             }
 
@@ -1579,12 +1581,14 @@ class RadiantLayoutTester {
         if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
         console.log(`   Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
 
-        // List failed tests at the end
-        if (failedTests.length > 0) {
+        // List failed tests at the end (only if 10 or fewer)
+        if (failedTests.length > 0 && failedTests.length <= 10) {
             console.log(`\n❌ Failed Tests:`);
             failedTests.forEach(test => {
                 console.log(`   - ${test.name}: ${test.reason}`);
             });
+        } else if (failedTests.length > 10) {
+            console.log(`\n⚠️  Too many failures (${failedTests.length}) - detailed list omitted`);
         }
         return allResults;
     }
@@ -1650,12 +1654,14 @@ class RadiantLayoutTester {
             console.log(`❌ Failed: ${failed}`);
             console.log(`Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
 
-            // List failed tests at the end
-            if (failedTests.length > 0) {
+            // List failed tests at the end (only if 10 or fewer)
+            if (failedTests.length > 0 && failedTests.length <= 10) {
                 console.log(`\n❌ Failed Tests:`);
                 failedTests.forEach(test => {
                     console.log(`   - ${test.name}: ${test.reason}`);
                 });
+            } else if (failedTests.length > 10) {
+                console.log(`\n⚠️  Too many failures (${failedTests.length}) - detailed list omitted`);
             }
         }
 
