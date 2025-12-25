@@ -18,6 +18,58 @@ float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout);
 
 // ============================================================================
+// Flex Item Property Helpers (support both flex items and form controls)
+// ============================================================================
+
+// Get flex-grow value for item (form controls store in FormControlProp)
+float get_item_flex_grow(ViewElement* item) {
+    if (!item) return 0;
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->flex_grow;
+    }
+    if (item->fi) {
+        return item->fi->flex_grow;
+    }
+    return 0;
+}
+
+// Get flex-shrink value for item (form controls store in FormControlProp)
+float get_item_flex_shrink(ViewElement* item) {
+    if (!item) return 1;  // default is 1
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->flex_shrink;
+    }
+    if (item->fi) {
+        return item->fi->flex_shrink;
+    }
+    return 1;  // default
+}
+
+// Get flex-basis value for item (form controls store in FormControlProp)
+float get_item_flex_basis(ViewElement* item) {
+    if (!item) return -1;  // auto
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->flex_basis;
+    }
+    if (item->fi) {
+        return item->fi->flex_basis;
+    }
+    return -1;  // auto
+}
+
+// Check if flex-basis is percentage for item
+bool get_item_flex_basis_is_percent(ViewElement* item) {
+    if (!item) return false;
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        return item->form->flex_basis_is_percent;
+    }
+    if (item->fi) {
+        return item->fi->flex_basis_is_percent;
+    }
+    return false;
+}
+
+// ============================================================================
 // Flex Item Intrinsic Size Helpers (support both flex items and form controls)
 // ============================================================================
 
@@ -791,9 +843,14 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Check if container has explicit height (given_height > 0 means explicit)
         // OR if this container is a flex item whose height was set by parent flex
         bool has_explicit_height = container->blk && container->blk->given_height > 0;
-        if (!has_explicit_height && container->fi && container->height > 0) {
+        // Only check flex item status if this container is actually a flex item
+        bool is_flex_item = container->fi != nullptr ||
+                            (container->item_prop_type == DomElement::ITEM_PROP_FORM && container->form);
+        if (!has_explicit_height && is_flex_item && container->height > 0) {
             // Check if parent set the height via flex sizing
-            if (container->fi->flex_grow > 0 || container->fi->flex_shrink > 0) {
+            float fg = get_item_flex_grow(container);
+            float fs = get_item_flex_shrink(container);
+            if (fg > 0 || fs > 0) {
                 has_explicit_height = true;
                 log_debug("Phase 7: Container is a flex item with height set by parent flex");
             }
@@ -838,9 +895,14 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Check if container has explicit height (given_height > 0 means explicit)
         // OR if this container is a flex item whose height was set by parent flex
         bool has_explicit_height = container->blk && container->blk->given_height > 0;
-        if (!has_explicit_height && container->fi && container->height > 0) {
+        // Only check flex item status if this container is actually a flex item
+        bool is_flex_item_col = container->fi != nullptr ||
+                                (container->item_prop_type == DomElement::ITEM_PROP_FORM && container->form);
+        if (!has_explicit_height && is_flex_item_col && container->height > 0) {
             // Check if parent set the height via flex sizing
-            if (container->fi->flex_grow > 0 || container->fi->flex_shrink > 0) {
+            float fg = get_item_flex_grow(container);
+            float fs = get_item_flex_shrink(container);
+            if (fg > 0 || fs > 0) {
                 has_explicit_height = true;
                 log_debug("Phase 7: (Column) Container is a flex item with height set by parent flex");
             }
@@ -1327,6 +1389,22 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
 
     // Handle form controls FIRST (they don't have fi)
     if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+        // Form controls with explicit flex-basis should use that value
+        float form_flex_basis = item->form->flex_basis;
+        if (form_flex_basis >= 0) {
+            // Explicit flex-basis (including 0 from "flex: 1")
+            if (item->form->flex_basis_is_percent) {
+                float container_size = is_horizontal ?
+                    flex_layout->main_axis_size : flex_layout->cross_axis_size;
+                float basis = form_flex_basis * container_size / 100.0f;
+                log_debug("calculate_flex_basis - form control explicit percent: %.1f%% = %.1f", form_flex_basis, basis);
+                return basis;
+            }
+            log_debug("calculate_flex_basis - form control explicit basis: %.1f", form_flex_basis);
+            return form_flex_basis;
+        }
+
+        // flex-basis: auto - use intrinsic size
         float basis = is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
 
         // For form controls, add padding and border to get border-box size
@@ -1737,7 +1815,16 @@ float apply_flex_constraint(
     bool* hit_min,
     bool* hit_max
 ) {
-    if (!item || !item->fi) return computed_size;
+    if (!item) return computed_size;
+
+    // Form controls don't have FlexItemProp - the union shares memory with FormControlProp
+    // They use intrinsic sizes and don't have resolved min/max constraints
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
+        log_debug("apply_flex_constraint: form control, skipping constraint (computed=%.1f)", computed_size);
+        return computed_size;
+    }
+
+    if (!item->fi) return computed_size;
 
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
@@ -2190,9 +2277,9 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
         line->total_flex_shrink = 0;
         for (int i = 0; i < line->item_count; i++) {
             ViewElement* item_elmt = (ViewElement*)line->items[i]->as_element();
-            if (item_elmt && item_elmt->fi) {
-                line->total_flex_grow += item_elmt->fi->flex_grow;
-                line->total_flex_shrink += item_elmt->fi->flex_shrink;
+            if (item_elmt) {
+                line->total_flex_grow += get_item_flex_grow(item_elmt);
+                line->total_flex_shrink += get_item_flex_shrink(item_elmt);
             } else {
                 line->total_flex_grow += 0;
                 line->total_flex_shrink += 1; // default shrink
@@ -2244,9 +2331,15 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         // Calculate hypothetical main size (basis clamped by min/max constraints)
         float hypothetical = calculate_hypothetical_main_size(item, flex_layout);
 
-        // Check if item is inflexible (has 0 flex factor in ALL directions)
-        bool is_inflexible = (!item->fi ||
-                              (item->fi->flex_grow == 0 && item->fi->flex_shrink == 0));
+        // Check if item is inflexible:
+        // - Items without fi (and not form controls) are inflexible
+        // - Items with explicit flex-grow:0 and flex-shrink:0 are inflexible
+        // Note: Form controls can have explicit flex values stored in form->flex_*
+        bool has_flex_props = item->fi != nullptr ||
+                              (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form);
+        float fg = get_item_flex_grow(item);
+        float fs = get_item_flex_shrink(item);
+        bool is_inflexible = !has_flex_props || (fg == 0 && fs == 0);
 
         if (is_inflexible) {
             // Inflexible items are frozen at their hypothetical main size
@@ -2259,7 +2352,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             set_main_axis_size(item, basis, flex_layout);
             total_initial_size += basis;
             log_debug("ITERATIVE_FLEX - item %d: FLEXIBLE (grow=%.2f, shrink=%.2f), basis=%.1f",
-                      i, item->fi->flex_grow, item->fi->flex_shrink, basis);
+                      i, fg, fs, basis);
         }
 
         // Add margins in the main axis direction
@@ -2322,20 +2415,23 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             if (frozen[i]) continue;
 
             ViewElement* item = (ViewElement*)line->items[i]->as_element();
-            if (!item || !item->fi) continue;
+            if (!item) continue;
 
-            if (is_growing && item->fi->flex_grow > 0) {
-                total_flex_factor += item->fi->flex_grow;
+            float fg = get_item_flex_grow(item);
+            float fs = get_item_flex_shrink(item);
+
+            if (is_growing && fg > 0) {
+                total_flex_factor += fg;
                 unfrozen_count++;
-            } else if (is_shrinking && item->fi->flex_shrink > 0) {
+            } else if (is_shrinking && fs > 0) {
                 // CRITICAL FIX: Use original flex_basis for scaled shrink factor
                 // Per CSS Flexbox spec: scaled_flex_shrink_factor = flex_shrink × flex_base_size
                 float flex_basis = item_flex_basis[i];
-                double scaled = (double)flex_basis * item->fi->flex_shrink;
+                double scaled = (double)flex_basis * fs;
                 total_scaled_shrink += scaled;
                 unfrozen_count++;
                 log_debug("FLEX_SHRINK - item %d: flex_shrink=%.2f, flex_basis=%.1f, scaled=%.2f",
-                          i, item->fi->flex_shrink, flex_basis, scaled);
+                          i, fs, flex_basis, scaled);
             }
         }
 
@@ -2365,27 +2461,29 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             if (frozen[i]) continue;
 
             ViewElement* item = (ViewElement*)line->items[i]->as_element();
-            if (!item || !item->fi) continue;
+            if (!item) continue;
 
+            float fg = get_item_flex_grow(item);
+            float fs = get_item_flex_shrink(item);
             float current_size = get_main_axis_size(item, flex_layout);
             float target_size = current_size;
 
-            if (is_growing && item->fi->flex_grow > 0) {
+            if (is_growing && fg > 0) {
                 // FLEX-GROW: Distribute positive free space
                 double effective_free_space = (total_flex_factor < 1.0)
                     ? remaining_free_space * total_flex_factor
                     : remaining_free_space;
-                double grow_ratio = item->fi->flex_grow / total_flex_factor;
+                double grow_ratio = fg / total_flex_factor;
                 float grow_amount = (float)(grow_ratio * effective_free_space);
                 target_size = current_size + grow_amount;
 
                 log_debug("ITERATIVE_FLEX - item %d: grow_ratio=%.4f, grow_amount=%.1f, %.1f→%.1f",
                           i, grow_ratio, grow_amount, current_size, target_size);
 
-            } else if (is_shrinking && item->fi->flex_shrink > 0) {
+            } else if (is_shrinking && fs > 0) {
                 // FLEX-SHRINK: Distribute negative space using scaled shrink factor
                 float flex_basis = item_flex_basis[i];
-                double scaled_shrink = (double)flex_basis * item->fi->flex_shrink;
+                double scaled_shrink = (double)flex_basis * fs;
                 double shrink_ratio = scaled_shrink / total_scaled_shrink;
                 float shrink_amount = (float)(shrink_ratio * (-remaining_free_space));
                 target_size = current_size - shrink_amount;
@@ -3361,7 +3459,7 @@ void distribute_free_space(FlexLineInfo* line, bool is_growing) {
     // Distribute space proportionally
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = (ViewElement*)line->items[i]->as_element();
-        float flex_factor = item && item->fi ? (is_growing ? item->fi->flex_grow : item->fi->flex_shrink) : 0.0f;
+        float flex_factor = is_growing ? get_item_flex_grow(item) : get_item_flex_shrink(item);
 
         if (flex_factor > 0) {
             int space_to_distribute = (int)((flex_factor / total_flex) * free_space);
