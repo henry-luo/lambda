@@ -584,7 +584,10 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE || tag_id == HTM_TAG_SVG ||
             tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
             tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
-            tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA) {
+            tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA ||
+            tag_id == HTM_TAG_OPTION || tag_id == HTM_TAG_OPTGROUP) {
+            // Option/optgroup elements inside <select> are rendered by the select control itself,
+            // not as normal DOM layout elements. Browsers report 0x0 dimensions for them.
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
         } else if (tag_id == HTM_TAG_TABLE) {
@@ -846,7 +849,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         log_debug("resolving function: %s() with %d args", func->name, func->arg_count);
-        
+
         if (strcmp(func->name, "calc") == 0) {
             // calc() expression - evaluate the expression
             // For now, handle simple cases like "calc(100% - 2rem)"
@@ -858,15 +861,15 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     CssValue* val1 = arg->data.list.values[0];
                     CssValue* op = arg->data.list.values[1];
                     CssValue* val2 = arg->data.list.values[2];
-                    
+
                     if (op && op->type == CSS_VALUE_TYPE_KEYWORD) {
                         float left = resolve_length_value(lycon, property, val1);
                         float right = resolve_length_value(lycon, property, val2);
                         const CssEnumInfo* op_info = css_enum_info(op->data.keyword);
                         const char* op_name = op_info ? op_info->name : "";
-                        
+
                         log_debug("calc: %.2f %s %.2f", left, op_name, right);
-                        
+
                         if (strcmp(op_name, "+") == 0) {
                             result = left + right;
                         } else if (strcmp(op_name, "-") == 0) {
@@ -884,9 +887,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                         float left = resolve_length_value(lycon, property, val1);
                         float right = resolve_length_value(lycon, property, val2);
                         const char* op_name = op->data.custom_property.name;
-                        
+
                         log_debug("calc (custom op): %.2f %s %.2f", left, op_name, right);
-                        
+
                         if (strcmp(op_name, "+") == 0) {
                             result = left + right;
                         } else if (strcmp(op_name, "-") == 0) {
@@ -908,14 +911,14 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     // Parse through the list: value op value op value ...
                     result = 0;
                     char pending_op = '+';  // Start with implicit + 0
-                    
+
                     for (int i = 0; i < arg->data.list.count; i++) {
                         CssValue* item = arg->data.list.values[i];
                         if (!item) continue;
-                        
+
                         bool is_operator = false;
                         const char* op_name = NULL;
-                        
+
                         if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                             const CssEnumInfo* op_info = css_enum_info(item->data.keyword);
                             op_name = op_info ? op_info->name : "";
@@ -923,12 +926,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                         } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
                             op_name = item->data.custom_property.name;
                             // Check if this looks like an operator
-                            if (strlen(op_name) == 1 && (op_name[0] == '+' || op_name[0] == '-' || 
+                            if (strlen(op_name) == 1 && (op_name[0] == '+' || op_name[0] == '-' ||
                                                          op_name[0] == '*' || op_name[0] == '/')) {
                                 is_operator = true;
                             }
                         }
-                        
+
                         if (is_operator && op_name) {
                             if (strcmp(op_name, "+") == 0) pending_op = '+';
                             else if (strcmp(op_name, "-") == 0) pending_op = '-';
@@ -2298,6 +2301,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (block) {
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_height = height;
+                block->blk->given_height_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
                 // Store raw percentage for flex item re-resolution
                 if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     block->blk->given_height_percent = value->data.percentage.value;
@@ -5924,9 +5928,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     for (int i = arg_idx; i < func->arg_count && stop_idx < lg->stop_count; i++) {
                         CssValue* arg = func->args[i];
                         if (!arg) continue;
-                        
+
                         log_debug("[CSS Gradient] arg %d type=%d", i, arg->type);
-                        
+
                         if (arg->type == CSS_VALUE_TYPE_COLOR) {
                             // Simple color without position
                             lg->stops[stop_idx].color = resolve_color_value(arg);
@@ -5940,7 +5944,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             if (items[0] && items[0]->type == CSS_VALUE_TYPE_COLOR) {
                                 lg->stops[stop_idx].color = resolve_color_value(items[0]);
                                 lg->stops[stop_idx].position = -1;  // default auto
-                                
+
                                 // Parse position if present
                                 if (arg->data.list.count >= 2 && items[1]) {
                                     CssValue* pos_val = items[1];
@@ -5950,9 +5954,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                         lg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
                                     }
                                 }
-                                
+
                                 log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x pos=%.2f", stop_idx,
-                                    lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, 
+                                    lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g,
                                     lg->stops[stop_idx].color.b, lg->stops[stop_idx].position);
                                 stop_idx++;
                             }

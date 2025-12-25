@@ -95,7 +95,12 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
  * Called from layout_block when element has item_prop_type == ITEM_PROP_FORM.
  */
 void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
+    log_info("[FORM] layout_form_control ENTRY: block=%p, prop_type=%d, form=%p, tag=%s",
+             block, block ? block->item_prop_type : -1, block ? block->form : nullptr,
+             (block && block->tag_name) ? block->tag_name : "?");
     if (!block || block->item_prop_type != DomElement::ITEM_PROP_FORM || !block->form) {
+        log_info("[FORM] layout_form_control SKIP: block=%p, prop_type=%d, form=%p",
+                 block, block ? block->item_prop_type : -1, block ? block->form : nullptr);
         return;
     }
 
@@ -169,6 +174,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         padding_h = block->bound->padding.left + block->bound->padding.right;
         padding_v = block->bound->padding.top + block->bound->padding.bottom;
     }
+
+    log_debug("[FORM] layout: intrinsic=%.1fx%.1f, given=%.1fx%.1f, border=%.1f/%.1f, padding=%.1f/%.1f",
+              form->intrinsic_width, form->intrinsic_height,
+              block->blk ? block->blk->given_width : -1, block->blk ? block->blk->given_height : -1,
+              border_h, border_v, padding_h, padding_v);
 
     // Set final dimensions (border-box sizing for form controls)
     block->width = width;
