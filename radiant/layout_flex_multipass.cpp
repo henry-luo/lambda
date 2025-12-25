@@ -18,6 +18,9 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 // External function for laying out absolute positioned children
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
+// External function from layout.cpp for whitespace detection
+extern bool is_only_whitespace(const char* str);
+
 // External function for printing view tree
 extern void print_view_block(ViewBlock* block, StrBuf* buf, int indent);
 
@@ -826,6 +829,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
         // First, create lightweight Views for the nested container's children
         // WITHOUT laying them out (the flex algorithm will position/size them)
+        // TEXT NODES: Direct text children of flex containers become anonymous flex items
+        // per CSS Flexbox spec. We handle them via layout_flow_node after the flex algorithm.
         DomNode* child = flex_item->first_child;
         if (child) {
             log_debug("Creating lightweight Views for nested flex children");
@@ -834,6 +839,14 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     log_debug("NESTED FLEX: Creating lightweight View for child %s", child->node_name());
                     // CRITICAL: Just create the View structure without layout
                     init_flex_item_view(lycon, child);
+                } else if (child->is_text()) {
+                    // Text nodes in flex containers become anonymous flex items
+                    // Check if non-whitespace text
+                    const char* text = (const char*)child->text_data();
+                    bool is_whitespace_only = is_only_whitespace(text);
+                    if (!is_whitespace_only) {
+                        log_debug("NESTED FLEX: Found text flex item: '%.30s...'", text ? text : "(null)");
+                    }
                 }
                 child = child->next_sibling;
             } while (child);
@@ -845,6 +858,81 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
         // CRITICAL: Lay out absolute positioned children of the nested flex container
         layout_flex_absolute_children(lycon, flex_item);
+
+        // CRITICAL: Handle text nodes as anonymous flex items
+        // Text nodes in flex containers become anonymous flex items per CSS spec.
+        // After the flex algorithm positions element children, we need to lay out
+        // text nodes alongside them.
+        {
+            // Get flex direction from the nested flex container (flex_item itself)
+            FlexProp* nested_flex_prop = flex_item->embed ? flex_item->embed->flex : nullptr;
+            int flex_direction = nested_flex_prop ? nested_flex_prop->direction : CSS_VALUE_ROW;
+            bool is_row = (flex_direction == CSS_VALUE_ROW || flex_direction == CSS_VALUE_ROW_REVERSE);
+
+            // Find the end position of the last flex item (where text should start)
+            float text_start_x = 0;
+            float text_start_y = 0;
+            View* last_flex_child = nullptr;
+            View* child_view = flex_item->first_child;
+            while (child_view) {
+                if (child_view->view_type == RDT_VIEW_BLOCK ||
+                    child_view->view_type == RDT_VIEW_INLINE_BLOCK) {
+                    ViewBlock* child_block = (ViewBlock*)child_view;
+                    if (is_row) {
+                        // For row flex, text starts after the rightmost edge of items
+                        float item_end = child_block->x + child_block->width;
+                        if (item_end > text_start_x) {
+                            text_start_x = item_end;
+                            last_flex_child = child_view;
+                        }
+                        // Y position should be for vertical centering (handled below)
+                    } else {
+                        // For column flex, text starts below the lowest item
+                        float item_end = child_block->y + child_block->height;
+                        if (item_end > text_start_y) {
+                            text_start_y = item_end;
+                            last_flex_child = child_view;
+                        }
+                    }
+                }
+                child_view = child_view->next();
+            }
+
+            // Now lay out text nodes after the flex items
+            DomNode* text_child = flex_item->first_child;
+            while (text_child) {
+                if (text_child->is_text()) {
+                    const char* text = (const char*)text_child->text_data();
+                    if (text && !is_only_whitespace(text)) {
+                        log_debug("NESTED FLEX: Laying out text flex item at x=%.1f: '%.30s...'",
+                                  text_start_x, text);
+
+                        // Set up line context to start after the last flex item
+                        if (is_row) {
+                            lycon->line.advance_x = text_start_x;
+                            lycon->line.left = text_start_x;
+                            // For row flex with align-items: center, we need to center the text
+                            // This is handled by layout_text using baseline alignment
+                        }
+
+                        // Use layout_flow_node to handle the text as inline content
+                        layout_flow_node(lycon, text_child);
+
+                        // Update text_start for next text node
+                        if (is_row) {
+                            text_start_x = lycon->line.advance_x;
+                        } else {
+                            text_start_y = lycon->block.advance_y;
+                        }
+                    }
+                }
+                text_child = text_child->next_sibling;
+            }
+            // Finalize any pending inline content
+            if (!lycon->line.is_line_start) {
+                line_break(lycon);
+            }
+        }
 
         log_info(">>> NESTED FLEX: Checking child coordinates after algorithm");
         View* nested_child = flex_item->first_child;
