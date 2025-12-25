@@ -4,6 +4,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font_config.h"
 #include <string.h>
+#include <cmath>
 #include FT_TRUETYPE_TABLES_H
 
 /**
@@ -836,9 +837,140 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         }
         break;
     }
+    case CSS_VALUE_TYPE_FUNCTION: {
+        // handle calc() and other CSS functions that return length values
+        CssFunction* func = value->data.function;
+        if (!func || !func->name) {
+            log_warn("function value with no name");
+            result = NAN;  // Use NAN to indicate unresolvable value
+            break;
+        }
+        log_debug("resolving function: %s() with %d args", func->name, func->arg_count);
+        
+        if (strcmp(func->name, "calc") == 0) {
+            // calc() expression - evaluate the expression
+            // For now, handle simple cases like "calc(100% - 2rem)"
+            if (func->arg_count >= 1 && func->args && func->args[0]) {
+                // Check for simple binary operations in a list value
+                CssValue* arg = func->args[0];
+                if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count == 3) {
+                    // Expect: <value1> <operator> <value2>
+                    CssValue* val1 = arg->data.list.values[0];
+                    CssValue* op = arg->data.list.values[1];
+                    CssValue* val2 = arg->data.list.values[2];
+                    
+                    if (op && op->type == CSS_VALUE_TYPE_KEYWORD) {
+                        float left = resolve_length_value(lycon, property, val1);
+                        float right = resolve_length_value(lycon, property, val2);
+                        const CssEnumInfo* op_info = css_enum_info(op->data.keyword);
+                        const char* op_name = op_info ? op_info->name : "";
+                        
+                        log_debug("calc: %.2f %s %.2f", left, op_name, right);
+                        
+                        if (strcmp(op_name, "+") == 0) {
+                            result = left + right;
+                        } else if (strcmp(op_name, "-") == 0) {
+                            result = left - right;
+                        } else if (strcmp(op_name, "*") == 0) {
+                            result = left * right;
+                        } else if (strcmp(op_name, "/") == 0) {
+                            result = right != 0 ? left / right : 0;
+                        } else {
+                            log_warn("calc: unknown operator '%s'", op_name);
+                            result = NAN;
+                        }
+                    } else if (op && op->type == CSS_VALUE_TYPE_CUSTOM && op->data.custom_property.name) {
+                        // Operator stored as custom property (e.g. "-" parsed as CSS_TOKEN_DELIM)
+                        float left = resolve_length_value(lycon, property, val1);
+                        float right = resolve_length_value(lycon, property, val2);
+                        const char* op_name = op->data.custom_property.name;
+                        
+                        log_debug("calc (custom op): %.2f %s %.2f", left, op_name, right);
+                        
+                        if (strcmp(op_name, "+") == 0) {
+                            result = left + right;
+                        } else if (strcmp(op_name, "-") == 0) {
+                            result = left - right;
+                        } else if (strcmp(op_name, "*") == 0) {
+                            result = left * right;
+                        } else if (strcmp(op_name, "/") == 0) {
+                            result = right != 0 ? left / right : 0;
+                        } else {
+                            log_warn("calc: unknown operator '%s'", op_name);
+                            result = NAN;
+                        }
+                    } else {
+                        log_warn("calc: operator is not a keyword or custom (type=%d)", op ? op->type : -1);
+                        result = NAN;
+                    }
+                } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
+                    // Try to evaluate as a simple expression with alternating values and operators
+                    // Parse through the list: value op value op value ...
+                    result = 0;
+                    char pending_op = '+';  // Start with implicit + 0
+                    
+                    for (int i = 0; i < arg->data.list.count; i++) {
+                        CssValue* item = arg->data.list.values[i];
+                        if (!item) continue;
+                        
+                        bool is_operator = false;
+                        const char* op_name = NULL;
+                        
+                        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* op_info = css_enum_info(item->data.keyword);
+                            op_name = op_info ? op_info->name : "";
+                            is_operator = true;
+                        } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                            op_name = item->data.custom_property.name;
+                            // Check if this looks like an operator
+                            if (strlen(op_name) == 1 && (op_name[0] == '+' || op_name[0] == '-' || 
+                                                         op_name[0] == '*' || op_name[0] == '/')) {
+                                is_operator = true;
+                            }
+                        }
+                        
+                        if (is_operator && op_name) {
+                            if (strcmp(op_name, "+") == 0) pending_op = '+';
+                            else if (strcmp(op_name, "-") == 0) pending_op = '-';
+                            else if (strcmp(op_name, "*") == 0) pending_op = '*';
+                            else if (strcmp(op_name, "/") == 0) pending_op = '/';
+                        } else {
+                            // This is a value
+                            float val = resolve_length_value(lycon, property, item);
+                            if (!std::isnan(val)) {
+                                switch (pending_op) {
+                                    case '+': result += val; break;
+                                    case '-': result -= val; break;
+                                    case '*': result *= val; break;
+                                    case '/': result = val != 0 ? result / val : result; break;
+                                }
+                            }
+                            pending_op = '+';  // Reset to + for next value
+                        }
+                    }
+                    log_debug("calc list expression result: %.2f", result);
+                } else {
+                    // Single value in calc - just resolve it
+                    result = resolve_length_value(lycon, property, arg);
+                }
+            } else {
+                log_warn("calc() with no arguments");
+                result = NAN;
+            }
+        } else if (strcmp(func->name, "min") == 0 || strcmp(func->name, "max") == 0 ||
+                   strcmp(func->name, "clamp") == 0) {
+            // min(), max(), clamp() functions
+            log_debug("CSS function %s() not yet implemented, treating as unset", func->name);
+            result = NAN;
+        } else {
+            log_warn("unknown CSS function: %s()", func->name);
+            result = NAN;
+        }
+        break;
+    }
     default:
         log_warn("unknown length value type: %d", value->type);
-        result = 0.0f;
+        result = NAN;  // Use NAN instead of 0 to indicate unresolvable value
         break;
     }
     log_debug("resolved length value: type %d -> %.2f px", value->type, result);
@@ -2181,8 +2313,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing min-width property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            block->blk->given_min_width = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, value);
-            log_debug("[CSS] Min-width: %.2f px", block->blk->given_min_width);
+            float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, value);
+            // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
+            if (std::isnan(resolved)) {
+                block->blk->given_min_width = 0;
+                log_debug("[CSS] Min-width: unresolvable value (e.g. calc), treating as 0");
+            } else {
+                block->blk->given_min_width = resolved;
+                log_debug("[CSS] Min-width: %.2f px", block->blk->given_min_width);
+            }
             break;
         }
 
@@ -2198,8 +2337,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->blk->given_max_width = -1;  // -1 means 'none' (unconstrained)
                 log_debug("[CSS] Max-width: percentage on 0-width parent, treating as 'none'");
             } else {
-                block->blk->given_max_width = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
-                log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
+                float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
+                // If resolve_length_value returns NAN (unresolvable), treat as 'none' (-1)
+                if (std::isnan(resolved)) {
+                    block->blk->given_max_width = -1;
+                    log_debug("[CSS] Max-width: unresolvable value (e.g. calc), treating as 'none'");
+                } else {
+                    block->blk->given_max_width = resolved;
+                    log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
+                }
             }
             break;
         }
@@ -2208,8 +2354,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing min-height property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            block->blk->given_min_height = resolve_length_value(lycon, CSS_PROPERTY_MIN_HEIGHT, value);
-            log_debug("[CSS] Min-height: %.2f px", block->blk->given_min_height);
+            float resolved = resolve_length_value(lycon, CSS_PROPERTY_MIN_HEIGHT, value);
+            // If resolve_length_value returns NAN (unresolvable), treat as 0 (no minimum)
+            if (std::isnan(resolved)) {
+                block->blk->given_min_height = 0;
+                log_debug("[CSS] Min-height: unresolvable value (e.g. calc), treating as 0");
+            } else {
+                block->blk->given_min_height = resolved;
+                log_debug("[CSS] Min-height: %.2f px", block->blk->given_min_height);
+            }
             break;
         }
 
@@ -2217,8 +2370,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing max-height property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            block->blk->given_max_height = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);
-            log_debug("[CSS] Max-height: %.2f px", block->blk->given_max_height);
+            float resolved = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);
+            // If resolve_length_value returns NAN (unresolvable), treat as 'none' (-1)
+            if (std::isnan(resolved)) {
+                block->blk->given_max_height = -1;
+                log_debug("[CSS] Max-height: unresolvable value (e.g. calc), treating as 'none'");
+            } else {
+                block->blk->given_max_height = resolved;
+                log_debug("[CSS] Max-height: %.2f px", block->blk->given_max_height);
+            }
             break;
         }
 
