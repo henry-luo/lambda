@@ -490,6 +490,46 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             measured_height = content_height;
             content_width = (int)elem->form->intrinsic_width;
             measured_width = content_width;
+
+            // Special handling for buttons with child content (e.g., <button>Subscribe</button>)
+            // The intrinsic_width may not be set because buttons go through normal layout flow
+            if (elem->form->control_type == FORM_CONTROL_BUTTON &&
+                elem->form->intrinsic_width <= 0 && elem->first_child) {
+                // Measure text content of button
+                DomNode* btn_child = elem->first_child;
+                float max_text_width = 0;
+                while (btn_child) {
+                    if (btn_child->is_text()) {
+                        const char* text = (const char*)btn_child->text_data();
+                        if (text && *text) {
+                            size_t len = strlen(text);
+                            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len);
+                            if (widths.max_content > max_text_width) {
+                                max_text_width = widths.max_content;
+                            }
+                        }
+                    }
+                    btn_child = btn_child->next_sibling;
+                }
+                if (max_text_width > 0) {
+                    // Store intrinsic size in form property for flex-basis calculation
+                    // Use FormDefaults::TEXT_HEIGHT to match input element height
+                    elem->form->intrinsic_width = max_text_width;
+                    elem->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
+
+                    // Update content sizes (intrinsic, without padding/border)
+                    // Padding/border will be added below in the generic code
+                    content_width = (int)max_text_width;
+                    measured_width = content_width;
+                    content_height = (int)FormDefaults::TEXT_HEIGHT;
+                    measured_height = content_height;
+
+                    log_debug("Button %s: measured text content width=%.1f, intrinsic=%dx%d",
+                              child->node_name(), max_text_width,
+                              (int)elem->form->intrinsic_width, (int)elem->form->intrinsic_height);
+                }
+            }
+
             log_debug("Form control %s: using intrinsic size %dx%d",
                       child->node_name(), measured_width, measured_height);
         }
