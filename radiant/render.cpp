@@ -884,6 +884,10 @@ void render_children(RenderContext* rdcon, View* view) {
                       block->embed ? block->embed->img : NULL, block->width, block->height);
             if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
                 // Form control rendering (input, select, textarea, button)
+                // First render the block (background, borders, children) then form-specific decoration
+                log_debug("[RENDER DISPATCH] calling render_block_view for form control");
+                render_block_view(rdcon, block);
+                // Now render form-specific decorations (checkboxes, radio buttons, etc.)
                 log_debug("[RENDER DISPATCH] calling render_form_control");
                 render_form_control(rdcon, block);
             }
