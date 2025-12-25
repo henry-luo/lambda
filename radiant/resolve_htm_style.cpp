@@ -1,5 +1,7 @@
 #include "layout.hpp"
+#include "form_control.hpp"
 #include <cstdlib>  // for strtol
+#include <new>      // for placement new
 
 // Direct declaration of the actual C symbol (compiler will add underscore)
 extern "C" int strview_to_int(StrView* s);
@@ -698,6 +700,144 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->padding.left = block->bound->padding.right = 6 * lycon->ui_context->pixel_ratio;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
             block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+        break;
+    case HTM_TAG_INPUT: {
+        // Allocate form control prop
+        float pr = lycon->ui_context->pixel_ratio;
+        block->item_prop_type = DomElement::ITEM_PROP_FORM;
+        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+        new (block->form) FormControlProp();  // placement new for constructor
+
+        // Parse type attribute
+        const char* type = block->get_attribute("type");
+        block->form->input_type = type;
+        block->form->control_type = get_input_control_type(type);
+
+        // Parse common attributes
+        block->form->value = block->get_attribute("value");
+        block->form->placeholder = block->get_attribute("placeholder");
+        block->form->name = block->get_attribute("name");
+
+        // Parse size attribute for text inputs
+        const char* size_attr = block->get_attribute("size");
+        if (size_attr) {
+            block->form->size = atoi(size_attr);
+            if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
+        }
+
+        // Parse state attributes
+        if (block->get_attribute("disabled")) block->form->disabled = 1;
+        if (block->get_attribute("readonly")) block->form->readonly = 1;
+        if (block->get_attribute("checked")) block->form->checked = 1;
+        if (block->get_attribute("required")) block->form->required = 1;
+
+        // Set display and intrinsic size based on control type
+        switch (block->form->control_type) {
+        case FORM_CONTROL_HIDDEN:
+            block->display.outer = CSS_VALUE_NONE;
+            break;
+        case FORM_CONTROL_CHECKBOX:
+        case FORM_CONTROL_RADIO:
+            block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->form->intrinsic_width = FormDefaults::CHECK_SIZE * pr;
+            block->form->intrinsic_height = FormDefaults::CHECK_SIZE * pr;
+            break;
+        case FORM_CONTROL_BUTTON:
+            block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            // Button intrinsic size depends on value text - computed in layout
+            break;
+        case FORM_CONTROL_RANGE: {
+            block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->form->intrinsic_width = FormDefaults::RANGE_WIDTH * pr;
+            block->form->intrinsic_height = FormDefaults::RANGE_HEIGHT * pr;
+            // Parse range attributes
+            const char* min_attr = block->get_attribute("min");
+            const char* max_attr = block->get_attribute("max");
+            const char* step_attr = block->get_attribute("step");
+            if (min_attr) block->form->range_min = atof(min_attr);
+            if (max_attr) block->form->range_max = atof(max_attr);
+            if (step_attr) block->form->range_step = atof(step_attr);
+            if (block->form->value) {
+                float val = atof(block->form->value);
+                block->form->range_value = (val - block->form->range_min) /
+                    (block->form->range_max - block->form->range_min);
+            }
+            break;
+        }
+        default:  // FORM_CONTROL_TEXT
+            block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->form->intrinsic_width = FormDefaults::TEXT_WIDTH * pr;
+            block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * pr;
+            // Default border for text inputs
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            block->bound->border->width.top = block->bound->border->width.right =
+                block->bound->border->width.bottom = block->bound->border->width.left = 1 * pr;
+            block->bound->border->top_style = block->bound->border->right_style =
+                block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_SOLID;
+            block->bound->border->top_color.r = block->bound->border->right_color.r =
+                block->bound->border->bottom_color.r = block->bound->border->left_color.r = 118;
+            block->bound->border->top_color.g = block->bound->border->right_color.g =
+                block->bound->border->bottom_color.g = block->bound->border->left_color.g = 118;
+            block->bound->border->top_color.b = block->bound->border->right_color.b =
+                block->bound->border->bottom_color.b = block->bound->border->left_color.b = 118;
+            block->bound->border->top_color.a = block->bound->border->right_color.a =
+                block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
+            block->bound->padding.top = block->bound->padding.bottom = FormDefaults::TEXT_PADDING_V * pr;
+            block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXT_PADDING_H * pr;
+            break;
+        }
+        break;
+    }
+    case HTM_TAG_SELECT: {
+        float pr = lycon->ui_context->pixel_ratio;
+        block->item_prop_type = DomElement::ITEM_PROP_FORM;
+        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+        new (block->form) FormControlProp();
+        block->form->control_type = FORM_CONTROL_SELECT;
+        block->form->name = block->get_attribute("name");
+        if (block->get_attribute("disabled")) block->form->disabled = 1;
+        if (block->get_attribute("multiple")) block->form->multiple = 1;
+        block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        block->form->intrinsic_width = FormDefaults::SELECT_WIDTH * pr;
+        block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT * pr;
+        // Default border
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+        block->bound->border->width.top = block->bound->border->width.right =
+            block->bound->border->width.bottom = block->bound->border->width.left = 1 * pr;
+        break;
+    }
+    case HTM_TAG_TEXTAREA: {
+        float pr = lycon->ui_context->pixel_ratio;
+        block->item_prop_type = DomElement::ITEM_PROP_FORM;
+        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+        new (block->form) FormControlProp();
+        block->form->control_type = FORM_CONTROL_TEXTAREA;
+        block->form->name = block->get_attribute("name");
+        block->form->placeholder = block->get_attribute("placeholder");
+        if (block->get_attribute("disabled")) block->form->disabled = 1;
+        if (block->get_attribute("readonly")) block->form->readonly = 1;
+        // Parse cols/rows
+        const char* cols_attr = block->get_attribute("cols");
+        const char* rows_attr = block->get_attribute("rows");
+        if (cols_attr) block->form->cols = atoi(cols_attr);
+        if (rows_attr) block->form->rows = atoi(rows_attr);
+        block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        // Intrinsic size based on cols/rows - computed in layout with font metrics
+        block->form->intrinsic_width = FormDefaults::TEXT_WIDTH * pr;  // placeholder
+        block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * 2 * pr;  // 2 rows default
+        // Default border and padding
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+        block->bound->border->width.top = block->bound->border->width.right =
+            block->bound->border->width.bottom = block->bound->border->width.left = 1 * pr;
+        block->bound->padding.top = block->bound->padding.bottom =
+            block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXTAREA_PADDING * pr;
+        break;
+    }
+    case HTM_TAG_LABEL:
+        // label is inline by default, no special styling
         break;
     // ========== Semantic/sectioning elements with no visual default ==========
     case HTM_TAG_ARTICLE:  case HTM_TAG_SECTION:  case HTM_TAG_NAV:

@@ -3,6 +3,7 @@
 #include "render_border.hpp"
 #include "render_background.hpp"
 #include "layout.hpp"
+#include "form_control.hpp"
 #include "../lib/log.h"
 #include "../lib/avl_tree.h"
 #include "../lambda/input/css/css_style.hpp"
@@ -48,6 +49,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
+void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 
 // draw a color glyph bitmap (BGRA format, used for color emoji) into the doc surface
 void draw_color_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
@@ -577,7 +579,7 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
         rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top);
         rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right);
         rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + block->scroller->clip.bottom);
-        
+
         // Copy border-radius for rounded corner clipping when overflow:hidden
         if (block->bound && block->bound->border) {
             BorderProp* border = block->bound->border;
@@ -880,7 +882,12 @@ void render_children(RenderContext* rdcon, View* view) {
             log_debug("[RENDER DISPATCH] view_type=%d, embed=%p, img=%p, width=%.0f, height=%.0f",
                       view->view_type, block->embed,
                       block->embed ? block->embed->img : NULL, block->width, block->height);
-            if (block->embed && block->embed->img) {
+            if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
+                // Form control rendering (input, select, textarea, button)
+                log_debug("[RENDER DISPATCH] calling render_form_control");
+                render_form_control(rdcon, block);
+            }
+            else if (block->embed && block->embed->img) {
                 log_debug("[RENDER DISPATCH] calling render_image_view");
                 render_image_view(rdcon, block);
             }
