@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "grid.hpp"
+#include "form_control.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font_config.h"
@@ -543,6 +544,80 @@ DisplayValue resolve_display_value(void* child) {
                                 display.inner = CSS_VALUE_TABLE_CAPTION;
                                 return display;
                             }
+                        } else if (decl->value->type == CSS_VALUE_TYPE_LIST) {
+                            // Handle CSS Display Level 3 two-value syntax: "display: <outer> <inner>"
+                            // e.g., "display: block flow", "display: inline flow", etc.
+                            CssValue** values = decl->value->data.list.values;
+                            int count = decl->value->data.list.count;
+                            log_debug("[CSS] display LIST value with %d items", count);
+
+                            if (count >= 2 && values[0] && values[1] &&
+                                values[0]->type == CSS_VALUE_TYPE_KEYWORD &&
+                                values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum outer_kw = values[0]->data.keyword;
+                                CssEnum inner_kw = values[1]->data.keyword;
+                                log_debug("[CSS] two-value display: outer=%d, inner=%d", outer_kw, inner_kw);
+
+                                // Map outer display keyword
+                                if (outer_kw == CSS_VALUE_BLOCK) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                } else if (outer_kw == CSS_VALUE_INLINE) {
+                                    display.outer = CSS_VALUE_INLINE;
+                                } else if (outer_kw == CSS_VALUE_RUN_IN) {
+                                    display.outer = CSS_VALUE_INLINE; // run-in treated as inline fallback
+                                } else {
+                                    display.outer = CSS_VALUE_BLOCK; // default to block
+                                }
+
+                                // Map inner display keyword
+                                if (inner_kw == CSS_VALUE_FLOW) {
+                                    display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                                } else if (inner_kw == CSS_VALUE_FLOW_ROOT) {
+                                    display.inner = CSS_VALUE_FLOW_ROOT;
+                                } else if (inner_kw == CSS_VALUE_FLEX) {
+                                    display.inner = CSS_VALUE_FLEX;
+                                } else if (inner_kw == CSS_VALUE_GRID) {
+                                    display.inner = CSS_VALUE_GRID;
+                                } else if (inner_kw == CSS_VALUE_TABLE) {
+                                    display.inner = CSS_VALUE_TABLE;
+                                } else if (inner_kw == CSS_VALUE_RUBY) {
+                                    display.inner = CSS_VALUE_RUBY;
+                                } else {
+                                    display.inner = CSS_VALUE_FLOW; // default to flow
+                                }
+
+                                log_debug("[CSS] ✅ Resolved two-value display: outer=%d, inner=%d",
+                                    display.outer, display.inner);
+                                return display;
+                            } else if (count == 1 && values[0] &&
+                                       values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                                // Single keyword in list (edge case)
+                                CssEnum keyword = values[0]->data.keyword;
+                                log_debug("[CSS] single keyword in list: %d", keyword);
+                                // Handle same as single keyword (fall through to regular logic won't work here)
+                                // Re-use the single keyword logic
+                                if (keyword == CSS_VALUE_BLOCK) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                    display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_INLINE) {
+                                    display.outer = CSS_VALUE_INLINE;
+                                    display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_FLEX) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                    display.inner = CSS_VALUE_FLEX;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_GRID) {
+                                    display.outer = CSS_VALUE_BLOCK;
+                                    display.inner = CSS_VALUE_GRID;
+                                    return display;
+                                } else if (keyword == CSS_VALUE_NONE) {
+                                    display.outer = CSS_VALUE_NONE;
+                                    display.inner = CSS_VALUE_NONE;
+                                    return display;
+                                }
+                            }
                         }
                     }
                 }
@@ -581,10 +656,17 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_HR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE || tag_id == HTM_TAG_SVG ||
+        } else if (tag_id == HTM_TAG_SVG) {
+            // SVG elements are inline replaced elements by default
+            display.outer = CSS_VALUE_INLINE;
+            display.inner = RDT_DISPLAY_REPLACED;
+        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE ||
             tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
             tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
-            tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA) {
+            tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA ||
+            tag_id == HTM_TAG_OPTION || tag_id == HTM_TAG_OPTGROUP) {
+            // Option/optgroup elements inside <select> are rendered by the select control itself,
+            // not as normal DOM layout elements. Browsers report 0x0 dimensions for them.
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
         } else if (tag_id == HTM_TAG_TABLE) {
@@ -846,7 +928,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         log_debug("resolving function: %s() with %d args", func->name, func->arg_count);
-        
+
         if (strcmp(func->name, "calc") == 0) {
             // calc() expression - evaluate the expression
             // For now, handle simple cases like "calc(100% - 2rem)"
@@ -858,15 +940,15 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     CssValue* val1 = arg->data.list.values[0];
                     CssValue* op = arg->data.list.values[1];
                     CssValue* val2 = arg->data.list.values[2];
-                    
+
                     if (op && op->type == CSS_VALUE_TYPE_KEYWORD) {
                         float left = resolve_length_value(lycon, property, val1);
                         float right = resolve_length_value(lycon, property, val2);
                         const CssEnumInfo* op_info = css_enum_info(op->data.keyword);
                         const char* op_name = op_info ? op_info->name : "";
-                        
+
                         log_debug("calc: %.2f %s %.2f", left, op_name, right);
-                        
+
                         if (strcmp(op_name, "+") == 0) {
                             result = left + right;
                         } else if (strcmp(op_name, "-") == 0) {
@@ -884,9 +966,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                         float left = resolve_length_value(lycon, property, val1);
                         float right = resolve_length_value(lycon, property, val2);
                         const char* op_name = op->data.custom_property.name;
-                        
+
                         log_debug("calc (custom op): %.2f %s %.2f", left, op_name, right);
-                        
+
                         if (strcmp(op_name, "+") == 0) {
                             result = left + right;
                         } else if (strcmp(op_name, "-") == 0) {
@@ -908,14 +990,14 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     // Parse through the list: value op value op value ...
                     result = 0;
                     char pending_op = '+';  // Start with implicit + 0
-                    
+
                     for (int i = 0; i < arg->data.list.count; i++) {
                         CssValue* item = arg->data.list.values[i];
                         if (!item) continue;
-                        
+
                         bool is_operator = false;
                         const char* op_name = NULL;
-                        
+
                         if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                             const CssEnumInfo* op_info = css_enum_info(item->data.keyword);
                             op_name = op_info ? op_info->name : "";
@@ -923,12 +1005,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                         } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
                             op_name = item->data.custom_property.name;
                             // Check if this looks like an operator
-                            if (strlen(op_name) == 1 && (op_name[0] == '+' || op_name[0] == '-' || 
+                            if (strlen(op_name) == 1 && (op_name[0] == '+' || op_name[0] == '-' ||
                                                          op_name[0] == '*' || op_name[0] == '/')) {
                                 is_operator = true;
                             }
                         }
-                        
+
                         if (is_operator && op_name) {
                             if (strcmp(op_name, "+") == 0) pending_op = '+';
                             else if (strcmp(op_name, "-") == 0) pending_op = '-';
@@ -2298,6 +2380,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (block) {
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_height = height;
+                block->blk->given_height_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
                 // Store raw percentage for flex item re-resolution
                 if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     block->blk->given_height_percent = value->data.percentage.value;
@@ -5042,10 +5125,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
-            alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float grow_value = (float)value->data.number.value;
-                span->fi->flex_grow = grow_value;
+                // Form controls store flex props in FormControlProp
+                if (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form) {
+                    span->form->flex_grow = grow_value;
+                } else {
+                    alloc_flex_item_prop(lycon, span);
+                    span->fi->flex_grow = grow_value;
+                }
                 log_debug("[CSS] flex-grow: %.2f", grow_value);
             }
             break;
@@ -5053,10 +5141,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX_SHRINK: {
             log_debug("[CSS] Processing flex-shrink property");
-            alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float shrink_value = (float)value->data.number.value;
-                span->fi->flex_shrink = shrink_value;
+                // Form controls store flex props in FormControlProp
+                if (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form) {
+                    span->form->flex_shrink = shrink_value;
+                } else {
+                    alloc_flex_item_prop(lycon, span);
+                    span->fi->flex_shrink = shrink_value;
+                }
                 log_debug("[CSS] flex-shrink: %.2f", shrink_value);
             }
             break;
@@ -5064,22 +5157,42 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX_BASIS: {
             log_debug("[CSS] Processing flex-basis property");
-            alloc_flex_item_prop(lycon, span);
+            // Form controls store flex props in FormControlProp
+            bool is_form = (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form);
+            if (!is_form) {
+                alloc_flex_item_prop(lycon, span);
+            }
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                span->fi->flex_basis = -1; // -1 indicates auto
-                span->fi->flex_basis_is_percent = false;
+                if (is_form) {
+                    span->form->flex_basis = -1;
+                    span->form->flex_basis_is_percent = false;
+                } else {
+                    span->fi->flex_basis = -1; // -1 indicates auto
+                    span->fi->flex_basis_is_percent = false;
+                }
                 log_debug("[CSS] flex-basis: auto");
             } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float basis_value = resolve_length_value(lycon, prop_id, value);
-                span->fi->flex_basis = (int)basis_value;
-                span->fi->flex_basis_is_percent = false;
+                if (is_form) {
+                    span->form->flex_basis = (int)basis_value;
+                    span->form->flex_basis_is_percent = false;
+                } else {
+                    span->fi->flex_basis = (int)basis_value;
+                    span->fi->flex_basis_is_percent = false;
+                }
                 log_debug("[CSS] flex-basis: %.2fpx", basis_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // DEBUG: log raw percentage value to diagnose parsing issue
                 log_debug("[CSS DEBUG] flex-basis percentage raw: %f", value->data.percentage.value);
-                span->fi->flex_basis = (float)value->data.percentage.value;
-                span->fi->flex_basis_is_percent = true;
-                log_debug("[CSS] flex-basis: %.1f%% (stored as %.1f)", value->data.percentage.value, span->fi->flex_basis);
+                if (is_form) {
+                    span->form->flex_basis = (float)value->data.percentage.value;
+                    span->form->flex_basis_is_percent = true;
+                } else {
+                    span->fi->flex_basis = (float)value->data.percentage.value;
+                    span->fi->flex_basis_is_percent = true;
+                }
+                log_debug("[CSS] flex-basis: %.1f%% (stored as %.1f)", value->data.percentage.value,
+                    is_form ? span->form->flex_basis : span->fi->flex_basis);
             }
             break;
         }
@@ -5147,7 +5260,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FLEX: {
             log_debug("[CSS] Processing flex shorthand property");
-            alloc_flex_item_prop(lycon, span);
+            // Check if this is a form control - they store flex props in FormControlProp
+            bool is_form = (span->item_prop_type == DomElement::ITEM_PROP_FORM && span->form);
+            if (!is_form) {
+                alloc_flex_item_prop(lycon, span);
+            }
             // flex is a shorthand for flex-grow, flex-shrink, and flex-basis
             // Syntax: none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
 
@@ -5177,10 +5294,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] flex: initial -> grow=0 shrink=1 basis=auto");
                 }
 
-                span->fi->flex_grow = flex_grow;
-                span->fi->flex_shrink = flex_shrink;
-                span->fi->flex_basis = flex_basis;
-                span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                if (is_form) {
+                    span->form->flex_grow = flex_grow;
+                    span->form->flex_shrink = flex_shrink;
+                    span->form->flex_basis = flex_basis;
+                    span->form->flex_basis_is_percent = flex_basis_is_percent;
+                } else {
+                    span->fi->flex_grow = flex_grow;
+                    span->fi->flex_shrink = flex_shrink;
+                    span->fi->flex_basis = flex_basis;
+                    span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                }
                 break;
             }
 
@@ -5237,10 +5361,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] flex: <grow> -> grow=%.2f shrink=1 basis=0", flex_grow);
                 }
 
-                span->fi->flex_grow = flex_grow;
-                span->fi->flex_shrink = flex_shrink;
-                span->fi->flex_basis = flex_basis;
-                span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                if (is_form) {
+                    span->form->flex_grow = flex_grow;
+                    span->form->flex_shrink = flex_shrink;
+                    span->form->flex_basis = flex_basis;
+                    span->form->flex_basis_is_percent = flex_basis_is_percent;
+                } else {
+                    span->fi->flex_grow = flex_grow;
+                    span->fi->flex_shrink = flex_shrink;
+                    span->fi->flex_basis = flex_basis;
+                    span->fi->flex_basis_is_percent = flex_basis_is_percent;
+                }
 
                 log_debug("[CSS] flex shorthand resolved: grow=%.2f shrink=%.2f basis=%.2f%s",
                          flex_grow, flex_shrink, flex_basis,
@@ -5252,10 +5383,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 flex_shrink = 1.0f;
                 flex_basis = 0;  // 0px when single unitless number
 
-                span->fi->flex_grow = flex_grow;
-                span->fi->flex_shrink = flex_shrink;
-                span->fi->flex_basis = flex_basis;
-                span->fi->flex_basis_is_percent = false;
+                if (is_form) {
+                    span->form->flex_grow = flex_grow;
+                    span->form->flex_shrink = flex_shrink;
+                    span->form->flex_basis = flex_basis;
+                    span->form->flex_basis_is_percent = false;
+                } else {
+                    span->fi->flex_grow = flex_grow;
+                    span->fi->flex_shrink = flex_shrink;
+                    span->fi->flex_basis = flex_basis;
+                    span->fi->flex_basis_is_percent = false;
+                }
                 log_debug("[CSS] flex: %.2f -> grow=%.2f shrink=1 basis=0", flex_grow, flex_grow);
             }
             break;
@@ -5924,9 +6062,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     for (int i = arg_idx; i < func->arg_count && stop_idx < lg->stop_count; i++) {
                         CssValue* arg = func->args[i];
                         if (!arg) continue;
-                        
+
                         log_debug("[CSS Gradient] arg %d type=%d", i, arg->type);
-                        
+
                         if (arg->type == CSS_VALUE_TYPE_COLOR) {
                             // Simple color without position
                             lg->stops[stop_idx].color = resolve_color_value(arg);
@@ -5940,7 +6078,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             if (items[0] && items[0]->type == CSS_VALUE_TYPE_COLOR) {
                                 lg->stops[stop_idx].color = resolve_color_value(items[0]);
                                 lg->stops[stop_idx].position = -1;  // default auto
-                                
+
                                 // Parse position if present
                                 if (arg->data.list.count >= 2 && items[1]) {
                                     CssValue* pos_val = items[1];
@@ -5950,9 +6088,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                         lg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
                                     }
                                 }
-                                
+
                                 log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x pos=%.2f", stop_idx,
-                                    lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, 
+                                    lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g,
                                     lg->stops[stop_idx].color.b, lg->stops[stop_idx].position);
                                 stop_idx++;
                             }

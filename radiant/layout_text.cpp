@@ -435,6 +435,12 @@ void line_break(LayoutContext* lycon) {
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     float css_line_height = lycon->block.line_height;
 
+    // BUGFIX: If css_line_height is not set (0 or negative), use font-based line height
+    // This ensures text in elements without explicit line-height gets proper spacing
+    if (css_line_height <= 0) {
+        css_line_height = font_line_height;
+    }
+
     // Check if we have mixed font sizes by comparing font height to CSS height
     bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
     float used_line_height;

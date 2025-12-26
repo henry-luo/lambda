@@ -225,6 +225,8 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
 
 /**
  * Render a button control.
+ * If the button has CSS-styled background (from author stylesheet),
+ * we skip the default gray background. Otherwise, render default button appearance.
  */
 void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     float x = rdcon->block.x + block->x;
@@ -233,17 +235,25 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     float h = block->height;
     float pr = rdcon->ui_context->pixel_ratio;
 
-    // Background (light gray)
-    Color bg = form->disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
-    fill_rect(rdcon, x, y, w, h, bg);
+    // Check if button has CSS-specified background (from author stylesheet)
+    bool has_css_background = block->bound && block->bound->background &&
+                              block->bound->background->color.c != 0;
 
-    // 3D outset border (raised button appearance)
-    draw_3d_border(rdcon, x, y, w, h, false, 1 * pr);
+    if (!has_css_background) {
+        // No CSS background - render default button appearance
+        // Background (light gray)
+        Color bg = form->disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
+        fill_rect(rdcon, x, y, w, h, bg);
 
-    // Button text is rendered via normal child content rendering
-    // The text should be centered via text-align: center set in resolve_htm_style
+        // 3D outset border (raised button appearance)
+        draw_3d_border(rdcon, x, y, w, h, false, 1 * pr);
+    }
+    // If CSS background is present, it's already rendered by render_block_view
 
-    log_debug("[FORM] render_button at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
+    // Button text is rendered via normal child content rendering in render_block_view
+
+    log_debug("[FORM] render_button at (%.1f, %.1f) size %.1fx%.1f, has_css_bg=%d",
+              x, y, w, h, has_css_background);
 }
 
 /**

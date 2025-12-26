@@ -105,6 +105,13 @@ struct FormControlProp {
     float intrinsic_width;
     float intrinsic_height;
 
+    // Flex item properties (when form control is a flex item)
+    // These are needed because form controls use FormControlProp instead of FlexItemProp
+    float flex_grow;
+    float flex_shrink;
+    float flex_basis;
+    int flex_basis_is_percent : 1;
+
     // Constructor
     FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
@@ -112,7 +119,8 @@ struct FormControlProp {
         rows(FormDefaults::TEXTAREA_ROWS), maxlength(-1),
         range_min(0), range_max(100), range_step(1), range_value(0.5f),
         disabled(0), readonly(0), checked(0), required(0), autofocus(0), multiple(0),
-        intrinsic_width(0), intrinsic_height(0) {}
+        intrinsic_width(0), intrinsic_height(0),
+        flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0) {}
 };
 
 // Helper functions

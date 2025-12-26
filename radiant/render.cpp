@@ -884,6 +884,10 @@ void render_children(RenderContext* rdcon, View* view) {
                       block->embed ? block->embed->img : NULL, block->width, block->height);
             if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
                 // Form control rendering (input, select, textarea, button)
+                // First render the block (background, borders, children) then form-specific decoration
+                log_debug("[RENDER DISPATCH] calling render_block_view for form control");
+                render_block_view(rdcon, block);
+                // Now render form-specific decorations (checkboxes, radio buttons, etc.)
                 log_debug("[RENDER DISPATCH] calling render_form_control");
                 render_form_control(rdcon, block);
             }
@@ -948,6 +952,51 @@ void render_clean_up(RenderContext* rdcon) {
     tvg_canvas_destroy(rdcon->canvas);
 }
 
+/**
+ * Get the canvas background color per CSS 2.1 spec section 14.2:
+ * If the root element (html) has no background, propagate from body.
+ * Returns white (0xFFFFFFFF) as default.
+ */
+static uint32_t get_canvas_background(View* root_view) {
+    if (!root_view || root_view->view_type != RDT_VIEW_BLOCK) {
+        return 0xFFFFFFFF;  // default white
+    }
+
+    ViewBlock* html_block = (ViewBlock*)root_view;
+
+    // Check if html element has a background color
+    bool html_has_bg = html_block->bound && html_block->bound->background &&
+                       html_block->bound->background->color.a > 0;
+
+    if (html_has_bg) {
+        // HTML has background, use it for canvas
+        return html_block->bound->background->color.c;
+    }
+
+    // HTML has no background, check for body element
+    // Per CSS spec, propagate body's background to canvas
+    View* child = html_block->first_child;
+    while (child) {
+        if (child->view_type == RDT_VIEW_BLOCK) {
+            ViewBlock* child_block = (ViewBlock*)child;
+            const char* name = child_block->node_name();
+            if (name && strcasecmp(name, "body") == 0) {
+                // Found body element
+                if (child_block->bound && child_block->bound->background &&
+                    child_block->bound->background->color.a > 0) {
+                    log_debug("[RENDER] Propagating body background #%08x to canvas",
+                              child_block->bound->background->color.c);
+                    return child_block->bound->background->color.c;
+                }
+                break;
+            }
+        }
+        child = (View*)child->next_sibling;
+    }
+
+    return 0xFFFFFFFF;  // default white
+}
+
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -956,8 +1005,9 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     log_debug("Render HTML doc");
     render_init(&rdcon, uicon, view_tree);
 
-    // fill the surface with a white background
-    fill_surface_rect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF, &rdcon.block.clip);
+    // Get canvas background color (may be propagated from body per CSS spec)
+    uint32_t canvas_bg = get_canvas_background(view_tree->root);
+    fill_surface_rect(rdcon.ui_context->surface, NULL, canvas_bg, &rdcon.block.clip);
 
     auto t_init = high_resolution_clock::now();
 
