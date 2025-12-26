@@ -498,10 +498,47 @@ class PremakeGenerator:
             ])
             print("DEBUG: AddressSanitizer disabled")
 
+        # Release configuration with size optimizations
         self.premake_content.extend([
             '    filter "configurations:Release"',
             '        defines { "NDEBUG" }',
             '        optimize "On"',
+            '        -- Dead code elimination',
+            '        buildoptions {',
+            '            "-ffunction-sections",',
+            '            "-fdata-sections",',
+            '            "-fvisibility=hidden",',
+            '            "-fvisibility-inlines-hidden",',
+            '        }',
+        ])
+
+        # Platform-specific linker flags for dead code stripping
+        if self.use_macos_config:
+            self.premake_content.extend([
+                '        -- macOS: strip dead code and symbols',
+                '        linkoptions {',
+                '            "-Wl,-dead_strip",',
+                '            "-Wl,-x",  -- Strip local symbols',
+                '        }',
+            ])
+        elif self.use_linux_config:
+            self.premake_content.extend([
+                '        -- Linux: strip dead code and symbols',
+                '        linkoptions {',
+                '            "-Wl,--gc-sections",',
+                '            "-Wl,--strip-all",',
+                '        }',
+            ])
+        elif self.use_windows_config:
+            self.premake_content.extend([
+                '        -- Windows: strip dead code',
+                '        linkoptions {',
+                '            "-Wl,--gc-sections",',
+                '            "-s",  -- Strip symbols',
+                '        }',
+            ])
+
+        self.premake_content.extend([
             '    ',
         ])
 

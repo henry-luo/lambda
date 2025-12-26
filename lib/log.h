@@ -100,32 +100,69 @@ int clog_fatal(log_category_t *category, const char *format, ...);
 int clog_error(log_category_t *category, const char *format, ...);
 int clog_warn(log_category_t *category, const char *format, ...);
 int clog_notice(log_category_t *category, const char *format, ...);
-int clog_info(log_category_t *category, const char *format, ...);
-int clog_debug(log_category_t *category, const char *format, ...);
+
+/*
+ * Release build optimization: clog_debug() and clog_info() are stripped
+ * When NDEBUG is defined (release builds), these become no-ops.
+ * LOG_IMPL is defined by log.c to prevent macro replacement of function definitions.
+ */
+#if defined(NDEBUG) && !defined(LOG_IMPL)
+    #define clog_info(category, ...) ((void)0)
+    #define clog_debug(category, ...) ((void)0)
+#else
+    int clog_info(log_category_t *category, const char *format, ...);
+    int clog_debug(log_category_t *category, const char *format, ...);
+#endif
 
 /* Variadic versions with category parameter */
 int clog_vfatal(log_category_t *category, const char *format, va_list args);
 int clog_verror(log_category_t *category, const char *format, va_list args);
 int clog_vwarn(log_category_t *category, const char *format, va_list args);
 int clog_vnotice(log_category_t *category, const char *format, va_list args);
-int clog_vinfo(log_category_t *category, const char *format, va_list args);
-int clog_vdebug(log_category_t *category, const char *format, va_list args);
+
+#if defined(NDEBUG) && !defined(LOG_IMPL)
+    #define clog_vinfo(category, format, args) ((void)0)
+    #define clog_vdebug(category, format, args) ((void)0)
+#else
+    int clog_vinfo(log_category_t *category, const char *format, va_list args);
+    int clog_vdebug(log_category_t *category, const char *format, va_list args);
+#endif
 
 /* Default category logging functions (convenient API) */
 int log_fatal(const char *format, ...);
 int log_error(const char *format, ...);
 int log_warn(const char *format, ...);
 int log_notice(const char *format, ...);
-int log_info(const char *format, ...);
-int log_debug(const char *format, ...);
+
+/*
+ * Release build optimization: log_debug() and log_info() are stripped
+ * When NDEBUG is defined (release builds), these become no-ops that the
+ * compiler will completely eliminate, reducing binary size and overhead.
+ * LOG_IMPL is defined by log.c to prevent macro replacement of function definitions.
+ */
+#if defined(NDEBUG) && !defined(LOG_IMPL)
+    /* Release build: strip debug and info logging completely */
+    #define log_info(...) ((void)0)
+    #define log_debug(...) ((void)0)
+#else
+    /* Debug build: use actual logging functions */
+    int log_info(const char *format, ...);
+    int log_debug(const char *format, ...);
+#endif
 
 /* Default category variadic versions */
 int log_vfatal(const char *format, va_list args);
 int log_verror(const char *format, va_list args);
 int log_vwarn(const char *format, va_list args);
 int log_vnotice(const char *format, va_list args);
-int log_vinfo(const char *format, va_list args);
-int log_vdebug(const char *format, va_list args);
+
+#if defined(NDEBUG) && !defined(LOG_IMPL)
+    #define log_vinfo(format, args) ((void)0)
+    #define log_vdebug(format, args) ((void)0)
+#else
+    int log_vinfo(const char *format, va_list args);
+    int log_vdebug(const char *format, va_list args);
+#endif
 
 /* Level check functions */
 int log_level_enabled(log_category_t *category, const int level);

@@ -416,14 +416,18 @@
                 "std=c++17",
                 "DNDEBUG",
                 "fdiagnostics-color=auto",
-                "fno-omit-frame-pointer",
                 "O3",
-                "flto"
+                "flto",
+                "ffunction-sections",
+                "fdata-sections",
+                "fvisibility=hidden",
+                "fvisibility-inlines-hidden"
             ],
             "linker_flags": [
                 "O3",
                 "flto",
-                "s"
+                "s",
+                "Wl,-dead_strip"
             ],
             "build_dir": "build_release",
             "debug": false
