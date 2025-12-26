@@ -1,4 +1,52 @@
-@import url("base.css");
+/* Essential styles extracted from base.css for HTML viewer compatibility */
+/* Full base.css uses CSS Grid and variables that may not work in all renderers */
+
+/*************/
+/* alignment */
+/*************/
+
+.centering, .list.center {
+    text-indent: 0;
+    text-align: center;
+}
+
+.raggedright, .list.flushleft {
+    text-indent: 0;
+    text-align: left;
+}
+
+.raggedleft, .list.flushright {
+    text-indent: 0;
+    text-align: right;
+}
+
+.list.center, .list.flushleft, .list.flushright {
+    margin-left: 0 !important;
+}
+
+/****************/
+/* basic styles */
+/****************/
+
+.title {
+    text-align: center;
+    font-size: 1.7rem;
+    font-weight: bold;
+    margin-top: 2em;
+    margin-bottom: 1.5em;
+}
+
+.author {
+    text-align: center;
+    font-size: 1.2rem;
+    margin-bottom: 1em;
+}
+
+.date {
+    text-align: center;
+    font-size: 1rem;
+    margin-bottom: 1.5em;
+}
 
 
 /**************/
