@@ -20,6 +20,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <chrono>
+#include <string>
+#include <unistd.h>
+#include <limits.h>
 extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
@@ -1518,43 +1521,93 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     log_debug("[Lambda LaTeX] Dumping LaTeX input tree:");
     log_root_item(latex_input->root);
 
-    // Step 2: Convert LaTeX Element tree to HTML using format_latex_html_v2
-    // Note: format_latex_html_v2 returns HTML as Element tree (not string)
-    log_debug("[Lambda LaTeX] Converting LaTeX to HTML using format_latex_html_v2...");
-    // TEMPORARY: Use text mode to test
-    Item html_item = lambda::format_latex_html_v2(latex_input, true);  // true = return HTML string for debugging
+    // Step 2: Generate complete HTML document with external CSS links
+    log_debug("[Lambda LaTeX] Converting LaTeX to HTML with external CSS...");
 
-    if (!html_item.item) {
-        log_error("Failed to convert LaTeX to HTML");
+    // Generate HTML output path: <input_file>.html
+    std::string html_output_path = std::string(latex_filepath) + ".html";
+
+    // Compute relative path from HTML file location to conf/input/latex/
+    // We need to find how many directories deep the HTML file is from the CWD
+    char cwd[PATH_MAX];
+    if (getcwd(cwd, sizeof(cwd)) == nullptr) {
+        log_error("Failed to get current working directory");
+        return nullptr;
+    }
+    std::string cwd_str(cwd);
+    std::string html_abs_dir = html_output_path;
+    size_t last_slash = html_abs_dir.rfind('/');
+    if (last_slash != std::string::npos) {
+        html_abs_dir = html_abs_dir.substr(0, last_slash);
+    }
+
+    // Get relative path from CWD to HTML directory
+    std::string rel_html_dir;
+    if (html_abs_dir.find(cwd_str) == 0) {
+        // HTML is under CWD
+        rel_html_dir = html_abs_dir.substr(cwd_str.length());
+        if (!rel_html_dir.empty() && rel_html_dir[0] == '/') {
+            rel_html_dir = rel_html_dir.substr(1);
+        }
+    } else {
+        rel_html_dir = html_abs_dir;  // Fallback to absolute
+    }
+
+    // Count directory depth
+    int depth = 0;
+    if (!rel_html_dir.empty()) {
+        depth = 1;  // At least one directory
+        for (char c : rel_html_dir) {
+            if (c == '/') depth++;
+        }
+    }
+
+    // Build relative path: go up 'depth' levels, then into conf/input/latex/
+    std::string asset_base_url_str;
+    for (int i = 0; i < depth; i++) {
+        asset_base_url_str += "../";
+    }
+    asset_base_url_str += "conf/input/latex/";
+
+    log_debug("[Lambda LaTeX] CWD: %s, HTML dir: %s, rel: %s, depth: %d, asset URL: %s",
+              cwd_str.c_str(), html_abs_dir.c_str(), rel_html_dir.c_str(), depth, asset_base_url_str.c_str());
+
+    const char* doc_class = "article";  // Default document class
+
+    // Generate complete HTML document with linked CSS
+    const char* html_doc = format_latex_html_v2_document_c(latex_input, doc_class, asset_base_url_str.c_str(), 0);
+    if (!html_doc) {
+        log_error("Failed to generate HTML document from LaTeX");
         return nullptr;
     }
 
-    // Get HTML root element from converted output
-    Element* html_root = nullptr;
-    TypeId html_type = get_type_id(html_item);
-    if (html_type == LMD_TYPE_ELEMENT) {
-        html_root = html_item.element;
-    } else if (html_type == LMD_TYPE_STRING) {
-        // If format_latex_html_v2 returned string instead of Element tree,
-        // we need to parse the HTML string
-        log_debug("[Lambda LaTeX] format_latex_html_v2 returned string, parsing HTML...");
-        String* html_string = html_item.get_string();
-
-        // Create new input for HTML parsing
-        String* type_str = (String*)malloc(sizeof(String) + 5);
-        type_str->len = 4;
-        strcpy(type_str->chars, "html");
-
-        Input* html_input = input_from_source(html_string->chars, latex_url, type_str, nullptr);
-        if (!html_input) {
-            log_error("Failed to parse generated HTML");
-            return nullptr;
-        }
-
-        html_root = get_html_root_element(html_input);
-        // Replace latex_input with html_input since we need the HTML tree
-        latex_input = html_input;
+    // Save HTML to file
+    FILE* html_file = fopen(html_output_path.c_str(), "w");
+    if (html_file) {
+        fprintf(html_file, "%s", html_doc);
+        fclose(html_file);
+        log_info("[Lambda LaTeX] Saved HTML to: %s (assets: %s)", html_output_path.c_str(), asset_base_url_str.c_str());
+    } else {
+        log_warn("[Lambda LaTeX] Could not save HTML to: %s", html_output_path.c_str());
     }
+
+    // Step 3: Parse the generated HTML for DOM construction
+    log_debug("[Lambda LaTeX] Parsing generated HTML for layout...");
+
+    // Create new input for HTML parsing
+    String* html_type_str = (String*)malloc(sizeof(String) + 5);
+    html_type_str->len = 4;
+    strcpy(html_type_str->chars, "html");
+
+    Input* html_input = input_from_source(html_doc, latex_url, html_type_str, nullptr);
+    if (!html_input) {
+        log_error("Failed to parse generated HTML");
+        return nullptr;
+    }
+
+    Element* html_root = get_html_root_element(html_input);
+    // Use html_input for DOM construction
+    latex_input = html_input;
 
     if (!html_root) {
         log_error("Failed to get HTML root element from LaTeX conversion");
