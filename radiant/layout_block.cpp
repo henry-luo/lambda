@@ -426,6 +426,33 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                       block->height, flow_height);
         }
     }
+
+    // BFC (Block Formatting Context) height expansion to contain floats
+    // CSS 2.2 Section 10.6.7: For BFC roots, floating descendants are included in height
+    // This applies to html/body elements which establish the initial BFC
+    if (lycon->block.establishing_element == block) {
+        float max_float_bottom = 0;
+        // Check all floats in this BFC
+        for (FloatBox* fb = lycon->block.left_floats; fb; fb = fb->next) {
+            if (fb->margin_box_bottom > max_float_bottom) {
+                max_float_bottom = fb->margin_box_bottom;
+            }
+        }
+        for (FloatBox* fb = lycon->block.right_floats; fb; fb = fb->next) {
+            if (fb->margin_box_bottom > max_float_bottom) {
+                max_float_bottom = fb->margin_box_bottom;
+            }
+        }
+        log_debug("finalize BFC %s: max_float_bottom=%.1f, block->height=%.1f",
+            block->node_name(), max_float_bottom, block->height);
+        if (max_float_bottom > block->height) {
+            float old_height = block->height;
+            block->height = max_float_bottom;
+            log_debug("finalize BFC height expansion: old=%.1f, new=%.1f",
+                      old_height, block->height);
+        }
+    }
+
     // Update scroller clip if height changed and scroller has clipping enabled
     // This ensures the clip region is correct after auto-height is calculated
     if (block->scroller && block->scroller->has_clip) {
