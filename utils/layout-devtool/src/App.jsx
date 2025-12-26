@@ -10,15 +10,69 @@ function App() {
   const [leftPanelWidth, setLeftPanelWidth] = useState(300);
   const [terminalHeight, setTerminalHeight] = useState(250);
   const [lambdaRenderPath, setLambdaRenderPath] = useState(null);
+  const [recentTests, setRecentTests] = useState([]);
+  const [showRecentTests, setShowRecentTests] = useState(false);
+  const [viewportPreset, setViewportPreset] = useState('desktop'); // desktop, tablet, mobile, custom
   const terminalRef = useRef(null);
   const comparisonPanelRef = useRef(null);
   const isDraggingLeftRef = useRef(false);
   const isDraggingBottomRef = useRef(false);
 
+  // Viewport presets
+  const viewportPresets = {
+    desktop: { width: 1200, height: 800, label: 'Desktop (1200×800)' },
+    tablet: { width: 768, height: 1024, label: 'Tablet (768×1024)' },
+    mobile: { width: 375, height: 667, label: 'Mobile (375×667)' },
+    custom: { width: 1200, height: 800, label: 'Custom' }
+  };
+
+  // Load recent tests on mount
+  useEffect(() => {
+    window.electronAPI.getRecentTests().then(tests => {
+      setRecentTests(tests || []);
+    });
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Cmd+R or Ctrl+R: Run selected test
+      if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
+        e.preventDefault();
+        if (selectedTest && !isRunning) {
+          handleRunTest();
+        }
+      }
+      // Cmd+L or Ctrl+L: Focus log panel
+      if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
+        e.preventDefault();
+        terminalRef.current?.focus();
+      }
+      // Cmd+K or Ctrl+K: Clear terminal
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        terminalRef.current?.clear();
+      }
+      // Cmd+Shift+R or Ctrl+Shift+R: Show recent tests
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'R') {
+        e.preventDefault();
+        setShowRecentTests(!showRecentTests);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedTest, isRunning, showRecentTests]);
+
   const handleTestSelect = (test) => {
     setSelectedTest(test);
     setTestResults(null);
     setLambdaRenderPath(null);
+    
+    // Add to recent tests
+    window.electronAPI.addRecentTest(test).then(updated => {
+      setRecentTests(updated || []);
+    });
   };
 
   const handleRunTest = async () => {
@@ -35,8 +89,12 @@ function App() {
       const testPath = `test/layout/data/${selectedTest.category}/${selectedTest.testFile}`;
       console.log('Test path:', testPath);
 
-      // Get browser panel width
-      let viewportWidth = 1200;
+      // Get viewport dimensions from preset
+      const preset = viewportPresets[viewportPreset];
+      let viewportWidth = preset.width;
+      let viewportHeight = preset.height;
+
+      // Override with browser panel dimensions if available
       if (comparisonPanelRef.current?.getBrowserDimensions) {
         const dims = comparisonPanelRef.current.getBrowserDimensions();
         viewportWidth = dims.width;
@@ -44,14 +102,13 @@ function App() {
 
       // Measure actual page content height via main process
       terminalRef.current?.writeln('Measuring page content height...');
-      let viewportHeight = 800;
       try {
         viewportHeight = await window.electronAPI.measurePageHeight(testPath, viewportWidth);
         console.log('Measured page height:', viewportHeight);
       } catch (measureError) {
         console.error('Failed to measure page height:', measureError);
       }
-      terminalRef.current?.writeln(`Viewport: ${viewportWidth}x${viewportHeight}`);
+      terminalRef.current?.writeln(`Viewport: ${viewportWidth}×${viewportHeight} (${preset.label})`);
 
       // Render the Lambda view with browser panel dimensions
       terminalRef.current?.writeln('Rendering Lambda view...');
@@ -157,20 +214,87 @@ function App() {
       <div className="menu-bar">
         <div className="menu-items">
           <span className="menu-item">File</span>
-          <span className="menu-item">Test</span>
+          <span 
+            className="menu-item" 
+            onClick={() => setShowRecentTests(!showRecentTests)}
+            style={{ cursor: 'pointer' }}
+          >
+            Recent {showRecentTests && '▼'}
+          </span>
           <span className="menu-item">View</span>
           <span className="menu-item">Help</span>
         </div>
         <div className="toolbar">
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginRight: '12px' }}>
+            <label style={{ fontSize: '13px', color: '#ccc' }}>Viewport:</label>
+            <select 
+              value={viewportPreset} 
+              onChange={(e) => setViewportPreset(e.target.value)}
+              style={{ 
+                padding: '4px 8px', 
+                borderRadius: '4px', 
+                border: '1px solid #555',
+                background: '#2d2d2d',
+                color: '#ccc',
+                fontSize: '13px'
+              }}
+            >
+              <option value="desktop">{viewportPresets.desktop.label}</option>
+              <option value="tablet">{viewportPresets.tablet.label}</option>
+              <option value="mobile">{viewportPresets.mobile.label}</option>
+            </select>
+          </div>
           <button
             className="btn btn-primary"
             onClick={handleRunTest}
             disabled={!selectedTest || isRunning}
+            title="Run test (Cmd+R)"
           >
-            {isRunning ? 'Running...' : 'Run Test'}
+            {isRunning ? 'Running...' : '▶ Run Test'}
           </button>
         </div>
       </div>
+
+      {showRecentTests && recentTests.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '40px',
+          left: '60px',
+          background: '#2d2d2d',
+          border: '1px solid #555',
+          borderRadius: '4px',
+          padding: '8px',
+          zIndex: 1000,
+          minWidth: '250px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+        }}>
+          <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px', padding: '4px 8px' }}>
+            Recent Tests (Cmd+Shift+R)
+          </div>
+          {recentTests.map((test, idx) => (
+            <div
+              key={idx}
+              onClick={() => {
+                handleTestSelect(test);
+                setShowRecentTests(false);
+              }}
+              style={{
+                padding: '6px 8px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                color: '#ccc',
+                borderRadius: '3px',
+                transition: 'background 0.2s'
+              }}
+              onMouseEnter={(e) => e.target.style.background = '#3d3d3d'}
+              onMouseLeave={(e) => e.target.style.background = 'transparent'}
+            >
+              <div style={{ fontWeight: 500 }}>{test.testFile}</div>
+              <div style={{ fontSize: '11px', color: '#888' }}>{test.category}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="main-content">
         <div className="left-sidebar" style={{ width: `${leftPanelWidth}px` }}>

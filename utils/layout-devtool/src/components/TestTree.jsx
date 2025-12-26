@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 function TestTree({ onTestSelect, selectedTest }) {
   const [categories, setCategories] = useState([]);
-  const [expandedCategories, setExpandedCategories] = useState(new Set(['baseline']));
+  const [expandedCategories, setExpandedCategories] = useState(new Set());
   const [testStatus, setTestStatus] = useState(new Map());
   const [searchQuery, setSearchQuery] = useState('');
 

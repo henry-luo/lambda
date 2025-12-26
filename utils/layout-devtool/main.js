@@ -11,6 +11,7 @@ class LayoutDevTool {
     this.testDataDir = path.join(this.projectRoot, 'test/layout/data');
     this.referenceDir = path.join(this.projectRoot, 'test/layout/reference');
     this.lambdaExe = path.join(this.projectRoot, 'lambda.exe');
+    this.recentTests = []; // Track recent test history
 
     console.log('LayoutDevTool initialized:');
     console.log('  __dirname:', __dirname);
@@ -46,7 +47,8 @@ class LayoutDevTool {
 
     if (isDevelopment) {
       this.mainWindow.loadURL('http://localhost:5173');
-      this.mainWindow.webContents.openDevTools();
+      // Dev tools can be opened with Cmd+Option+I or F12
+      // No auto-open to keep workspace clean
     } else {
       this.mainWindow.loadFile(path.join(__dirname, 'dist/index.html'));
     }
@@ -96,6 +98,25 @@ class LayoutDevTool {
     // Read HTML tree file
     ipcMain.handle('read-html-tree-file', async () => {
       return await this.readHtmlTreeFile();
+    });
+
+    // Get recent tests
+    ipcMain.handle('get-recent-tests', async () => {
+      return this.recentTests;
+    });
+
+    // Add test to recent history
+    ipcMain.handle('add-recent-test', async (event, testInfo) => {
+      // Remove duplicate if exists
+      this.recentTests = this.recentTests.filter(
+        t => !(t.category === testInfo.category && t.testFile === testInfo.testFile)
+      );
+      // Add to front, limit to 10 most recent
+      this.recentTests.unshift(testInfo);
+      if (this.recentTests.length > 10) {
+        this.recentTests = this.recentTests.slice(0, 10);
+      }
+      return this.recentTests;
     });
 
     // Stream process output
