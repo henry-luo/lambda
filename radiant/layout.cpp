@@ -426,7 +426,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewBlock* block = (ViewBlock*)view;
         float item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
-        float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
+        // For replaced elements (like img), baseline is at bottom margin edge
+        // item_baseline = distance from top of margin-box to baseline = entire height
+        float item_baseline = item_height;
         CssEnum align = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align : lycon->line.vertical_align;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
@@ -568,13 +570,19 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
 void line_align(LayoutContext* lycon) {
     // horizontal text alignment: left, right, center, justify
     if (lycon->block.text_align != CSS_VALUE_LEFT) {
-        // Skip centering/right alignment only for inline-block with shrink-to-fit width
-        // Regular block elements should still align their content even with given_width < 0
-        // because their content_width is determined by the containing block
-        bool is_inline_block = lycon->view && lycon->view->view_type == RDT_VIEW_INLINE_BLOCK;
-        if (is_inline_block && lycon->block.given_width < 0 &&
+        // Skip centering/right alignment only when laying out content INSIDE an inline-block
+        // with shrink-to-fit width. In that case, the inline-block's width will shrink to fit
+        // its content, so centering/right alignment would have no effect.
+        //
+        // Important: Check the CONTAINER (establishing_element), not the current view.
+        // We want to center inline-blocks ON a line, just not content INSIDE a shrink-to-fit inline-block.
+        ViewBlock* container = lycon->block.establishing_element;
+        bool container_is_shrink_inline_block = container &&
+            container->view_type == RDT_VIEW_INLINE_BLOCK &&
+            lycon->block.given_width < 0;
+        if (container_is_shrink_inline_block &&
             (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT)) {
-            log_debug("line_align: skipping center/right align for shrink-to-fit inline-block");
+            log_debug("line_align: skipping center/right align for content inside shrink-to-fit inline-block");
             return;
         }
 
