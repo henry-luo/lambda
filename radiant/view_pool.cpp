@@ -210,12 +210,21 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
+    log_debug("alloc_flex_item_prop: span=%p, item_prop_type=%d, fi=%p, form=%p",
+              span, span ? span->item_prop_type : -1, span ? span->fi : nullptr, span ? span->form : nullptr);
+    // Don't overwrite form control properties - form controls store intrinsic size
+    // in form->intrinsic_width/height instead of fi->intrinsic_*
+    if (span->item_prop_type == DomElement::ITEM_PROP_FORM) {
+        log_debug("alloc_flex_item_prop: skipping form control");
+        return;  // Preserve form control properties
+    }
     if (!span->fi) {
         FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
         span->fi = prop;
         span->item_prop_type = DomElement::ITEM_PROP_FLEX;
         prop->flex_grow = 0;  prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
         prop->align_self = CSS_VALUE_AUTO; // ALIGN_AUTO as per CSS spec
+        log_debug("alloc_flex_item_prop: allocated fi=%p for span=%p", prop, span);
     }
 }
 

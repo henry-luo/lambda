@@ -568,6 +568,16 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
 void line_align(LayoutContext* lycon) {
     // horizontal text alignment: left, right, center, justify
     if (lycon->block.text_align != CSS_VALUE_LEFT) {
+        // Skip centering/right alignment only for inline-block with shrink-to-fit width
+        // Regular block elements should still align their content even with given_width < 0
+        // because their content_width is determined by the containing block
+        bool is_inline_block = lycon->view && lycon->view->view_type == RDT_VIEW_INLINE_BLOCK;
+        if (is_inline_block && lycon->block.given_width < 0 &&
+            (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT)) {
+            log_debug("line_align: skipping center/right align for shrink-to-fit inline-block");
+            return;
+        }
+
         View* view = lycon->line.start_view;
 
         // Special handling for wrapped text continuation lines:

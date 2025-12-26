@@ -116,6 +116,13 @@ void set_cross_axis_position(ViewElement* item, float position, FlexContainerLay
 void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
 void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
 
+// Flex item property helpers (support both flex items and form controls)
+// Form controls store flex properties in FormControlProp instead of FlexItemProp
+float get_item_flex_grow(ViewElement* item);
+float get_item_flex_shrink(ViewElement* item);
+float get_item_flex_basis(ViewElement* item);
+bool get_item_flex_basis_is_percent(ViewElement* item);
+
 // Helper functions for constraints and percentages
 float clamp_value(float value, float min_val, float max_val);
 int resolve_percentage(int value, bool is_percent, int container_size);
