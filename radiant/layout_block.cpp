@@ -1503,7 +1503,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // Skip absolutely positioned and floated children - they're out of normal flow
         if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
             block->bound->padding.bottom == 0 && block->first_child) {
-            // Find last in-flow child (skip abs-positioned and floated elements)
+            // Find last in-flow child (skip abs-positioned, floated elements, and empty zero-height blocks)
+            // CSS 2.2 Section 8.3.1: An empty block allows margins to collapse "through" it when:
+            // - It has zero height
+            // - It has no borders, padding, or line boxes
             View* last_in_flow = nullptr;
             View* child = (View*)block->first_child;
             while (child) {
@@ -1523,8 +1526,34 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 child = (View*)child->next_sibling;
             }
 
-            if (last_in_flow && last_in_flow->is_block() && ((ViewBlock*)last_in_flow)->bound) {
-                ViewBlock* last_child_block = (ViewBlock*)last_in_flow;
+            // Skip empty zero-height blocks at the end - margins collapse "through" them
+            // Find the effective last child whose margin-bottom should collapse with parent
+            // CSS 2.2 Section 8.3.1: Margins collapse through an element only if it has no:
+            // - min-height (> 0), borders, padding, inline content, or block formatting context
+            View* effective_last = last_in_flow;
+            while (effective_last && effective_last->is_block()) {
+                ViewBlock* vb = (ViewBlock*)effective_last;
+                // Check if this is an empty zero-height block that allows collapse-through
+                // Must have: zero height, no borders, no padding, no margin, AND no content (no children)
+                if (vb->height == 0 && !vb->first_child) {
+                    float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
+                    float border_bottom = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
+                    float padding_top = vb->bound ? vb->bound->padding.top : 0;
+                    float padding_bottom = vb->bound ? vb->bound->padding.bottom : 0;
+                    float margin_bottom = vb->bound ? vb->bound->margin.bottom : 0;
+                    if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0 && margin_bottom == 0) {
+                        // This empty block allows margins to collapse through - look at previous sibling
+                        log_debug("skipping empty zero-height block for bottom margin collapsing");
+                        View* prev = effective_last->prev_placed_view();
+                        effective_last = prev;
+                        continue;
+                    }
+                }
+                break;
+            }
+
+            if (effective_last && effective_last->is_block() && ((ViewBlock*)effective_last)->bound) {
+                ViewBlock* last_child_block = (ViewBlock*)effective_last;
                 if (last_child_block->bound->margin.bottom > 0) {
                     float margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);
                     block->height -= last_child_block->bound->margin.bottom;

@@ -16,11 +16,11 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 634,
+      "height": 2174,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
-      "scrollHeight": 800
+      "scrollHeight": 2174
     },
     "computed": {
       "display": "block",
@@ -496,11 +496,11 @@
           "x": 0,
           "y": 0,
           "width": 800,
-          "height": 634,
+          "height": 2174,
           "contentWidth": 800,
-          "contentHeight": 634,
+          "contentHeight": 2174,
           "scrollWidth": 800,
-          "scrollHeight": 634
+          "scrollHeight": 2174
         },
         "computed": {
           "display": "block",
@@ -738,11 +738,11 @@
               "x": 20,
               "y": 124,
               "width": 760,
-              "height": 122,
+              "height": 507,
               "contentWidth": 760,
-              "contentHeight": 122,
+              "contentHeight": 507,
               "scrollWidth": 760,
-              "scrollHeight": 122
+              "scrollHeight": 507
             },
             "computed": {
               "display": "block",
@@ -977,12 +977,12 @@
                 "layout": {
                   "x": 20,
                   "y": 202,
-                  "width": 66,
-                  "height": 44,
-                  "contentWidth": 64,
-                  "contentHeight": 42,
-                  "scrollWidth": 64,
-                  "scrollHeight": 42
+                  "width": 642,
+                  "height": 429,
+                  "contentWidth": 640,
+                  "contentHeight": 427,
+                  "scrollWidth": 640,
+                  "scrollHeight": 427
                 },
                 "computed": {
                   "display": "block",
@@ -1041,13 +1041,13 @@
             ],
             "layout": {
               "x": 20,
-              "y": 270,
+              "y": 655,
               "width": 760,
-              "height": 122,
+              "height": 507,
               "contentWidth": 760,
-              "contentHeight": 122,
+              "contentHeight": 507,
               "scrollWidth": 760,
-              "scrollHeight": 122
+              "scrollHeight": 507
             },
             "computed": {
               "display": "block",
@@ -1101,7 +1101,7 @@
                 "classes": [],
                 "layout": {
                   "x": 20,
-                  "y": 270,
+                  "y": 655,
                   "width": 760,
                   "height": 30,
                   "contentWidth": 760,
@@ -1162,11 +1162,11 @@
                       "rects": [
                         {
                           "x": 20,
-                          "y": 274,
+                          "y": 659,
                           "width": 183.41,
                           "height": 22,
                           "right": 203.41,
-                          "bottom": 296,
+                          "bottom": 681,
                           "text": "Sample PNG Image",
                           "startIndex": 0,
                           "endIndex": 16
@@ -1191,7 +1191,7 @@
                 "classes": [],
                 "layout": {
                   "x": 20,
-                  "y": 312,
+                  "y": 697,
                   "width": 760,
                   "height": 24,
                   "contentWidth": 760,
@@ -1252,11 +1252,11 @@
                       "rects": [
                         {
                           "x": 20,
-                          "y": 315,
+                          "y": 700,
                           "width": 174.33,
                           "height": 17,
                           "right": 194.33,
-                          "bottom": 332,
+                          "bottom": 717,
                           "text": "Displaying sample1.png:",
                           "startIndex": 0,
                           "endIndex": 23
@@ -1281,13 +1281,13 @@
                 "classes": [],
                 "layout": {
                   "x": 20,
-                  "y": 348,
-                  "width": 64,
-                  "height": 44,
-                  "contentWidth": 62,
-                  "contentHeight": 42,
-                  "scrollWidth": 62,
-                  "scrollHeight": 42
+                  "y": 733,
+                  "width": 642,
+                  "height": 429,
+                  "contentWidth": 640,
+                  "contentHeight": 427,
+                  "scrollWidth": 640,
+                  "scrollHeight": 427
                 },
                 "computed": {
                   "display": "block",
@@ -1346,13 +1346,13 @@
             ],
             "layout": {
               "x": 20,
-              "y": 416,
+              "y": 1186,
               "width": 760,
-              "height": 178,
+              "height": 948,
               "contentWidth": 760,
-              "contentHeight": 178,
+              "contentHeight": 948,
               "scrollWidth": 760,
-              "scrollHeight": 178
+              "scrollHeight": 948
             },
             "computed": {
               "display": "block",
@@ -1406,7 +1406,7 @@
                 "classes": [],
                 "layout": {
                   "x": 20,
-                  "y": 416,
+                  "y": 1186,
                   "width": 760,
                   "height": 30,
                   "contentWidth": 760,
@@ -1467,11 +1467,11 @@
                       "rects": [
                         {
                           "x": 20,
-                          "y": 420,
+                          "y": 1190,
                           "width": 209.66,
                           "height": 22,
                           "right": 229.66,
-                          "bottom": 442,
+                          "bottom": 1212,
                           "text": "Both Images Together",
                           "startIndex": 0,
                           "endIndex": 20
@@ -1496,7 +1496,7 @@
                 "classes": [],
                 "layout": {
                   "x": 20,
-                  "y": 458,
+                  "y": 1228,
                   "width": 760,
                   "height": 24,
                   "contentWidth": 760,
@@ -1557,11 +1557,11 @@
                       "rects": [
                         {
                           "x": 20,
-                          "y": 461,
+                          "y": 1231,
                           "width": 260.61,
                           "height": 17,
                           "right": 280.61,
-                          "bottom": 478,
+                          "bottom": 1248,
                           "text": "Displaying both images in sequence:",
                           "startIndex": 0,
                           "endIndex": 35
@@ -1586,13 +1586,13 @@
                 "classes": [],
                 "layout": {
                   "x": 20,
-                  "y": 494,
-                  "width": 66,
-                  "height": 44,
-                  "contentWidth": 64,
-                  "contentHeight": 42,
-                  "scrollWidth": 64,
-                  "scrollHeight": 42
+                  "y": 1264,
+                  "width": 642,
+                  "height": 429,
+                  "contentWidth": 640,
+                  "contentHeight": 427,
+                  "scrollWidth": 640,
+                  "scrollHeight": 427
                 },
                 "computed": {
                   "display": "block",
@@ -1647,13 +1647,13 @@
                 "classes": [],
                 "layout": {
                   "x": 20,
-                  "y": 550,
-                  "width": 64,
-                  "height": 44,
-                  "contentWidth": 62,
-                  "contentHeight": 42,
-                  "scrollWidth": 62,
-                  "scrollHeight": 42
+                  "y": 1705,
+                  "width": 642,
+                  "height": 429,
+                  "contentWidth": 640,
+                  "contentHeight": 427,
+                  "scrollWidth": 640,
+                  "scrollHeight": 427
                 },
                 "computed": {
                   "display": "block",
