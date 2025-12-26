@@ -456,6 +456,11 @@ void line_break(LayoutContext* lycon) {
     // printf("DEBUG: Line advance - font: %d, css: %d, mixed: %s, used: %d\n",
     //        font_line_height, css_line_height, has_mixed_fonts ? "yes" : "no", used_line_height);
     lycon->block.advance_y += used_line_height;
+    
+    // CSS 2.1 10.8.1: Track last line's ascender for inline-block baseline alignment
+    // The baseline of an inline-block with in-flow content is the baseline of its last line box
+    lycon->block.last_line_ascender = lycon->line.max_ascender;
+    
     // reset the new line
     line_reset(lycon);
 }
