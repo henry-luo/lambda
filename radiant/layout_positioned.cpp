@@ -14,6 +14,35 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
 
 /**
+ * Recursively offset all child views by the given amounts
+ * Used for inline relative positioning where children have block-relative coordinates
+ */
+static void offset_children_recursive(ViewElement* elem, int offset_x, int offset_y) {
+    View* child = elem->first_child;
+    while (child) {
+        child->x += offset_x;
+        child->y += offset_y;
+
+        // For text nodes, also offset all TextRect positions
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)child;
+            TextRect* rect = text->rect;
+            while (rect) {
+                rect->x += offset_x;
+                rect->y += offset_y;
+                rect = rect->next;
+            }
+        }
+
+        // Recurse into element children
+        if (child->is_element()) {
+            offset_children_recursive((ViewElement*)child, offset_x, offset_y);
+        }
+        child = child->next();
+    }
+}
+
+/**
  * Apply relative positioning to an element
  * Relative positioning moves the element from its normal position without affecting other elements
  */
@@ -88,6 +117,13 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     block->x += offset_x;  block->y += offset_y;
     log_debug("Applied relative positioning: offset (%d, %d), final position (%d, %d)",
               offset_x, offset_y, block->x, block->y);
+
+    // For inline elements (spans), children have block-relative coordinates,
+    // so we must also offset all descendants to move with the inline box
+    if (block->view_type == RDT_VIEW_INLINE && (offset_x != 0 || offset_y != 0)) {
+        log_debug("Offsetting inline children by (%d, %d)", offset_x, offset_y);
+        offset_children_recursive((ViewElement*)block, offset_x, offset_y);
+    }
 
     // todo: add to chain of positioned elements for z-index stacking
     // find containing block; add to its positioned children list;
