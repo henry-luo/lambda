@@ -78,6 +78,7 @@ typedef struct BlockContext {
     CssEnum text_align;         // Text alignment
     float given_width;          // CSS specified width (-1 if auto)
     float given_height;         // CSS specified height (-1 if auto)
+    float last_line_ascender;   // Baseline of last line (for inline-block baseline alignment)
 
     // =========================================================================
     // BFC Hierarchy
