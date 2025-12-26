@@ -319,7 +319,50 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     log_debug("finalizing block, display=%d, given wd:%f", display, lycon->block.given_width);
     if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
         block->width = min(flow_width, block->width);
-        log_debug("inline-block final width set to: %f", block->width);
+        log_debug("inline-block final width set to: %f, text_align=%d", block->width, lycon->block.text_align);
+
+        // For inline-block with auto width and text-align:center/right,
+        // we deferred alignment during line_align. Now apply it with final width.
+        if (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT) {
+            // Calculate content width (excluding border/padding)
+            float final_content_width = block->width;
+            if (block->bound) {
+                final_content_width -= (block->bound->padding.left + block->bound->padding.right);
+                if (block->bound->border) {
+                    final_content_width -= (block->bound->border->width.left + block->bound->border->width.right);
+                }
+            }
+
+            // Align children using the final content width
+            View* child = block->first_child;
+            while (child) {
+                if (child->view_type == RDT_VIEW_TEXT) {
+                    ViewText* text = (ViewText*)child;
+                    TextRect* rect = text->rect;
+                    while (rect) {
+                        float line_width = rect->width;
+                        // Calculate offset to center/right align within content area
+                        // Note: rect->x is relative to block including padding offset
+                        float padding_left = block->bound ? block->bound->padding.left : 0;
+                        float current_offset_in_content = rect->x - padding_left;
+                        float target_offset_in_content;
+                        if (lycon->block.text_align == CSS_VALUE_CENTER) {
+                            target_offset_in_content = (final_content_width - line_width) / 2;
+                        } else { // RIGHT
+                            target_offset_in_content = final_content_width - line_width;
+                        }
+                        float offset = target_offset_in_content - current_offset_in_content;
+                        if (abs(offset) > 0.5f) {  // Only adjust if offset is significant
+                            rect->x += offset;
+                            log_debug("deferred text align: rect->x adjusted by %.1f to %.1f (content_width=%.1f)",
+                                      offset, rect->x, final_content_width);
+                        }
+                        rect = rect->next;
+                    }
+                }
+                child = child->next();
+            }
+        }
     }
 
     // handle horizontal overflow
