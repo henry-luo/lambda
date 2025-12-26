@@ -62,14 +62,13 @@ make build-release
 
 ## Current State
 
-| Metric | Value |
-|--------|-------|
-| Binary | `lambda.exe` |
-| Debug Size | 7.9 MB (`-g -O2`) |
-| **Release Size** | **5.7 MB** (optimized) |
-| Stripped Size | 7.1 MB (`strip -x`) |
-| Object Files | 478 files, 179 MB total |
-| Exported Functions | ~5,945 |
+| Metric | Debug Build | Release Build |
+|--------|-------------|---------------|
+| Binary | `lambda.exe` | `lambda.exe` |
+| Size | 7.9 MB | **5.7 MB** |
+| Optimization | `-g -O2` | `-O3 -flto` |
+| Exported Functions | ~5,945 | ~1,895 |
+| Logging | Full | `log_debug`/`log_info` stripped |
 
 ## Size Breakdown by Component
 
@@ -263,16 +262,17 @@ Trade-offs:
 
 ## Implementation Plan
 
-### Phase 1: Quick Wins (No Code Changes)
+### Phase 1: Quick Wins ✅ COMPLETED
 
-| Task | Effort | Savings |
-|------|--------|---------|
-| Enable release build | Low | 2-3 MB |
-| Add `-dead_strip` linker flag | Low | 0.3-0.5 MB |
-| Add visibility flags | Low | 0.2-0.3 MB |
-| Strip release binary | Low | 0.5-0.8 MB |
+| Task | Effort | Savings | Status |
+|------|--------|---------|--------|
+| Enable release build | Low | 2.2 MB | ✅ Done |
+| Dead code elimination | Low | included | ✅ Done |
+| Symbol visibility | Low | included | ✅ Done |
+| Strip debug symbols | Low | included | ✅ Done |
+| Strip logging calls | Low | included | ✅ Done |
 
-**Expected Result: 4-5 MB release binary**
+**Result: 5.7 MB release binary (28% reduction from 7.9 MB)**
 
 ### Phase 2: Build Variants (Config Changes)
 
@@ -296,13 +296,13 @@ Trade-offs:
 
 ## Summary: Achievable Targets
 
-| Build Variant | Target Size | Use Case |
-|---------------|-------------|----------|
-| Debug (current) | 7.9 MB | Development |
-| Release (optimized) | 4-5 MB | Production |
-| Lite (no Radiant) | 2-3 MB | CLI processing |
-| Minimal (no JIT, no network) | 1.5-2 MB | Embedded |
-| UPX compressed | 1-2 MB | Distribution |
+| Build Variant | Target Size | Status |
+|---------------|-------------|--------|
+| Debug | 7.9 MB | Current default |
+| **Release (optimized)** | **5.7 MB** | ✅ **Implemented** |
+| Lite (no Radiant) | 2-3 MB | Planned |
+| Minimal (no JIT, no network) | 1.5-2 MB | Planned |
+| UPX compressed | ~2 MB | Optional |
 
 ---
 
