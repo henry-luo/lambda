@@ -1925,6 +1925,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // layout block content to determine content width and height
         layout_block_content(lycon, block, &pa_block, &pa_line);
 
+        // CSS 2.1 Section 10.8.1: For non-replaced inline-blocks with in-flow line boxes
+        // and overflow:visible, the baseline is the baseline of the last line box.
+        // The last line's ascender was saved to lycon->block.last_line_ascender in line_break().
+        // If there was no line break (single line), use lycon->line.max_ascender.
+        float content_last_line_ascender = lycon->block.last_line_ascender;
+        if (content_last_line_ascender == 0 && lycon->line.max_ascender > 0) {
+            // No line break occurred - use current line's ascender
+            content_last_line_ascender = lycon->line.max_ascender;
+        }
+        bool content_has_line_boxes = content_last_line_ascender > 0;
+        log_debug("inline-block content baseline: last_line_ascender=%.1f, has_line_boxes=%d",
+            content_last_line_ascender, content_has_line_boxes);
+
         log_debug("flow block in parent context, block->y before restoration: %.2f", block->y);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
 
@@ -1964,9 +1977,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (block->in_line && block->in_line->vertical_align) {
                 float item_height = block->height + (block->bound ?
                     block->bound->margin.top + block->bound->margin.bottom : 0);
-                // For replaced elements (like img), baseline is at bottom margin edge
-                // item_baseline = distance from top of margin-box to baseline = entire height
-                float item_baseline = item_height;
+                // For non-replaced inline-blocks with content: baseline is at content baseline
+                // For replaced elements (like img): baseline is at bottom margin edge
+                bool overflow_visible = !block->scroller ||
+                    (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
+                     block->scroller->overflow_y == CSS_VALUE_VISIBLE);
+                float item_baseline;
+                if (content_has_line_boxes && overflow_visible) {
+                    // Baseline from top of margin-box = margin.top + content_baseline
+                    item_baseline = (block->bound ? block->bound->margin.top : 0) + content_last_line_ascender;
+                } else {
+                    // Replaced or no content: baseline at bottom margin edge
+                    item_baseline = item_height;
+                }
                 float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
                 float offset = calculate_vertical_align_offset(
                     lycon, block->in_line->vertical_align, item_height, line_height,
@@ -2002,21 +2025,44 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             } else {
                 // default baseline alignment for inline block
-                // Per CSS 2.1 Section 10.8.1: The baseline of a replaced inline-block is
-                // its bottom margin edge. For vertical-align: baseline, this aligns with
-                // the text baseline. Therefore:
-                // - The entire margin-box (height + margin.top + margin.bottom) is ABOVE baseline
-                // - Only the strut's descender extends below baseline
-                if (block->bound) {
-                    // margin-box above baseline = height + margin-top + margin-bottom
-                    lycon->line.max_ascender = max(lycon->line.max_ascender,
-                        block->height + block->bound->margin.top + block->bound->margin.bottom);
-                    // only strut descender below baseline
-                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
-                }
-                else {
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
-                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
+                // CSS 2.1 Section 10.8.1:
+                // - Non-replaced inline-block with in-flow line boxes and overflow:visible:
+                //   baseline = baseline of last line box (captured as content_last_line_ascender)
+                // - Non-replaced inline-block with no in-flow line boxes OR overflow != visible:
+                //   baseline = bottom margin edge
+                // - Replaced inline-block (like img): baseline = bottom margin edge
+                
+                // Check if this inline-block has overflow:visible and in-flow line boxes
+                bool overflow_visible = !block->scroller ||
+                    (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
+                     block->scroller->overflow_y == CSS_VALUE_VISIBLE);
+                bool uses_content_baseline = content_has_line_boxes && overflow_visible;
+                
+                if (uses_content_baseline) {
+                    // Non-replaced inline-block with text content and overflow:visible
+                    // Baseline is at content_last_line_ascender from top of content box
+                    // Distance above parent baseline = content_last_line_ascender
+                    // Distance below parent baseline = block->height - content_last_line_ascender
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, content_last_line_ascender +
+                        (block->bound ? block->bound->margin.top : 0));
+                    float descender_part = block->height - content_last_line_ascender +
+                        (block->bound ? block->bound->margin.bottom : 0);
+                    lycon->line.max_descender = max(lycon->line.max_descender, descender_part);
+                    log_debug("inline-block with content baseline: ascender=%.1f, descender=%.1f",
+                        content_last_line_ascender, descender_part);
+                } else {
+                    // Replaced element or no in-flow content: baseline at bottom margin edge
+                    if (block->bound) {
+                        // margin-box above baseline = height + margin-top + margin-bottom
+                        lycon->line.max_ascender = max(lycon->line.max_ascender,
+                            block->height + block->bound->margin.top + block->bound->margin.bottom);
+                        // only strut descender below baseline
+                        lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
+                    }
+                    else {
+                        lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+                        lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
+                    }
                 }
                 log_debug("inline-block set max_ascender to: %d", lycon->line.max_ascender);
             }
