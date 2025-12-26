@@ -728,6 +728,22 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
         // Handle newlines as forced line breaks when not collapsing newlines
         if (!collapse_newlines && (*str == '\n' || *str == '\r')) {
+            // CSS 2.2: When preserving newlines with collapsing spaces (pre-line),
+            // any spaces/tabs immediately before the newline should be removed
+            // Check if we have trailing whitespace to strip
+            if (collapse_spaces && str > text_start + rect->start_index) {
+                // Walk back to find trailing spaces before this newline
+                const unsigned char* check = str - 1;
+                float trailing_width = 0;
+                while (check >= text_start + rect->start_index && is_space(*check)) {
+                    trailing_width += lycon->font.style->space_width;
+                    check--;
+                }
+                if (trailing_width > 0) {
+                    rect->width -= trailing_width;
+                    log_debug("stripped trailing whitespace before newline: width reduced by %f", trailing_width);
+                }
+            }
             // Output any text before the newline
             if (str > text_start + rect->start_index) {
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
