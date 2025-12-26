@@ -23,6 +23,18 @@ workspace "Lambda"
     filter "configurations:Release"
         defines { "NDEBUG" }
         optimize "On"
+        -- Dead code elimination
+        buildoptions {
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-fvisibility=hidden",
+            "-fvisibility-inlines-hidden",
+        }
+        -- macOS: strip dead code and symbols
+        linkoptions {
+            "-Wl,-dead_strip",
+            "-Wl,-x",  -- Strip local symbols
+        }
     
     -- Native Linux build settings
     toolset "gcc"

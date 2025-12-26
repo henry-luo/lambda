@@ -1,4 +1,8 @@
 /* Lambda Script Log Library - zlog-compatible implementation with log_ prefix */
+
+/* LOG_IMPL prevents log.h from defining macros that would replace function definitions */
+#define LOG_IMPL
+
 #include <string.h>
 #include "log.h"
 #include <stdlib.h>
