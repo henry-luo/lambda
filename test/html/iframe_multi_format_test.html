@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Iframe Multi-Format Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .iframe-wrapper {
+            flex: 1;
+            border: 2px solid #ccc;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .iframe-wrapper h2 {
+            margin-top: 0;
+            color: #555;
+        }
+        iframe {
+            width: 100%;
+            height: 350px;
+            border: 1px solid #999;
+        }
+        .md-frame {
+            border-color: #4a9eff;
+        }
+        .tex-frame {
+            border-color: #10b981;
+        }
+    </style>
+</head>
+<body>
+    <h1>Multi-Format Document Loading via Iframe</h1>
+    
+    <p>This page demonstrates loading different document formats in iframes.</p>
+    
+    <div class="container">
+        <div class="iframe-wrapper md-frame">
+            <h2>📝 Markdown Document</h2>
+            <iframe src="iframe_test.md"></iframe>
+        </div>
+        
+        <div class="iframe-wrapper tex-frame">
+            <h2>📐 LaTeX Document</h2>
+            <iframe src="../latex/test_simple.tex"></iframe>
+        </div>
+    </div>
+    
+    <p>Both iframes above load their respective document formats and render them as HTML.</p>
+</body>
+</html>

@@ -1330,6 +1330,10 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load LaTeX document: parse LaTeX → convert to HTML → layout
         log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
         doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
+    } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
+        // Load Markdown document: parse Markdown → convert to HTML → layout
+        log_info("[load_html_doc] Detected Markdown file, using Markdown→HTML pipeline");
+        doc = load_markdown_doc(full_url, viewport_width, viewport_height, pool);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
