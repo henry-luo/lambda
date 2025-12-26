@@ -129,4 +129,4 @@ analysis-results*/
 
 gumbo-parser/
 latex-js/
-utils/refactor_to_log_debug
+conf/
