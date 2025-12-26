@@ -1870,7 +1870,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (block->in_line && block->in_line->vertical_align) {
                 float item_height = block->height + (block->bound ?
                     block->bound->margin.top + block->bound->margin.bottom : 0);
-                float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
+                // For replaced elements (like img), baseline is at bottom margin edge
+                // item_baseline = distance from top of margin-box to baseline = entire height
+                float item_baseline = item_height;
                 float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
                 float offset = calculate_vertical_align_offset(
                     lycon, block->in_line->vertical_align, item_height, line_height,
@@ -1906,13 +1908,21 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             } else {
                 // default baseline alignment for inline block
+                // Per CSS 2.1 Section 10.8.1: The baseline of a replaced inline-block is
+                // its bottom margin edge. For vertical-align: baseline, this aligns with
+                // the text baseline. Therefore:
+                // - The entire margin-box (height + margin.top + margin.bottom) is ABOVE baseline
+                // - Only the strut's descender extends below baseline
                 if (block->bound) {
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, block->height + block->bound->margin.top);
-                    // bottom margin is placed below the baseline as descender
-                    lycon->line.max_descender = max(lycon->line.max_descender, block->bound->margin.bottom);
+                    // margin-box above baseline = height + margin-top + margin-bottom
+                    lycon->line.max_ascender = max(lycon->line.max_ascender,
+                        block->height + block->bound->margin.top + block->bound->margin.bottom);
+                    // only strut descender below baseline
+                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
                 }
                 else {
                     lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
                 }
                 log_debug("inline-block set max_ascender to: %d", lycon->line.max_ascender);
             }
@@ -2058,7 +2068,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             }
                             break;
                         }
-                        if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
+                        // Inline-block elements are part of inline formatting context and create line boxes.
+                        // They don't participate in sibling margin collapsing because:
+                        // 1. They establish their own BFC internally
+                        // 2. They act as in-flow content that separates adjacent block margins
+                        // CSS 2.2 Section 8.3.1: Margins don't collapse when separated by in-flow content
+                        if (prev_view && prev_view->is_block() && prev_view->view_type != RDT_VIEW_INLINE_BLOCK
+                            && ((ViewBlock*)prev_view)->bound) {
                             ViewBlock* prev_block = (ViewBlock*)prev_view;
                             if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
                                 collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
