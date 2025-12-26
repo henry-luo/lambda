@@ -542,6 +542,7 @@ typedef struct BlockProp {
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
+    CssEnum given_height_type;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
     float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
 } BlockProp;

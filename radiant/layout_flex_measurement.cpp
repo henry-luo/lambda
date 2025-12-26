@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "intrinsic_sizing.hpp"
+#include "form_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
 #include "../lib/log.h"
@@ -482,6 +483,57 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         content_width = measured_width;
         content_height = measured_height;
 
+        // Special handling for form controls - use intrinsic size as content
+        if (elem && elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
+            // Form controls have intrinsic sizes stored in form property
+            content_height = (int)elem->form->intrinsic_height;
+            measured_height = content_height;
+            content_width = (int)elem->form->intrinsic_width;
+            measured_width = content_width;
+
+            // Special handling for buttons with child content (e.g., <button>Subscribe</button>)
+            // The intrinsic_width may not be set because buttons go through normal layout flow
+            if (elem->form->control_type == FORM_CONTROL_BUTTON &&
+                elem->form->intrinsic_width <= 0 && elem->first_child) {
+                // Measure text content of button
+                DomNode* btn_child = elem->first_child;
+                float max_text_width = 0;
+                while (btn_child) {
+                    if (btn_child->is_text()) {
+                        const char* text = (const char*)btn_child->text_data();
+                        if (text && *text) {
+                            size_t len = strlen(text);
+                            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len);
+                            if (widths.max_content > max_text_width) {
+                                max_text_width = widths.max_content;
+                            }
+                        }
+                    }
+                    btn_child = btn_child->next_sibling;
+                }
+                if (max_text_width > 0) {
+                    // Store intrinsic size in form property for flex-basis calculation
+                    // Use FormDefaults::TEXT_HEIGHT to match input element height
+                    elem->form->intrinsic_width = max_text_width;
+                    elem->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
+
+                    // Update content sizes (intrinsic, without padding/border)
+                    // Padding/border will be added below in the generic code
+                    content_width = (int)max_text_width;
+                    measured_width = content_width;
+                    content_height = (int)FormDefaults::TEXT_HEIGHT;
+                    measured_height = content_height;
+
+                    log_debug("Button %s: measured text content width=%.1f, intrinsic=%dx%d",
+                              child->node_name(), max_text_width,
+                              (int)elem->form->intrinsic_width, (int)elem->form->intrinsic_height);
+                }
+            }
+
+            log_debug("Form control %s: using intrinsic size %dx%d",
+                      child->node_name(), measured_width, measured_height);
+        }
+
         // Add padding and border to measured height for total height
         // CSS box model: total_height = content_height + padding + border
         if (elem && elem->bound) {
@@ -822,13 +874,18 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         item->fi->has_intrinsic_height = true;
 
         log_debug("calculate_item_intrinsic_sizes: image final intrinsic=%.1fx%.1f", max_width, max_height);
-        
+
         // Restore font before returning
         if (font_changed) {
             lycon->font = saved_font;
         }
         return;
     }
+
+    // Note: Form controls are handled in calculate_flex_basis directly since
+    // they don't have fi (FlexItemProp) allocated - form properties use a union
+    // with flex item properties, so form controls store their intrinsic sizes
+    // in form->intrinsic_width/height instead.
 
     // Check if item has children to measure
     DomNode* child = item->first_child;
@@ -858,8 +915,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len);
                 min_width = widths.min_content;
                 max_width = widths.max_content;
-                min_height = max_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-                    lycon->font.style->font_size : 20.0f;
+                // BUGFIX: Use line height instead of font size for text height
+                // This matches browser behavior where text takes up line-height space
+                if (lycon->font.ft_face) {
+                    min_height = max_height = calc_normal_line_height(lycon->font.ft_face);
+                } else if (lycon->font.style && lycon->font.style->font_size > 0) {
+                    min_height = max_height = lycon->font.style->font_size;  // Fallback to font-size
+                } else {
+                    min_height = max_height = 20.0f;  // Ultimate fallback
+                }
             } else {
                 // Fallback: rough estimation when no layout context
                 max_width = len * 10.0f;
@@ -940,8 +1004,15 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len);
                                 text_min_width = widths.min_content;
                                 text_max_width = widths.max_content;
-                                text_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-                                    lycon->font.style->font_size : 20.0f;
+                                // BUGFIX: Use line height instead of font size for text height
+                                // This matches browser behavior where text takes up line-height space
+                                if (lycon->font.ft_face) {
+                                    text_height = calc_normal_line_height(lycon->font.ft_face);
+                                } else if (lycon->font.style && lycon->font.style->font_size > 0) {
+                                    text_height = lycon->font.style->font_size;  // Fallback to font-size
+                                } else {
+                                    text_height = 20.0f;  // Ultimate fallback
+                                }
                             } else {
                                 text_max_width = text_len * 10.0f;
                                 text_min_width = text_max_width;  // Fallback: same as max
@@ -1137,7 +1208,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     item->fi->has_intrinsic_width = 1;
     item->fi->has_intrinsic_height = 1;
 
-    log_debug("Intrinsic sizes calculated: width=[%d, %d], height=[%d, %d]",
+    log_debug("Intrinsic sizes calculated: width=[%.1f, %.1f], height=[%.1f, %.1f]",
               min_width, max_width, min_height, max_height);
 
     // Restore font after measurement
