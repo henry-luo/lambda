@@ -568,8 +568,17 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
 }
 
 void line_align(LayoutContext* lycon) {
-    // horizontal text alignment: left, right, center, justify
-    if (lycon->block.text_align != CSS_VALUE_LEFT) {
+    // horizontal text alignment: left, right, center, justify, start, end
+    // Convert logical values (start/end) to physical values (left/right) for LTR text
+    // Note: For RTL support in future, this would need to be reversed
+    CssEnum text_align = lycon->block.text_align;
+    if (text_align == CSS_VALUE_START) {
+        text_align = CSS_VALUE_LEFT;  // LTR: start = left
+    } else if (text_align == CSS_VALUE_END) {
+        text_align = CSS_VALUE_RIGHT;  // LTR: end = right
+    }
+
+    if (text_align != CSS_VALUE_LEFT) {
         // Skip centering/right alignment only when laying out content INSIDE an inline-block
         // with shrink-to-fit width. In that case, the inline-block's width will shrink to fit
         // its content, so centering/right alignment would have no effect.
@@ -581,7 +590,7 @@ void line_align(LayoutContext* lycon) {
             container->view_type == RDT_VIEW_INLINE_BLOCK &&
             lycon->block.given_width < 0;
         if (container_is_shrink_inline_block &&
-            (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT)) {
+            (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT)) {
             log_debug("line_align: skipping center/right align for content inside shrink-to-fit inline-block");
             return;
         }
@@ -607,7 +616,7 @@ void line_align(LayoutContext* lycon) {
         }
 
         // For justify, always use current view if start_view is NULL
-        if (!view && lycon->block.text_align == CSS_VALUE_JUSTIFY) {
+        if (!view && text_align == CSS_VALUE_JUSTIFY) {
             view = lycon->view;
         }
 
@@ -620,15 +629,15 @@ void line_align(LayoutContext* lycon) {
         float line_width = lycon->line.advance_x - lycon->line.left;
         float offset = 0;
 
-        if (lycon->block.text_align == CSS_VALUE_CENTER) {
+        if (text_align == CSS_VALUE_CENTER) {
             offset = (lycon->block.content_width - line_width) / 2;
         }
-        else if (lycon->block.text_align == CSS_VALUE_RIGHT) {
+        else if (text_align == CSS_VALUE_RIGHT) {
             offset = lycon->block.content_width - line_width;
         }
 
         // For center/right alignment
-        if (offset > 0 && (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT)) {
+        if (offset > 0 && (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT)) {
             // For wrapped text continuation lines, only align the current line's TextRect
             if (is_wrapped_continuation) {
                 ViewText* text = (ViewText*)view;
@@ -650,7 +659,7 @@ void line_align(LayoutContext* lycon) {
             return;
         }
 
-        if (lycon->block.text_align == CSS_VALUE_JUSTIFY) {
+        if (text_align == CSS_VALUE_JUSTIFY) {
                 // For text nodes that wrap across multiple lines, we need to find the
                 // TextRect that corresponds to this line and justify it
                 if (view->view_type == RDT_VIEW_TEXT) {
