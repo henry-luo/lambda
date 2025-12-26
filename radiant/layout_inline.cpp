@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_positioned.hpp"
 
 // Forward declarations from layout_block.cpp for pseudo-element handling
 extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
@@ -244,6 +245,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // Handle block-in-inline splitting
         layout_inline_with_block_children(lycon, static_cast<DomElement*>(elmt), span, child);
         compute_span_bounding_box(span);
+
+        // Apply CSS relative positioning after normal layout
+        if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
+            log_debug("Applying relative positioning to inline span (with block children)");
+            layout_relative_positioned(lycon, (ViewBlock*)span);
+        }
+
         lycon->font = pa_font;
         lycon->line.vertical_align = pa_line_align;
         return;
@@ -259,6 +267,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     compute_span_bounding_box(span);
+
+    // Apply CSS relative positioning after normal layout
+    // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position
+    if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
+        log_debug("Applying relative positioning to inline span");
+        layout_relative_positioned(lycon, (ViewBlock*)span);
+    }
+
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
         span->first_child, span->x, span->y, span->width, span->height);
