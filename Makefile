@@ -545,11 +545,18 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Debug build completed. Executable: lambda.exe"
 	$(call mingw64_dll_check)
 
-# Release build (optimized)
+# Release build (optimized with size reduction)
+# Optimizations applied:
+#   1. Dead code elimination (-ffunction-sections, -fdata-sections, -Wl,-dead_strip)
+#   2. log_debug() and log_info() stripped via NDEBUG macro
+#   3. Symbol visibility control (-fvisibility=hidden)
+#   4. Debug symbols stripped (-s linker flag + post-build strip)
+#   5. LTO enabled (-flto)
 release: build-release
 
 build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building release version using Premake build system..."
+	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call mingw64_env_check)
 	$(call mingw64_toolchain_verify)
 	@echo "Generating Premake configuration..."
@@ -557,8 +564,16 @@ build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable (release) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=release_x64 lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
-	@echo "Release build completed. Executable: lambda.exe"
+	$(MAKE) -C build/premake config=release_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+ifeq ($(OS),Darwin)
+	@echo "Stripping debug symbols (macOS)..."
+	@strip -x lambda_release.exe 2>/dev/null || strip -x lambda.exe 2>/dev/null || true
+else
+	@echo "Stripping debug symbols..."
+	@strip lambda_release.exe 2>/dev/null || strip lambda.exe 2>/dev/null || true
+endif
+	@echo "Release build completed."
+	@ls -lh lambda_release.exe 2>/dev/null || ls -lh lambda.exe 2>/dev/null || true
 	$(call mingw64_dll_check)
 
 # Force rebuild (clean + build)
