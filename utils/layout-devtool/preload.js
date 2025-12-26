@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // HTML tree file
   readHtmlTreeFile: () => ipcRenderer.invoke('read-html-tree-file'),
 
+  // Recent tests
+  getRecentTests: () => ipcRenderer.invoke('get-recent-tests'),
+  addRecentTest: (testInfo) => ipcRenderer.invoke('add-recent-test', testInfo),
+
   // Terminal output listener
   onTerminalOutput: (callback) => {
     ipcRenderer.on('terminal-output', (event, data) => callback(data));
