@@ -233,6 +233,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float left_edge = block->position->left + (block->bound ? block->bound->margin.left : 0);
         float right_edge = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0);
         content_width = max(right_edge - left_edge, 0.0f);
+        // CRITICAL: Store constraint-calculated width so finalize_block_flow knows width is fixed
+        lycon->block.given_width = content_width;
+        log_debug("[ABS POS] width from constraints: left_edge=%.1f, right_edge=%.1f, content_width=%.1f (stored in given_width)",
+                  left_edge, right_edge, content_width);
     } else if (is_intrinsic_width) {
         // For max-content/min-content/fit-content, use 0 as initial width
         // The actual width will be determined by content and adjusted post-layout
@@ -257,17 +261,25 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     assert(content_width >= 0);
 
     // calculate vertical position - same refactoring as horizontal
+    log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
+              lycon->block.given_height, block->position->has_top, block->position->has_bottom, cb_height);
     if (lycon->block.given_height >= 0) {
         content_height = lycon->block.given_height;
+        log_debug("[ABS POS] using explicit height: %.1f", content_height);
     } else if (block->position->has_top && block->position->has_bottom) {
         // both top and bottom specified - calculate height from constraints
         float top_edge = block->position->top + (block->bound ? block->bound->margin.top : 0);
         float bottom_edge = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
         content_height = max(bottom_edge - top_edge, 0.0f);
+        // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
+        lycon->block.given_height = content_height;
+        log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, content_height=%.1f (stored in given_height)",
+                  top_edge, bottom_edge, content_height);
     } else {
         // shrink-to-fit: height will be determined by content after layout
         // Start with 0 and let the post-layout adjustment set the final height
         content_height = 0;
+        log_debug("[ABS POS] using auto height (shrink-to-fit)");
     }
 
     // Now determine y position (relative to padding box, then add border offset)
