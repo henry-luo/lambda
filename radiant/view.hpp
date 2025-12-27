@@ -16,8 +16,17 @@
 #include FT_SFNT_NAMES_H
 #include <thorvg_capi.h>
 
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define min(a, b) ((a) < (b) ? (a) : (b))
+// Use inline functions instead of macros to avoid conflicts with std::max/min
+// Support mixed types (e.g., int and float) by using common_type
+template<typename T, typename U>
+inline auto max(T a, U b) -> decltype(a > b ? a : b) {
+    return (a > b) ? a : b;
+}
+
+template<typename T, typename U>
+inline auto min(T a, U b) -> decltype(a < b ? a : b) {
+    return (a < b) ? a : b;
+}
 
 // Forward declarations
 struct FontFaceDescriptor;
