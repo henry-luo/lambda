@@ -1121,12 +1121,34 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
-        // Check for closing $$
+        // Check for closing $$ at start of line
         const char* pos = current;
         skip_whitespace(&pos);
         if (*pos == '$' && *(pos+1) == '$') {
             parser->current_line++; // Skip closing $$
             break;
+        }
+
+        // Check for closing $$ at end of line (for inline-style multi-line blocks)
+        size_t line_len = strlen(current);
+        if (line_len >= 2) {
+            const char* line_end = current + line_len;
+            // Skip trailing whitespace
+            while (line_end > current && (*(line_end-1) == ' ' || *(line_end-1) == '\t')) {
+                line_end--;
+            }
+            if (line_end - current >= 2 && *(line_end-2) == '$' && *(line_end-1) == '$') {
+                // Found $$ at end of line - add content before $$
+                size_t content_len = (line_end - 2) - current;
+                if (sb->length > 0) {
+                    stringbuf_append_char(sb, '\n');
+                }
+                if (content_len > 0) {
+                    stringbuf_append_str_n(sb, current, content_len);
+                }
+                parser->current_line++; // Skip this line with closing $$
+                break;
+            }
         }
 
         // Add line to math content
