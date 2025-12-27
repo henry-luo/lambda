@@ -536,12 +536,10 @@ TEST_F(AstValidatorTest, OptionalConstraintTooManyItems) {
 
     String* str1 = create_string(test_pool, "item1");
     String* str2 = create_string(test_pool, "item2");
-    ConstItem items[2];
     Item item1, item2;
     item1.item = s2it(str1);
     item2.item = s2it(str2);
-    items[0] = item1.to_const();
-    items[1] = item2.to_const();
+    ConstItem items[2] = { item1.to_const(), item2.to_const() };
 
     SchemaValidator* ctx = validator;
     ctx->get_options()->max_depth = 10;
@@ -574,14 +572,11 @@ TEST_F(AstValidatorTest, OneOrMoreConstraintMultipleItems) {
     String* str1 = create_string(test_pool, "item1");
     String* str2 = create_string(test_pool, "item2");
     String* str3 = create_string(test_pool, "item3");
-    ConstItem items[3];
     Item item1, item2, item3;
     item1.item = s2it(str1);
     item2.item = s2it(str2);
     item3.item = s2it(str3);
-    items[0] = item1.to_const();
-    items[1] = item2.to_const();
-    items[2] = item3.to_const();
+    ConstItem items[3] = { item1.to_const(), item2.to_const(), item3.to_const() };
 
     SchemaValidator* ctx = validator;
     ctx->get_options()->max_depth = 10;
@@ -597,11 +592,13 @@ TEST_F(AstValidatorTest, ZeroOrMoreConstraintAnyItems) {
     string_type->type_id = LMD_TYPE_STRING;
 
     String* str = create_string(test_pool, "item");
+    Item item_mut;
+    item_mut.item = s2it(str);
     ConstItem items[5];
+    // Use memcpy to initialize array elements since ConstItem has deleted assignment
+    ConstItem temp = item_mut.to_const();
     for (int i = 0; i < 5; i++) {
-        Item item_mut;
-        item_mut.item = s2it(str);
-        items[i] = item_mut.to_const();
+        memcpy(&items[i], &temp, sizeof(ConstItem));
     }
 
     SchemaValidator* ctx = validator;
