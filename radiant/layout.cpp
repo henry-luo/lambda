@@ -801,6 +801,33 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             }
         }
 
+        // CSS 2.2 Section 9.7: Absolutely positioned (position: absolute/fixed) elements
+        // are blockified - 'display: inline' becomes 'display: block', etc.
+        CssEnum position_value = CSS_VALUE_STATIC;
+        if (elem->position) {
+            position_value = elem->position->position;
+        } else if (elem->specified_style && elem->specified_style->tree) {
+            AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
+            if (pos_node) {
+                StyleNode* style_node = (StyleNode*)pos_node->declaration;
+                if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                    CssValue* val = style_node->winning_decl->value;
+                    if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                        position_value = val->data.keyword;
+                    }
+                }
+            }
+        }
+
+        if (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED) {
+            // Absolutely positioned elements become block-level
+            if (display.outer == CSS_VALUE_INLINE) {
+                log_debug("Position absolute/fixed on %s: transforming display from INLINE to BLOCK",
+                          node->node_name());
+                display.outer = CSS_VALUE_BLOCK;
+            }
+        }
+
         if (strcmp(node->node_name(), "table") == 0) {
             log_debug("TABLE ELEMENT in layout_flow_node - outer=%d, inner=%d (TABLE=%d)",
                    display.outer, display.inner, CSS_VALUE_TABLE);

@@ -327,6 +327,8 @@ static bool is_visibility_collapse(ViewBlock* element) {
 // Measure content height from cell's children
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     float content_height = 0.0f;
+    float block_content_min_y = -1.0f;  // Track min y of block content (for offset)
+    float block_content_max_y = 0.0f;   // Track max bottom of block content
 
     // Set up line-height for this cell so we can use it for text content measurement
     // This ensures we use the cell's own line-height, not a stale value from lycon
@@ -361,7 +363,16 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             ViewBlock* block = (ViewBlock*)child;
             float child_css_height = get_explicit_css_height(lycon, block);
             float child_height = (child_css_height > 0) ? child_css_height : block->height;
-            if (child_height > content_height) content_height = child_height;
+            // Track the min y and max bottom of block content for stacked blocks
+            // This handles padding offset by computing (max_y - min_y) instead of absolute position
+            float child_top = child->y;
+            float child_bottom = child->y + child_height;
+            if (block_content_min_y < 0 || child_top < block_content_min_y) {
+                block_content_min_y = child_top;
+            }
+            if (child_bottom > block_content_max_y) {
+                block_content_max_y = child_bottom;
+            }
         }
         else if (child->view_type == RDT_VIEW_TABLE) {
             // Handle nested tables - use the table's computed height
@@ -371,6 +382,13 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             if (table_height > content_height) content_height = table_height;
         }
     }
+
+    // Compute block content height as the extent from min to max y
+    // This correctly handles cells with padding by subtracting the initial offset
+    float block_content_height = (block_content_min_y >= 0) ? (block_content_max_y - block_content_min_y) : 0.0f;
+
+    // Use the larger of inline content height or block content extent
+    content_height = max(content_height, block_content_height);
 
     // Return measured content height (no artificial minimum)
     return content_height;
@@ -3615,7 +3633,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
 
         // STEP 6: Handle explicit table HEIGHT for fixed layout
-        // If table has height: 300px, distribute that height across rows
+        // If table has height: 300px or height="200" attribute, distribute that height across rows
         int explicit_table_height = 0;
         if (table->node_type == DOM_NODE_ELEMENT) {
             DomElement* dom_elem = table->as_element();
@@ -3630,6 +3648,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         log_debug("FIXED LAYOUT - read table CSS height: %dpx (resolved)", explicit_table_height);
                     }
                 }
+            }
+            // Fallback to HTML height attribute (stored in blk->given_height)
+            if (explicit_table_height <= 0 && table->blk && table->blk->given_height > 0) {
+                explicit_table_height = (int)table->blk->given_height;
+                log_debug("FIXED LAYOUT - read table HTML height attribute: %dpx", explicit_table_height);
             }
         }
 
@@ -4681,6 +4704,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
     }
 
+    // Fallback to HTML height attribute (stored in blk->given_height) for auto layout
+    if (explicit_css_height <= 0 && table->blk && table->blk->given_height > 0) {
+        explicit_css_height = (int)table->blk->given_height;
+        log_debug("Table has explicit HTML height attribute: %dpx", explicit_css_height);
+    }
+
     // Calculate what the minimum content height would be (including padding, borders, spacing)
     int min_content_height = current_y;
     int table_padding_vert = 0;
@@ -4848,6 +4877,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Iterate through row groups and direct rows to update their dimensions
             for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
                 if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                    // Track max extent within group for updating group height
+                    float group_max_y = 0;
+                    
                     // Update rows within group
                     for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
                         if (row->view_type == RDT_VIEW_TABLE_ROW) {
@@ -4858,6 +4890,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 if (row_idx >= 0 && row_idx < meta->row_count) {
                                     row->height = meta->row_heights[row_idx];
                                     row->y = meta->row_y_positions[row_idx] - child->y;  // Adjust for group offset
+
+                                    // Track max extent for group height
+                                    float row_bottom = row->y + row->height;
+                                    if (row_bottom > group_max_y) {
+                                        group_max_y = row_bottom;
+                                    }
 
                                     // Update cell heights and vertical alignment
                                     for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
@@ -4872,6 +4910,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 }
                             }
                         }
+                    }
+                    
+                    // Update group height to encompass all rows after height distribution
+                    if (group_max_y > 0) {
+                        float old_group_height = child->height;
+                        child->height = group_max_y;
+                        log_debug("Updated row group height from %.1f to %.1f", old_group_height, child->height);
                     }
                 } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
                     ViewTableRow* trow = (ViewTableRow*)child;
@@ -5011,11 +5056,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("Positioned caption at bottom: y=%d, caption_height=%d", (int)caption->y, caption_height);
     }
 
-    // Override calculated height with explicit CSS height if set (only in border-collapse mode)
-    // In border-collapse, the explicit height includes the collapsed borders
-    // In separate mode, the explicit height is content height, borders are added separately
-    if (explicit_css_height > 0 && table->tb->border_collapse) {
-        log_debug("Border-collapse explicit height override - changing final_table_height from %d to %d",
+    // Override calculated height with explicit height if set and larger than content height
+    // CSS 2.2 Section 17.5.3: If the table has an explicit height, use it
+    // Note: The height distribution to rows was already done above (around line 4731)
+    // Here we just ensure final_table_height respects the explicit height constraint
+    if (explicit_css_height > 0 && explicit_css_height > final_table_height) {
+        log_debug("Explicit height override - changing final_table_height from %d to %d",
                final_table_height, explicit_css_height);
         final_table_height = explicit_css_height;
     }

@@ -17,6 +17,11 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
 /**
  * Recursively offset all child views by the given amounts
  * Used for inline relative positioning where children have block-relative coordinates
+ * 
+ * Note: For block-level children, we offset the block itself but NOT its contents.
+ * Block children break out of inline context and establish their own coordinate system,
+ * so their internal content (text, nested elements) should not be affected by the
+ * inline span's relative positioning offset.
  */
 static void offset_children_recursive(ViewElement* elem, int offset_x, int offset_y) {
     View* child = elem->first_child;
@@ -35,8 +40,10 @@ static void offset_children_recursive(ViewElement* elem, int offset_x, int offse
             }
         }
 
-        // Recurse into element children
-        if (child->is_element()) {
+        // Recurse into element children, BUT skip recursing into block children
+        // Block children have their own coordinate system - their internal content
+        // positions are relative to the block, not to the inline span
+        if (child->is_element() && child->view_type != RDT_VIEW_BLOCK) {
             offset_children_recursive((ViewElement*)child, offset_x, offset_y);
         }
         child = child->next();
