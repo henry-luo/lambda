@@ -71,7 +71,7 @@ char* find_font_path_platform(const char* font_name) {
             if (test_file) {
                 fclose(test_file);
                 char* result = strdup(mappings[i].file_path);
-                log_info("Found macOS font '%s' via mapping: %s", font_name, result);
+                log_debug("Found macOS font '%s' via mapping: %s", font_name, result);
                 return result;
             } else {
                 log_debug("Mapped path doesn't exist: %s", mappings[i].file_path);
@@ -104,7 +104,7 @@ char* find_font_path_platform(const char* font_name) {
             if (test_file) {
                 fclose(test_file);
                 char* result = strdup(font_path);
-                log_info("Found macOS font '%s' at: %s", font_name, result);
+                log_debug("Found macOS font '%s' at: %s", font_name, result);
                 return result;
             }
         }
