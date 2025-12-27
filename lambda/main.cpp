@@ -1088,13 +1088,14 @@ int main(int argc, char *argv[]) {
         } else if (ext && (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                           strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                           strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
-                          strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0)) {
-            // Use unified document viewer for HTML, Markdown, LaTeX, XML, RST, etc.
+                          strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
+                          strcmp(ext, ".wiki") == 0)) {
+            // Use unified document viewer for HTML, Markdown, LaTeX, XML, RST, Wiki, etc.
             log_info("Opening document file: %s", filename);
             exit_code = view_doc_in_window(filename);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .tex, .latex, .xml, .rst\n");
+            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .tex, .latex, .xml, .rst, .wiki\n");
             log_finish();
             return 1;
         }
