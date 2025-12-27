@@ -691,9 +691,41 @@ DisplayValue resolve_display_value(void* child) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_COLUMN;
         } else {
-            // Default for unknown elements (inline)
-            display.outer = CSS_VALUE_INLINE;
-            display.inner = CSS_VALUE_FLOW;
+            // Fall back to tag name string comparison for elements without tag_id
+            // This handles markdown/Lambda-generated HTML that doesn't go through HTML5 parser
+            const char* tag_name = node->node_name();
+            if (tag_name) {
+                if (strcmp(tag_name, "table") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE;
+                } else if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 || strcmp(tag_name, "tfoot") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_ROW_GROUP;
+                } else if (strcmp(tag_name, "tr") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_ROW;
+                } else if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
+                    display.outer = CSS_VALUE_TABLE_CELL;
+                    display.inner = CSS_VALUE_TABLE_CELL;
+                } else if (strcmp(tag_name, "caption") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_FLOW;
+                } else if (strcmp(tag_name, "colgroup") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_COLUMN_GROUP;
+                } else if (strcmp(tag_name, "col") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_COLUMN;
+                } else {
+                    // Default for truly unknown elements (inline)
+                    display.outer = CSS_VALUE_INLINE;
+                    display.inner = CSS_VALUE_FLOW;
+                }
+            } else {
+                // No tag name available, default to inline
+                display.outer = CSS_VALUE_INLINE;
+                display.inner = CSS_VALUE_FLOW;
+            }
         }
         // TODO: Check for CSS display property in child->style (DomElement)
         // For now, using tag-based defaults is sufficient
@@ -2049,13 +2081,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
             float font_size = 0.0f;  bool valid = false;
+            // For font-size, em/percentage are relative to PARENT font size, not element's current
+            // lycon->font.style->font_size holds the inherited/parent font size
+            float parent_font_size = lycon->font.style && lycon->font.style->font_size > 0
+                ? lycon->font.style->font_size : 16.0f;
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Special handling for em units: em is relative to parent font size for font-size property
                 if (value->data.length.unit == CSS_UNIT_EM) {
-                    float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
-                    font_size = value->data.length.value * parent_size;
+                    font_size = value->data.length.value * parent_font_size;
                     log_debug("[CSS] Font size em: %.2fem -> %.2f px (parent size: %.2f px)",
-                              value->data.length.value, font_size, parent_size);
+                              value->data.length.value, font_size, parent_font_size);
                 } else {
                     font_size = resolve_length_value(lycon, prop_id, value);
                     log_debug("[CSS] Font size length: %.2f px (after conversion)", font_size);
@@ -2068,10 +2103,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // Percentage of parent font size
-                float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
-                font_size = parent_size * (value->data.percentage.value / 100.0f);
+                font_size = parent_font_size * (value->data.percentage.value / 100.0f);
                 log_debug("[CSS] Font size percentage: %.2f%% -> %.2f px (parent size: %.2f px)",
-                          value->data.percentage.value, font_size, parent_size);
+                          value->data.percentage.value, font_size, parent_font_size);
                 if (font_size >= 0) {
                     valid = true;
                 } else {
