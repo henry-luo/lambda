@@ -1312,6 +1312,10 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
         font->family_name = arena_strdup(arena, "Courier New");
     } else if (strstr(filename, "Courier") || strstr(filename, "courier")) {
         font->family_name = arena_strdup(arena, "Courier");
+    } else if (strstr(filename, "Menlo") || strstr(filename, "menlo")) {
+        font->family_name = arena_strdup(arena, "Menlo");
+    } else if (strstr(filename, "Monaco") || strstr(filename, "monaco")) {
+        font->family_name = arena_strdup(arena, "Monaco");
     } else if (strstr(filename, "Georgia") || strstr(filename, "georgia")) {
         font->family_name = arena_strdup(arena, "Georgia");
     } else if (strstr(filename, "Trebuchet") || strstr(filename, "trebuchet")) {
