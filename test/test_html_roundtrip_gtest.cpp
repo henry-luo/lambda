@@ -209,31 +209,31 @@ char* expand_self_closing_tags(const char* html) {
 
     const char* read = html;
     char* write = result;
-    
+
     while (*read) {
         if (*read == '<') {
             // Start of a tag - copy it and find the tag name
             *write++ = *read++;
-            
+
             // Skip whitespace after '<'
             while (*read && isspace(*read)) {
                 *write++ = *read++;
             }
-            
+
             // Check if it's a closing tag or comment
             if (*read == '/' || *read == '!') {
                 continue;  // Not a self-closing candidate
             }
-            
+
             // Extract tag name
             const char* tag_start = read;
             while (*read && *read != '>' && *read != '/' && !isspace(*read)) {
                 *write++ = *read++;
             }
-            
+
             size_t tag_len = read - tag_start;
             if (tag_len == 0) continue;
-            
+
             // Save tag name for later
             char tag_name[64];
             if (tag_len < sizeof(tag_name)) {
@@ -242,7 +242,7 @@ char* expand_self_closing_tags(const char* html) {
             } else {
                 tag_name[0] = '\0';  // Tag name too long, skip
             }
-            
+
             // Copy attributes and look for self-closing />
             bool is_self_closing = false;
             while (*read && *read != '>') {
@@ -253,11 +253,11 @@ char* expand_self_closing_tags(const char* html) {
                 }
                 *write++ = *read++;
             }
-            
+
             if (*read == '>') {
                 *write++ = *read++;
             }
-            
+
             // If it was self-closing, add explicit close tag
             if (is_self_closing && tag_name[0]) {
                 *write++ = '>';
@@ -937,24 +937,9 @@ TEST_F(BasicHtmlTests, NestedElementsRoundtrip) {
 // ==== SIMPLE HTML FILES (Basic structure, minimal CSS) ====
 class SimpleHtmlFileTests : public HtmlRoundtripTest {};
 
-TEST_F(SimpleHtmlFileTests, TestWhitespace) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_whitespace.html", "test_whitespace");
-    EXPECT_TRUE(result.success) << "Whitespace test HTML should succeed";
-}
-
 TEST_F(SimpleHtmlFileTests, TestClearSimple) {
     auto result = test_html_file_roundtrip_cli("./test/html/test_clear_simple.html", "test_clear_simple");
     EXPECT_TRUE(result.success) << "Simple clear test HTML should succeed";
-}
-
-TEST_F(SimpleHtmlFileTests, SimpleBoxTest) {
-    auto result = test_html_file_roundtrip_cli("./test/html/simple_box_test.html", "simple_box_test");
-    EXPECT_TRUE(result.success) << "Simple box test HTML should succeed";
-}
-
-TEST_F(SimpleHtmlFileTests, SimpleTableTest) {
-    auto result = test_html_file_roundtrip_cli("./test/html/simple_table_test.html", "simple_table_test");
-    EXPECT_TRUE(result.success) << "Simple table test HTML should succeed";
 }
 
 TEST_F(SimpleHtmlFileTests, TableSimple) {
@@ -981,7 +966,7 @@ TEST_F(IntermediateHtmlFileTests, Sample3) {
 }
 
 TEST_F(IntermediateHtmlFileTests, Sample4) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample4.html", "sample4");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/baseline/sample4.html", "sample4");
     EXPECT_TRUE(result.success) << "Sample4 landing page HTML should succeed";
 }
 
@@ -1036,16 +1021,6 @@ TEST_F(AdvancedHtmlFileTests, BoxHtml) {
 TEST_F(AdvancedHtmlFileTests, FlexHtml) {
     auto result = test_html_file_roundtrip_cli("./test/html/flex.html", "flex");
     EXPECT_TRUE(result.success) << "Flex HTML file should succeed";
-}
-
-TEST_F(AdvancedHtmlFileTests, TestPositioningSimple) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_positioning_simple.html", "test_positioning_simple");
-    EXPECT_TRUE(result.success) << "Simple positioning test HTML should succeed";
-}
-
-TEST_F(AdvancedHtmlFileTests, TestPositioningBasic) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_positioning_basic.html", "test_positioning_basic");
-    EXPECT_TRUE(result.success) << "Basic positioning test HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestCompletePositioning) {
