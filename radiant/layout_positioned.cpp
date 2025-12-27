@@ -5,6 +5,10 @@
 #include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
 #include <cfloat>
+#include <algorithm>
+
+using std::min;
+using std::max;
 
 // Forward declarations
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
@@ -703,13 +707,21 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     float final_y_bfc = current_y_bfc;
     int max_iterations = 100;  // Prevent infinite loops
     
+    // CSS 2.1 §9.5.1: Float's margin box must not exceed the containing block's content edge
+    // Calculate the containing block's right edge in BFC coordinates
+    float containing_block_right_bfc = parent_x_in_bfc + content_offset_x + parent_content_width;
+    log_debug("[FLOAT_LAYOUT] Containing block right edge in BFC coords: %.1f", containing_block_right_bfc);
+    
     while (max_iterations-- > 0) {
         // Query available space at this Y position
         FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
-        float available_width = space.right - space.left;
         
-        log_debug("[FLOAT_LAYOUT] Checking Y=%.1f: space=(%.1f, %.1f), available=%.1f, needed=%.1f",
-                  final_y_bfc, space.left, space.right, available_width, float_total_width);
+        // Constrain space.right by the containing block's right edge
+        float effective_right = min(space.right, containing_block_right_bfc);
+        float available_width = effective_right - space.left;
+        
+        log_debug("[FLOAT_LAYOUT] Checking Y=%.1f: space=(%.1f, %.1f), effective_right=%.1f, available=%.1f, needed=%.1f",
+                  final_y_bfc, space.left, space.right, effective_right, available_width, float_total_width);
         
         // Check if float fits at this Y position
         if (available_width >= float_total_width) {
