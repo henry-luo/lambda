@@ -392,7 +392,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     }
 
     // handle vertical overflow and determine block->height
-    if (lycon->block.given_height >= 0) { // got specified height
+    // Use block->blk->given_height instead of lycon->block.given_height to avoid corruption
+    // from child layouts that modify lycon->block during their CSS resolution
+    float block_given_height = (block->blk && block->blk->given_height >= 0) ? block->blk->given_height : -1;
+    if (block_given_height >= 0) { // got specified height
         // no change to block->height
         if (flow_height > block->height) { // vt overflow
             if (!block->scroller) {
@@ -413,7 +416,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
             }
         }
-        log_debug("block: given_height: %f, height: %f, flow height: %f", lycon->block.given_height, block->height, flow_height);
+        log_debug("block: given_height: %f, height: %f, flow height: %f", block_given_height, block->height, flow_height);
     }
     else {
         // For non-flex containers, set height to flow height

@@ -53,6 +53,8 @@ void ScrollPane::reset() {
 
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip) {
+    log_info("SCROLLPANE: content size: %.1f x %.1f, view bounds: %.1f x %.1f",
+        content_width, content_height, block_bound->width, block_bound->height);
     log_debug("render scroller content size: %f x %f, blk bounds: %f x %f",
         content_width, content_height, block_bound->width, block_bound->height);
 
