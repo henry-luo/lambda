@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_positioned.hpp"
 #include "layout_flex.hpp"
 #include "grid.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -673,13 +674,30 @@ void append_json_string(StrBuf* buf, const char* str) {
 void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, TextRect* rect = nullptr) {
     // calculate absolute position for view
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
-    // Calculate absolute position by traversing up the parent chain
-    ViewElement* parent = view->parent_view();
-    while (parent) {
-        if (parent->is_block()) {
-            abs_x += parent->x;  abs_y += parent->y;
+    
+    // Check if this is a fixed positioned element
+    // Fixed elements have coordinates relative to viewport, not parent
+    bool is_fixed = false;
+    if (view->is_block()) {
+        ViewBlock* block = (ViewBlock*)view;
+        if (block->position) {
+            is_fixed = (block->position->position == CSS_VALUE_FIXED);
         }
-        parent = parent->parent_view();
+    }
+    
+    // Calculate absolute position by traversing up the parent chain
+    // For fixed elements: position is already relative to viewport (root at 0,0)
+    //   so we don't add any parent positions
+    // For all other elements (including absolute): accumulate parent positions
+    //   as per the original logic (they're relative to their immediate parent)
+    if (!is_fixed) {
+        ViewElement* parent = view->parent_view();
+        while (parent) {
+            if (parent->is_block()) {
+                abs_x += parent->x;  abs_y += parent->y;
+            }
+            parent = parent->parent_view();
+        }
     }
 
     // Convert absolute view dimensions to CSS pixels
