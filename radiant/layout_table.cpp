@@ -2247,6 +2247,48 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     DisplayValue display = resolve_display_value(node);
     uintptr_t tag = node->tag();
 
+    // CSS 2.1 §9.7: Elements with float become block-level elements
+    // Check if this element has float set - if so, it's not a table internal element
+    DomElement* elem = node->as_element();
+    CssEnum float_value = CSS_VALUE_NONE;
+    if (elem->position) {
+        float_value = elem->position->float_prop;
+    } else if (elem->specified_style && elem->specified_style->tree) {
+        AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+        if (float_node) {
+            StyleNode* style_node = (StyleNode*)float_node->declaration;
+            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                CssValue* val = style_node->winning_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                    float_value = val->data.keyword;
+                }
+            }
+        }
+    }
+
+    // If floated, treat as a regular block element and skip table-specific handling
+    if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
+        log_debug("[TABLE] Floated element %s inside table - treating as block, not table internal", node->node_name());
+        
+        // CSS 2.1 §9.7: Floated elements become block-level
+        // Layout this element as a float, not as a table internal element
+        DisplayValue float_display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
+        
+        // Mark as pre-laid to prevent double processing
+        elem->float_prelaid = true;
+        
+        // Save and restore view context for the float
+        View* saved_view = lycon->view;
+        
+        // Layout the float as a block
+        layout_block(lycon, node, float_display);
+        
+        // Restore view context
+        lycon->view = saved_view;
+        
+        return;
+    }
+
     // Save context
     DomNode* saved_elmt = lycon->elmt;
     lycon->elmt = node;

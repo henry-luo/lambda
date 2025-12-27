@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_positioned.hpp"
 #include "layout_flex.hpp"
 #include "grid.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -673,13 +674,153 @@ void append_json_string(StrBuf* buf, const char* str) {
 void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, TextRect* rect = nullptr) {
     // calculate absolute position for view
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
-    // Calculate absolute position by traversing up the parent chain
-    ViewElement* parent = view->parent_view();
-    while (parent) {
-        if (parent->is_block()) {
-            abs_x += parent->x;  abs_y += parent->y;
+    
+    // Check if this is a fixed or absolute positioned element
+    bool is_fixed = false;
+    bool is_absolute = false;
+    ViewBlock* containing_block = nullptr;
+    
+    if (view->is_block()) {
+        ViewBlock* block = (ViewBlock*)view;
+        if (block->position) {
+            is_fixed = (block->position->position == CSS_VALUE_FIXED);
+            is_absolute = (block->position->position == CSS_VALUE_ABSOLUTE);
         }
-        parent = parent->parent_view();
+    }
+    
+    // Calculate absolute position by traversing up the parent chain
+    // For fixed elements: position is already relative to viewport (root at 0,0)
+    //   so we don't add any parent positions
+    // For absolute elements: position is relative to containing block, so we need
+    //   to add the containing block's absolute position
+    // For all other elements: accumulate parent positions normally
+    if (is_fixed) {
+        // Fixed: position already relative to viewport, nothing to add
+    } else if (is_absolute) {
+        // Absolute: position is relative to containing block
+        // Need to get the containing block's absolute position
+        
+        // Find the containing block (nearest positioned ancestor)
+        ViewElement* ancestor = view->parent_view();
+        ViewBlock* cb = nullptr;
+        
+        while (ancestor) {
+            if (ancestor->is_block()) {
+                ViewBlock* ancestor_block = (ViewBlock*)ancestor;
+                if (ancestor_block->position && 
+                    ancestor_block->position->position != CSS_VALUE_STATIC) {
+                    cb = ancestor_block;
+                    break;
+                }
+            }
+            ancestor = ancestor->parent_view();
+        }
+        
+        if (cb) {
+            // Add containing block's position
+            abs_x += cb->x;
+            abs_y += cb->y;
+            
+            // Now get containing block's absolute position based on its positioning
+            if (cb->position->position == CSS_VALUE_FIXED) {
+                // Fixed: already relative to viewport, done
+            } else if (cb->position->position == CSS_VALUE_ABSOLUTE) {
+                // Absolute containing block: recursively find ITS containing block chain
+                ViewBlock* current = cb;
+                while (true) {
+                    ViewElement* cb_ancestor = current->parent_view();
+                    ViewBlock* cb_cb = nullptr;
+                    
+                    while (cb_ancestor) {
+                        if (cb_ancestor->is_block()) {
+                            ViewBlock* cb_ancestor_block = (ViewBlock*)cb_ancestor;
+                            if (cb_ancestor_block->position && 
+                                cb_ancestor_block->position->position != CSS_VALUE_STATIC) {
+                                cb_cb = cb_ancestor_block;
+                                break;
+                            }
+                        }
+                        cb_ancestor = cb_ancestor->parent_view();
+                    }
+                    
+                    if (!cb_cb) break;  // Reached root
+                    
+                    abs_x += cb_cb->x;
+                    abs_y += cb_cb->y;
+                    
+                    if (cb_cb->position->position == CSS_VALUE_FIXED) break;
+                    if (cb_cb->position->position != CSS_VALUE_ABSOLUTE) {
+                        // Relative: continue with normal DOM walk
+                        ViewElement* parent = cb_cb->parent_view();
+                        while (parent) {
+                            if (parent->is_block()) {
+                                abs_x += parent->x;
+                                abs_y += parent->y;
+                            }
+                            parent = parent->parent_view();
+                        }
+                        break;
+                    }
+                    current = cb_cb;
+                }
+            } else {
+                // Relative: containing block is in normal flow, walk up DOM
+                ViewElement* parent = cb->parent_view();
+                while (parent) {
+                    if (parent->is_block()) {
+                        abs_x += parent->x;
+                        abs_y += parent->y;
+                    }
+                    parent = parent->parent_view();
+                }
+            }
+        }
+        // If no positioned ancestor, containing block is root (at 0,0), nothing to add
+    } else {
+        // Normal flow element: add parent positions
+        // When we encounter an absolute/fixed parent, we still add its position,
+        // but then we need to continue walking up to find the absolute parent's
+        // containing block and add those positions too.
+        ViewElement* parent = view->parent_view();
+        while (parent) {
+            if (parent->is_block()) {
+                ViewBlock* parent_block = (ViewBlock*)parent;
+                abs_x += parent->x;  abs_y += parent->y;
+                
+                // If parent is fixed, its position is relative to viewport (root at 0,0)
+                // so we can stop here
+                if (parent_block->position && 
+                    parent_block->position->position == CSS_VALUE_FIXED) {
+                    break;
+                }
+                
+                // If parent is absolute, its position is relative to its containing block
+                // We need to find that containing block and continue from there
+                if (parent_block->position && 
+                    parent_block->position->position == CSS_VALUE_ABSOLUTE) {
+                    // Find the containing block (nearest positioned ancestor)
+                    ViewElement* ancestor = parent_block->parent_view();
+                    while (ancestor) {
+                        if (ancestor->is_block()) {
+                            ViewBlock* ancestor_block = (ViewBlock*)ancestor;
+                            if (ancestor_block->position && 
+                                ancestor_block->position->position != CSS_VALUE_STATIC) {
+                                // This is the containing block - continue from here
+                                parent = ancestor;
+                                break;
+                            }
+                        }
+                        ancestor = ancestor->parent_view();
+                    }
+                    if (!ancestor) {
+                        // No positioned ancestor - containing block is root (already at 0,0)
+                        break;
+                    }
+                    continue;  // Continue loop with containing block as parent
+                }
+            }
+            parent = parent->parent_view();
+        }
     }
 
     // Convert absolute view dimensions to CSS pixels

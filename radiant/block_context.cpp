@@ -69,12 +69,18 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
         }
 
         // Content area bounds for float calculations
+        // content_width is already the pure content area (width - padding - border)
+        // Only subtract padding/border if we're using element->width directly
         ctx->float_left_edge = 0;
-        ctx->float_right_edge = element->content_width > 0 ? element->content_width : element->width;
-        if (element->bound) {
-            ctx->float_right_edge -= element->bound->padding.left + element->bound->padding.right;
-            if (element->bound->border) {
-                ctx->float_right_edge -= element->bound->border->width.left + element->bound->border->width.right;
+        if (element->content_width > 0) {
+            ctx->float_right_edge = element->content_width;
+        } else {
+            ctx->float_right_edge = element->width;
+            if (element->bound) {
+                ctx->float_right_edge -= element->bound->padding.left + element->bound->padding.right;
+                if (element->bound->border) {
+                    ctx->float_right_edge -= element->bound->border->width.left + element->bound->border->width.right;
+                }
             }
         }
         if (ctx->float_right_edge < 0) ctx->float_right_edge = element->width;
@@ -143,8 +149,10 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
-    // 5. Table cells and captions
-    if (block->display.inner == CSS_VALUE_TABLE_CELL ||
+    // 5. Tables, table cells and captions
+    // CSS 2.2 §9.4.1: "The border box of a table..."
+    if (block->display.inner == CSS_VALUE_TABLE ||
+        block->display.inner == CSS_VALUE_TABLE_CELL ||
         block->display.inner == CSS_VALUE_TABLE_CAPTION) {
         return true;
     }
