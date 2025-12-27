@@ -1335,6 +1335,10 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load Markdown document: parse Markdown → convert to HTML → layout
         log_info("[load_html_doc] Detected Markdown file, using Markdown→HTML pipeline");
         doc = load_markdown_doc(full_url, viewport_width, viewport_height, pool);
+    } else if (ext && strcmp(ext, ".wiki") == 0) {
+        // Load Wiki document: parse Wiki → convert to HTML → layout
+        log_info("[load_html_doc] Detected Wiki file, using Wiki→HTML pipeline");
+        doc = load_wiki_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && strcmp(ext, ".xml") == 0) {
         // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
         log_info("[load_html_doc] Detected XML file, using XML→DOM pipeline");
