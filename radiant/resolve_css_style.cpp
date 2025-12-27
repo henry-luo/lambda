@@ -1689,7 +1689,6 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         bool has_font = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr ||
                        avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr;
         if (has_font && span && span->font && span->font->family && lycon->ui_context) {
-            log_debug("[Lambda CSS] Setting up font for element: family='%s'", span->font->family);
             setup_font(lycon->ui_context, &lycon->font, span->font);
         }
     }

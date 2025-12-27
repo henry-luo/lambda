@@ -705,19 +705,16 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                                 case NAME_ID_FAMILY_NAME:
                                     if (!entry->family_name) {
                                         entry->family_name = ascii_name;
-                                        log_debug("Parsed family name: %s", entry->family_name);
                                     }
                                     break;
                                 case NAME_ID_SUBFAMILY_NAME:
                                     if (!entry->subfamily_name) {
                                         entry->subfamily_name = ascii_name;
-                                        log_debug("Parsed subfamily name: %s", entry->subfamily_name);
                                     }
                                 break;
                             case NAME_ID_POSTSCRIPT_NAME:
                                 if (!entry->postscript_name) {
                                     entry->postscript_name = ascii_name;
-                                    log_debug("Parsed PostScript name: %s", entry->postscript_name);
                                 }
                                 break;
                         }
@@ -766,9 +763,6 @@ static bool parse_os2_table(FILE *file, TTF_Table_Directory *os2_table, FontEntr
         }
     }
 
-    log_debug("Parsed OS/2 table: weight=%d, italic=%s",
-        entry->weight, entry->style == FONT_STYLE_ITALIC ? "yes" : "no");
-
     return true;
 }
 
@@ -797,7 +791,6 @@ static bool parse_cmap_table(FILE *file, TTF_Table_Directory *cmap_table, FontEn
         entry->unicode_coverage_hash = calculate_unicode_coverage_hash(basic_range);
     }
 
-    log_debug("Parsed cmap table with %d subtables", num_tables);
     return true;
 }
 
@@ -1490,9 +1483,6 @@ static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
         log_debug("Failed to lazy load font: %s", file_path);
         return NULL;
     }
-
-    log_debug("Successfully lazy loaded font: %s (family: %s)", file_path,
-        font_entry->family_name ? font_entry->family_name : "unknown");
 
     return font_entry;
 }
