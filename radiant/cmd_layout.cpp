@@ -68,6 +68,7 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
@@ -1334,6 +1335,14 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load Markdown document: parse Markdown → convert to HTML → layout
         log_info("[load_html_doc] Detected Markdown file, using Markdown→HTML pipeline");
         doc = load_markdown_doc(full_url, viewport_width, viewport_height, pool);
+    } else if (ext && strcmp(ext, ".wiki") == 0) {
+        // Load Wiki document: parse Wiki → convert to HTML → layout
+        log_info("[load_html_doc] Detected Wiki file, using Wiki→HTML pipeline");
+        doc = load_wiki_doc(full_url, viewport_width, viewport_height, pool);
+    } else if (ext && strcmp(ext, ".xml") == 0) {
+        // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
+        log_info("[load_html_doc] Detected XML file, using XML→DOM pipeline");
+        doc = load_xml_doc(full_url, viewport_width, viewport_height, pool);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
@@ -1497,6 +1506,160 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 }
 
 /**
+ * Load MediaWiki document with Lambda CSS system
+ * Parses wiki markup, applies Wikipedia-style CSS, builds DOM tree, returns DomDocument for layout
+ *
+ * @param wiki_url URL to wiki file
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure with Lambda CSS DOM, ready for layout
+ */
+DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!wiki_url || !pool) {
+        log_error("load_wiki_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* wiki_filepath = url_to_local_path(wiki_url);
+    log_info("[TIMING] Loading wiki document: %s", wiki_filepath);
+
+    // Step 1: Parse wiki with Lambda parser
+    auto step1_start = std::chrono::high_resolution_clock::now();
+    char* wiki_content = read_text_file(wiki_filepath);
+    if (!wiki_content) {
+        log_error("Failed to read wiki file: %s", wiki_filepath);
+        return nullptr;
+    }
+
+    // Create type string for wiki
+    String* type_str = (String*)malloc(sizeof(String) + 5);
+    type_str->len = 4;
+    strcpy(type_str->chars, "wiki");
+
+    // Parse wiki to Lambda Element tree
+    Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
+    free(wiki_content);
+
+    if (!input) {
+        log_error("Failed to parse wiki file: %s", wiki_filepath);
+        return nullptr;
+    }
+
+    // Get root element from parsed wiki
+    Element* wiki_root = nullptr;
+    TypeId root_type = get_type_id(input->root);
+    if (root_type == LMD_TYPE_ELEMENT) {
+        wiki_root = input->root.element;
+    } else if (root_type == LMD_TYPE_LIST) {
+        // Wiki parser may return list, find first element
+        List* root_list = input->root.list;
+        for (int64_t i = 0; i < root_list->length; i++) {
+            Item item = root_list->items[i];
+            if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+                wiki_root = item.element;
+                break;
+            }
+        }
+    }
+
+    if (!wiki_root) {
+        log_error("Failed to get wiki root element");
+        return nullptr;
+    }
+
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Parse wiki: %.1fms",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+
+    // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
+    auto step2_start = std::chrono::high_resolution_clock::now();
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument");
+        return nullptr;
+    }
+
+    DomElement* dom_root = build_dom_tree_from_element(wiki_root, dom_doc, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DomElement tree from wiki");
+        dom_document_destroy(dom_doc);
+        return nullptr;
+    }
+
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
+        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+
+    // Step 3: Initialize CSS engine
+    auto step3_start = std::chrono::high_resolution_clock::now();
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("Failed to create CSS engine");
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Step 4: Load wiki.css stylesheet
+    // Determine the path to wiki.css (relative to executable)
+    const char* css_filename = "lambda/input/wiki.css";
+    log_debug("[Lambda Wiki] Loading default wiki stylesheet: %s", css_filename);
+
+    CssStylesheet* wiki_stylesheet = nullptr;
+    char* css_content = read_text_file(css_filename);
+    if (css_content) {
+        size_t css_len = strlen(css_content);
+        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+        if (css_pool_copy) {
+            strcpy(css_pool_copy, css_content);
+            free(css_content);
+            wiki_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+            if (wiki_stylesheet) {
+                log_debug("[Lambda Wiki] Loaded wiki stylesheet with %zu rules",
+                        wiki_stylesheet->rule_count);
+            } else {
+                log_warn("Failed to parse wiki.css");
+            }
+        } else {
+            free(css_content);
+        }
+    } else {
+        log_warn("Failed to load wiki.css file: %s", css_filename);
+        log_warn("Continuing without stylesheet - wiki will use browser defaults");
+    }
+
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - CSS parse: %.1fms",
+        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
+    // Step 5: Apply CSS cascade to DOM tree
+    auto step4_start = std::chrono::high_resolution_clock::now();
+    if (wiki_stylesheet && wiki_stylesheet->rule_count > 0) {
+        SelectorMatcher* matcher = selector_matcher_create(pool);
+        apply_stylesheet_to_dom_tree_fast(dom_root, wiki_stylesheet, matcher, pool, css_engine);
+    }
+    auto step4_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
+        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
+
+    // Step 6: Populate DomDocument structure
+    dom_doc->root = dom_root;
+    dom_doc->html_root = wiki_root;
+    dom_doc->html_version = HTML5;  // Treat wiki as HTML5
+    dom_doc->url = wiki_url;
+    dom_doc->view_tree = nullptr;  // Will be created during layout
+    dom_doc->state = nullptr;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_wiki_doc total: %.1fms",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
+    return dom_doc;
+}
+
+/**
  * Load LaTeX document with Lambda CSS system
  * Parses LaTeX, converts to HTML, applies CSS, builds DOM tree, returns DomDocument for layout
  *
@@ -1545,40 +1708,39 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Step 2: Generate complete HTML document with external CSS links
     log_debug("[Lambda LaTeX] Converting LaTeX to HTML with external CSS...");
 
-    // Generate HTML output path: <input_file>.html
-    std::string html_output_path = std::string(latex_filepath) + ".html";
-
-    // Compute relative path from HTML file location to conf/input/latex/
-    // We need to find how many directories deep the HTML file is from the CWD
+    // Compute relative path from LaTeX file location to conf/input/latex/
+    // We need to find how many directories deep the file is from the CWD
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == nullptr) {
         log_error("Failed to get current working directory");
         return nullptr;
     }
     std::string cwd_str(cwd);
-    std::string html_abs_dir = html_output_path;
-    size_t last_slash = html_abs_dir.rfind('/');
+    std::string latex_abs_dir = std::string(latex_filepath);
+    size_t last_slash = latex_abs_dir.rfind('/');
     if (last_slash != std::string::npos) {
-        html_abs_dir = html_abs_dir.substr(0, last_slash);
+        latex_abs_dir = latex_abs_dir.substr(0, last_slash);
     }
 
-    // Get relative path from CWD to HTML directory
-    std::string rel_html_dir;
-    if (html_abs_dir.find(cwd_str) == 0) {
-        // HTML is under CWD
-        rel_html_dir = html_abs_dir.substr(cwd_str.length());
-        if (!rel_html_dir.empty() && rel_html_dir[0] == '/') {
-            rel_html_dir = rel_html_dir.substr(1);
+    // Get relative path from CWD to LaTeX directory
+    std::string rel_latex_dir;
+    if (latex_abs_dir.find(cwd_str) == 0) {
+        // LaTeX is under CWD
+        rel_latex_dir = latex_abs_dir.substr(cwd_str.length());
+        if (!rel_latex_dir.empty() && rel_latex_dir[0] == '/') {
+            rel_latex_dir = rel_latex_dir.substr(1);
         }
     } else {
-        rel_html_dir = html_abs_dir;  // Fallback to absolute
+        rel_latex_dir = latex_abs_dir;  // Fallback to absolute
     }
+
+    log_info("[Lambda LaTeX] Starting LaTeX document load from %s", latex_filepath);
 
     // Count directory depth
     int depth = 0;
-    if (!rel_html_dir.empty()) {
+    if (!rel_latex_dir.empty()) {
         depth = 1;  // At least one directory
-        for (char c : rel_html_dir) {
+        for (char c : rel_latex_dir) {
             if (c == '/') depth++;
         }
     }
@@ -1590,8 +1752,8 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
     asset_base_url_str += "conf/input/latex/";
 
-    log_debug("[Lambda LaTeX] CWD: %s, HTML dir: %s, rel: %s, depth: %d, asset URL: %s",
-              cwd_str.c_str(), html_abs_dir.c_str(), rel_html_dir.c_str(), depth, asset_base_url_str.c_str());
+    log_debug("[Lambda LaTeX] CWD: %s, LaTeX dir: %s, rel: %s, depth: %d, asset URL: %s",
+              cwd_str.c_str(), latex_abs_dir.c_str(), rel_latex_dir.c_str(), depth, asset_base_url_str.c_str());
 
     const char* doc_class = "article";  // Default document class
 
@@ -1602,15 +1764,12 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    // Save HTML to file
-    FILE* html_file = fopen(html_output_path.c_str(), "w");
-    if (html_file) {
-        fprintf(html_file, "%s", html_doc);
-        fclose(html_file);
-        log_info("[Lambda LaTeX] Saved HTML to: %s (assets: %s)", html_output_path.c_str(), asset_base_url_str.c_str());
-    } else {
-        log_warn("[Lambda LaTeX] Could not save HTML to: %s", html_output_path.c_str());
-    }
+    // Log the first 100 characters to verify structure
+    size_t html_len = strlen(html_doc);
+    char html_preview[101];
+    strncpy(html_preview, html_doc, 100);
+    html_preview[100] = '\0';
+    log_info("[Lambda LaTeX] Generated HTML (%zu bytes), starts with: %s", html_len, html_preview);
 
     // Step 3: Parse the generated HTML for DOM construction
     log_debug("[Lambda LaTeX] Parsing generated HTML for layout...");
@@ -1727,6 +1886,233 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     dom_doc->state = nullptr;
 
     log_debug("[Lambda LaTeX] LaTeX document loaded, converted to HTML, and styled");
+    return dom_doc;
+}
+
+/**
+ * Load XML document with Lambda CSS system
+ * Parses XML, treats XML elements as custom HTML elements, applies external CSS, builds DOM tree
+ *
+ * @param xml_url URL to XML file
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure with Lambda CSS DOM, ready for layout
+ */
+DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool) {
+    using namespace std::chrono;
+    auto total_start = high_resolution_clock::now();
+
+    if (!xml_url || !pool) {
+        log_error("load_xml_doc: invalid parameters");
+        return nullptr;
+    }
+
+    const char* xml_filepath = url_get_pathname(xml_url);
+    log_info("[Lambda XML] Loading XML file: %s", xml_filepath);
+
+    // Step 1: Read XML file
+    auto t_read = high_resolution_clock::now();
+    char* xml_content = read_text_file(xml_filepath);
+    if (!xml_content) {
+        log_error("[Lambda XML] Failed to read XML file: %s", xml_filepath);
+        return nullptr;
+    }
+    auto t_parse = high_resolution_clock::now();
+    log_info("[TIMING] load: read XML: %.1fms",
+             duration_cast<duration<double, std::milli>>(t_parse - t_read).count());
+
+    // Step 2: Parse XML into Lambda elements using input_from_source
+    String* type_str = (String*)malloc(sizeof(String) + 4);
+    type_str->len = 3;
+    strcpy(type_str->chars, "xml");
+
+    Input* xml_input = input_from_source(xml_content, xml_url, type_str, nullptr);
+    free(xml_content);
+
+    if (!xml_input || !xml_input->root.item || xml_input->root.item == ITEM_ERROR) {
+        log_error("[Lambda XML] Failed to parse XML");
+        return nullptr;
+    }
+
+    // Check if XML has stylesheet
+    if (!xml_input->xml_stylesheet_href) {
+        log_error("[Lambda XML] Error: XML document must have <?xml-stylesheet?> directive");
+        log_error("[Lambda XML] Expected: <?xml-stylesheet type=\"text/css\" href=\"style.css\"?>");
+        return nullptr;
+    }
+
+    log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);
+    auto t_css_parse = high_resolution_clock::now();
+    log_info("[TIMING] load: parse XML: %.1fms",
+             duration_cast<duration<double, std::milli>>(t_css_parse - t_parse).count());
+
+    // Step 3: Get the actual XML root element (skip document wrapper)
+    Element* document_wrapper = (Element*)xml_input->root.item;
+    Element* xml_root = nullptr;
+
+    // Find the first actual XML element (skip processing instructions, comments)
+    if (document_wrapper && document_wrapper->type) {
+        TypeElmt* doc_type = (TypeElmt*)document_wrapper->type;
+
+        if (strcmp(doc_type->name.str, "document") == 0) {
+            // Element extends List, so access children via items array
+            for (int64_t i = 0; i < document_wrapper->length; i++) {
+                Item child = document_wrapper->items[i];
+                TypeId child_type_id = get_type_id(child);
+
+                if (child.item && child_type_id == LMD_TYPE_ELEMENT) {
+                    Element* child_elem = (Element*)child.item;
+                    TypeElmt* child_type = (TypeElmt*)child_elem->type;
+
+                    // Skip processing instructions and comments
+                    if (child_type->name.str[0] != '?' && child_type->name.str[0] != '!') {
+                        xml_root = child_elem;
+                        log_debug("[Lambda XML] Found XML root element: <%s> with %lld children",
+                                child_type->name.str, child_elem->length);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!xml_root) {
+        log_error("[Lambda XML] Could not find XML root element");
+        return nullptr;
+    }
+
+    // Step 4: Create CSS engine and set viewport
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("[Lambda XML] Failed to create CSS engine");
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Step 5: Load external CSS stylesheet
+    log_debug("[Lambda XML] Loading external stylesheet: %s", xml_input->xml_stylesheet_href);
+
+    CssStylesheet* external_stylesheet = nullptr;
+    char* css_content = read_text_file(xml_input->xml_stylesheet_href);
+    if (css_content) {
+        size_t css_len = strlen(css_content);
+        external_stylesheet = css_parse_stylesheet(css_engine, css_content, xml_filepath);
+        if (external_stylesheet) {
+            log_info("[Lambda XML] Loaded external stylesheet: %s (%zu bytes)",
+                     xml_input->xml_stylesheet_href, css_len);
+        } else {
+            log_error("[Lambda XML] Failed to parse CSS stylesheet");
+            free(css_content);
+            return nullptr;
+        }
+        free(css_content);
+    } else {
+        log_error("[Lambda XML] Failed to read CSS file: %s", xml_input->xml_stylesheet_href);
+        return nullptr;
+    }
+
+    auto t_dom = high_resolution_clock::now();
+    log_info("[TIMING] load: parse CSS: %.1fms",
+             duration_cast<duration<double, std::milli>>(t_dom - t_css_parse).count());
+
+    // Step 6: Create DOM document
+    DomDocument* dom_doc = dom_document_create(xml_input);
+    if (!dom_doc) {
+        log_error("[Lambda XML] Failed to create DOM document");
+        return nullptr;
+    }
+
+    // Assign pool to DOM document for future allocations
+    dom_doc->pool = pool;
+    dom_doc->url = xml_url;
+
+    // Step 7: Build DOM tree from XML elements
+    // XML needs to be wrapped in html > body structure for the layout engine
+    log_debug("[Lambda XML] Building DOM tree from XML root with %lld children", xml_root->length);
+
+    // Create <html> wrapper element
+    DomElement* html_elem = dom_element_create(dom_doc, "html", nullptr);
+    if (!html_elem) {
+        log_error("[Lambda XML] Failed to create html wrapper element");
+        return nullptr;
+    }
+    html_elem->tag_id = HTM_TAG_HTML;
+
+    // Create <body> wrapper element
+    DomElement* body_elem = dom_element_create(dom_doc, "body", nullptr);
+    if (!body_elem) {
+        log_error("[Lambda XML] Failed to create body wrapper element");
+        return nullptr;
+    }
+    body_elem->tag_id = HTM_TAG_BODY;
+
+    // Build DOM tree from XML content and add as child of body
+    DomElement* xml_dom = build_dom_tree_from_element(xml_root, dom_doc, body_elem);
+    if (!xml_dom) {
+        log_error("[Lambda XML] Failed to build DOM tree from XML");
+        return nullptr;
+    }
+
+    // Wire up the tree structure: html > body > xml_dom
+    html_elem->first_child = (DomNode*)body_elem;
+    html_elem->last_child = (DomNode*)body_elem;
+    body_elem->parent = (DomNode*)html_elem;
+
+    body_elem->first_child = (DomNode*)xml_dom;
+    body_elem->last_child = (DomNode*)xml_dom;
+    xml_dom->parent = (DomNode*)body_elem;
+
+    log_debug("[Lambda XML] Built DOM tree: html > body > %s", xml_dom->tag_name);
+
+    // Use html_elem as the root
+    dom_doc->root = html_elem;
+    dom_doc->html_root = xml_root;
+
+    auto t_cascade = high_resolution_clock::now();
+    log_info("[TIMING] load: build DOM: %.1fms",
+             duration_cast<duration<double, std::milli>>(t_cascade - t_dom).count());
+
+    // Step 8: Store stylesheet in DOM document
+    dom_doc->stylesheet_capacity = 1;
+    dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, sizeof(CssStylesheet*));
+    dom_doc->stylesheet_count = 0;
+    if (external_stylesheet) {
+        dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
+    }
+
+    // Step 9: Apply CSS cascade to DOM tree
+    log_debug("[Lambda XML] Applying CSS cascade to XML/DOM tree");
+
+    // Create selector matcher
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) {
+        log_error("[Lambda XML] Failed to create selector matcher");
+        return nullptr;
+    }
+
+    // Reset timing stats before cascade
+    reset_cascade_timing();
+
+    // Apply external stylesheet to the entire tree (starting from html)
+    if (external_stylesheet && external_stylesheet->rule_count > 0) {
+        log_debug("[Lambda XML] Applying external stylesheet with %zu rules", external_stylesheet->rule_count);
+        apply_stylesheet_to_dom_tree_fast(html_elem, external_stylesheet, matcher, pool, css_engine);
+    }
+
+    log_cascade_timing_summary();  // Output cascade stats
+
+    // Apply inline style="" attributes (if XML elements have them)
+    apply_inline_styles_to_tree(html_elem, xml_root, pool);
+    log_debug("[Lambda XML] CSS cascade complete");
+
+    auto t_complete = high_resolution_clock::now();
+    log_info("[TIMING] load: apply cascade: %.1fms",
+             duration_cast<duration<double, std::milli>>(t_complete - t_cascade).count());
+    log_info("[TIMING] load: total: %.1fms",
+             duration_cast<duration<double, std::milli>>(t_complete - total_start).count());
+
+    log_debug("[Lambda XML] Document loaded and styled");
     return dom_doc;
 }
 
@@ -1856,6 +2242,14 @@ int cmd_layout(int argc, char** argv) {
         // Load Markdown document: parse Markdown → convert to HTML → layout
         log_info("[Layout] Detected Markdown file, using Markdown→HTML pipeline");
         doc = load_markdown_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
+    } else if (ext && strcmp(ext, ".wiki") == 0) {
+        // Load Wiki document: parse MediaWiki → convert to HTML → layout
+        log_info("[Layout] Detected Wiki file, using Wiki→HTML pipeline");
+        doc = load_wiki_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
+    } else if (ext && strcmp(ext, ".xml") == 0) {
+        // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
+        log_info("[Layout] Detected XML file, using XML→DOM pipeline");
+        doc = load_xml_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(

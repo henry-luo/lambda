@@ -33,7 +33,8 @@ typedef enum {
     DOC_FORMAT_MARKDOWN,
     DOC_FORMAT_LATEX,
     DOC_FORMAT_XML,
-    DOC_FORMAT_RST
+    DOC_FORMAT_RST,
+    DOC_FORMAT_WIKI
 } DocFormat;
 
 // Detect document format from file extension
@@ -55,6 +56,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_XML;
     } else if (strcasecmp(ext, "rst") == 0) {
         return DOC_FORMAT_RST;
+    } else if (strcasecmp(ext, "wiki") == 0) {
+        return DOC_FORMAT_WIKI;
     }
 
     return DOC_FORMAT_UNKNOWN;
@@ -86,12 +89,23 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             return load_html_doc(base_url, (char*)filename, width, height);
 
         case DOC_FORMAT_XML:
-            log_warn("XML format not yet implemented, treating as HTML");
+            log_debug("Loading as XML document with CSS stylesheet");
             return load_html_doc(base_url, (char*)filename, width, height);
 
         case DOC_FORMAT_RST:
             log_warn("RST format not yet implemented");
             return NULL;
+
+        case DOC_FORMAT_WIKI: {
+            log_debug("Loading as Wiki document");
+            Url* doc_url = url_parse_with_base(filename, base_url);
+            if (!doc_url) {
+                log_error("Failed to parse document URL: %s", filename);
+                return NULL;
+            }
+            DomDocument* doc = load_wiki_doc(doc_url, width, height, pool);
+            return doc;
+        }
 
         default:
             log_error("Unknown document format for file: %s", filename);
@@ -108,6 +122,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_LATEX: return "LaTeX";
         case DOC_FORMAT_XML: return "XML";
         case DOC_FORMAT_RST: return "RST";
+        case DOC_FORMAT_WIKI: return "Wiki";
         default: return "Document";
     }
 }

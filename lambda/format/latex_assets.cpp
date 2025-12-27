@@ -70,6 +70,9 @@ std::string LatexAssets::getStylesheetLinks(const char* doc_class,
     out << "    <link rel=\"stylesheet\" type=\"text/css\" href=\""
         << base << "css/katex.css\">\n";
 
+    // Note: base.css not included - it uses CSS variables (var()) which aren't
+    // fully supported by the layout engine. article.css has simplified styles.
+
     // Document class CSS (article.css, book.css, etc.)
     const char* css_path = getCssPath(doc_class);
     out << "    <link rel=\"stylesheet\" type=\"text/css\" href=\""

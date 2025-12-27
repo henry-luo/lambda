@@ -395,6 +395,7 @@ typedef struct Input {
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)
+    char* xml_stylesheet_href;  // href from <?xml-stylesheet?> processing instruction (nullable)
     // StringBuf* sb;
 
     // member functions
