@@ -897,6 +897,9 @@ typedef struct {
     // image cache
     struct hashmap* image_cache;  // cache for images loaded
 
+    // glyph fallback cache: maps codepoint -> fallback FT_Face that successfully rendered it
+    struct hashmap* glyph_fallback_cache;
+
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     DomDocument* document;  // current document
     MouseState mouse_state; // current mouse state
