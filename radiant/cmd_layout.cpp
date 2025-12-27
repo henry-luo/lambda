@@ -1502,6 +1502,160 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 }
 
 /**
+ * Load MediaWiki document with Lambda CSS system
+ * Parses wiki markup, applies Wikipedia-style CSS, builds DOM tree, returns DomDocument for layout
+ *
+ * @param wiki_url URL to wiki file
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure with Lambda CSS DOM, ready for layout
+ */
+DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!wiki_url || !pool) {
+        log_error("load_wiki_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* wiki_filepath = url_to_local_path(wiki_url);
+    log_info("[TIMING] Loading wiki document: %s", wiki_filepath);
+
+    // Step 1: Parse wiki with Lambda parser
+    auto step1_start = std::chrono::high_resolution_clock::now();
+    char* wiki_content = read_text_file(wiki_filepath);
+    if (!wiki_content) {
+        log_error("Failed to read wiki file: %s", wiki_filepath);
+        return nullptr;
+    }
+
+    // Create type string for wiki
+    String* type_str = (String*)malloc(sizeof(String) + 5);
+    type_str->len = 4;
+    strcpy(type_str->chars, "wiki");
+
+    // Parse wiki to Lambda Element tree
+    Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
+    free(wiki_content);
+
+    if (!input) {
+        log_error("Failed to parse wiki file: %s", wiki_filepath);
+        return nullptr;
+    }
+
+    // Get root element from parsed wiki
+    Element* wiki_root = nullptr;
+    TypeId root_type = get_type_id(input->root);
+    if (root_type == LMD_TYPE_ELEMENT) {
+        wiki_root = input->root.element;
+    } else if (root_type == LMD_TYPE_LIST) {
+        // Wiki parser may return list, find first element
+        List* root_list = input->root.list;
+        for (int64_t i = 0; i < root_list->length; i++) {
+            Item item = root_list->items[i];
+            if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+                wiki_root = item.element;
+                break;
+            }
+        }
+    }
+
+    if (!wiki_root) {
+        log_error("Failed to get wiki root element");
+        return nullptr;
+    }
+
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Parse wiki: %.1fms",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+
+    // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
+    auto step2_start = std::chrono::high_resolution_clock::now();
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument");
+        return nullptr;
+    }
+
+    DomElement* dom_root = build_dom_tree_from_element(wiki_root, dom_doc, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DomElement tree from wiki");
+        dom_document_destroy(dom_doc);
+        return nullptr;
+    }
+
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
+        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+
+    // Step 3: Initialize CSS engine
+    auto step3_start = std::chrono::high_resolution_clock::now();
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("Failed to create CSS engine");
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Step 4: Load wiki.css stylesheet
+    // Determine the path to wiki.css (relative to executable)
+    const char* css_filename = "lambda/input/wiki.css";
+    log_debug("[Lambda Wiki] Loading default wiki stylesheet: %s", css_filename);
+
+    CssStylesheet* wiki_stylesheet = nullptr;
+    char* css_content = read_text_file(css_filename);
+    if (css_content) {
+        size_t css_len = strlen(css_content);
+        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+        if (css_pool_copy) {
+            strcpy(css_pool_copy, css_content);
+            free(css_content);
+            wiki_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+            if (wiki_stylesheet) {
+                log_debug("[Lambda Wiki] Loaded wiki stylesheet with %zu rules",
+                        wiki_stylesheet->rule_count);
+            } else {
+                log_warn("Failed to parse wiki.css");
+            }
+        } else {
+            free(css_content);
+        }
+    } else {
+        log_warn("Failed to load wiki.css file: %s", css_filename);
+        log_warn("Continuing without stylesheet - wiki will use browser defaults");
+    }
+
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - CSS parse: %.1fms",
+        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
+    // Step 5: Apply CSS cascade to DOM tree
+    auto step4_start = std::chrono::high_resolution_clock::now();
+    if (wiki_stylesheet && wiki_stylesheet->rule_count > 0) {
+        SelectorMatcher* matcher = selector_matcher_create(pool);
+        apply_stylesheet_to_dom_tree_fast(dom_root, wiki_stylesheet, matcher, pool, css_engine);
+    }
+    auto step4_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
+        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
+
+    // Step 6: Populate DomDocument structure
+    dom_doc->root = dom_root;
+    dom_doc->html_root = wiki_root;
+    dom_doc->html_version = HTML5;  // Treat wiki as HTML5
+    dom_doc->url = wiki_url;
+    dom_doc->view_tree = nullptr;  // Will be created during layout
+    dom_doc->state = nullptr;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_wiki_doc total: %.1fms",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
+    return dom_doc;
+}
+
+/**
  * Load LaTeX document with Lambda CSS system
  * Parses LaTeX, converts to HTML, applies CSS, builds DOM tree, returns DomDocument for layout
  *
@@ -2084,6 +2238,10 @@ int cmd_layout(int argc, char** argv) {
         // Load Markdown document: parse Markdown → convert to HTML → layout
         log_info("[Layout] Detected Markdown file, using Markdown→HTML pipeline");
         doc = load_markdown_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
+    } else if (ext && strcmp(ext, ".wiki") == 0) {
+        // Load Wiki document: parse MediaWiki → convert to HTML → layout
+        log_info("[Layout] Detected Wiki file, using Wiki→HTML pipeline");
+        doc = load_wiki_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
     } else if (ext && strcmp(ext, ".xml") == 0) {
         // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
         log_info("[Layout] Detected XML file, using XML→DOM pipeline");
