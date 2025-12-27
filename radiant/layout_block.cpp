@@ -1390,17 +1390,28 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 
                 while (max_iterations-- > 0) {
                     FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, 1.0f);
-                    float available_width = space.right - space.left;
                     
-                    log_debug("[BFC Float Avoid] Checking y=%.1f: space=(%.1f,%.1f), available=%.1f, needed=%.1f",
-                              current_y, space.left, space.right, available_width, element_required_width);
+                    // Calculate how much space is available in the PARENT's content area
+                    // (not the BFC's full width, which may be much larger)
+                    float local_left = space.left - x_in_bfc;  // Float edge in local coords
+                    float local_right = space.right - x_in_bfc;  // Right edge in local coords
+                    
+                    // Clamp to parent's content area bounds
+                    float parent_left_bound = 0;
+                    float parent_right_bound = pa_block->content_width;
+                    
+                    float effective_left = max(local_left, parent_left_bound);
+                    float effective_right = min(local_right, parent_right_bound);
+                    float available_width = max(0.0f, effective_right - effective_left);
+                    
+                    log_debug("[BFC Float Avoid] Checking y=%.1f: space=(%.1f,%.1f), local=(%.1f,%.1f), parent_width=%.1f, available=%.1f, needed=%.1f",
+                              current_y, space.left, space.right, local_left, local_right, 
+                              pa_block->content_width, available_width, element_required_width);
                     
                     // Check if element fits
                     if (available_width >= element_required_width || 
                         (!space.has_left_float && !space.has_right_float)) {
                         // Element fits here - calculate offset
-                        float local_left = space.left - x_in_bfc;
-                        float local_right = space.right - x_in_bfc;
                         float float_intrusion_left = max(0.0f, local_left);
                         float float_intrusion_right = max(0.0f, pa_block->content_width - local_right);
 
