@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <chrono>
 #include <string>
+#include <algorithm>
 #include <unistd.h>
 #include <limits.h>
 extern "C" {

@@ -211,13 +211,6 @@
             "link": "static"
         },
         {
-            "name": "rpmalloc",
-            "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
-            "include": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
-            "lib": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-            "link": "static"
-        },
-        {
             "name": "zlib",
             "description": "Compression library",
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
@@ -750,6 +743,13 @@
                     "link": "static"
                 },
                 {
+                    "name": "rpmalloc",
+                    "description": "Memory pool allocator",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/aarch64-linux-gnu/librpmalloc.a",
+                    "link": "static"
+                },
+                {
                     "name": "pthread",
                     "include": "",
                     "lib": "-lpthread",
@@ -765,6 +765,67 @@
                     "include": "/usr/include",
                     "lib": "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
                     "link": "static"
+                },
+                {
+                    "name": "zlib",
+                    "description": "Compression library",
+                    "lib": "-lz",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "bzip2",
+                    "lib": "-lbz2",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "freetype",
+                    "include": "/usr/include/freetype2",
+                    "lib": "-lfreetype",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "ThorVG",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/aarch64-linux-gnu/libthorvg.a",
+                    "link": "static",
+                    "version": "v1.0-pre11"
+                },
+                {
+                    "name": "glfw",
+                    "include": "/usr/include",
+                    "lib": "-lglfw",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "png",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libpng.a",
+                    "link": "static"
+                },
+                {
+                    "name": "turbojpeg",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libturbojpeg.a",
+                    "link": "static"
+                },
+                {
+                    "name": "gif",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libgif.a",
+                    "link": "static"
+                },
+                {
+                    "name": "GL",
+                    "lib": "-lGL",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "GLU",
+                    "lib": "-lGLU",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "gomp",
+                    "description": "GNU OpenMP library (required by ThorVG)",
+                    "lib": "-lgomp",
+                    "link": "dynamic"
                 }
             ],
             "dev_libraries": [
@@ -868,6 +929,13 @@
                     "include": null,
                     "lib": "-framework Carbon",
                     "link": "dynamic"
+                },
+                {
+                    "name": "rpmalloc",
+                    "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
+                    "include": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+                    "lib": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+                    "link": "static"
                 }
             ]
         }

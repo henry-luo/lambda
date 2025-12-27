@@ -877,15 +877,17 @@ ValidationResult* SchemaValidator::validate_with_format(
     log_debug("Validating with format: %s", input_format ? input_format : "auto");
 
     // apply format-specific unwrapping
-    ConstItem unwrapped_item = item;
-    if (input_format) {
-        if (strcmp(input_format, "xml") == 0) {
-            unwrapped_item = unwrap_xml_document(item, this->pool);
-        } else if (strcmp(input_format, "html") == 0) {
-            unwrapped_item = unwrap_html_document(item, this->pool);
+    ConstItem unwrapped_item = [&]() {
+        if (input_format) {
+            if (strcmp(input_format, "xml") == 0) {
+                return unwrap_xml_document(item, this->pool);
+            } else if (strcmp(input_format, "html") == 0) {
+                return unwrap_html_document(item, this->pool);
+            }
         }
         // json and other formats don't need unwrapping
-    }
+        return item;
+    }();
 
     // perform standard validation on unwrapped item
     return this->validate(unwrapped_item, type_name);

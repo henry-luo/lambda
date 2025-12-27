@@ -31,7 +31,8 @@ RADIANT_DEPS=(
     "libpng-dev"             # PNG image format support
     "libbz2-dev"             # Alternative compression library
     "zlib1g-dev"             # Compression library (already included above)
-    "libjpeg-turbo8-dev"     # JPEG image format support (TurboJPEG)
+    "libturbojpeg0-dev"      # TurboJPEG library with turbojpeg.h header
+    "libgif-dev"             # GIF image format support
     "gettext"                # For libintl support
     "libgl1-mesa-dev"        # OpenGL development libraries
     "libglu1-mesa-dev"       # OpenGL utility libraries
@@ -52,6 +53,20 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     # Clean tree-sitter-lambda build files
     if [ -d "lambda/tree-sitter-lambda" ]; then
         cd lambda/tree-sitter-lambda
+        make clean 2>/dev/null || true
+        cd - > /dev/null
+    fi
+
+    # Clean tree-sitter-javascript build files
+    if [ -d "lambda/tree-sitter-javascript" ]; then
+        cd lambda/tree-sitter-javascript
+        make clean 2>/dev/null || true
+        cd - > /dev/null
+    fi
+
+    # Clean tree-sitter-latex build files
+    if [ -d "lambda/tree-sitter-latex" ]; then
+        cd lambda/tree-sitter-latex
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
@@ -161,7 +176,19 @@ check_and_install_tool "make" "build-essential" || exit 1
 check_and_install_tool "gcc" "build-essential" || exit 1
 check_and_install_tool "g++" "build-essential" || exit 1
 check_and_install_tool "git" "git" || exit 1
-check_and_install_tool "xxd" "xxd" || exit 1
+
+# xxd is now a separate package in Ubuntu 24.04+
+if ! command -v xxd >/dev/null 2>&1; then
+    echo "Installing xxd..."
+    if sudo apt install -y xxd; then
+        echo "✅ xxd installed successfully"
+    else
+        echo "❌ Failed to install xxd"
+        exit 1
+    fi
+else
+    echo "✅ xxd already available"
+fi
 
 # Check for Node.js and npm (needed for tree-sitter CLI via npx)
 echo "Setting up Node.js and npm for tree-sitter CLI..."
@@ -588,6 +615,93 @@ build_thorvg_v1_0_pre11_for_linux() {
     return 1
 }
 
+# Function to build rpmalloc for Linux
+build_rpmalloc_for_linux() {
+    echo "Building rpmalloc for Linux..."
+
+    # Determine architecture
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "aarch64" ]; then
+        LIB_DIR="$SYSTEM_PREFIX/lib/aarch64-linux-gnu"
+    else
+        LIB_DIR="$SYSTEM_PREFIX/lib/x86_64-linux-gnu"
+    fi
+
+    # Check if already installed in system location
+    if [ -f "$LIB_DIR/librpmalloc.a" ] && [ -f "$SYSTEM_PREFIX/include/rpmalloc/rpmalloc.h" ]; then
+        # Verify the library has the expected symbols
+        if nm "$LIB_DIR/librpmalloc.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
+            echo "✅ rpmalloc already installed and verified"
+            return 0
+        else
+            echo "rpmalloc found but missing expected symbols, rebuilding..."
+            sudo rm -f "$LIB_DIR/librpmalloc.a" 2>/dev/null || true
+        fi
+    fi
+
+    # Create build_temp directory if it doesn't exist
+    mkdir -p build_temp
+
+    # Check if source exists, if not clone it
+    if [ ! -d "build_temp/rpmalloc-src" ]; then
+        echo "Cloning rpmalloc repository..."
+        cd build_temp
+        git clone https://github.com/mjansson/rpmalloc.git rpmalloc-src || {
+            echo "Warning: Could not clone rpmalloc repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    else
+        echo "rpmalloc source already downloaded"
+    fi
+
+    cd build_temp/rpmalloc-src
+
+    # Clean any previous builds
+    rm -f *.o *.a 2>/dev/null || true
+
+    # Build rpmalloc with ENABLE_OVERRIDE=0 (no malloc override)
+    # This allows us to use rpmalloc only for explicit pool allocations
+    echo "Compiling rpmalloc with ENABLE_OVERRIDE=0..."
+    if gcc -c -O2 \
+        -DRPMALLOC_FIRST_CLASS_HEAPS=1 \
+        -DENABLE_OVERRIDE=0 \
+        -I. \
+        rpmalloc/rpmalloc.c \
+        -o rpmalloc.o; then
+
+        echo "Creating static library..."
+        if ar rcs librpmalloc.a rpmalloc.o; then
+            # Install the library and headers
+            echo "Installing rpmalloc to system location (requires sudo)..."
+            sudo mkdir -p "$LIB_DIR"
+            sudo mkdir -p "$SYSTEM_PREFIX/include/rpmalloc"
+            sudo cp librpmalloc.a "$LIB_DIR/"
+            sudo cp rpmalloc/rpmalloc.h "$SYSTEM_PREFIX/include/rpmalloc/"
+
+            # Verify the library has expected symbols
+            if nm "$LIB_DIR/librpmalloc.a" | grep -q "rpmalloc_initialize"; then
+                echo "✅ rpmalloc built successfully"
+                echo "   - rpmalloc_initialize: ✓ Available"
+                echo "   - rpmalloc_heap_acquire: ✓ Available"
+                echo "   - rpmalloc_heap_alloc: ✓ Available"
+                echo "   - ENABLE_OVERRIDE=0: ✓ No malloc override"
+                cd - > /dev/null
+                return 0
+            else
+                echo "❌ Required functions not found in built library"
+                cd - > /dev/null
+                return 1
+            fi
+        fi
+    fi
+
+    echo "❌ rpmalloc build failed"
+    cd - > /dev/null
+    return 1
+}
+
 # Function to build mpdecimal for Linux
 build_mpdecimal_for_linux() {
     echo "Building mpdecimal for Linux..."
@@ -851,15 +965,106 @@ else
     echo "Tree-sitter-lambda already built for Linux"
 fi
 
+# Build tree-sitter-javascript for Linux
+if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
+    if [ -d "lambda/tree-sitter-javascript" ]; then
+        echo "Building tree-sitter-javascript for Linux..."
+        cd lambda/tree-sitter-javascript
+        # Clean previous builds
+        make clean || true
+
+        # Generate parser if needed
+        if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
+            echo "Generating tree-sitter-javascript parser..."
+            if command -v npx >/dev/null 2>&1; then
+                npx tree-sitter-cli@0.24.7 generate
+            else
+                echo "Warning: npx not available, assuming parser files are already generated"
+            fi
+        fi
+
+        # Build static library for Linux (creates libtree-sitter-javascript.a)
+        make libtree-sitter-javascript.a
+        cd - > /dev/null
+        echo "Tree-sitter-javascript built successfully"
+    else
+        echo "❌ Directory lambda/tree-sitter-javascript does not exist. Skipping tree-sitter-javascript build."
+        echo "Please ensure the tree-sitter-javascript source is present at lambda/tree-sitter-javascript."
+    fi
+else
+    echo "Tree-sitter-javascript already built for Linux"
+fi
+
+# Build tree-sitter-latex for Linux
+if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
+    if [ -d "lambda/tree-sitter-latex" ]; then
+        echo "Building tree-sitter-latex for Linux..."
+        cd lambda/tree-sitter-latex
+        # Clean previous builds
+        make clean || true
+
+        # Generate parser if needed
+        if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
+            echo "Generating tree-sitter-latex parser..."
+            if command -v npx >/dev/null 2>&1; then
+                npx tree-sitter-cli@0.24.7 generate
+            else
+                echo "Warning: npx not available, assuming parser files are already generated"
+            fi
+        fi
+
+        # Build static library for Linux (creates libtree-sitter-latex.a)
+        make libtree-sitter-latex.a
+        cd - > /dev/null
+        echo "Tree-sitter-latex built successfully"
+    else
+        echo "❌ Directory lambda/tree-sitter-latex does not exist. Skipping tree-sitter-latex build."
+        echo "Please ensure the tree-sitter-latex source is present at lambda/tree-sitter-latex."
+    fi
+else
+    echo "Tree-sitter-latex already built for Linux"
+fi
+
 
 # Build ThorVG v1.0-pre11 for Linux (required for Radiant project)
+echo "Setting up ThorVG ..."
+
+# Check if ThorVG v1.0-pre11 is already properly installed
 if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ]; then
-    echo "ThorVG already available"
-else
-    if ! build_thorvg_v1_0_pre11_for_linux; then
-        echo "Warning: ThorVG build failed"
+    # Verify it's the correct version by checking if we can find the repository with the right tag
+    if [ -d "build_temp/thorvg" ]; then
+        cd "build_temp/thorvg"
+        if git describe --tags 2>/dev/null | grep -q "v1.0-pre11"; then
+            echo "✅ ThorVG v1.0-pre11 already installed and verified"
+            cd - > /dev/null
+        else
+            echo "ThorVG found but version mismatch, rebuilding..."
+            cd - > /dev/null
+            # Force rebuild to ensure we have the correct version
+            echo "Removing existing ThorVG installation to ensure correct version..."
+            sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
+            sudo rm -f "$SYSTEM_PREFIX/include/thorvg"* 2>/dev/null || true
+            sudo rm -rf "$SYSTEM_PREFIX/include/thorvg" 2>/dev/null || true
+            sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
+            rm -rf "build_temp/thorvg" 2>/dev/null || true
+
+            if ! build_thorvg_v1_0_pre11_for_linux; then
+                echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
+                exit 1
+            else
+                echo "✅ ThorVG v1.0-pre11 built successfully"
+            fi
+        fi
     else
-        echo "ThorVG v1.0-pre11 built successfully"
+        echo "✅ ThorVG v1.0-pre11 already installed in system location"
+    fi
+else
+    # ThorVG not found, need to build it
+    if ! build_thorvg_v1_0_pre11_for_linux; then
+        echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
+        exit 1
+    else
+        echo "✅ ThorVG v1.0-pre11 built successfully"
     fi
 fi
 
@@ -915,6 +1120,38 @@ else
         echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
     else
         echo "Warning: c2mir.h not found in project include/ directory either"
+    fi
+fi
+
+
+# Build rpmalloc for Linux (memory pool allocator)
+echo "Setting up rpmalloc..."
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ]; then
+    RPMALLOC_LIB_DIR="$SYSTEM_PREFIX/lib/aarch64-linux-gnu"
+else
+    RPMALLOC_LIB_DIR="$SYSTEM_PREFIX/lib/x86_64-linux-gnu"
+fi
+
+if [ -f "$RPMALLOC_LIB_DIR/librpmalloc.a" ] && [ -f "$SYSTEM_PREFIX/include/rpmalloc/rpmalloc.h" ]; then
+    if nm "$RPMALLOC_LIB_DIR/librpmalloc.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
+        echo "✅ rpmalloc already available and verified"
+    else
+        echo "rpmalloc library found but missing required symbols, rebuilding..."
+        if ! build_rpmalloc_for_linux; then
+            echo "❌ rpmalloc build failed - required for Lambda memory pool"
+            exit 1
+        else
+            echo "✅ rpmalloc built successfully"
+        fi
+    fi
+else
+    echo "rpmalloc not found, building..."
+    if ! build_rpmalloc_for_linux; then
+        echo "❌ rpmalloc build failed - required for Lambda memory pool"
+        exit 1
+    else
+        echo "✅ rpmalloc built successfully"
     fi
 fi
 
@@ -1060,27 +1297,46 @@ echo ""
 echo "Built dependencies:"
 echo "- Tree-sitter: $([ -f "lambda/tree-sitter/libtree-sitter.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- Tree-sitter-javascript: $([ -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- Tree-sitter-latex: $([ -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ] && echo "✓ Built" || echo "✗ Missing")"
+
+# Detect architecture for library paths
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+    LIB_ARCH_PATH="/usr/lib/x86_64-linux-gnu"
+elif [ "$ARCH" = "aarch64" ]; then
+    LIB_ARCH_PATH="/usr/lib/aarch64-linux-gnu"
+else
+    LIB_ARCH_PATH="/usr/lib"
+fi
 
 # Check system locations and apt packages
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
-echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- curl: $([ -f "$LIB_ARCH_PATH/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
+echo "- mpdecimal: $([ -f "$LIB_ARCH_PATH/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- utf8proc: $([ -f "$LIB_ARCH_PATH/libutf8proc.so" ] || [ -f "$LIB_ARCH_PATH/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- mbedtls: $([ -f "$LIB_ARCH_PATH/libmbedtls.a" ] || dpkg -l | grep -q libmbedtls-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- gtest: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Radiant project dependencies:"
-echo "- GLFW: $(dpkg -l | grep -q libglfw3-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- FreeType: $(dpkg -l | grep -q libfreetype6-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- fontconfig: $(dpkg -l | grep -q libfontconfig1-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- libpng: $(dpkg -l | grep -q libpng-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- GLFW: $(dpkg -l | grep -q libglfw3-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- libpng: $(dpkg -l | grep -q libpng-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- libturbojpeg: $(dpkg -l | grep -q libturbojpeg0-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- libgif: $(dpkg -l | grep -q libgif-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- fontconfig: $(dpkg -l | grep -q libfontconfig1-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- expat: $(dpkg -l | grep -q libexpat1-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- zlib: $(dpkg -l | grep -q zlib1g-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- bzip2: $(dpkg -l | grep -q libbz2-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- OpenGL: $(dpkg -l | grep -q libgl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- EGL: $(dpkg -l | grep -q libegl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
-echo "1. Run: make"
-echo "2. Run: make test"
+echo "1. Run: make build           # Build Lambda main project"
+echo "2. Run: make build-radiant   # Build Radiant HTML/CSS renderer"
+echo "3. Run: make test            # Run tests"
 echo ""
-echo "To clean up intermediate files, run: ./setup-linux-deps.sh clean"
+echo "To clean up intermediate files later, run: ./setup-linux-deps.sh clean"
