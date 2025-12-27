@@ -1721,18 +1721,61 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (effective_last && effective_last->is_block() && ((ViewBlock*)effective_last)->bound) {
             ViewBlock* last_child_block = (ViewBlock*)effective_last;
             if (last_child_block->bound->margin.bottom > 0) {
-                float parent_margin = block->bound ? block->bound->margin.bottom : 0;
-                float margin_bottom = max(parent_margin, last_child_block->bound->margin.bottom);
-                block->height -= last_child_block->bound->margin.bottom;
-                
-                // If parent has no bound yet, allocate one to store the collapsed margin
-                if (!block->bound) {
-                    block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-                    memset(block->bound, 0, sizeof(BoundaryProp));
+                // CSS 2.2 Section 8.3.1: Margins collapse only if there's NO content separating them.
+                // Check if there's any inline-level content (inline-blocks, text) AFTER the last
+                // block-level child. If so, this content separates the child's margin from the
+                // parent's margin, and they should NOT collapse.
+                // Note: Empty zero-height blocks (like containers for only floats) don't count as
+                // "separating content" - margins can collapse through them.
+                bool has_content_after = false;
+                View* sibling = (View*)effective_last->next_sibling;
+                while (sibling) {
+                    if (sibling->view_type) {
+                        // Any placed view after effective_last means content separates the margins
+                        // Except for absolutely/fixed positioned elements and floats which are out of flow
+                        if (sibling->is_block()) {
+                            ViewBlock* sb = (ViewBlock*)sibling;
+                            bool is_truly_out_of_flow = sb->position &&
+                                (sb->position->position == CSS_VALUE_ABSOLUTE ||
+                                 sb->position->position == CSS_VALUE_FIXED ||
+                                 element_has_float(sb));
+                            // Inline-blocks ARE inline-level content that separates margins
+                            bool is_inline_level = (sb->view_type == RDT_VIEW_INLINE_BLOCK);
+                            if (is_inline_level) {
+                                has_content_after = true;
+                                break;
+                            }
+                            // Regular blocks with zero height don't separate margins (CSS 8.3.1)
+                            // Margins can collapse "through" empty blocks
+                            if (!is_truly_out_of_flow && sb->height > 0) {
+                                has_content_after = true;
+                                break;
+                            }
+                        } else {
+                            // Non-block content (text, inline elements)
+                            has_content_after = true;
+                            break;
+                        }
+                    }
+                    sibling = (View*)sibling->next_sibling;
                 }
-                block->bound->margin.bottom = margin_bottom;
-                last_child_block->bound->margin.bottom = 0;
-                log_debug("collapsed bottom margin %f between block and last child", margin_bottom);
+
+                if (has_content_after) {
+                    log_debug("NOT collapsing bottom margin - content exists after last block child");
+                } else {
+                    float parent_margin = block->bound ? block->bound->margin.bottom : 0;
+                    float margin_bottom = max(parent_margin, last_child_block->bound->margin.bottom);
+                    block->height -= last_child_block->bound->margin.bottom;
+                    
+                    // If parent has no bound yet, allocate one to store the collapsed margin
+                    if (!block->bound) {
+                        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                        memset(block->bound, 0, sizeof(BoundaryProp));
+                    }
+                    block->bound->margin.bottom = margin_bottom;
+                    last_child_block->bound->margin.bottom = 0;
+                    log_debug("collapsed bottom margin %f between block and last child", margin_bottom);
+                }
             }
         }
     }
