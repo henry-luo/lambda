@@ -183,8 +183,8 @@ hr {
 table {
     border-spacing: 0;
     border-collapse: collapse;
-    display: block;
-    width: max-content;
+    display: table;
+    width: auto;
     max-width: 100%;
     overflow: auto;
     margin-top: 0;
@@ -419,7 +419,7 @@ summary {
     body {
         padding: 16px;
     }
-    
+
     table {
         display: block;
         width: 100%;
@@ -434,12 +434,12 @@ summary {
         color: black;
         max-width: none;
     }
-    
+
     a {
         color: black;
         text-decoration: underline;
     }
-    
+
     pre, code {
         border: 1px solid #d0d7de;
     }
