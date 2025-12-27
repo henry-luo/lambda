@@ -1668,7 +1668,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
-        if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO)  {
+        
+        // CSS 2.1 §10.3.5: For floats, if margin-left/right is 'auto', its used value is 0
+        // CSS 2.1 §10.3.3: For normal flow blocks, auto margins center the element
+        if (is_float) {
+            // Floats: auto margins become 0
+            if (block->bound->margin.left_type == CSS_VALUE_AUTO) block->bound->margin.left = 0;
+            if (block->bound->margin.right_type == CSS_VALUE_AUTO) block->bound->margin.right = 0;
+        } else if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO)  {
             block->bound->margin.left = block->bound->margin.right = max((pa_block->content_width - block->width) / 2, 0);
         } else {
             if (block->bound->margin.left_type == CSS_VALUE_AUTO) block->bound->margin.left = 0;
