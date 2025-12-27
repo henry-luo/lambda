@@ -524,6 +524,34 @@ static Item parse_element(InputContext& ctx, const char **xml) {
         }
         const char* pi_data_end = *xml;
 
+        // Extract stylesheet href if this is xml-stylesheet processing instruction
+        if (strcmp(target_name->chars, "xml-stylesheet") == 0) {
+            // Parse the pseudo-attributes in the PI data
+            const char* href_start = strstr(pi_data_start, "href=");
+            if (href_start && href_start < pi_data_end) {
+                href_start += 5; // skip "href="
+                skip_whitespace(&href_start);
+
+                // Extract quoted value
+                char quote = *href_start;
+                if (quote == '"' || quote == '\'') {
+                    href_start++; // skip opening quote
+                    const char* href_end = strchr(href_start, quote);
+                    if (href_end && href_end < pi_data_end) {
+                        size_t href_len = href_end - href_start;
+                        // Allocate from pool and store in input
+                        Input* input = ctx.input();
+                        input->xml_stylesheet_href = (char*)pool_alloc(input->pool, href_len + 1);
+                        if (input->xml_stylesheet_href) {
+                            strncpy(input->xml_stylesheet_href, href_start, href_len);
+                            input->xml_stylesheet_href[href_len] = '\0';
+                            log_debug("[XML Parser] Found xml-stylesheet href: %s", input->xml_stylesheet_href);
+                        }
+                    }
+                }
+            }
+        }
+
         // Skip ?>
         if (**xml == '?' && *(*xml + 1) == '>') {
             *xml += 2;
