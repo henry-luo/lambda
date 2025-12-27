@@ -103,6 +103,12 @@
 /* page layout */
 /***************/
 
+/* Ensure html and body fill their containers properly for iframe embedding */
+html {
+    height: auto;
+    min-height: 100%;
+}
+
 /* .page is the element when used as a web component */
 body, .page {
     display: grid;
@@ -115,6 +121,7 @@ body, .page {
 
     max-width: var(--paperwidth);   /* elements wider than this overflow, but don't increase bodywidth */
     min-width: var(--paperwidth);
+    height: auto;
 }
 
 
