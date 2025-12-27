@@ -1,0 +1,538 @@
+/**
+ * MediaWiki-style Stylesheet
+ * For Lambda wiki document viewer
+ * Based on Wikipedia/MediaWiki rendering styles
+ */
+
+/* Base document styling */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Liberation Sans", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #202122;
+    background-color: #ffffff;
+    padding: 20px 40px;
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+/* Headings - Wikipedia style with borders */
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Linux Libertine", "Georgia", "Times", serif;
+    font-weight: normal;
+    margin-top: 1em;
+    margin-bottom: 0.25em;
+    overflow: hidden;
+    line-height: 1.3;
+    color: #000000;
+}
+
+h1 {
+    font-size: 28px;
+    border-bottom: 1px solid #a2a9b1;
+    padding-bottom: 0.25em;
+    margin-bottom: 0.6em;
+}
+
+h2 {
+    font-size: 22px;
+    border-bottom: 1px solid #a2a9b1;
+    padding-bottom: 0.25em;
+    margin-bottom: 0.5em;
+}
+
+h3 {
+    font-size: 18px;
+    margin-bottom: 0.3em;
+}
+
+h4 {
+    font-size: 15px;
+    font-weight: bold;
+}
+
+h5 {
+    font-size: 14px;
+    font-weight: bold;
+}
+
+h6 {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* Paragraphs */
+p {
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+    line-height: 1.6;
+}
+
+/* Links - Wikipedia blue style */
+a {
+    color: #0645ad;
+    text-decoration: none;
+    background: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+a:visited {
+    color: #0b0080;
+}
+
+/* Red links for non-existent pages */
+a.new, a.redlink {
+    color: #ba0000;
+}
+
+/* External links */
+a.external {
+    color: #36b;
+}
+
+/* Lists */
+ul, ol {
+    margin-top: 0.3em;
+    margin-bottom: 0;
+    padding-left: 1.6em;
+    line-height: 1.6;
+}
+
+ul {
+    list-style-type: disc;
+}
+
+ol {
+    list-style-type: decimal;
+}
+
+li {
+    margin-bottom: 0.1em;
+}
+
+/* Nested lists */
+ul ul, ol ol, ul ol, ol ul {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Definition lists */
+dl {
+    margin-top: 0.2em;
+    margin-bottom: 0.5em;
+}
+
+dt {
+    font-weight: bold;
+    margin-bottom: 0.1em;
+}
+
+dd {
+    margin-left: 1.6em;
+    margin-bottom: 0.1em;
+}
+
+/* Indented text (colon indentation in wiki) */
+.indent, blockquote {
+    margin-left: 1.6em;
+    margin-top: 0.2em;
+    margin-bottom: 0.2em;
+}
+
+/* Bold and italic */
+strong, b {
+    font-weight: bold;
+}
+
+em, i {
+    font-style: italic;
+}
+
+/* Tables - Wikipedia wikitable style */
+table {
+    margin: 1em 0;
+    background-color: #f8f9fa;
+    border: 1px solid #a2a9b1;
+    border-collapse: collapse;
+    color: #202122;
+}
+
+table.wikitable {
+    background-color: #f8f9fa;
+    border: 1px solid #a2a9b1;
+}
+
+th, td {
+    border: 1px solid #a2a9b1;
+    padding: 0.2em 0.4em;
+    vertical-align: top;
+}
+
+th {
+    background-color: #eaecf0;
+    text-align: center;
+    font-weight: bold;
+}
+
+td {
+    background-color: #ffffff;
+}
+
+/* Table caption */
+caption {
+    font-weight: bold;
+    padding: 0.2em;
+}
+
+/* Preformatted text and code */
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #eaecf0;
+    padding: 1em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.3;
+    overflow-x: auto;
+    margin: 1em 0;
+}
+
+code {
+    font-family: monospace;
+    font-size: 13px;
+    background-color: #f8f9fa;
+    border: 1px solid #eaecf0;
+    border-radius: 2px;
+    padding: 1px 4px;
+}
+
+/* Inline code within pre should not have extra styling */
+pre code {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
+/* nowiki - display markup as-is */
+.nowiki {
+    font-family: monospace;
+    white-space: pre-wrap;
+}
+
+/* Horizontal rule */
+hr {
+    border: none;
+    border-top: 1px solid #a2a9b1;
+    margin: 0.5em 0;
+    height: 0;
+}
+
+/* Template styling */
+.template {
+    background-color: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin: 0.5em 0;
+    font-size: 13px;
+}
+
+.template-name {
+    font-weight: bold;
+    color: #856404;
+}
+
+/* Citation needed and similar templates */
+.citation-needed {
+    background-color: #fff3cd;
+    color: #856404;
+    font-size: 11px;
+    vertical-align: super;
+    padding: 0 2px;
+}
+
+/* Stub notice */
+.stub {
+    background-color: #f8f9fa;
+    border: 1px solid #a2a9b1;
+    padding: 8px;
+    margin: 1em 0;
+    font-size: 12px;
+    text-align: center;
+}
+
+/* Categories */
+.categories {
+    margin-top: 2em;
+    padding-top: 1em;
+    border-top: 1px solid #a2a9b1;
+    font-size: 12px;
+    color: #54595d;
+}
+
+.category-link {
+    color: #0645ad;
+    margin-right: 0.5em;
+}
+
+/* File/Image styling */
+.thumb {
+    margin: 0.5em 0 1.3em 1.4em;
+    float: right;
+    clear: right;
+    background-color: #f8f9fa;
+    border: 1px solid #c8ccd1;
+    padding: 3px;
+}
+
+.thumb.tleft {
+    float: left;
+    clear: left;
+    margin-left: 0;
+    margin-right: 1.4em;
+}
+
+.thumbinner {
+    min-width: 100px;
+    overflow: hidden;
+    font-size: 94%;
+    text-align: center;
+}
+
+.thumbcaption {
+    padding: 3px;
+    font-size: 94%;
+    text-align: left;
+    line-height: 1.4;
+}
+
+/* Image within content */
+img {
+    max-width: 100%;
+    height: auto;
+    vertical-align: middle;
+}
+
+/* Table of Contents */
+.toc {
+    background-color: #f8f9fa;
+    border: 1px solid #a2a9b1;
+    padding: 7px;
+    display: inline-block;
+    margin: 1em 0;
+}
+
+.toc-title {
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 0.5em;
+}
+
+.toc ul {
+    list-style: none;
+    margin: 0;
+    padding-left: 0;
+}
+
+.toc li {
+    margin-left: 1em;
+}
+
+/* Magic words display */
+.magicword {
+    color: #72777d;
+    font-size: 12px;
+}
+
+/* Parser function display */
+.parser-function {
+    background-color: #eaf3ff;
+    padding: 2px 4px;
+    border-radius: 2px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+/* Comments (hidden by default, but shown for debugging) */
+.wiki-comment {
+    display: none;
+}
+
+/* Redirects */
+.redirect {
+    font-style: italic;
+    color: #54595d;
+    margin-bottom: 1em;
+}
+
+/* Interwiki links */
+a.interwiki {
+    color: #36b;
+}
+
+/* Special characters */
+.special-char {
+    font-family: "DejaVu Sans", "Arial Unicode MS", sans-serif;
+}
+
+/* Blockquote styling */
+blockquote {
+    margin: 1em 40px;
+    padding-left: 1em;
+    border-left: 3px solid #a2a9b1;
+    color: #54595d;
+}
+
+/* Subscript and superscript */
+sub, sup {
+    font-size: 75%;
+    line-height: 0;
+    position: relative;
+    vertical-align: baseline;
+}
+
+sup {
+    top: -0.5em;
+}
+
+sub {
+    bottom: -0.25em;
+}
+
+/* Small text */
+small {
+    font-size: 85%;
+}
+
+/* Big text */
+big {
+    font-size: 120%;
+}
+
+/* Strikethrough */
+s, strike, del {
+    text-decoration: line-through;
+}
+
+/* Underline */
+u, ins {
+    text-decoration: underline;
+}
+
+/* Abbreviations */
+abbr {
+    border-bottom: 1px dotted;
+    cursor: help;
+}
+
+/* References section */
+.references {
+    font-size: 90%;
+    margin-top: 1em;
+}
+
+.references ol {
+    margin-left: 2em;
+}
+
+/* Footnote markers */
+.footnote-ref {
+    font-size: 75%;
+    vertical-align: super;
+    color: #0645ad;
+}
+
+/* Gallery */
+.gallery {
+    display: flex;
+    flex-wrap: wrap;
+    margin: 1em 0;
+}
+
+.gallery-item {
+    margin: 4px;
+    text-align: center;
+}
+
+/* Infobox (common template) */
+.infobox {
+    float: right;
+    clear: right;
+    margin: 0 0 1em 1em;
+    padding: 0.2em;
+    width: 22em;
+    font-size: 88%;
+    line-height: 1.5;
+    background-color: #f8f9fa;
+    border: 1px solid #a2a9b1;
+    border-collapse: collapse;
+}
+
+.infobox th {
+    text-align: left;
+    background-color: #eaecf0;
+}
+
+/* Navbox (navigation box) */
+.navbox {
+    border: 1px solid #a2a9b1;
+    background-color: #fdfdfd;
+    margin: 1em 0;
+    padding: 2px;
+    width: 100%;
+    font-size: 88%;
+}
+
+.navbox-title {
+    background-color: #ccf;
+    text-align: center;
+    padding: 2px;
+    font-weight: bold;
+}
+
+/* Message boxes */
+.messagebox {
+    border: 1px solid #a2a9b1;
+    background-color: #f8f9fa;
+    padding: 0.5em 1em;
+    margin: 0.5em 0;
+}
+
+.messagebox.warning {
+    background-color: #fff3cd;
+    border-color: #ffc107;
+}
+
+.messagebox.error {
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+}
+
+/* Edit section links (usually hidden in viewing mode) */
+.mw-editsection {
+    font-size: small;
+    font-weight: normal;
+    margin-left: 1em;
+    vertical-align: baseline;
+}
+
+/* Print styles */
+@media print {
+    body {
+        background-color: white;
+        color: black;
+    }
+    
+    a {
+        color: black;
+        text-decoration: underline;
+    }
+    
+    .noprint {
+        display: none;
+    }
+}
