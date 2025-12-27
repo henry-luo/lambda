@@ -416,28 +416,54 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
     // CSS 2.2 Section 10.6.4: For absolutely positioned elements without explicit top/bottom,
     // use the "static position" - where the element would be in normal flow
-    // The static Y position is the parent's current advance_y (where next block would go)
+    // The static position is relative to the parent element's content area, but we need
+    // to express it relative to the containing block's padding box.
+    
+    // Calculate offset from containing block to parent element
+    // Walk from parent up to containing block, accumulating positions
+    // Note: pa_line->left and pa_block->advance_y are already relative to the parent's 
+    // content area (they include padding/border offsets), so we only need to add
+    // the parent's position relative to the containing block.
+    float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
+    ViewElement* parent = block->parent_view();
+    if (parent && parent->is_block()) {
+        ViewBlock* p = (ViewBlock*)parent;
+        // Walk from parent to containing block, accumulating offsets
+        while (p && p != cb) {
+            parent_to_cb_offset_x += p->x;
+            parent_to_cb_offset_y += p->y;
+            log_debug("[STATIC POS] Adding parent %s offset: (%f, %f)", p->node_name(), p->x, p->y);
+            ViewElement* gp = p->parent_view();
+            if (gp && gp->is_block()) {
+                p = (ViewBlock*)gp;
+            } else {
+                break;
+            }
+        }
+        // Note: Don't add parent's padding/border here - pa_line->left already includes them
+    }
+    log_debug("[STATIC POS] Total parent-to-CB offset: (%f, %f)", parent_to_cb_offset_x, parent_to_cb_offset_y);
+
     if (!block->position->has_top && !block->position->has_bottom) {
         // Calculate static position: pa_block->advance_y is relative to parent's content area
-        // We need to convert this to be relative to the containing block
-        // The static-position containing block is the parent element, not necessarily cb
-        float static_y = pa_block->advance_y;
+        // Add offset to convert to containing block coordinates
+        float static_y = parent_to_cb_offset_y + pa_block->advance_y;
         // Add margin.top (if not already included)
         if (block->bound && block->bound->margin.top > 0) {
             static_y += block->bound->margin.top;
         }
-        log_debug("[STATIC POS] Using static Y position: %.1f (pa_block->advance_y=%.1f)",
-                  static_y, pa_block->advance_y);
+        log_debug("[STATIC POS] Using static Y position: %.1f (pa_block->advance_y=%.1f, offset=%.1f)",
+                  static_y, pa_block->advance_y, parent_to_cb_offset_y);
         block->y = static_y;
     }
     // Similarly for X when neither left nor right specified
     if (!block->position->has_left && !block->position->has_right) {
-        float static_x = pa_line->left;  // Line's left edge for static horizontal position
+        float static_x = parent_to_cb_offset_x + pa_line->left;  // Line's left edge for static horizontal position
         if (block->bound && block->bound->margin.left > 0) {
             static_x += block->bound->margin.left;
         }
-        log_debug("[STATIC POS] Using static X position: %.1f (pa_line->left=%.1f)",
-                  static_x, pa_line->left);
+        log_debug("[STATIC POS] Using static X position: %.1f (pa_line->left=%.1f, offset=%.1f)",
+                  static_x, pa_line->left, parent_to_cb_offset_x);
         block->x = static_x;
     }
 
