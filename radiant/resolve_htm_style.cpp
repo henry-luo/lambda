@@ -509,6 +509,22 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 }
             }
         }
+        // Handle HTML height attribute (e.g., height="200")
+        const char* height_attr = elmt->get_attribute("height");
+        if (height_attr) {
+            size_t value_len = strlen(height_attr);
+            if (value_len > 0) {
+                // Parse pixel value (percentages for table height are less common)
+                StrView height_view = strview_init(height_attr, value_len);
+                float height = strview_to_int(&height_view);
+                if (height > 0) {
+                    lycon->block.given_height = height * lycon->ui_context->pixel_ratio;
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    block->blk->given_height = lycon->block.given_height;
+                    log_debug("[HTML] TABLE height attribute: %.0fpx", height);
+                }
+            }
+        }
         // Handle HTML bgcolor attribute (e.g., bgcolor="#f6f6ef")
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {
