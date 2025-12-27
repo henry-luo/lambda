@@ -691,9 +691,41 @@ DisplayValue resolve_display_value(void* child) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_COLUMN;
         } else {
-            // Default for unknown elements (inline)
-            display.outer = CSS_VALUE_INLINE;
-            display.inner = CSS_VALUE_FLOW;
+            // Fall back to tag name string comparison for elements without tag_id
+            // This handles markdown/Lambda-generated HTML that doesn't go through HTML5 parser
+            const char* tag_name = node->node_name();
+            if (tag_name) {
+                if (strcmp(tag_name, "table") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE;
+                } else if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 || strcmp(tag_name, "tfoot") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_ROW_GROUP;
+                } else if (strcmp(tag_name, "tr") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_ROW;
+                } else if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
+                    display.outer = CSS_VALUE_TABLE_CELL;
+                    display.inner = CSS_VALUE_TABLE_CELL;
+                } else if (strcmp(tag_name, "caption") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_FLOW;
+                } else if (strcmp(tag_name, "colgroup") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_COLUMN_GROUP;
+                } else if (strcmp(tag_name, "col") == 0) {
+                    display.outer = CSS_VALUE_BLOCK;
+                    display.inner = CSS_VALUE_TABLE_COLUMN;
+                } else {
+                    // Default for truly unknown elements (inline)
+                    display.outer = CSS_VALUE_INLINE;
+                    display.inner = CSS_VALUE_FLOW;
+                }
+            } else {
+                // No tag name available, default to inline
+                display.outer = CSS_VALUE_INLINE;
+                display.inner = CSS_VALUE_FLOW;
+            }
         }
         // TODO: Check for CSS display property in child->style (DomElement)
         // For now, using tag-based defaults is sufficient

@@ -801,15 +801,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             }
         }
 
-        if (strcmp(node->node_name(), "table") == 0) {
-            log_debug("TABLE ELEMENT in layout_flow_node - outer=%d, inner=%d (TABLE=%d)",
-                   display.outer, display.inner, CSS_VALUE_TABLE);
-        }
-        if (strcmp(node->node_name(), "tbody") == 0) {
-            printf("DEBUG: TBODY in layout_flow_node - outer=%d, inner=%d\n", display.outer, display.inner);
-            printf("DEBUG: TBODY current position before layout_block: x=%.1f, y=%.1f\n",
-                   ((View*)lycon->view)->x, ((View*)lycon->view)->y);
-        }
         switch (display.outer) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
