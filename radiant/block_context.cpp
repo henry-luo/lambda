@@ -143,8 +143,10 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
-    // 5. Table cells and captions
-    if (block->display.inner == CSS_VALUE_TABLE_CELL ||
+    // 5. Tables, table cells and captions
+    // CSS 2.2 §9.4.1: "The border box of a table..."
+    if (block->display.inner == CSS_VALUE_TABLE ||
+        block->display.inner == CSS_VALUE_TABLE_CELL ||
         block->display.inner == CSS_VALUE_TABLE_CAPTION) {
         return true;
     }
