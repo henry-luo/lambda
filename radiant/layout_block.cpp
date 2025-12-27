@@ -11,6 +11,7 @@
 #include "../lib/log.h"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include <chrono>
+#include <cfloat>
 using namespace std::chrono;
 
 // External timing accumulators from layout.cpp
@@ -1296,9 +1297,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Query parent BFC for available space at current y position
     float bfc_float_offset_x = 0;
     float bfc_available_width_reduction = 0;
+    float bfc_shift_down = 0;  // Amount to shift down if element doesn't fit beside floats
+    BlockContext* parent_bfc = nullptr;
+
     if (is_normal_flow_bfc) {
         // Find the BFC root from the parent context - that's where floats are registered
-        BlockContext* parent_bfc = block_context_find_bfc(pa_block);
+        parent_bfc = block_context_find_bfc(pa_block);
         if (parent_bfc && (parent_bfc->left_float_count > 0 || parent_bfc->right_float_count > 0)) {
             // Calculate this block's position in BFC coordinates
             // block->y is relative to parent's content area, need to convert to BFC coordinates
@@ -1313,32 +1317,112 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 walker = walker->parent_view();
             }
 
-            // Get available space between floats at current y position
-            FloatAvailableSpace space = block_context_space_at_y(parent_bfc, y_in_bfc, 1.0f);
+            // Get the element's actual width requirement
+            // For elements with explicit CSS width, use that; otherwise use parent width
+            float element_required_width = pa_block->content_width;
+            bool has_explicit_width = false;
+            
+            // Check block->blk for CSS width (resolved by dom_node_resolve_style)
+            if (block->blk) {
+                if (block->blk->given_width > 0) {
+                    // Explicit width in px
+                    element_required_width = block->blk->given_width;
+                    has_explicit_width = true;
+                } else if (!isnan(block->blk->given_width_percent)) {
+                    // Percentage width - resolve against parent
+                    element_required_width = pa_block->content_width * block->blk->given_width_percent / 100.0f;
+                    has_explicit_width = true;
+                }
+            }
+            
+            // Add margins if they're explicitly set (not auto)
+            if (has_explicit_width && block->bound) {
+                if (block->bound->margin.left_type != CSS_VALUE_AUTO)
+                    element_required_width += block->bound->margin.left;
+                if (block->bound->margin.right_type != CSS_VALUE_AUTO)
+                    element_required_width += block->bound->margin.right;
+            }
 
-            log_debug("[BFC Float Avoid] parent_bfc=%p, floats: left=%d, right=%d, y_in_bfc=%.1f",
-                      (void*)parent_bfc, parent_bfc->left_float_count, parent_bfc->right_float_count, y_in_bfc);
+            log_debug("[BFC Float Avoid] element %s: required_width=%.1f, has_explicit_width=%d, y_in_bfc=%.1f",
+                      block->node_name(), element_required_width, has_explicit_width, y_in_bfc);
 
-            // If there are floats, we may need to adjust position
-            if (space.has_left_float || space.has_right_float) {
-                // Convert BFC space to local coordinates
+            // For elements WITHOUT explicit width, they can shrink to fit - no need to shift down
+            // For elements WITH explicit width, shift down if they don't fit
+            float current_y = y_in_bfc;
+            
+            if (has_explicit_width) {
+                // Check if element fits at current Y position
+                // If not, shift down like floats do
+                int max_iterations = 100;
+                
+                while (max_iterations-- > 0) {
+                    FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, 1.0f);
+                    float available_width = space.right - space.left;
+                    
+                    log_debug("[BFC Float Avoid] Checking y=%.1f: space=(%.1f,%.1f), available=%.1f, needed=%.1f",
+                              current_y, space.left, space.right, available_width, element_required_width);
+                    
+                    // Check if element fits
+                    if (available_width >= element_required_width || 
+                        (!space.has_left_float && !space.has_right_float)) {
+                        // Element fits here - calculate offset
+                        float local_left = space.left - x_in_bfc;
+                        float local_right = space.right - x_in_bfc;
+                        float float_intrusion_left = max(0.0f, local_left);
+                        float float_intrusion_right = max(0.0f, pa_block->content_width - local_right);
+
+                        if (space.has_left_float && float_intrusion_left > 0) {
+                            bfc_float_offset_x = float_intrusion_left;
+                        }
+                        bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
+                        break;
+                    }
+                    
+                    // Element doesn't fit - find next float boundary to try
+                    float next_y = FLT_MAX;
+                    for (FloatBox* fb = parent_bfc->left_floats; fb; fb = fb->next) {
+                        if (fb->margin_box_bottom > current_y && fb->margin_box_bottom < next_y) {
+                            next_y = fb->margin_box_bottom;
+                        }
+                    }
+                    for (FloatBox* fb = parent_bfc->right_floats; fb; fb = fb->next) {
+                        if (fb->margin_box_bottom > current_y && fb->margin_box_bottom < next_y) {
+                            next_y = fb->margin_box_bottom;
+                        }
+                    }
+                    
+                    if (next_y == FLT_MAX || next_y <= current_y) {
+                        // No more floats below - use current position
+                        break;
+                    }
+                    
+                    log_debug("[BFC Float Avoid] Element doesn't fit, shifting from y=%.1f to y=%.1f",
+                              current_y, next_y);
+                    current_y = next_y;
+                }
+            } else {
+                // No explicit width - element will shrink to fit, just calculate intrusion
+                FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, 1.0f);
                 float local_left = space.left - x_in_bfc;
                 float local_right = space.right - x_in_bfc;
-
-                // Calculate float intrusion in local coordinates
                 float float_intrusion_left = max(0.0f, local_left);
                 float float_intrusion_right = max(0.0f, pa_block->content_width - local_right);
 
                 if (space.has_left_float && float_intrusion_left > 0) {
-                    // Shift x position to avoid left float
                     bfc_float_offset_x = float_intrusion_left;
                 }
-                // Width will be reduced by both float intrusions
                 bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
-
-                log_debug("[BFC Float Avoid] space=(%.1f, %.1f), local=(%.1f, %.1f), offset_x=%.1f, width_reduction=%.1f",
-                          space.left, space.right, local_left, local_right,
+                
+                log_debug("[BFC Float Avoid] Auto-width element: offset_x=%.1f, width_reduction=%.1f",
                           bfc_float_offset_x, bfc_available_width_reduction);
+            }
+            
+            // Calculate total shift needed in local coordinates
+            bfc_shift_down = current_y - y_in_bfc;
+            if (bfc_shift_down > 0) {
+                log_debug("[BFC Float Avoid] Shifting element down by %.1f to avoid floats", bfc_shift_down);
+                block->y += bfc_shift_down;
+                pa_block->advance_y += bfc_shift_down;
             }
         }
     }
