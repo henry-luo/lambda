@@ -203,6 +203,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_MAX_WIDTH,
     CSS_PROPERTY_MAX_HEIGHT,
     CSS_PROPERTY_BOX_SIZING,
+    CSS_PROPERTY_ASPECT_RATIO,
 
     // Margin Properties
     CSS_PROPERTY_MARGIN,
