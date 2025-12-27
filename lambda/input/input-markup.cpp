@@ -1327,9 +1327,11 @@ static bool is_table_separator(const char* line) {
 
     // Check pattern: spaces, dashes, colons, pipes
     bool found_dash = false;
+    bool found_any_dash = false;  // track if we found at least one dash in any column
     while (*pos) {
         if (*pos == '|') {
             if (!found_dash) return false; // Must have at least one dash per column
+            found_any_dash = true;
             found_dash = false;
             pos++;
         } else if (*pos == '-') {
@@ -1342,7 +1344,8 @@ static bool is_table_separator(const char* line) {
         }
     }
 
-    return found_dash; // Must end with valid column
+    // Valid if we found at least one complete column (ending with |) or column in progress
+    return found_any_dash || found_dash;
 }
 
 // Parse table alignment specification
