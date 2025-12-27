@@ -542,11 +542,13 @@ DisplayValue resolve_display_value(void* child) {
                             } else if (keyword == CSS_VALUE_INLINE) {
                                 display.outer = CSS_VALUE_INLINE;
                                 display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
-                                return display;
+                                // CSS 2.1 §9.7: Floated/absolutely positioned elements become block
+                                return is_floated ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_INLINE_BLOCK) {
                                 display.outer = CSS_VALUE_INLINE_BLOCK;
                                 display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
-                                return display;
+                                // CSS 2.1 §9.7: Floated elements become block
+                                return is_floated ? blockify_display(display) : display;
                             } else if (keyword == CSS_VALUE_LIST_ITEM) {
                                 display.outer = CSS_VALUE_LIST_ITEM;
                                 display.inner = CSS_VALUE_FLOW;

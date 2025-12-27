@@ -1762,21 +1762,23 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
 
         // Calculate fit-content width (shrink-to-fit)
-        int fit_content = calculate_fit_content_width(lycon, dom_element, (int)available);
+        // Use float to avoid truncation that could cause text wrapping issues
+        float fit_content = calculate_fit_content_width(lycon, dom_element, available);
 
         // For min-content, use min-content width instead of fit-content
         if (is_min_content_width) {
-            fit_content = (int)calculate_min_content_width(lycon, (DomNode*)dom_element);
-            log_debug("min-content width: using min_content=%d", fit_content);
+            fit_content = calculate_min_content_width(lycon, (DomNode*)dom_element);
+            log_debug("min-content width: using min_content=%.1f", fit_content);
         }
 
-        if (fit_content > 0 && fit_content < (int)block->width) {
-            log_debug("Shrink-to-fit (%s): fit_content=%d, old_width=%.1f, available=%.1f",
+        if (fit_content > 0 && fit_content < block->width) {
+            log_debug("Shrink-to-fit (%s): fit_content=%.1f, old_width=%.1f, available=%.1f",
                 is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" : "float"),
                 fit_content, block->width, available);
 
             // Update block width to shrink-to-fit size
-            block->width = (float)fit_content;
+            // Add small epsilon to prevent text wrapping due to floating-point precision issues
+            block->width = fit_content + 0.1f;
 
             // Also update content_width for child layout
             float new_content_width = block->width;
