@@ -509,7 +509,12 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 block->embed->doc = doc; // assign loaded document to embed property
                 if (doc->html_root) {
                     log_debug("IFRAME TRACE: about to layout iframe document (src: %s)", src->str);
+                    // save parent document and set iframe document for correct image URL resolution
+                    DomDocument* parent_doc = lycon->ui_context->document;
+                    lycon->ui_context->document = doc;
                     layout_html_doc(lycon->ui_context, doc, false);
+                    // restore parent document
+                    lycon->ui_context->document = parent_doc;
                     log_debug("IFRAME TRACE: finished layout iframe document");
                 }
             }
