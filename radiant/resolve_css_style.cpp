@@ -3795,7 +3795,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing position property");
             if (!block) break;
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
@@ -3810,7 +3810,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing top property");
             if (!block) break;
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_top = false;
@@ -3824,7 +3824,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing left property");
             if (!block) break;
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_left = false;
@@ -3838,7 +3838,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing right property");
             if (!block) break;
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_right = false;
@@ -3852,7 +3852,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing bottom property");
             if (!block) break;
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_bottom = false;
@@ -3867,7 +3867,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing z-index property");
             if (!block) break;
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int z = (int)value->data.number.value;
@@ -3886,7 +3886,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_FLOAT: {
             log_debug("[CSS] Processing float property");
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum float_value = value->data.keyword;
@@ -3903,7 +3903,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing clear property");
             if (!block) break;
             if (!block->position) {
-                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+                block->position = alloc_position_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
