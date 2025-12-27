@@ -1029,7 +1029,20 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         DomNode *child = nullptr;
         if (block->is_element()) { child = block->first_child; }
         if (child) {
-            if (block->display.inner == CSS_VALUE_FLOW) {
+            // CSS 2.1 §17.2.1: Orphaned table-internal elements (table-row, table-cell, etc.)
+            // inside non-table contexts should be treated as block+flow for layout purposes.
+            // This handles cases like floated table-row-group containing table-row/table-cell.
+            bool is_orphaned_table_internal = 
+                block->display.inner == CSS_VALUE_TABLE_ROW ||
+                block->display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
+                block->display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
+                block->display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
+                block->display.inner == CSS_VALUE_TABLE_COLUMN ||
+                block->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
+                block->display.inner == CSS_VALUE_TABLE_CELL ||
+                block->display.inner == CSS_VALUE_TABLE_CAPTION;
+            
+            if (block->display.inner == CSS_VALUE_FLOW || is_orphaned_table_internal) {
                 // Pre-scan and layout floats BEFORE laying out inline content
                 // This ensures floats are positioned and affect line bounds correctly
                 prescan_and_layout_floats(lycon, child, block);
