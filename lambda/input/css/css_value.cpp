@@ -37,6 +37,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"text-top", 8, CSS_VALUE_TEXT_TOP, CSS_VALUE_GROUP_VERTICAL_ALIGN},
     {"sub", 3, CSS_VALUE_SUB, CSS_VALUE_GROUP_VERTICAL_ALIGN},
     {"super", 5, CSS_VALUE_SUPER, CSS_VALUE_GROUP_VERTICAL_ALIGN},
+    {"top", 3, CSS_VALUE_TOP, CSS_VALUE_GROUP_VERTICAL_ALIGN},  // vertical-align: top
+    {"bottom", 6, CSS_VALUE_BOTTOM, CSS_VALUE_GROUP_VERTICAL_ALIGN},  // vertical-align: bottom
     {"top", 3, CSS_VALUE_TOP, CSS_VALUE_GROUP_POSITION_SIDE},
     {"bottom", 6, CSS_VALUE_BOTTOM, CSS_VALUE_GROUP_POSITION_SIDE},
     {"first", 5, CSS_VALUE_FIRST, CSS_VALUE_GROUP_POSITION_SIDE},

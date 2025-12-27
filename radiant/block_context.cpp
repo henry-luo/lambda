@@ -122,8 +122,12 @@ bool block_context_establishes_bfc(ViewBlock* block) {
     // 1. Root element (html) - no parent
     if (!block->parent) return true;
 
-    // 2. Floats (float != none)
-    if (block->position && block->position->float_prop != CSS_VALUE_NONE) {
+    // 2. Floats (float == left or right)
+    // Note: Check for explicit float values, not just != CSS_VALUE_NONE,
+    // because uninitialized float_prop is CSS_VALUE__UNDEF (0) which is != CSS_VALUE_NONE
+    if (block->position &&
+        (block->position->float_prop == CSS_VALUE_LEFT ||
+         block->position->float_prop == CSS_VALUE_RIGHT)) {
         return true;
     }
 

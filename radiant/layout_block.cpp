@@ -1231,10 +1231,70 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     // Check if this block establishes a new BFC using unified BlockContext
     bool establishes_bfc = block_context_establishes_bfc(block);
+
+    // CSS 2.2 Section 9.4.1: "The border box of... an element in the normal flow that
+    // establishes a new block formatting context... must not overlap the margin box of
+    // any floats in the same block formatting context as the element itself."
+    // BFC elements in normal flow (not floats, not absolute/fixed) should avoid floats.
+    // Check parent BFC for floats BEFORE resetting for own BFC.
+    bool is_normal_flow_bfc = establishes_bfc && !is_float &&
+        (!block->position || (block->position->position != CSS_VALUE_ABSOLUTE &&
+                              block->position->position != CSS_VALUE_FIXED));
+
+    // Query parent BFC for available space at current y position
+    float bfc_float_offset_x = 0;
+    float bfc_available_width_reduction = 0;
+    if (is_normal_flow_bfc) {
+        // Find the BFC root from the parent context - that's where floats are registered
+        BlockContext* parent_bfc = block_context_find_bfc(pa_block);
+        if (parent_bfc && (parent_bfc->left_float_count > 0 || parent_bfc->right_float_count > 0)) {
+            // Calculate this block's position in BFC coordinates
+            // block->y is relative to parent's content area, need to convert to BFC coordinates
+            float y_in_bfc = block->y;
+            float x_in_bfc = block->x;
+
+            // Walk up from parent to BFC establishing element, accumulating offsets
+            ViewElement* walker = block->parent_view();
+            while (walker && walker != parent_bfc->establishing_element) {
+                y_in_bfc += walker->y;
+                x_in_bfc += walker->x;
+                walker = walker->parent_view();
+            }
+
+            // Get available space between floats at current y position
+            FloatAvailableSpace space = block_context_space_at_y(parent_bfc, y_in_bfc, 1.0f);
+
+            log_debug("[BFC Float Avoid] parent_bfc=%p, floats: left=%d, right=%d, y_in_bfc=%.1f",
+                      (void*)parent_bfc, parent_bfc->left_float_count, parent_bfc->right_float_count, y_in_bfc);
+
+            // If there are floats, we may need to adjust position
+            if (space.has_left_float || space.has_right_float) {
+                // Convert BFC space to local coordinates
+                float local_left = space.left - x_in_bfc;
+                float local_right = space.right - x_in_bfc;
+
+                // Calculate float intrusion in local coordinates
+                float float_intrusion_left = max(0.0f, local_left);
+                float float_intrusion_right = max(0.0f, pa_block->content_width - local_right);
+
+                if (space.has_left_float && float_intrusion_left > 0) {
+                    // Shift x position to avoid left float
+                    bfc_float_offset_x = float_intrusion_left;
+                }
+                // Width will be reduced by both float intrusions
+                bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
+
+                log_debug("[BFC Float Avoid] space=(%.1f, %.1f), local=(%.1f, %.1f), offset_x=%.1f, width_reduction=%.1f",
+                          space.left, space.right, local_left, local_right,
+                          bfc_float_offset_x, bfc_available_width_reduction);
+            }
+        }
+    }
+
     if (establishes_bfc) {
         lycon->block.is_bfc_root = true;
         lycon->block.establishing_element = block;
-        // Reset float lists for new BFC
+        // Reset float lists for new BFC (children won't see parent's floats)
         block_context_reset_floats(&lycon->block);
         log_debug("[BlockContext] Block %s establishes new BFC", block->node_name());
     } else {
@@ -1379,12 +1439,21 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     else { // derive from parent block width
         log_debug("Deriving from parent: pa_block->content_width=%.2f", pa_block->content_width);
+        float available_from_parent = pa_block->content_width;
+
+        // Reduce available width for BFC elements avoiding floats
+        if (bfc_available_width_reduction > 0) {
+            available_from_parent -= bfc_available_width_reduction;
+            log_debug("[BFC Float Avoid] Reduced available width by %.1f to %.1f",
+                      bfc_available_width_reduction, available_from_parent);
+        }
+
         if (block->bound) {
-            content_width = pa_block->content_width
+            content_width = available_from_parent
                 - (block->bound->margin.left_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
                 - (block->bound->margin.right_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
         }
-        else { content_width = pa_block->content_width; }
+        else { content_width = available_from_parent; }
         if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             content_width = adjust_min_max_width(block, content_width);
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
@@ -1465,12 +1534,25 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         float y_before_margin = block->y;
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
+
+        // Apply BFC float avoidance offset for normal-flow BFC elements
+        if (bfc_float_offset_x > 0) {
+            block->x += bfc_float_offset_x;
+            log_debug("[BFC Float Avoid] Applied x offset: block->x now=%.1f", block->x);
+        }
+
         log_debug("Y coordinate: before margin=%f, margin.top=%f, after margin=%f (tag=%s)",
                   y_before_margin, block->bound->margin.top, block->y, block->node_name());
     }
     else {
         block->width = content_width;  block->height = content_height;
         // no change to block->x, block->y
+
+        // Apply BFC float avoidance offset for normal-flow BFC elements
+        if (bfc_float_offset_x > 0) {
+            block->x += bfc_float_offset_x;
+            log_debug("[BFC Float Avoid] Applied x offset (no bounds): block->x now=%.1f", block->x);
+        }
     }
     log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
@@ -1569,7 +1651,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         while (child) {
             if (child->view_type && child->is_block()) {
                 ViewBlock* vb = (ViewBlock*)child;
-                bool is_out_of_flow = (vb->position &&
+                // CSS 2.1 Section 8.3.1: Only block-level boxes participate in margin collapsing
+                // Inline-blocks are inline-level boxes in inline formatting context - they don't collapse
+                bool is_inline_block = (vb->view_type == RDT_VIEW_INLINE_BLOCK);
+                bool is_out_of_flow = is_inline_block || (vb->position &&
                     (vb->position->position == CSS_VALUE_ABSOLUTE ||
                      vb->position->position == CSS_VALUE_FIXED ||
                      element_has_float(vb)));
@@ -2019,7 +2104,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
                 log_debug("valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d",
                     offset, line_height, block->height, lycon->block.advance_y, block->y, block->in_line->vertical_align);
-                lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - lycon->line.max_ascender);
+                // For TOP/BOTTOM, we handle max_descender/max_ascender specially in the section below
+                // Don't apply this generic formula which assumes baseline-relative positioning
+                if (block->in_line->vertical_align != CSS_VALUE_TOP && block->in_line->vertical_align != CSS_VALUE_BOTTOM) {
+                    lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - lycon->line.max_ascender);
+                }
                 log_debug("new max_descender=%f", lycon->line.max_descender);
             } else {
                 log_debug("valigned-inline-block: default baseline align");
@@ -2042,7 +2131,23 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 else if (block->in_line->vertical_align == CSS_VALUE_TEXT_BOTTOM) {
                     lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
                 }
+                else if (block->in_line->vertical_align == CSS_VALUE_TOP) {
+                    // CSS 2.1 10.8.1: vertical-align:top aligns element's top with line box top
+                    // The line box top is at init_ascender above the baseline
+                    // Element contributes (block_flow_height - init_ascender) below the baseline
+                    lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
+                    // The strut always contributes its ascender to the line box
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->block.init_ascender);
+                }
+                else if (block->in_line->vertical_align == CSS_VALUE_BOTTOM) {
+                    // CSS 2.1 10.8.1: vertical-align:bottom aligns element's bottom with line box bottom
+                    // Similar calculation but relative to init_descender
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
+                    // The strut always contributes its descender to the line box
+                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
+                }
                 else {
+                    // For other vertical-align values (sub, super, middle, etc.)
                     lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
                 }
             } else {
