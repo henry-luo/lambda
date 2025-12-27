@@ -567,6 +567,14 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     log_debug("render_html_to_svg called with html_file='%s', svg_file='%s', viewport=%dx%d",
               html_file, svg_file, viewport_width, viewport_height);
 
+    // Remember if we need to auto-size (viewport was 0)
+    bool auto_width = (viewport_width == 0);
+    bool auto_height = (viewport_height == 0);
+
+    // Use reasonable defaults for layout if auto-sizing
+    int layout_width = viewport_width > 0 ? viewport_width : 1200;
+    int layout_height = viewport_height > 0 ? viewport_height : 800;
+
     // Initialize UI context in headless mode
     UiContext ui_context;
     if (ui_context_init(&ui_context, true) != 0) {
@@ -574,12 +582,12 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
         return 1;
     }
 
-    // Create a surface for layout calculations with specified viewport dimensions
-    ui_context_create_surface(&ui_context, viewport_width, viewport_height);
+    // Create a surface for layout calculations with layout dimensions
+    ui_context_create_surface(&ui_context, layout_width, layout_height);
 
     // Update UI context viewport dimensions for layout calculations
-    ui_context.window_width = viewport_width;
-    ui_context.window_height = viewport_height;
+    ui_context.window_width = layout_width;
+    ui_context.window_height = layout_height;
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -591,7 +599,7 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
 
     // Load HTML document
     log_debug("Loading HTML document: %s", html_file);
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
     if (!doc) {
         log_debug("Could not load HTML file: %s", html_file);
         url_destroy(cwd);
@@ -609,18 +617,32 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     layout_html_doc(&ui_context, doc, false);
 
     // Calculate actual content dimensions
-    int content_max_x = 0, content_max_y = 0;
+    int content_max_x = layout_width;
+    int content_max_y = layout_height;
     if (doc->view_tree && doc->view_tree->root) {
-        calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
+        int bounds_x = 0, bounds_y = 0;
+        calculate_content_bounds(doc->view_tree->root, &bounds_x, &bounds_y);
         // Add some padding to ensure nothing is cut off
-        content_max_x += 50;
-        content_max_y += 50;
+        bounds_x += 50;
+        bounds_y += 50;
 
-        // Use minimum dimensions to ensure reasonable viewport
-        if (content_max_x < viewport_width) content_max_x = viewport_width;
-        if (content_max_y < viewport_height) content_max_y = viewport_height;
+        // If auto-sizing, use content bounds; otherwise use minimum of viewport and content
+        if (auto_width) {
+            content_max_x = bounds_x;
+        } else {
+            content_max_x = (bounds_x > layout_width) ? bounds_x : layout_width;
+        }
+        if (auto_height) {
+            content_max_y = bounds_y;
+        } else {
+            content_max_y = (bounds_y > layout_height) ? bounds_y : layout_height;
+        }
 
-        log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
+        if (auto_width || auto_height) {
+            log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding)", content_max_x, content_max_y);
+        } else {
+            log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
+        }
     }
 
     // Render to SVG

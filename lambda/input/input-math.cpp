@@ -1125,6 +1125,7 @@ static Item parse_latex_sum_or_prod(InputContext& ctx, const char **math, const 
 static Item parse_latex_integral(InputContext& ctx, const char **math);
 static Item parse_latex_limit(InputContext& ctx, const char **math);
 static Item parse_latex_matrix(InputContext& ctx, const char **math, const char* matrix_type);
+static Item parse_latex_array(InputContext& ctx, const char **math);
 static Item parse_latex_cases(InputContext& ctx, const char **math);
 static Item parse_latex_equation(InputContext& ctx, const char **math);
 static Item parse_latex_align(InputContext& ctx, const char **math);
@@ -1174,6 +1175,8 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
                 return parse_latex_aligned(ctx, math);
             } else if (env_len == 6 && strncmp(env_start, "gather", 6) == 0) {
                 return parse_latex_gather(ctx, math);
+            } else if (env_len == 5 && strncmp(env_start, "array", 5) == 0) {
+                return parse_latex_array(ctx, math);
             }
 
             // For unknown environments, try to parse as generic environment
@@ -3214,6 +3217,139 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
     ((TypeElmt*)matrix_element->type)->content_length = ((List*)matrix_element)->length;
     // Matrix environment parsing completed successfully
     return {.item = (uint64_t)matrix_element};
+}
+
+// Parse LaTeX array environment: \begin{array}{col_spec} ... \end{array}
+static Item parse_latex_array(InputContext& ctx, const char **math) {
+    Input* input = ctx.input();
+
+    // Expected format: \begin{array}{col_spec} content \end{array}
+    // The col_spec like {ll} or {lcr} specifies column alignment but we'll ignore it
+
+    // Skip \begin{array}
+    if (strncmp(*math, "\\begin{array}", 13) != 0) {
+        log_debug("ERROR: Expected \\begin{array} for array environment\n");
+        return {.item = ITEM_ERROR};
+    }
+    *math += 13;
+
+    skip_whitespace(math);
+
+    // Skip the column specification {ll}, {lcr}, etc.
+    if (**math == '{') {
+        (*math)++; // skip opening brace
+        // Skip until closing brace
+        while (**math && **math != '}') {
+            (*math)++;
+        }
+        if (**math == '}') {
+            (*math)++; // skip closing brace
+        } else {
+            log_debug("WARNING: Missing closing brace for array column specification\n");
+        }
+    }
+
+    skip_whitespace(math);
+
+    // Create the array element (treat it like a matrix/pmatrix)
+    Element* array_element = create_math_element(input, "array");
+    if (!array_element) {
+        log_debug("ERROR: Failed to create array environment element\n");
+        return {.item = ITEM_ERROR};
+    }
+
+    add_attribute_to_element(input, array_element, "env", "true");
+
+    // Parse array content (same as matrix)
+    Element* current_row = create_math_element(input, "row");
+    if (!current_row) {
+        log_debug("ERROR: Failed to create array row element\n");
+        return {.item = ITEM_ERROR};
+    }
+
+    int row_count = 0;
+    int col_count = 0;
+    int current_col = 0;
+
+    while (**math) {
+        skip_whitespace(math);
+
+        // Check for end of environment
+        if (strncmp(*math, "\\end{array}", 11) == 0) {
+            *math += 11; // skip \end{array}
+            break;
+        }
+
+        // Check for row separator (backslash backslash)
+        if (**math == '\\' && *(*math + 1) == '\\') {
+            // End current row
+            if (((List*)current_row)->length > 0) {
+                // Validate column count consistency
+                if (row_count == 0) {
+                    col_count = current_col + 1;
+                } else if (current_col + 1 != col_count) {
+                    log_debug("WARNING: Inconsistent column count in array row %d: expected %d, got %d\n",
+                             row_count, col_count, current_col + 1);
+                }
+
+                ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
+                list_push((List*)array_element, {.item = (uint64_t)current_row});
+                row_count++;
+            }
+
+            // Start new row
+            current_row = create_math_element(input, "row");
+            if (!current_row) {
+                log_debug("ERROR: Failed to create new array row element\n");
+                return {.item = ITEM_ERROR};
+            }
+            current_col = 0;
+
+            *math += 2; // skip backslash backslash
+            skip_whitespace(math);
+            continue;
+        }
+
+        // Check for column separator &
+        if (**math == '&') {
+            current_col++;
+            (*math)++;
+            skip_whitespace(math);
+            continue;
+        }
+
+        // Parse cell content
+        Item cell_item = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
+        if (get_type_id(cell_item) == LMD_TYPE_ERROR) {
+            log_debug("ERROR: Failed to parse array cell content\n");
+            return {.item = ITEM_ERROR};
+        }
+
+        list_push((List*)current_row, cell_item);
+        skip_whitespace(math);
+    }
+
+    // Add the last row if it has content
+    if (((List*)current_row)->length > 0) {
+        // Validate final row column count
+        if (row_count > 0 && current_col + 1 != col_count) {
+            log_debug("WARNING: Inconsistent column count in final array row\n");
+        }
+        ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
+        list_push((List*)array_element, {.item = (uint64_t)current_row});
+        row_count++;
+    }
+
+    // Add array dimensions as attributes
+    char row_str[16], col_str[16];
+    snprintf(row_str, sizeof(row_str), "%d", row_count);
+    snprintf(col_str, sizeof(col_str), "%d", col_count);
+    add_attribute_to_element(input, array_element, "rows", row_str);
+    add_attribute_to_element(input, array_element, "cols", col_str);
+
+    ((TypeElmt*)array_element->type)->content_length = ((List*)array_element)->length;
+    // Array environment parsing completed successfully
+    return {.item = (uint64_t)array_element};
 }
 
 // Parse LaTeX cases environment: \begin{cases} ... \end{cases}
