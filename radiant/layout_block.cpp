@@ -1336,8 +1336,23 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                          block->blk->given_width_type == CSS_VALUE_AUTO ||
                          block->blk->given_width_type == CSS_VALUE__UNDEF;
     bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && width_is_auto;
+    
+    // Check for width: max-content or min-content (intrinsic sizing keywords)
+    bool is_max_content_width = block->blk && block->blk->given_width_type == CSS_VALUE_MAX_CONTENT;
+    bool is_min_content_width = block->blk && block->blk->given_width_type == CSS_VALUE_MIN_CONTENT;
 
-    if (is_float_auto_width) {
+    if (is_max_content_width || is_min_content_width) {
+        // For max-content/min-content width, use shrink-to-fit behavior
+        // Initially use available width for layout, then shrink to content width post-layout
+        float available_width = pa_block->content_width;
+        if (block->bound) {
+            available_width -= (block->bound->margin.left_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
+                + (block->bound->margin.right_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
+        }
+        content_width = available_width;
+        log_debug("max/min-content width: initial layout with available_width=%.2f (will shrink post-layout)", content_width);
+    }
+    else if (is_float_auto_width) {
         // For floats with auto width, initially use available width for layout
         // Then shrink to fit content in post-layout step
         float available_width = pa_block->content_width;
@@ -1477,7 +1492,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     // For floats with auto width, calculate intrinsic width BEFORE laying out children
     // This ensures children are laid out with the correct shrink-to-fit width
-    if (is_float_auto_width && block->is_element()) {
+    if ((is_float_auto_width || is_max_content_width || is_min_content_width) && block->is_element()) {
         // Font is loaded after setup_inline, so now we can calculate intrinsic width
         DomElement* dom_element = (DomElement*)block;
         float available = pa_block->content_width;
@@ -1488,9 +1503,16 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         // Calculate fit-content width (shrink-to-fit)
         int fit_content = calculate_fit_content_width(lycon, dom_element, (int)available);
+        
+        // For min-content, use min-content width instead of fit-content
+        if (is_min_content_width) {
+            fit_content = (int)calculate_min_content_width(lycon, (DomNode*)dom_element);
+            log_debug("min-content width: using min_content=%d", fit_content);
+        }
 
         if (fit_content > 0 && fit_content < (int)block->width) {
-            log_debug("Float shrink-to-fit: fit_content=%d, old_width=%.1f, available=%.1f",
+            log_debug("Shrink-to-fit (%s): fit_content=%d, old_width=%.1f, available=%.1f",
+                is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" : "float"),
                 fit_content, block->width, available);
 
             // Update block width to shrink-to-fit size
