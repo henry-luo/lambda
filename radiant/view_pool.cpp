@@ -491,6 +491,12 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
                 strbuf_append_format(buf, "%s", pos_value->name);
             }
         }
+        if (block->position->float_prop) {
+            const CssEnumInfo* float_value = css_enum_info(block->position->float_prop);
+            if (float_value && float_value->name) {
+                strbuf_append_format(buf, ", float:%s", float_value->name);
+            }
+        }
         if (block->position->has_top) {
             strbuf_append_format(buf, ", top:%.1f", block->position->top);
         }
