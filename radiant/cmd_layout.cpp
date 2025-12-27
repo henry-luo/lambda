@@ -1545,40 +1545,39 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Step 2: Generate complete HTML document with external CSS links
     log_debug("[Lambda LaTeX] Converting LaTeX to HTML with external CSS...");
 
-    // Generate HTML output path: <input_file>.html
-    std::string html_output_path = std::string(latex_filepath) + ".html";
-
-    // Compute relative path from HTML file location to conf/input/latex/
-    // We need to find how many directories deep the HTML file is from the CWD
+    // Compute relative path from LaTeX file location to conf/input/latex/
+    // We need to find how many directories deep the file is from the CWD
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == nullptr) {
         log_error("Failed to get current working directory");
         return nullptr;
     }
     std::string cwd_str(cwd);
-    std::string html_abs_dir = html_output_path;
-    size_t last_slash = html_abs_dir.rfind('/');
+    std::string latex_abs_dir = std::string(latex_filepath);
+    size_t last_slash = latex_abs_dir.rfind('/');
     if (last_slash != std::string::npos) {
-        html_abs_dir = html_abs_dir.substr(0, last_slash);
+        latex_abs_dir = latex_abs_dir.substr(0, last_slash);
     }
 
-    // Get relative path from CWD to HTML directory
-    std::string rel_html_dir;
-    if (html_abs_dir.find(cwd_str) == 0) {
-        // HTML is under CWD
-        rel_html_dir = html_abs_dir.substr(cwd_str.length());
-        if (!rel_html_dir.empty() && rel_html_dir[0] == '/') {
-            rel_html_dir = rel_html_dir.substr(1);
+    // Get relative path from CWD to LaTeX directory
+    std::string rel_latex_dir;
+    if (latex_abs_dir.find(cwd_str) == 0) {
+        // LaTeX is under CWD
+        rel_latex_dir = latex_abs_dir.substr(cwd_str.length());
+        if (!rel_latex_dir.empty() && rel_latex_dir[0] == '/') {
+            rel_latex_dir = rel_latex_dir.substr(1);
         }
     } else {
-        rel_html_dir = html_abs_dir;  // Fallback to absolute
+        rel_latex_dir = latex_abs_dir;  // Fallback to absolute
     }
+
+    log_info("[Lambda LaTeX] Starting LaTeX document load from %s", latex_filepath);
 
     // Count directory depth
     int depth = 0;
-    if (!rel_html_dir.empty()) {
+    if (!rel_latex_dir.empty()) {
         depth = 1;  // At least one directory
-        for (char c : rel_html_dir) {
+        for (char c : rel_latex_dir) {
             if (c == '/') depth++;
         }
     }
@@ -1590,8 +1589,8 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
     asset_base_url_str += "conf/input/latex/";
 
-    log_debug("[Lambda LaTeX] CWD: %s, HTML dir: %s, rel: %s, depth: %d, asset URL: %s",
-              cwd_str.c_str(), html_abs_dir.c_str(), rel_html_dir.c_str(), depth, asset_base_url_str.c_str());
+    log_debug("[Lambda LaTeX] CWD: %s, LaTeX dir: %s, rel: %s, depth: %d, asset URL: %s",
+              cwd_str.c_str(), latex_abs_dir.c_str(), rel_latex_dir.c_str(), depth, asset_base_url_str.c_str());
 
     const char* doc_class = "article";  // Default document class
 
@@ -1602,15 +1601,12 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    // Save HTML to file
-    FILE* html_file = fopen(html_output_path.c_str(), "w");
-    if (html_file) {
-        fprintf(html_file, "%s", html_doc);
-        fclose(html_file);
-        log_info("[Lambda LaTeX] Saved HTML to: %s (assets: %s)", html_output_path.c_str(), asset_base_url_str.c_str());
-    } else {
-        log_warn("[Lambda LaTeX] Could not save HTML to: %s", html_output_path.c_str());
-    }
+    // Log the first 100 characters to verify structure
+    size_t html_len = strlen(html_doc);
+    char html_preview[101];
+    strncpy(html_preview, html_doc, 100);
+    html_preview[100] = '\0';
+    log_info("[Lambda LaTeX] Generated HTML (%zu bytes), starts with: %s", html_len, html_preview);
 
     // Step 3: Parse the generated HTML for DOM construction
     log_debug("[Lambda LaTeX] Parsing generated HTML for layout...");
