@@ -526,12 +526,12 @@ abbr {
         background-color: white;
         color: black;
     }
-    
+
     a {
         color: black;
         text-decoration: underline;
     }
-    
+
     .noprint {
         display: none;
     }
