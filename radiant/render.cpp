@@ -16,6 +16,30 @@
 
 #define DEBUG_RENDER 0
 
+// Rendering performance counters
+static int64_t g_render_glyph_count = 0;
+static int64_t g_render_draw_count = 0;
+static double g_render_load_glyph_time = 0;
+static double g_render_draw_glyph_time = 0;
+static int64_t g_render_setup_font_count = 0;
+static double g_render_setup_font_time = 0;
+
+void reset_render_stats() {
+    g_render_glyph_count = 0;
+    g_render_draw_count = 0;
+    g_render_load_glyph_time = 0;
+    g_render_draw_glyph_time = 0;
+    g_render_setup_font_count = 0;
+    g_render_setup_font_time = 0;
+}
+
+void log_render_stats() {
+    log_info("[TIMING] render stats: load_glyph calls=%lld (%.1fms), draw_glyph calls=%lld (%.1fms), setup_font calls=%lld (%.1fms)",
+        g_render_glyph_count, g_render_load_glyph_time,
+        g_render_draw_count, g_render_draw_glyph_time,
+        g_render_setup_font_count, g_render_setup_font_time);
+}
+
 // Forward declaration for border-collapse support
 struct CollapsedBorder {
     float width;
@@ -217,7 +241,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 if (bytes <= 0) { scan++; }
                 else { scan += bytes; }
 
+                auto t1 = std::chrono::high_resolution_clock::now();
                 FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, scan_codepoint, false);
+                auto t2 = std::chrono::high_resolution_clock::now();
+                g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
+                g_render_glyph_count++;
                 if (glyph) {
                     natural_width += glyph->advance.x / 64.0;
                 } else {
@@ -261,7 +289,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
                 is_word_start = false;
 
+                auto t1 = std::chrono::high_resolution_clock::now();
                 FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, codepoint, true);
+                auto t2 = std::chrono::high_resolution_clock::now();
+                g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
+                g_render_glyph_count++;
                 if (!glyph) {
                     // draw a square box for missing glyph
                     Rect rect = {x + 1, y, (float)(rdcon->font.style->space_width - 2), (float)(rdcon->font.ft_face->size->metrics.y_ppem / 64.0)};
@@ -271,7 +303,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else {
                     // draw the glyph to the image buffer
                     float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                    auto t3 = std::chrono::high_resolution_clock::now();
                     draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
+                    auto t4 = std::chrono::high_resolution_clock::now();
+                    g_render_draw_glyph_time += std::chrono::duration<double, std::milli>(t4 - t3).count();
+                    g_render_draw_count++;
                     // advance to the next position
                     x += glyph->advance.x / 64.0;
                 }
@@ -626,7 +662,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
+        auto t1 = std::chrono::high_resolution_clock::now();
         setup_font(rdcon->ui_context, &rdcon->font, block->font);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        g_render_setup_font_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
+        g_render_setup_font_count++;
     }
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
     if (block->view_type == RDT_VIEW_LIST_ITEM) {
@@ -1001,6 +1041,8 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
+    reset_render_stats();  // reset performance counters
+
     RenderContext rdcon;
     log_debug("Render HTML doc");
     render_init(&rdcon, uicon, view_tree);
@@ -1031,6 +1073,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     auto t_render = high_resolution_clock::now();
     log_info("[TIMING] render_block_view: %.1fms", duration<double, std::milli>(t_render - t_init).count());
+    log_render_stats();  // log detailed render statistics
 
     // all shapes should already have been drawn to the canvas
     // tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
