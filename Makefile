@@ -305,7 +305,7 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_LATEX_LIB)
+tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_LATEX_LIB)
 
 # Build tree-sitter without Unicode/ICU dependencies (minimal build)
 # Uses the amalgamated lib.c file approach recommended by ChatGPT
@@ -677,6 +677,12 @@ clean-all: clean-premake clean-test
 	fi
 	@if [ -d "lambda/tree-sitter-lambda" ]; then \
 		cd lambda/tree-sitter-lambda && $(MAKE) clean; \
+	fi
+	@if [ -d "lambda/tree-sitter-javascript" ]; then \
+		cd lambda/tree-sitter-javascript && rm -f src/*.o *.a *.so *.dylib; \
+	fi
+	@if [ -d "lambda/tree-sitter-latex" ]; then \
+		cd lambda/tree-sitter-latex && rm -f src/*.o *.a *.so *.dylib; \
 	fi
 	@echo "All build directories and tree-sitter libraries cleaned."
 
