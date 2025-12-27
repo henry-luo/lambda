@@ -4,6 +4,11 @@
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
+#include <cfloat>
+#include <algorithm>
+
+using std::min;
+using std::max;
 
 // Forward declarations
 ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
@@ -232,6 +237,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float left_edge = block->position->left + (block->bound ? block->bound->margin.left : 0);
         float right_edge = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0);
         content_width = max(right_edge - left_edge, 0.0f);
+        // CRITICAL: Store constraint-calculated width so finalize_block_flow knows width is fixed
+        lycon->block.given_width = content_width;
+        log_debug("[ABS POS] width from constraints: left_edge=%.1f, right_edge=%.1f, content_width=%.1f (stored in given_width)",
+                  left_edge, right_edge, content_width);
     } else if (is_intrinsic_width) {
         // For max-content/min-content/fit-content, use 0 as initial width
         // The actual width will be determined by content and adjusted post-layout
@@ -256,17 +265,25 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     assert(content_width >= 0);
 
     // calculate vertical position - same refactoring as horizontal
+    log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
+              lycon->block.given_height, block->position->has_top, block->position->has_bottom, cb_height);
     if (lycon->block.given_height >= 0) {
         content_height = lycon->block.given_height;
+        log_debug("[ABS POS] using explicit height: %.1f", content_height);
     } else if (block->position->has_top && block->position->has_bottom) {
         // both top and bottom specified - calculate height from constraints
         float top_edge = block->position->top + (block->bound ? block->bound->margin.top : 0);
         float bottom_edge = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
         content_height = max(bottom_edge - top_edge, 0.0f);
+        // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
+        lycon->block.given_height = content_height;
+        log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, content_height=%.1f (stored in given_height)",
+                  top_edge, bottom_edge, content_height);
     } else {
         // shrink-to-fit: height will be determined by content after layout
         // Start with 0 and let the post-layout adjustment set the final height
         content_height = 0;
+        log_debug("[ABS POS] using auto height (shrink-to-fit)");
     }
 
     // Now determine y position (relative to padding box, then add border offset)
@@ -399,28 +416,54 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
     // CSS 2.2 Section 10.6.4: For absolutely positioned elements without explicit top/bottom,
     // use the "static position" - where the element would be in normal flow
-    // The static Y position is the parent's current advance_y (where next block would go)
+    // The static position is relative to the parent element's content area, but we need
+    // to express it relative to the containing block's padding box.
+    
+    // Calculate offset from containing block to parent element
+    // Walk from parent up to containing block, accumulating positions
+    // Note: pa_line->left and pa_block->advance_y are already relative to the parent's 
+    // content area (they include padding/border offsets), so we only need to add
+    // the parent's position relative to the containing block.
+    float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
+    ViewElement* parent = block->parent_view();
+    if (parent && parent->is_block()) {
+        ViewBlock* p = (ViewBlock*)parent;
+        // Walk from parent to containing block, accumulating offsets
+        while (p && p != cb) {
+            parent_to_cb_offset_x += p->x;
+            parent_to_cb_offset_y += p->y;
+            log_debug("[STATIC POS] Adding parent %s offset: (%f, %f)", p->node_name(), p->x, p->y);
+            ViewElement* gp = p->parent_view();
+            if (gp && gp->is_block()) {
+                p = (ViewBlock*)gp;
+            } else {
+                break;
+            }
+        }
+        // Note: Don't add parent's padding/border here - pa_line->left already includes them
+    }
+    log_debug("[STATIC POS] Total parent-to-CB offset: (%f, %f)", parent_to_cb_offset_x, parent_to_cb_offset_y);
+
     if (!block->position->has_top && !block->position->has_bottom) {
         // Calculate static position: pa_block->advance_y is relative to parent's content area
-        // We need to convert this to be relative to the containing block
-        // The static-position containing block is the parent element, not necessarily cb
-        float static_y = pa_block->advance_y;
+        // Add offset to convert to containing block coordinates
+        float static_y = parent_to_cb_offset_y + pa_block->advance_y;
         // Add margin.top (if not already included)
         if (block->bound && block->bound->margin.top > 0) {
             static_y += block->bound->margin.top;
         }
-        log_debug("[STATIC POS] Using static Y position: %.1f (pa_block->advance_y=%.1f)",
-                  static_y, pa_block->advance_y);
+        log_debug("[STATIC POS] Using static Y position: %.1f (pa_block->advance_y=%.1f, offset=%.1f)",
+                  static_y, pa_block->advance_y, parent_to_cb_offset_y);
         block->y = static_y;
     }
     // Similarly for X when neither left nor right specified
     if (!block->position->has_left && !block->position->has_right) {
-        float static_x = pa_line->left;  // Line's left edge for static horizontal position
+        float static_x = parent_to_cb_offset_x + pa_line->left;  // Line's left edge for static horizontal position
         if (block->bound && block->bound->margin.left > 0) {
             static_x += block->bound->margin.left;
         }
-        log_debug("[STATIC POS] Using static X position: %.1f (pa_line->left=%.1f)",
-                  static_x, pa_line->left);
+        log_debug("[STATIC POS] Using static X position: %.1f (pa_line->left=%.1f, offset=%.1f)",
+                  static_x, pa_line->left, parent_to_cb_offset_x);
         block->x = static_x;
     }
 
@@ -590,73 +633,75 @@ bool element_has_float(ViewBlock* block) {
 
 /**
  * Apply float layout to an element
- * Note: The block has already been laid out at its normal flow position by layout_block_content.
- * For floats, we need to:
- * 1. Reposition float:right elements to the right edge of their containing block
- * 2. Add the float to the float context for tracking
- * 3. Adjust surrounding content (handled by adjust_line_for_floats and clear)
- *
+ * 
  * CSS 2.2 Section 9.5.1: Float Positioning Rules
- * - float:left positions at the left edge of available space (after earlier floats)
- * - float:right positions at the right edge of available space (before earlier floats)
+ * Rule 1: Left float's left outer edge may not be to the left of the containing block's left edge
+ * Rule 2: Right float's right outer edge may not be to the right of the containing block's right edge  
+ * Rule 3: Right float's right outer edge may not be to the right of any preceding right float's left outer edge
+ * Rule 4: Float's outer top may not be higher than the top of its containing block
+ * Rule 5: Float's outer top may not be higher than the outer top of any preceding float
+ * Rule 6: Float's outer top may not be higher than any line-box with content preceding the float
+ * Rule 7: Left float with preceding left floats: left edge must be to the right of preceding float's right edge,
+ *         OR its top must be below the preceding float's bottom (SHIFT DOWN IF DOESN'T FIT)
+ * Rule 8: Float must be placed as high as possible
+ * Rule 9: Left floats placed as far left as possible, right floats as far right as possible
+ *
+ * The key implementation here is Rule 7 (and the right float equivalent): if a float doesn't fit
+ * horizontally at the current Y position, it must shift down until it finds space.
  */
 void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     if (!element_has_float(block)) {
         return;
     }
 
-    log_debug("Applying float layout to element (float_prop=%d)", block->position->float_prop);
+    log_debug("[FLOAT_LAYOUT] Applying float layout to element %s (float_prop=%d)",
+              block->node_name(), block->position->float_prop);
 
     // Get the parent's BlockContext - floats are positioned relative to their BFC container
-    // lycon->block.parent points to the parent's context (pa_block in layout_block)
     BlockContext* parent_ctx = lycon->block.parent;
     if (!parent_ctx) {
-        log_error("No parent BlockContext for float positioning");
+        log_error("[FLOAT_LAYOUT] No parent BlockContext for float positioning");
         return;
     }
 
     // Find the BFC root from the parent's context
     BlockContext* bfc = block_context_find_bfc(parent_ctx);
     if (!bfc) {
-        log_debug("No BFC found, using parent context directly");
+        log_debug("[FLOAT_LAYOUT] No BFC found, using parent context directly");
         bfc = parent_ctx;
     }
 
     // Get the IMMEDIATE PARENT's content area offset (border + padding)
-    // The float's x,y coordinates are relative to the PARENT's border box origin,
-    // but space.left/right from block_context_space_at_y are relative to content area (0 = content left edge)
-    // IMPORTANT: Use immediate parent, not BFC root - the float is positioned in parent's coordinate space
     ViewElement* parent_view = block->parent_view();
     float content_offset_x = 0;
+    float content_offset_y = 0;
     if (parent_view && parent_view->is_block()) {
         ViewBlock* parent_block = (ViewBlock*)parent_view;
         if (parent_block->bound) {
             if (parent_block->bound->border) {
                 content_offset_x += parent_block->bound->border->width.left;
+                content_offset_y += parent_block->bound->border->width.top;
             }
             content_offset_x += parent_block->bound->padding.left;
+            content_offset_y += parent_block->bound->padding.top;
         }
     }
-    log_debug("Float parent: %s, content_offset_x=%.1f",
-              parent_view ? parent_view->node_name() : "null", content_offset_x);
+    log_debug("[FLOAT_LAYOUT] Float parent: %s, content_offset=(%.1f, %.1f)",
+              parent_view ? parent_view->node_name() : "null", content_offset_x, content_offset_y);
 
     float margin_left = block->bound ? block->bound->margin.left : 0;
     float margin_right = block->bound ? block->bound->margin.right : 0;
+    float margin_top = block->bound ? block->bound->margin.top : 0;
+    float margin_bottom = block->bound ? block->bound->margin.bottom : 0;
 
-    // Get the parent block's content width for right float positioning
-    // Use parent_ctx->content_width which is set from lycon->block.content_width
-    // BEFORE content layout begins (unlike ViewBlock.content_width which is set after)
+    // Get the parent block's content width for positioning
     float parent_content_width = parent_ctx->content_width;
-    log_debug("Float positioning: using parent_ctx->content_width=%.1f", parent_content_width);
+    log_debug("[FLOAT_LAYOUT] using parent_ctx->content_width=%.1f", parent_content_width);
 
-    // Get the current Y position of this float
     // Calculate parent's position in BFC coordinates for coordinate conversion
-    // This is needed because float space queries return BFC-relative coordinates,
-    // but we position floats relative to their immediate parent
     float parent_x_in_bfc = 0;
     float parent_y_in_bfc = 0;
     if (parent_view) {
-        // Walk up the view tree to accumulate parent positions relative to BFC
         ViewElement* v = parent_view;
         while (v && v != bfc->establishing_element) {
             parent_x_in_bfc += v->x;
@@ -666,56 +711,131 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             v = pv;
         }
     }
-    log_debug("Float parent_in_bfc=(%.1f, %.1f)", parent_x_in_bfc, parent_y_in_bfc);
+    log_debug("[FLOAT_LAYOUT] Float parent_in_bfc=(%.1f, %.1f)", parent_x_in_bfc, parent_y_in_bfc);
 
-    // Get the current Y position of this float
-    float current_y = block->y;
-    if (block->bound) {
-        current_y -= block->bound->margin.top;  // Remove margin that was already applied
-    }
-    // Convert to BFC coordinates for the space query
-    float current_y_bfc = current_y + parent_y_in_bfc;
+    // Calculate float dimensions including margins (margin box)
+    float float_total_width = block->width + margin_left + margin_right;
+    float float_total_height = block->height + margin_top + margin_bottom;
 
-    // Query available horizontal space at this Y position using BlockContext API
-    float total_height = block->height + (block->bound ?
-        block->bound->margin.top + block->bound->margin.bottom : 0);
-    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, total_height);
+    // Get the initial Y position (from normal flow placement)
+    // block->y is relative to parent's border box, includes margin.top already
+    float initial_y_local = block->y - margin_top;  // Get content box top in parent coords
+    float current_y_bfc = initial_y_local + parent_y_in_bfc;
 
-    log_debug("Float positioning: current_y=%.1f, available space left=%.1f, right=%.1f, content_offset_x=%.1f, parent_content_width=%.1f",
-              current_y_bfc, space.left, space.right, content_offset_x, parent_content_width);
+    log_debug("[FLOAT_LAYOUT] Float dimensions: width=%.1f, height=%.1f, total_width=%.1f, total_height=%.1f",
+              block->width, block->height, float_total_width, float_total_height);
+    log_debug("[FLOAT_LAYOUT] Initial position: local_y=%.1f, bfc_y=%.1f", initial_y_local, current_y_bfc);
+    log_debug("[FLOAT_LAYOUT] BFC: left_floats=%d, right_floats=%d, right_edge=%.1f",
+              bfc->left_float_count, bfc->right_float_count, bfc->float_right_edge);
 
-    if (block->position->float_prop == CSS_VALUE_LEFT) {
-        // Left float: position at left edge of available space
-        float new_x;
-        if (space.has_left_float) {
-            // There's a left float - convert BFC coords to parent's border box coords
-            float left_in_parent = space.left - parent_x_in_bfc;
-            new_x = left_in_parent + margin_left;
-        } else {
-            // No left float intrusion - position at content area left edge
-            new_x = content_offset_x + margin_left;
+    // CSS 2.2 §9.5.1 Rule 6/7/8: Find Y position where float fits horizontally
+    // Start at current Y and move down until we find space
+    float final_y_bfc = current_y_bfc;
+    int max_iterations = 100;  // Prevent infinite loops
+    
+    // CSS 2.1 §9.5.1: Float's margin box must not exceed the containing block's content edge
+    // Calculate the containing block's right edge in BFC coordinates
+    float containing_block_right_bfc = parent_x_in_bfc + content_offset_x + parent_content_width;
+    log_debug("[FLOAT_LAYOUT] Containing block right edge in BFC coords: %.1f", containing_block_right_bfc);
+    
+    while (max_iterations-- > 0) {
+        // Query available space at this Y position
+        FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
+        
+        // Constrain space.right by the containing block's right edge
+        float effective_right = min(space.right, containing_block_right_bfc);
+        float available_width = effective_right - space.left;
+        
+        log_debug("[FLOAT_LAYOUT] Checking Y=%.1f: space=(%.1f, %.1f), effective_right=%.1f, available=%.1f, needed=%.1f",
+                  final_y_bfc, space.left, space.right, effective_right, available_width, float_total_width);
+        
+        // Check if float fits at this Y position
+        if (available_width >= float_total_width) {
+            // Float fits here - determine X position
+            if (block->position->float_prop == CSS_VALUE_LEFT) {
+                // Left float: position at left edge of available space
+                float new_x;
+                if (space.has_left_float) {
+                    float left_in_parent = space.left - parent_x_in_bfc;
+                    new_x = left_in_parent + margin_left;
+                } else {
+                    new_x = content_offset_x + margin_left;
+                }
+                block->x = new_x;
+                log_debug("[FLOAT_LAYOUT] Float:left positioned at x=%.1f", new_x);
+            } else {
+                // Right float: position at right edge of available space
+                float new_x;
+                if (space.has_right_float) {
+                    float right_in_parent = space.right - parent_x_in_bfc;
+                    new_x = right_in_parent - block->width - margin_right;
+                } else {
+                    float content_right = content_offset_x + parent_content_width;
+                    new_x = content_right - block->width - margin_right;
+                }
+                block->x = new_x;
+                log_debug("[FLOAT_LAYOUT] Float:right positioned at x=%.1f", new_x);
+            }
+            break;  // Found a valid position
         }
-        log_debug("Float:left repositioning: old_x=%.1f, new_x=%.1f (has_left=%d, content_offset=%.1f)",
-                  block->x, new_x, space.has_left_float, content_offset_x);
-        block->x = new_x;
-    }
-    else if (block->position->float_prop == CSS_VALUE_RIGHT) {
-        // Right float: position at right edge of available space
-        float new_x;
-        if (space.has_right_float) {
-            // There's a right float - convert BFC coords to parent's border box coords
-            float right_in_parent = space.right - parent_x_in_bfc;
-            // Position float so its margin box right edge aligns with the intrusion
-            new_x = right_in_parent - block->width - margin_right;
-        } else {
-            // No right float intrusion - position at content area right edge
-            float content_right = content_offset_x + parent_content_width;
-            new_x = content_right - block->width - margin_right;
+        
+        // Float doesn't fit - need to shift down (CSS 2.2 §9.5.1 Rule 7)
+        // Find the next float boundary to try
+        float next_y = FLT_MAX;
+        
+        // Check left floats for next boundary
+        for (FloatBox* fb = bfc->left_floats; fb; fb = fb->next) {
+            if (fb->margin_box_bottom > final_y_bfc && fb->margin_box_bottom < next_y) {
+                next_y = fb->margin_box_bottom;
+            }
         }
-        log_debug("Float:right repositioning: old_x=%.1f, new_x=%.1f (has_right=%d)",
-                  block->x, new_x, space.has_right_float);
-        block->x = new_x;
+        
+        // Check right floats for next boundary
+        for (FloatBox* fb = bfc->right_floats; fb; fb = fb->next) {
+            if (fb->margin_box_bottom > final_y_bfc && fb->margin_box_bottom < next_y) {
+                next_y = fb->margin_box_bottom;
+            }
+        }
+        
+        if (next_y == FLT_MAX || next_y <= final_y_bfc) {
+            // No more floats below - position at current Y anyway
+            // (this shouldn't happen if there's enough container width)
+            log_debug("[FLOAT_LAYOUT] No more float boundaries, positioning at Y=%.1f", final_y_bfc);
+            
+            // Position float at the edge even if it doesn't fit perfectly
+            if (block->position->float_prop == CSS_VALUE_LEFT) {
+                FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
+                float new_x = space.has_left_float ? 
+                    (space.left - parent_x_in_bfc + margin_left) : 
+                    (content_offset_x + margin_left);
+                block->x = new_x;
+            } else {
+                FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
+                float new_x = space.has_right_float ?
+                    (space.right - parent_x_in_bfc - block->width - margin_right) :
+                    (content_offset_x + parent_content_width - block->width - margin_right);
+                block->x = new_x;
+            }
+            break;
+        }
+        
+        log_debug("[FLOAT_LAYOUT] Float doesn't fit, shifting from Y=%.1f to Y=%.1f",
+                  final_y_bfc, next_y);
+        final_y_bfc = next_y;
     }
+    
+    // Convert final Y position back to parent-relative coordinates and apply
+    float final_y_local = final_y_bfc - parent_y_in_bfc;
+    float new_y = final_y_local + margin_top;
+    
+    if (new_y != block->y) {
+        log_debug("[FLOAT_LAYOUT] Float Y shifted: old=%.1f, new=%.1f (delta=%.1f)",
+                  block->y, new_y, new_y - block->y);
+        block->y = new_y;
+    }
+
+    log_debug("[FLOAT_LAYOUT] Float element positioned at (%.1f, %.1f) size (%.1f, %.1f)",
+              block->x, block->y, block->width, block->height);
 
     // Note: Float is added to BlockContext by the caller (layout_block_content)
     // to ensure it's added to the parent's context, not the float's own context
