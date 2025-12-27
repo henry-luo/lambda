@@ -981,6 +981,35 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         log_debug("Laying out body element: %p", (void*)body_node);
         layout_block(lycon, body_node,
             (DisplayValue){.outer = CSS_VALUE_BLOCK, .inner = CSS_VALUE_FLOW});
+
+        // After body layout, update html's advance_y from body's height
+        // This is critical for scroll height calculation in iframes
+        // Find the body view by iterating through html's children
+        View* child = html->first_placed_child();
+        ViewBlock* body_view = nullptr;
+        while (child) {
+            if (child->is_block()) {
+                ViewBlock* vb = (ViewBlock*)child;
+                // Check if this is the body element (tag() == HTM_TAG_BODY)
+                if (vb->tag() == HTM_TAG_BODY) {
+                    body_view = vb;
+                    break;
+                }
+            }
+            child = child->next();
+        }
+
+        if (body_view) {
+            float body_total_height = body_view->height;
+            if (body_view->bound) {
+                body_total_height += body_view->bound->margin.top + body_view->bound->margin.bottom;
+            }
+            lycon->block.advance_y = body_total_height;
+            log_debug("Body layout done: body->height=%.1f, total=%.1f, advance_y=%.1f",
+                body_view->height, body_total_height, lycon->block.advance_y);
+        } else {
+            log_debug("Could not find body view in html children");
+        }
     } else {
         log_debug("No body element found in DOM tree");
     }

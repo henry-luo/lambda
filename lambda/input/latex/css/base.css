@@ -111,10 +111,7 @@ html {
 
 /* .page is the element when used as a web component */
 body, .page {
-    display: grid;
-
-    grid-template-columns: [margin-left] var(--marginleftwidth) [body] var(--textwidth) [margin-right] var(--marginrightwidth);
-    grid-template-rows: auto;
+    display: block;  /* simplified: was grid with undefined variables */
 
     margin: 0;
     padding: 0;
