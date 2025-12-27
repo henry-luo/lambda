@@ -568,12 +568,37 @@ static Item parse_header(MarkupParser* parser, const char* line) {
     snprintf(level_str, sizeof(level_str), "%d", level);
     add_attribute_to_element(parser, header, "level", level_str);
 
-    // Extract header text (handle both Markdown and RST styles)
+    // Extract header text (handle different markup styles)
     const char* text = line;
+    char* wiki_text_buf = NULL;  // buffer for wiki heading text (needs trimming from both ends)
+
     if (*text == '#') {
         // Markdown-style header: skip # markers and whitespace
         while (*text == '#') text++;
         skip_whitespace(&text);
+    } else if (parser->config.format == MARKUP_WIKI && *text == '=') {
+        // Wiki-style header: == Header Text ==
+        // Skip leading = markers and whitespace
+        while (*text == '=') text++;
+        skip_whitespace(&text);
+
+        // Find and strip trailing = markers and whitespace
+        int text_len = strlen(text);
+        if (text_len > 0) {
+            // Find the end of actual content (before trailing = markers)
+            int end_pos = text_len - 1;
+            while (end_pos >= 0 && text[end_pos] == '=') end_pos--;
+            // Trim trailing whitespace before the = markers
+            while (end_pos >= 0 && (text[end_pos] == ' ' || text[end_pos] == '\t')) end_pos--;
+
+            // Create a trimmed copy
+            if (end_pos >= 0) {
+                wiki_text_buf = (char*)malloc(end_pos + 2);
+                strncpy(wiki_text_buf, text, end_pos + 1);
+                wiki_text_buf[end_pos + 1] = '\0';
+                text = wiki_text_buf;
+            }
+        }
     } else if (parser->config.format == MARKUP_RST) {
         // RST-style underlined header: use the entire line as text
         // The underline will be skipped by incrementing current_line twice
@@ -589,6 +614,11 @@ static Item parse_header(MarkupParser* parser, const char* line) {
     if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
         list_push((List*)header, content);
         increment_element_content_length(header);
+    }
+
+    // Free temporary buffer for wiki headings
+    if (wiki_text_buf) {
+        free(wiki_text_buf);
     }
 
     parser->current_line++;
