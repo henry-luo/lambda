@@ -1312,14 +1312,20 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Check if this block establishes a new BFC using unified BlockContext
     bool establishes_bfc = block_context_establishes_bfc(block);
 
-    // CSS 2.2 Section 9.4.1: "The border box of... an element in the normal flow that
-    // establishes a new block formatting context... must not overlap the margin box of
-    // any floats in the same block formatting context as the element itself."
-    // BFC elements in normal flow (not floats, not absolute/fixed) should avoid floats.
-    // Check parent BFC for floats BEFORE resetting for own BFC.
-    bool is_normal_flow_bfc = establishes_bfc && !is_float &&
+    // CSS 2.1 Section 9.5: "The border box of a table, a block-level replaced element,
+    // or an element in the normal flow that establishes a new block formatting context...
+    // must not overlap the margin box of any floats in the same block formatting context
+    // as the element itself."
+    // Block-level replaced elements (like <img display:block>) must also avoid floats.
+    bool is_block_level_replaced = (block->display.outer == CSS_VALUE_BLOCK &&
+                                    block->display.inner == RDT_DISPLAY_REPLACED);
+    
+    bool is_normal_flow = !is_float &&
         (!block->position || (block->position->position != CSS_VALUE_ABSOLUTE &&
                               block->position->position != CSS_VALUE_FIXED));
+    
+    // Elements that must avoid floats: BFC roots, block-level replaced elements
+    bool should_avoid_floats = (establishes_bfc || is_block_level_replaced) && is_normal_flow;
 
     // Query parent BFC for available space at current y position
     float bfc_float_offset_x = 0;
@@ -1327,7 +1333,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     float bfc_shift_down = 0;  // Amount to shift down if element doesn't fit beside floats
     BlockContext* parent_bfc = nullptr;
 
-    if (is_normal_flow_bfc) {
+    if (should_avoid_floats) {
         // Find the BFC root from the parent context - that's where floats are registered
         parent_bfc = block_context_find_bfc(pa_block);
         if (parent_bfc && (parent_bfc->left_float_count > 0 || parent_bfc->right_float_count > 0)) {
