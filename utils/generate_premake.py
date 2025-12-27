@@ -2091,6 +2091,14 @@ class PremakeGenerator:
                 '        "linux-deps/lib",',
                 '        "build/lib",',
             ])
+        elif self.use_linux_config:
+            # Native Linux paths
+            self.premake_content.extend([
+                '        "/usr/local/lib",',
+                '        "/usr/local/lib/aarch64-linux-gnu",',
+                '        "/usr/lib/aarch64-linux-gnu",',
+                '        "build/lib",',
+            ])
         elif self.use_windows_config:
             # Windows/MSYS2 paths
             self.premake_content.extend([
@@ -2203,6 +2211,7 @@ class PremakeGenerator:
         if libraries:
             external_static_libs = []
             tree_sitter_libs = []  # Track tree-sitter libraries separately
+            late_static_libs = []  # Static libs that need to come after lambda-lib (link order)
             for lib_name in libraries:
                 if lib_name in self.external_libraries:
                     lib_info = self.external_libraries[lib_name]
@@ -2219,6 +2228,10 @@ class PremakeGenerator:
                         # Special handling for tree-sitter libraries - add them to links instead of linkoptions
                         if lib_name in ['tree-sitter', 'tree-sitter-lambda']:
                             tree_sitter_libs.append(lib_path)
+                        # On Linux, static libs need to come AFTER lambda-lib in link order
+                        # because lambda-lib has unresolved symbols that these libs provide
+                        elif self.use_linux_config and lib_name in ['rpmalloc', 'utf8proc']:
+                            late_static_libs.append((lib_name, lib_path))
                         else:
                             external_static_libs.append(lib_path)
 
@@ -2231,6 +2244,28 @@ class PremakeGenerator:
                 # Add tree-sitter libraries to links
                 for lib_path in tree_sitter_libs:
                     self.premake_content.append(f'        "{lib_path}",')
+
+                # Close the links block again
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+
+            # Add late static libraries to links block (must come after lambda-lib on Linux)
+            if late_static_libs:
+                # Re-open the links block
+                self.premake_content[-2] = '    '  # Remove the closing brace line
+                self.premake_content.pop()  # Remove the empty line
+
+                for lib_name, lib_path in late_static_libs:
+                    if lib_name == 'rpmalloc':
+                        # Use :librpmalloc.a syntax (libdir already set up)
+                        self.premake_content.append('        ":librpmalloc.a",')
+                    elif lib_name == 'utf8proc':
+                        # Use :libutf8proc.a syntax (path in libdir /usr/lib/aarch64-linux-gnu)
+                        self.premake_content.append('        ":libutf8proc.a",')
+                    else:
+                        self.premake_content.append(f'        "{lib_path}",')
 
                 # Close the links block again
                 self.premake_content.extend([
@@ -2325,9 +2360,19 @@ class PremakeGenerator:
             if not self.use_windows_config:
                 self.premake_content.append('        "ncurses",')
 
+            # Add rpmalloc for Linux (must come after shared libraries that depend on it)
+            # Added INSIDE the links block so it comes AFTER the shared library in link order
+            if self.use_linux_config:
+                if 'rpmalloc' in self.external_libraries:
+                    # Use :librpmalloc.a to link static library (libdir already set)
+                    self.premake_content.append('        ":librpmalloc.a",')
+
             self.premake_content.extend([
                 '    }',
                 '    ',
+            ])
+
+            self.premake_content.extend([
                 '    -- Add tree-sitter libraries using linkoptions to append to LIBS section',
                 '    linkoptions {',
             ])
@@ -2487,6 +2532,14 @@ class PremakeGenerator:
         if self.use_windows_config:
             windows_config = platforms_config.get('windows', {})
             for lib in windows_config.get('libraries', []):
+                lib_name = lib.get('name', '')
+                if lib_name and lib_name not in dependencies and lib_name not in ['criterion']:
+                    dependencies.append(lib_name)
+
+        # Add platform-specific libraries for Linux
+        if self.use_linux_config:
+            linux_config = platforms_config.get('linux', {})
+            for lib in linux_config.get('libraries', []):
                 lib_name = lib.get('name', '')
                 if lib_name and lib_name not in dependencies and lib_name not in ['criterion']:
                     dependencies.append(lib_name)
@@ -2700,6 +2753,13 @@ class PremakeGenerator:
                                 self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
                             else:
                                 self.premake_content.append(f'        "{lib_path}",')
+
+            # Add OpenGL libraries for Linux (must come after ThorVG static library)
+            if self.use_linux_config:
+                self.premake_content.append('        -- OpenGL and OpenMP libraries (required by ThorVG)')
+                self.premake_content.append('        "-lGL",')
+                self.premake_content.append('        "-lGLU",')
+                self.premake_content.append('        "-lgomp",')
 
             self.premake_content.extend([
                 '    }',

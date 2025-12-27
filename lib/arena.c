@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdalign.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define ARENA_VALID_MARKER 0xABCD4321
 #define SIZE_LIMIT (1024 * 1024 * 1024)  // 1GB limit for single allocation
@@ -53,7 +54,7 @@ struct Arena {
     unsigned alignment;         // default alignment
     unsigned chunk_count;       // number of chunks allocated
     unsigned valid;             // validity marker
-    
+
     // Free-list for memory reuse
     ArenaFreeBlock* free_lists[ARENA_FREE_LIST_BINS];  // Free-list bins
     size_t free_bytes;          // Total bytes in free-lists
@@ -130,7 +131,7 @@ Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size
     arena->total_used = 0;
     arena->chunk_count = 0;
     arena->valid = ARENA_VALID_MARKER;
-    
+
     // Initialize free-lists
     for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
         arena->free_lists[i] = NULL;
@@ -190,7 +191,7 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
 
     // Calculate aligned size for proper accounting
     size_t aligned_size = ALIGN_UP(size, alignment);
-    
+
     // Try to allocate from free-list first
     void* free_ptr = _arena_alloc_from_freelist(arena, aligned_size);
     if (free_ptr) {
@@ -406,20 +407,20 @@ bool arena_owns(Arena* arena, const void* ptr) {
     if (!arena || arena->valid != ARENA_VALID_MARKER || !ptr) {
         return false;
     }
-    
+
     // Iterate through all chunks to find if ptr is within any chunk's data
     ArenaChunk* chunk = arena->first;
     while (chunk) {
         uintptr_t data_start = (uintptr_t)&chunk->data[0];
         uintptr_t data_end = data_start + chunk->used;
         uintptr_t ptr_addr = (uintptr_t)ptr;
-        
+
         if (ptr_addr >= data_start && ptr_addr < data_end) {
             return true;
         }
         chunk = chunk->next;
     }
-    
+
     return false;
 }
 
@@ -427,15 +428,15 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
     if (!arena || arena->valid != ARENA_VALID_MARKER || !ptr) {
         return;
     }
-    
+
     // Must be large enough to hold a free block header
     if (size < ARENA_MIN_FREE_BLOCK_SIZE) {
         return;
     }
-    
+
     // Determine bin index based on size
     int bin = _arena_get_bin(size);
-    
+
     // Add to free-list
     ArenaFreeBlock* block = (ArenaFreeBlock*)ptr;
     block->size = size;
@@ -447,32 +448,32 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
 // Try to allocate from free-list
 static void* _arena_alloc_from_freelist(Arena* arena, size_t size) {
     int bin = _arena_get_bin(size);
-    
+
     // Search current bin and larger bins for suitable block
     for (int i = bin; i < ARENA_FREE_LIST_BINS; i++) {
         ArenaFreeBlock** prev_ptr = &arena->free_lists[i];
         ArenaFreeBlock* block = arena->free_lists[i];
-        
+
         while (block) {
             if (block->size >= size) {
                 // Found suitable block - remove from free-list
                 *prev_ptr = block->next;
                 arena->free_bytes -= block->size;
-                
+
                 // If block is significantly larger, split it
                 size_t excess = block->size - size;
                 if (excess >= ARENA_MIN_FREE_BLOCK_SIZE) {
                     void* excess_ptr = (char*)block + size;
                     arena_free(arena, excess_ptr, excess);
                 }
-                
+
                 return (void*)block;
             }
             prev_ptr = &block->next;
             block = block->next;
         }
     }
-    
+
     return NULL;  // No suitable block found
 }
 
@@ -480,23 +481,23 @@ void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size) {
     if (!arena || arena->valid != ARENA_VALID_MARKER) {
         return NULL;
     }
-    
+
     // NULL ptr -> allocate new
     if (!ptr) {
         return arena_alloc(arena, new_size);
     }
-    
+
     // new_size == 0 -> free
     if (new_size == 0) {
         arena_free(arena, ptr, old_size);
         return NULL;
     }
-    
+
     // Same size -> no-op
     if (new_size == old_size) {
         return ptr;
     }
-    
+
     // Shrinking -> add excess to free-list
     if (new_size < old_size) {
         size_t excess = old_size - new_size;
@@ -506,25 +507,25 @@ void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size) {
         }
         return ptr;
     }
-    
+
     // Growing -> check if at end of current chunk (can extend in-place)
     ArenaChunk* chunk = arena->current;
     uintptr_t ptr_addr = (uintptr_t)ptr;
     uintptr_t data_start = (uintptr_t)&chunk->data[0];
     uintptr_t chunk_end = data_start + chunk->used;
-    
+
     // If at end of chunk and enough space remaining, extend in place
     if (ptr_addr + old_size == chunk_end) {
         size_t growth = new_size - old_size;
         size_t aligned_growth = ALIGN_UP(growth, arena->alignment);
-        
+
         if (chunk->used + aligned_growth <= chunk->capacity) {
             chunk->used += aligned_growth;
             arena->total_used += aligned_growth;
             return ptr;
         }
     }
-    
+
     // Otherwise, allocate new, copy, free old
     void* new_ptr = arena_alloc(arena, new_size);
     if (new_ptr) {
