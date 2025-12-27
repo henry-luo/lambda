@@ -911,12 +911,14 @@ static Item parse_list_item(MarkupParser* parser, const char* line) {
 
 // Parse code blocks (```, ```, ~~~, etc.)
 static Item parse_code_block(MarkupParser* parser, const char* line) {
+    // Create code element with type="block" attribute
     Element* code = create_element(parser, "code");
     if (!code) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
     }
 
+    // Mark as block-level code
     add_attribute_to_element(parser, code, "type", "block");
 
     // Extract language from fence line (```python, ~~~javascript, etc.)
@@ -1121,12 +1123,34 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
-        // Check for closing $$
+        // Check for closing $$ at start of line
         const char* pos = current;
         skip_whitespace(&pos);
         if (*pos == '$' && *(pos+1) == '$') {
             parser->current_line++; // Skip closing $$
             break;
+        }
+
+        // Check for closing $$ at end of line (for inline-style multi-line blocks)
+        size_t line_len = strlen(current);
+        if (line_len >= 2) {
+            const char* line_end = current + line_len;
+            // Skip trailing whitespace
+            while (line_end > current && (*(line_end-1) == ' ' || *(line_end-1) == '\t')) {
+                line_end--;
+            }
+            if (line_end - current >= 2 && *(line_end-2) == '$' && *(line_end-1) == '$') {
+                // Found $$ at end of line - add content before $$
+                size_t content_len = (line_end - 2) - current;
+                if (sb->length > 0) {
+                    stringbuf_append_char(sb, '\n');
+                }
+                if (content_len > 0) {
+                    stringbuf_append_str_n(sb, current, content_len);
+                }
+                parser->current_line++; // Skip this line with closing $$
+                break;
+            }
         }
 
         // Add line to math content
@@ -1305,9 +1329,11 @@ static bool is_table_separator(const char* line) {
 
     // Check pattern: spaces, dashes, colons, pipes
     bool found_dash = false;
+    bool found_any_dash = false;  // track if we found at least one dash in any column
     while (*pos) {
         if (*pos == '|') {
             if (!found_dash) return false; // Must have at least one dash per column
+            found_any_dash = true;
             found_dash = false;
             pos++;
         } else if (*pos == '-') {
@@ -1320,7 +1346,8 @@ static bool is_table_separator(const char* line) {
         }
     }
 
-    return found_dash; // Must end with valid column
+    // Valid if we found at least one complete column (ending with |) or column in progress
+    return found_any_dash || found_dash;
 }
 
 // Parse table alignment specification

@@ -152,6 +152,14 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     log_debug("render_html_to_png called with html_file='%s', png_file='%s', viewport=%dx%d",
               html_file, png_file, viewport_width, viewport_height);
 
+    // Remember if we need to auto-size (viewport was 0)
+    bool auto_width = (viewport_width == 0);
+    bool auto_height = (viewport_height == 0);
+
+    // Use reasonable defaults for layout if auto-sizing
+    int layout_width = viewport_width > 0 ? viewport_width : 1200;
+    int layout_height = viewport_height > 0 ? viewport_height : 800;
+
     // Initialize UI context in headless mode
     UiContext ui_context;
     if (ui_context_init(&ui_context, true) != 0) {
@@ -159,12 +167,12 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         return 1;
     }
 
-    // Create a surface for rendering with specified viewport dimensions
-    ui_context_create_surface(&ui_context, viewport_width, viewport_height);
+    // Create a surface for rendering with layout dimensions
+    ui_context_create_surface(&ui_context, layout_width, layout_height);
 
     // Update UI context viewport dimensions for layout calculations
-    ui_context.window_width = viewport_width;
-    ui_context.window_height = viewport_height;
+    ui_context.window_width = layout_width;
+    ui_context.window_height = layout_height;
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -178,7 +186,7 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     log_info("[TIMING] Init: %.1fms", duration<double, std::milli>(t_init - t_start).count());
 
     // Load and layout the HTML document
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
     if (!doc) {
         log_debug("Failed to load HTML document: %s", html_file);
         ui_context_cleanup(&ui_context);
@@ -203,6 +211,24 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     auto t_layout = high_resolution_clock::now();
     log_info("[TIMING] Layout: %.1fms", duration<double, std::milli>(t_layout - t_fonts).count());
+
+    // Calculate content bounds if auto-sizing
+    int output_width = layout_width;
+    int output_height = layout_height;
+    if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
+        extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
+        int content_max_x = 0, content_max_y = 0;
+        calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
+        // Add padding to ensure nothing is cut off
+        content_max_x += 50;
+        content_max_y += 50;
+        if (auto_width) output_width = content_max_x;
+        if (auto_height) output_height = content_max_y;
+        log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding)", output_width, output_height);
+
+        // Recreate surface with correct output dimensions
+        ui_context_create_surface(&ui_context, output_width, output_height);
+    }
 
     // Render the document
     if (doc && doc->view_tree) {
