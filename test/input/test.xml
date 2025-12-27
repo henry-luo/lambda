@@ -1,13 +1,83 @@
 <?xml version="1.0"?>
+<?xml-stylesheet type="text/css" href="test/input/test-xml.css"?>
 <bookstore>
-  <book id="1" category="fiction">
-    <title>Great Gatsby</title>
-    <author>F. Scott Fitzgerald</author>
-    <price>12.99</price>
-  </book>
-  <book id="2" category="science">
-    <title>Brief History of Time</title>
-    <author>Stephen Hawking</author>
-    <price>15.99</price>
-  </book>
+  <header>
+    <title>Sam's Bookstore</title>
+    <subtitle>Your One-Stop Shop for Great Books</subtitle>
+  </header>
+
+  <featured>
+    <book id="featured-1" category="fiction" rating="5">
+      <title>The Great Gatsby</title>
+      <author>F. Scott Fitzgerald</author>
+      <year>1925</year>
+      <price currency="USD">12.99</price>
+      <description>A classic American novel about the decadence of the Jazz Age.</description>
+      <stock>15</stock>
+    </book>
+  </featured>
+
+  <catalog>
+    <section name="Fiction">
+      <book id="fic-1" category="fiction" rating="5">
+        <title>1984</title>
+        <author>George Orwell</author>
+        <year>1949</year>
+        <price currency="USD">14.99</price>
+        <description>A dystopian social science fiction novel.</description>
+        <stock>20</stock>
+      </book>
+      <book id="fic-2" category="fiction" rating="4">
+        <title>To Kill a Mockingbird</title>
+        <author>Harper Lee</author>
+        <year>1960</year>
+        <price currency="USD">13.99</price>
+        <description>A novel about racial injustice in the American South.</description>
+        <stock>12</stock>
+      </book>
+    </section>
+
+    <section name="Science">
+      <book id="sci-1" category="science" rating="5">
+        <title>A Brief History of Time</title>
+        <author>Stephen Hawking</author>
+        <year>1988</year>
+        <price currency="USD">15.99</price>
+        <description>A landmark volume in science writing exploring cosmology.</description>
+        <stock>8</stock>
+      </book>
+      <book id="sci-2" category="science" rating="4">
+        <title>The Selfish Gene</title>
+        <author>Richard Dawkins</author>
+        <year>1976</year>
+        <price currency="USD">16.99</price>
+        <description>A gene-centered view of evolution.</description>
+        <stock>10</stock>
+      </book>
+    </section>
+
+    <section name="Technology">
+      <book id="tech-1" category="technology" rating="5">
+        <title>The Pragmatic Programmer</title>
+        <author>Andrew Hunt, David Thomas</author>
+        <year>1999</year>
+        <price currency="USD">49.99</price>
+        <description>Your journey to mastery in software development.</description>
+        <stock>25</stock>
+      </book>
+      <book id="tech-2" category="technology" rating="4">
+        <title>Clean Code</title>
+        <author>Robert C. Martin</author>
+        <year>2008</year>
+        <price currency="USD">44.99</price>
+        <description>A handbook of agile software craftsmanship.</description>
+        <stock>18</stock>
+      </book>
+    </section>
+  </catalog>
+
+  <footer>
+    <contact>Email: info@samsbookstore.com | Phone: (555) 123-4567</contact>
+    <copyright>© 2025 Sam's Bookstore. All rights reserved.</copyright>
+  </footer>
 </bookstore>

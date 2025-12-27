@@ -66,7 +66,7 @@ static bool commandAbsorbsSpace(const char* cmd_name) {
 struct DiacriticKey {
     char cmd;
     uint32_t base_char;  // UTF-32 codepoint
-    
+
     bool operator==(const DiacriticKey& other) const {
         return cmd == other.cmd && base_char == other.base_char;
     }
@@ -107,11 +107,11 @@ static const std::unordered_map<DiacriticKey, const char*, DiacriticKeyHash> dia
     {{'\'','n'}, "ń"}, {{'\'','N'}, "Ń"}, {{'\'','s'}, "ś"}, {{'\'','S'}, "Ś"},
     {{'\'','z'}, "ź"}, {{'\'','Z'}, "Ź"}, {{'\'','l'}, "ĺ"}, {{'\'','L'}, "Ĺ"},
     {{'\'','r'}, "ŕ"}, {{'\'','R'}, "Ŕ"},
-    
+
     // Grave accent (`)
     {{'`','a'}, "à"}, {{'`','e'}, "è"}, {{'`','i'}, "ì"}, {{'`','o'}, "ò"}, {{'`','u'}, "ù"},
     {{'`','A'}, "À"}, {{'`','E'}, "È"}, {{'`','I'}, "Ì"}, {{'`','O'}, "Ò"}, {{'`','U'}, "Ù"},
-    
+
     // Circumflex (^)
     {{'^','a'}, "â"}, {{'^','e'}, "ê"}, {{'^','i'}, "î"}, {{'^','o'}, "ô"}, {{'^','u'}, "û"},
     {{'^','A'}, "Â"}, {{'^','E'}, "Ê"}, {{'^','I'}, "Î"}, {{'^','O'}, "Ô"}, {{'^','U'}, "Û"},
@@ -119,44 +119,44 @@ static const std::unordered_map<DiacriticKey, const char*, DiacriticKeyHash> dia
     {{'^','h'}, "ĥ"}, {{'^','H'}, "Ĥ"}, {{'^','j'}, "ĵ"}, {{'^','J'}, "Ĵ"},
     {{'^','s'}, "ŝ"}, {{'^','S'}, "Ŝ"}, {{'^','w'}, "ŵ"}, {{'^','W'}, "Ŵ"},
     {{'^','y'}, "ŷ"}, {{'^','Y'}, "Ŷ"},
-    
+
     // Diaeresis/umlaut (")
     {{'"','a'}, "ä"}, {{'"','e'}, "ë"}, {{'"','i'}, "ï"}, {{'"','o'}, "ö"}, {{'"','u'}, "ü"},
     {{'"','A'}, "Ä"}, {{'"','E'}, "Ë"}, {{'"','I'}, "Ï"}, {{'"','O'}, "Ö"}, {{'"','U'}, "Ü"},
     {{'"','y'}, "ÿ"}, {{'"','Y'}, "Ÿ"},
-    
+
     // Tilde (~)
     {{'~','a'}, "ã"}, {{'~','o'}, "õ"}, {{'~','n'}, "ñ"},
     {{'~','A'}, "Ã"}, {{'~','O'}, "Õ"}, {{'~','N'}, "Ñ"},
     {{'~','i'}, "ĩ"}, {{'~','I'}, "Ĩ"}, {{'~','u'}, "ũ"}, {{'~','U'}, "Ũ"},
-    
+
     // Macron (=)
     {{'=','a'}, "ā"}, {{'=','e'}, "ē"}, {{'=','i'}, "ī"}, {{'=','o'}, "ō"}, {{'=','u'}, "ū"},
     {{'=','A'}, "Ā"}, {{'=','E'}, "Ē"}, {{'=','I'}, "Ī"}, {{'=','O'}, "Ō"}, {{'=','U'}, "Ū"},
-    
+
     // Dot above (.)
     {{'.','c'}, "ċ"}, {{'.','C'}, "Ċ"}, {{'.','e'}, "ė"}, {{'.','E'}, "Ė"},
     {{'.','g'}, "ġ"}, {{'.','G'}, "Ġ"}, {{'.','z'}, "ż"}, {{'.','Z'}, "Ż"},
     {{'.','I'}, "İ"},
-    
+
     // Breve (u)
     {{'u','a'}, "ă"}, {{'u','A'}, "Ă"}, {{'u','e'}, "ĕ"}, {{'u','E'}, "Ĕ"},
     {{'u','g'}, "ğ"}, {{'u','G'}, "Ğ"}, {{'u','i'}, "ĭ"}, {{'u','I'}, "Ĭ"},
     {{'u','o'}, "ŏ"}, {{'u','O'}, "Ŏ"}, {{'u','u'}, "ŭ"}, {{'u','U'}, "Ŭ"},
-    
+
     // Caron/háček (v)
     {{'v','c'}, "č"}, {{'v','C'}, "Č"}, {{'v','d'}, "ď"}, {{'v','D'}, "Ď"},
     {{'v','e'}, "ě"}, {{'v','E'}, "Ě"}, {{'v','n'}, "ň"}, {{'v','N'}, "Ň"},
     {{'v','r'}, "ř"}, {{'v','R'}, "Ř"}, {{'v','s'}, "š"}, {{'v','S'}, "Š"},
     {{'v','t'}, "ť"}, {{'v','T'}, "Ť"}, {{'v','z'}, "ž"}, {{'v','Z'}, "Ž"},
-    
+
     // Cedilla (c)
     {{'c','c'}, "ç"}, {{'c','C'}, "Ç"}, {{'c','s'}, "ş"}, {{'c','S'}, "Ş"},
     {{'c','t'}, "ţ"}, {{'c','T'}, "Ţ"},
-    
+
     // Ring above (r)
     {{'r','a'}, "å"}, {{'r','A'}, "Å"}, {{'r','u'}, "ů"}, {{'r','U'}, "Ů"},
-    
+
     // Ogonek (k)
     {{'k','a'}, "ą"}, {{'k','A'}, "Ą"}, {{'k','e'}, "ę"}, {{'k','E'}, "Ę"},
     {{'k','i'}, "į"}, {{'k','I'}, "Į"}, {{'k','o'}, "ǫ"}, {{'k','O'}, "Ǫ"},
@@ -176,11 +176,11 @@ static std::string applyDiacritic(char diacritic_cmd, const char* base_char) {
     if (!base_char || base_char[0] == '\0') {
         return "";
     }
-    
+
     // Decode UTF-8 to get the character length
     const unsigned char* p = (const unsigned char*)base_char;
     int char_len = 1;
-    
+
     if ((p[0] & 0x80) == 0) {
         // ASCII
         char_len = 1;
@@ -194,13 +194,13 @@ static std::string applyDiacritic(char diacritic_cmd, const char* base_char) {
         // 4-byte UTF-8
         char_len = 4;
     }
-    
+
     // Look up the combining character for this diacritic
     auto comb_it = diacritic_combining_map.find(diacritic_cmd);
     if (comb_it != diacritic_combining_map.end()) {
         std::string result(base_char, char_len);  // Base character
         uint32_t combining = comb_it->second;
-        
+
         // Encode combining character to UTF-8
         if (combining < 0x80) {
             result += (char)combining;
@@ -214,7 +214,7 @@ static std::string applyDiacritic(char diacritic_cmd, const char* base_char) {
         }
         return result;
     }
-    
+
     // Fallback: just return the base character
     return std::string(base_char, char_len);
 }
@@ -268,22 +268,22 @@ static std::string utf8_encode(uint32_t codepoint) {
 static std::string processHatNotation(const char* text) {
     std::string result;
     result.reserve(strlen(text));
-    
+
     for (const char* p = text; *p; p++) {
         if (*p == '^' && *(p+1) == '^') {
             // Found ^^
             p += 2;  // Skip ^^
-            
+
             // Check for ^^^^ (4 hats total)
             if (*p == '^' && *(p+1) == '^') {
                 p += 2;  // Skip the second ^^
-                
+
                 // Parse 4 hex digits
                 int h1 = hex_to_value(*p);
                 int h2 = hex_to_value(*(p+1));
                 int h3 = hex_to_value(*(p+2));
                 int h4 = hex_to_value(*(p+3));
-                
+
                 if (h1 >= 0 && h2 >= 0 && h3 >= 0 && h4 >= 0) {
                     uint32_t codepoint = (h1 << 12) | (h2 << 8) | (h3 << 4) | h4;
                     result += utf8_encode(codepoint);
@@ -296,11 +296,11 @@ static std::string processHatNotation(const char* text) {
                     continue;
                 }
             }
-            
+
             // Check for ^^HH (2 hex digits)
             int h1 = hex_to_value(*p);
             int h2 = hex_to_value(*(p+1));
-            
+
             if (h1 >= 0 && h2 >= 0) {
                 // Valid 2-digit hex
                 uint32_t codepoint = (h1 << 4) | h2;
@@ -308,7 +308,7 @@ static std::string processHatNotation(const char* text) {
                 p += 1;  // Skip 2 hex digits (p will be incremented by loop)
                 continue;
             }
-            
+
             // ^^c (single character transform)
             unsigned char c = static_cast<unsigned char>(*p);
             uint32_t transformed;
@@ -323,7 +323,7 @@ static std::string processHatNotation(const char* text) {
             result += *p;
         }
     }
-    
+
     return result;
 }
 
@@ -417,97 +417,97 @@ public:
         Element* definition;
         Element* default_value;  // optional default value for first parameter (LaTeX [default] syntax)
     };
-    
+
 public:
-    LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input) 
-        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0), 
+    LatexProcessor(HtmlGenerator* gen, Pool* pool, Input* input)
+        : gen_(gen), pool_(pool), input_(input), in_paragraph_(false), inline_depth_(0),
           next_paragraph_is_continue_(false), next_paragraph_is_noindent_(false),
           next_paragraph_alignment_(nullptr),
           strip_next_leading_space_(false), styled_span_depth_(0), italic_styled_span_depth_(0),
-          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false), 
+          recursion_depth_(0), depth_exceeded_(false), restricted_h_mode_(false),
           restricted_h_mode_first_text_(false), next_box_frame_(false),
           pending_zws_output_(false), pending_zws_had_trailing_space_(false),
           group_suppresses_zws_(false), monospace_depth_(0), margin_par_counter_(0),
           stored_title_({0}), stored_author_({0}), stored_date_({0}),
           has_title_(false), has_author_(false), has_date_(false) {}
-    
+
     // Process a LaTeX element tree
     void process(Item root);
-    
+
     // Process a single node (element, string, or symbol)
     void processNode(Item node);
-    
+
     // Process element children
     void processChildren(Item elem);
-    
+
     // Process spacing command
     void processSpacingCommand(Item elem);
-    
+
     // Process text content
     void processText(const char* text);
     void outputTextWithSpecialChars(const char* text);
-    
+
     // Get generator
     HtmlGenerator* generator() { return gen_; }
-    
+
     // Get pool
     Pool* pool() { return pool_; }
-    
+
     // Get input
     Input* input() { return input_; }
-    
+
     // Font declaration tracking - call after a font declaration command
     // to indicate that the next text should strip its leading space
     void setStripNextLeadingSpace(bool strip) { strip_next_leading_space_ = strip; }
-    
+
     // Styled span depth management - used to prevent double-wrapping in text-styling commands
     void enterStyledSpan() { styled_span_depth_++; }
     void exitStyledSpan() { if (styled_span_depth_ > 0) styled_span_depth_--; }
     bool inStyledSpan() const { return styled_span_depth_ > 0; }
-    
+
     // Italic span tracking - to know if we're inside an italic styled span
     void enterItalicStyledSpan() { italic_styled_span_depth_++; }
     void exitItalicStyledSpan() { if (italic_styled_span_depth_ > 0) italic_styled_span_depth_--; }
     bool inItalicStyledSpan() const { return italic_styled_span_depth_ > 0; }
-    
+
     // Monospace mode tracking - inside \texttt or similar, suppress dash ligatures
     void enterMonospaceMode() { monospace_depth_++; }
     void exitMonospaceMode() { if (monospace_depth_ > 0) monospace_depth_--; }
     bool inMonospaceMode() const { return monospace_depth_ > 0; }
-    
+
     // Font environment class tracking - for \begin{small}, \begin{bfseries}, etc.
     // Only the innermost environment class is used for text wrapping
     void pushFontEnvClass(const std::string& font_class) { font_env_class_stack_.push_back(font_class); }
     void popFontEnvClass() { if (!font_env_class_stack_.empty()) font_env_class_stack_.pop_back(); }
     bool inFontEnv() const { return !font_env_class_stack_.empty(); }
-    const std::string& currentFontEnvClass() const { 
+    const std::string& currentFontEnvClass() const {
         static const std::string empty;
-        return font_env_class_stack_.empty() ? empty : font_env_class_stack_.back(); 
+        return font_env_class_stack_.empty() ? empty : font_env_class_stack_.back();
     }
-    
+
     // Restricted horizontal mode (inside \mbox, \fbox, etc.)
     // In this mode: \\ and \newline are ignored, \par becomes a space
-    void enterRestrictedHMode() { 
-        restricted_h_mode_ = true; 
+    void enterRestrictedHMode() {
+        restricted_h_mode_ = true;
         restricted_h_mode_first_text_ = true;  // Track first text for ZWS handling
     }
-    void exitRestrictedHMode() { 
-        restricted_h_mode_ = false; 
+    void exitRestrictedHMode() {
+        restricted_h_mode_ = false;
         restricted_h_mode_first_text_ = false;
     }
     bool inRestrictedHMode() const { return restricted_h_mode_; }
-    
+
     // Frame class flag - when true, next box command should add "frame" class
     void set_next_box_frame(bool frame) { next_box_frame_ = frame; }
     bool get_next_box_frame() const { return next_box_frame_; }
-    
+
     // Group ZWS suppression - when true, the containing group won't output ZWS
     void setSuppressGroupZWS(bool suppress) { group_suppresses_zws_ = suppress; }
     bool getSuppressGroupZWS() const { return group_suppresses_zws_; }
-    
+
     // Pending ZWS output - set by space-absorbing commands like \LaTeX
     void setPendingZWSOutput(bool pending) { pending_zws_output_ = pending; }
-    
+
     // Paragraph management - public so command handlers can access
     void endParagraph();  // Close current paragraph if open
     void closeParagraphIfOpen();  // Alias for endParagraph
@@ -516,7 +516,7 @@ public:
     void setNextParagraphAlignment(const char* alignment) { next_paragraph_alignment_ = alignment; }
     const char* getCurrentAlignment() const { return next_paragraph_alignment_; }
     void pushAlignmentScope() { alignment_stack_.push_back(next_paragraph_alignment_); }
-    void popAlignmentScope() { 
+    void popAlignmentScope() {
         if (!alignment_stack_.empty()) {
             next_paragraph_alignment_ = alignment_stack_.back();
             alignment_stack_.pop_back();
@@ -525,17 +525,17 @@ public:
     void ensureParagraph();  // Start a paragraph if not already in one
     bool inParagraph() const { return in_paragraph_; }  // Check if currently in a paragraph
     void setInParagraph(bool value) { in_paragraph_ = value; }  // Set paragraph state (for list items)
-    
+
     // Inline mode management (to suppress paragraph creation)
     void enterInlineMode() { inline_depth_++; }
     void exitInlineMode() { inline_depth_--; }
-    
+
     // Macro system functions (public so command handlers can access)
     void registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value = nullptr);
     bool isMacro(const std::string& name);
     MacroDefinition* getMacro(const std::string& name);
     Element* expandMacro(const std::string& name, const std::vector<Element*>& args);
-    
+
     // Document metadata storage for \title, \author, \date, \maketitle
     void storeTitle(Item elem) { stored_title_ = elem; has_title_ = true; }
     void storeAuthor(Item elem) { stored_author_ = elem; has_author_ = true; }
@@ -546,78 +546,78 @@ public:
     Item getStoredTitle() const { return stored_title_; }
     Item getStoredAuthor() const { return stored_author_; }
     Item getStoredDate() const { return stored_date_; }
-    
+
     // Margin paragraph functions
     int addMarginParagraph(const std::string& content);
     bool hasMarginParagraphs() const;
     void writeMarginParagraphs(HtmlWriter* writer);
-    
+
     // Helper to get next sibling (skipping whitespace) for command argument collection
     // Returns true if a sibling was found, sets out_item and out_type
     bool getNextSiblingArg(int64_t offset, Item* out_item, const char** out_type);
-    
+
     // Helper to consume sibling arguments for echo commands
     // Returns number of siblings consumed
     int consumeSiblingArgs(std::vector<Item>& brack_args, std::vector<Item>& curly_args);
-    
+
     // Helper to output the content of a group with parbreak -> <br> conversion
     void outputGroupContent(Item group_item);
-    
+
     // Sibling context accessors for \begin{...} handling
     ElementReader* getSiblingParent() { return sibling_ctx_.parent_reader; }
     int64_t getSiblingCurrentIndex() { return sibling_ctx_.current_index; }
-    void setSiblingConsumed(int64_t count) { 
-        if (sibling_ctx_.consumed_count) *sibling_ctx_.consumed_count = count; 
+    void setSiblingConsumed(int64_t count) {
+        if (sibling_ctx_.consumed_count) *sibling_ctx_.consumed_count = count;
     }
-    
+
 private:
     HtmlGenerator* gen_;
     Pool* pool_;
     Input* input_;
-    
+
     // Command dispatch table (will be populated)
     std::map<std::string, CommandFunc> command_table_;
-    
+
     // Macro storage
     std::map<std::string, MacroDefinition> macro_table_;
-    
+
     // Paragraph tracking for auto-wrapping text
     bool in_paragraph_;
     int inline_depth_;  // Track nesting depth of inline elements
-    
+
     // When true, the next paragraph should have class="continue"
     // Set when a block environment ends (itemize, enumerate, center, etc.)
     bool next_paragraph_is_continue_;
-    
+
     // When true, the next paragraph should have class="noindent"
     // Set by \noindent command
     bool next_paragraph_is_noindent_;
-    
+
     // Alignment for next paragraph (centering, raggedright, raggedleft)
     // Set by alignment declaration commands (\centering, \raggedright, \raggedleft)
     const char* next_paragraph_alignment_;
-    
+
     // Stack for tracking alignment in nested groups (for proper scope restoration)
     std::vector<const char*> alignment_stack_;
-    
+
     // Font declaration tracking - when true, the next text should strip leading space
     // This is set by font declaration commands like \bfseries, \em, etc.
     bool strip_next_leading_space_;
-    
+
     // Styled span depth - when > 0, we're inside a text-styling command like \textbf{}
     // processText should not add font spans when inside a styled span
     int styled_span_depth_;
-    
+
     // Italic styled span depth - when > 0, we're inside an italic styled span (\textit{}, \emph{})
     // Used by \emph to decide whether to add outer <span class="it">
     int italic_styled_span_depth_;
-    
+
     // Recursion depth tracking for macro expansion (prevent infinite loops)
     int recursion_depth_;
     bool depth_exceeded_;  // Flag to halt processing when depth limit is exceeded
-    
+
     // Restricted horizontal mode flag - set when inside \mbox, \fbox, etc.
-    
+
     // Frame class flag - when true, next box command should add "frame" class
     // Set by fbox when it contains a single parbox/minipage/makebox
     bool next_box_frame_;
@@ -626,7 +626,7 @@ private:
     // Flag to track if we should add ZWS before first newline-sourced whitespace
     // Set when entering restricted h-mode, cleared after first text is processed
     bool restricted_h_mode_first_text_;
-    
+
     // Pending ZWS output - when true, a ZWS should be output if there's more content
     // Set by curly_group handler when a group at document level closes
     bool pending_zws_output_;
@@ -635,18 +635,18 @@ private:
     // If set, the current group contains only whitespace-controlling commands
     // and should not trigger ZWS output
     bool group_suppresses_zws_;
-    
+
     // Monospace mode tracking - when > 0, we're inside \texttt or similar
     // In monospace mode, dash ligatures (-- → en-dash, --- → em-dash) are suppressed
     // and single hyphens are not converted to Unicode hyphen
     int monospace_depth_;
-    
+
     // Font environment class stack - tracks the class to use for current font environment
     // When inside \begin{small}...\end{small}, this is "small"
     // When inside \begin{bfseries}...\end{bfseries}, this is "bf"
     // The innermost (top) class is used for text wrapping, not the accumulated font state
     std::vector<std::string> font_env_class_stack_;
-    
+
     // Margin paragraph tracking
     struct MarginParagraph {
         int id;              // Unique ID (1-based)
@@ -654,7 +654,7 @@ private:
     };
     std::vector<MarginParagraph> margin_paragraphs_;
     int margin_par_counter_;  // Counter for generating unique IDs
-    
+
     // Document metadata storage for \maketitle
     // Stores element references so content can be rendered later
     Item stored_title_;       // Content from \title{}
@@ -663,14 +663,14 @@ private:
     bool has_title_;
     bool has_author_;
     bool has_date_;
-    
+
     // Helper methods for paragraph management
     bool isBlockCommand(const char* cmd_name);
     bool isInlineCommand(const char* cmd_name);
-    
+
     // Process specific command
     void processCommand(const char* cmd_name, Item elem);
-    
+
     // Sibling context for lookahead in command handlers
     // Set by processChildren before calling processNode/processCommand
     struct SiblingContext {
@@ -679,10 +679,10 @@ private:
         int64_t* consumed_count;       // Output: how many extra siblings were consumed
     };
     SiblingContext sibling_ctx_;
-    
+
     // Initialize command table
     void initCommandTable();
-    
+
     // Recursion depth guard (RAII pattern)
     class DepthGuard {
     public:
@@ -706,7 +706,7 @@ private:
 // =============================================================================
 
 void LatexProcessor::registerMacro(const std::string& name, int num_params, Element* definition, Element* default_value) {
-    
+
     MacroDefinition macro;
     macro.name = name;
     macro.num_params = num_params;
@@ -732,31 +732,31 @@ Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<
     if (depth_exceeded_) {
         return nullptr;
     }
-    
+
     DepthGuard guard(this);
     if (guard.exceeded()) {
         log_error("Macro expansion depth exceeded maximum %d for macro '%s'", MAX_MACRO_DEPTH, name.c_str());
         depth_exceeded_ = true;  // Set flag to halt all further processing
         return nullptr;
     }
-    
+
     MacroDefinition* macro = getMacro(name);
     if (!macro || !macro->definition) {
         log_debug("expandMacro: macro '%s' not found or no definition", name.c_str());
         return nullptr;
     }
-    
+
     log_debug("expandMacro: '%s' with %zu args, num_params=%d, depth=%d", name.c_str(), args.size(), macro->num_params, recursion_depth_);
-    
+
     // Clone the definition using MarkBuilder to preserve TypeElmt metadata
     Element* expanded = cloneElement(macro->definition, input_, pool_);
-    
+
     // Substitute parameters with actual arguments if needed
     if (expanded && args.size() > 0 && macro->num_params > 0) {
         log_debug("expandMacro: substituting parameters in macro '%s'", name.c_str());
         substituteParamsRecursive(expanded, args, pool_, 0);
     }
-    
+
     return expanded;
 }
 
@@ -779,11 +779,11 @@ bool LatexProcessor::hasMarginParagraphs() const {
 
 void LatexProcessor::writeMarginParagraphs(HtmlWriter* writer) {
     if (margin_paragraphs_.empty()) return;
-    
+
     // Output: <div class="margin-right"><div class="marginpar">...content...</div></div>
     writer->openTag("div", "margin-right");
     writer->openTag("div", "marginpar");
-    
+
     for (const auto& mp : margin_paragraphs_) {
         // Each marginpar gets: <div id="N"><span class="mpbaseline"></span>content</div>
         char id_str[32];
@@ -795,7 +795,7 @@ void LatexProcessor::writeMarginParagraphs(HtmlWriter* writer) {
         writer->writeRawHtml(mp.content.c_str());
         writer->writeRawHtml("</div>");
     }
-    
+
     writer->closeTag("div");  // marginpar
     writer->closeTag("div");  // margin-right
 }
@@ -808,7 +808,7 @@ void LatexProcessor::writeMarginParagraphs(HtmlWriter* writer) {
 // Uses MarkBuilder to properly reconstruct Elements with TypeElmt metadata
 static Element* cloneElement(Element* src, Input* input, Pool* pool) {
     if (!src) return nullptr;
-    
+
     Item src_item;
     src_item.element = src;
     ElementReader reader(src_item);
@@ -817,17 +817,17 @@ static Element* cloneElement(Element* src, Input* input, Pool* pool) {
         log_error("cloneElement: source element has no tag name");
         return nullptr;
     }
-    
+
     // Create builder using input's arena
     MarkBuilder builder(input);
     auto elem_builder = builder.element(tag);
-    
+
     // Clone all child items
     for (int64_t i = 0; i < reader.childCount(); i++) {
         ItemReader child_reader = reader.childAt(i);
         Item child = child_reader.item();
         TypeId type = get_type_id(child);
-        
+
         if (type == LMD_TYPE_ELEMENT) {
             // Recursively clone child elements
             Element* child_clone = cloneElement(child.element, input, pool);
@@ -849,7 +849,7 @@ static Element* cloneElement(Element* src, Input* input, Pool* pool) {
             elem_builder.child(child);
         }
     }
-    
+
     Item clone_item = elem_builder.final();
     return clone_item.element;
 }
@@ -861,12 +861,12 @@ static std::vector<Item> substituteParamsInString(const char* text, size_t len,
     std::vector<Item> result;
     size_t i = 0;
     size_t segment_start = 0;
-    
+
     while (i < len) {
         if (text[i] == '#' && i + 1 < len && text[i + 1] >= '1' && text[i + 1] <= '9') {
             // Found parameter reference
             int param_num = text[i + 1] - '0';
-            
+
             // Add text segment before the parameter
             if (i > segment_start) {
                 size_t seg_len = i - segment_start;
@@ -874,27 +874,27 @@ static std::vector<Item> substituteParamsInString(const char* text, size_t len,
                 seg_str->len = seg_len;
                 memcpy(seg_str->chars, text + segment_start, seg_len);
                 seg_str->chars[seg_len] = '\0';
-                
+
                 Item str_item;
                 str_item.string_ptr = (uint64_t)seg_str;
                 str_item._8_s = LMD_TYPE_STRING;
                 result.push_back(str_item);
             }
-            
+
             // Add the argument element (if it exists)
             if (param_num > 0 && param_num <= (int)args.size() && args[param_num - 1]) {
                 Item arg_item;
                 arg_item.item = (uint64_t)args[param_num - 1];
                 result.push_back(arg_item);
             }
-            
+
             i += 2;  // Skip #N
             segment_start = i;
         } else {
             i++;
         }
     }
-    
+
     // Add remaining text
     if (segment_start < len) {
         size_t seg_len = len - segment_start;
@@ -902,13 +902,13 @@ static std::vector<Item> substituteParamsInString(const char* text, size_t len,
         seg_str->len = seg_len;
         memcpy(seg_str->chars, text + segment_start, seg_len);
         seg_str->chars[seg_len] = '\0';
-        
+
         Item str_item;
         str_item.string_ptr = (uint64_t)seg_str;
         str_item._8_s = LMD_TYPE_STRING;
         result.push_back(str_item);
     }
-    
+
     return result;
 }
 
@@ -919,21 +919,21 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
         log_error("Parameter substitution depth exceeded maximum %d", MAX_MACRO_DEPTH);
         return;
     }
-    
+
     if (!elem) return;
-    
+
     List* elem_list = (List*)elem;
     if (!elem_list->items) return;
-    
+
     std::vector<Item> new_items;
-    
+
     for (int64_t i = 0; i < elem_list->length; i++) {
         Item item = elem_list->items[i];
         TypeId type = get_type_id(item);
-        
+
         if (type == LMD_TYPE_STRING) {
             String* str = (String*)item.string_ptr;
-            
+
             // Check if string contains parameter references
             bool has_param = false;
             for (size_t j = 0; j < str->len; j++) {
@@ -943,7 +943,7 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
                     break;
                 }
             }
-            
+
             if (has_param) {
                 // Substitute parameters in this string
                 std::vector<Item> substituted = substituteParamsInString(str->chars, str->len, args, pool);
@@ -954,12 +954,12 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
         } else if (type == LMD_TYPE_SYMBOL) {
             // Check if symbol is a parameter reference like "#1"
             String* sym = (String*)item.string_ptr;
-            
-            if (sym->len >= 2 && sym->chars[0] == '#' && 
+
+            if (sym->len >= 2 && sym->chars[0] == '#' &&
                 sym->chars[1] >= '1' && sym->chars[1] <= '9') {
                 // This is a parameter reference
                 int param_num = sym->chars[1] - '0';
-                
+
                 if (param_num > 0 && param_num <= (int)args.size() && args[param_num - 1]) {
                     // Substitute with the argument element
                     Item arg_item;
@@ -984,7 +984,7 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
             new_items.push_back(item);
         }
     }
-    
+
     // Replace element's items with substituted version (always update, even if size is same)
     elem_list->items = (Item*)pool_calloc(pool, sizeof(Item) * new_items.size());
     elem_list->length = new_items.size();
@@ -1032,11 +1032,11 @@ static bool hasEmptyCurlyGroupChild(Item elem) {
 static void processDiacritic(LatexProcessor* proc, Item elem, char diacritic_cmd) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     // Look for the base character in children
     std::string base_char;
     bool found_base = false;
-    
+
     // Check all children
     auto iter = reader.children();
     ItemReader child;
@@ -1044,7 +1044,7 @@ static void processDiacritic(LatexProcessor* proc, Item elem, char diacritic_cmd
         if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* child_tag = child_elem.tagName();
-            
+
             if (child_tag && strcmp(child_tag, "curly_group") == 0) {
                 // Extract text from curly_group
                 Pool* pool = proc->pool();
@@ -1065,7 +1065,7 @@ static void processDiacritic(LatexProcessor* proc, Item elem, char diacritic_cmd
                 int char_len = getUtf8CharLen((unsigned char)text[0]);
                 base_char = std::string(text, char_len);
                 found_base = true;
-                
+
                 // If there's more text after the first char, we need to output it too
                 if (strlen(text) > (size_t)char_len) {
                     std::string result = applyDiacritic(diacritic_cmd, base_char.c_str());
@@ -1078,7 +1078,7 @@ static void processDiacritic(LatexProcessor* proc, Item elem, char diacritic_cmd
             break;
         }
     }
-    
+
     if (found_base && !base_char.empty()) {
         std::string result = applyDiacritic(diacritic_cmd, base_char.c_str());
         proc->ensureParagraph();
@@ -1245,7 +1245,7 @@ static void cmd_AA(LatexProcessor* proc, Item elem) {
 static void cmd_textbf(LatexProcessor* proc, Item elem) {
     // \textbf{text} - bold text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("bf");  // Just the class name
@@ -1258,7 +1258,7 @@ static void cmd_textbf(LatexProcessor* proc, Item elem) {
 static void cmd_textit(LatexProcessor* proc, Item elem) {
     // \textit{text} - italic text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     proc->enterItalicStyledSpan();  // Mark we're inside an italic styled span
@@ -1274,18 +1274,18 @@ static void cmd_textit(LatexProcessor* proc, Item elem) {
 static void cmd_emph(LatexProcessor* proc, Item elem) {
     // \emph{text} - emphasized text (toggles italic)
     // When already in italic and inside an italic styled span, just output <span class="up">
-    // When already in italic but NOT inside an italic styled span (e.g., \em declaration), 
+    // When already in italic but NOT inside an italic styled span (e.g., \em declaration),
     //   output <span class="it"><span class="up"> to show current state + toggle
     // When not italic, just output <span class="it">
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
-    
+
     // Toggle italic state
     bool was_italic = (gen->currentFont().shape == FontShape::Italic);
     bool in_italic_span = proc->inItalicStyledSpan();
-    
+
     if (was_italic) {
         if (in_italic_span) {
             // Already inside an italic styled span (e.g., nested \emph or inside \textit)
@@ -1314,7 +1314,7 @@ static void cmd_emph(LatexProcessor* proc, Item elem) {
         proc->exitItalicStyledSpan();
         gen->closeElement();  // Close "it"
     }
-    
+
     proc->exitStyledSpan();
     gen->exitGroup();
 }
@@ -1322,7 +1322,7 @@ static void cmd_emph(LatexProcessor* proc, Item elem) {
 static void cmd_texttt(LatexProcessor* proc, Item elem) {
     // \texttt{text} - typewriter/monospace text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     proc->enterMonospaceMode();  // Suppress dash ligatures and hyphen conversion
@@ -1338,7 +1338,7 @@ static void cmd_texttt(LatexProcessor* proc, Item elem) {
 static void cmd_textsf(LatexProcessor* proc, Item elem) {
     // \textsf{text} - sans-serif text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().family = FontFamily::SansSerif;
@@ -1352,7 +1352,7 @@ static void cmd_textsf(LatexProcessor* proc, Item elem) {
 static void cmd_textrm(LatexProcessor* proc, Item elem) {
     // \textrm{text} - roman (serif) text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().family = FontFamily::Roman;
@@ -1366,7 +1366,7 @@ static void cmd_textrm(LatexProcessor* proc, Item elem) {
 static void cmd_textsc(LatexProcessor* proc, Item elem) {
     // \textsc{text} - small caps text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().shape = FontShape::SmallCaps;
@@ -1380,7 +1380,7 @@ static void cmd_textsc(LatexProcessor* proc, Item elem) {
 static void cmd_underline(LatexProcessor* proc, Item elem) {
     // \underline{text} - underlined text
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("underline");
     proc->processChildren(elem);
@@ -1391,7 +1391,7 @@ static void cmd_underline(LatexProcessor* proc, Item elem) {
 static void cmd_sout(LatexProcessor* proc, Item elem) {
     // \sout{text} - strikethrough text
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->span("sout");
     proc->processChildren(elem);
@@ -1406,7 +1406,7 @@ static void cmd_sout(LatexProcessor* proc, Item elem) {
 static void cmd_textmd(LatexProcessor* proc, Item elem) {
     // \textmd{text} - medium weight text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().series = FontSeries::Normal;
@@ -1420,7 +1420,7 @@ static void cmd_textmd(LatexProcessor* proc, Item elem) {
 static void cmd_textup(LatexProcessor* proc, Item elem) {
     // \textup{text} - upright shape
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().shape = FontShape::Upright;
@@ -1434,7 +1434,7 @@ static void cmd_textup(LatexProcessor* proc, Item elem) {
 static void cmd_textsl(LatexProcessor* proc, Item elem) {
     // \textsl{text} - slanted text
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     gen->currentFont().shape = FontShape::Slanted;
@@ -1448,7 +1448,7 @@ static void cmd_textsl(LatexProcessor* proc, Item elem) {
 static void cmd_textnormal(LatexProcessor* proc, Item elem) {
     // \textnormal{text} - normal font
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->enterGroup();
     proc->enterStyledSpan();  // Prevent double-wrapping in processText
     // Reset to defaults
@@ -1468,7 +1468,7 @@ static void cmd_textnormal(LatexProcessor* proc, Item elem) {
 // These can operate in two modes:
 // 1. Declaration-style (no children): \bfseries sets font for subsequent text in current scope
 // 2. Command-style (\small{text}): wraps content in a single span
-// 3. Environment-style (\begin{small}...\end{small}): 
+// 3. Environment-style (\begin{small}...\end{small}):
 //    - Outputs ZWS spans at boundaries for visual separation
 //    - Text inside gets per-chunk wrapping via processText() based on font state
 // Distinction: Environment-style has paragraph elements as children (from \begin{...})
@@ -1520,7 +1520,7 @@ static void cmd_bfseries(LatexProcessor* proc, Item elem) {
     // \bfseries - switch to bold
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         // Declaration-style: just set font state
         gen->currentFont().series = FontSeries::Bold;
@@ -1594,7 +1594,7 @@ static void cmd_itshape(LatexProcessor* proc, Item elem) {
 static void cmd_em(LatexProcessor* proc, Item elem) {
     // \em - toggle italic/upright shape (like \emph but as declaration)
     HtmlGenerator* gen = proc->generator();
-    
+
     // Toggle italic state
     FontShape current = gen->currentFont().shape;
     if (current == FontShape::Italic) {
@@ -1607,7 +1607,7 @@ static void cmd_em(LatexProcessor* proc, Item elem) {
         // Toggle from default upright to italic
         gen->currentFont().shape = FontShape::Italic;
     }
-    
+
     proc->setStripNextLeadingSpace(true);
     proc->processChildren(elem);
 }
@@ -1652,43 +1652,43 @@ static void cmd_normalfont(LatexProcessor* proc, Item elem) {
 static void cmd_newcommand(LatexProcessor* proc, Item elem) {
     // \newcommand{\name}[num]{definition}
     // Defines a new macro (error if already exists)
-    
+
     ElementReader reader(elem);
-    
+
     // DEBUG: Check textContent of entire element
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     reader.textContent(sb);
     String* all_text = stringbuf_to_string(sb);
-    
-    
-    
-    
+
+
+
+
     std::string macro_name;
     int num_params = 0;
     Element* definition = nullptr;
     Element* default_value = nullptr;  // optional default value for first parameter
     bool have_num_params = false;  // track if we've seen [num] bracket group
-    
+
     // Parse arguments: first is command name, second (optional) is num params, third is definition
     auto iter = reader.children();
     ItemReader child;
     int arg_index = 0;
-    
+
     while (iter.next(&child)) {
         TypeId child_type = child.getType();
-        
-        
+
+
         if (child.isString()) {
             String* str = child.asString();
-            
+
             // If we find a string starting with \, that might be the command name
             if (macro_name.empty() && str->chars[0] == '\\') {
                 macro_name = str->chars;
             }
         } else if (child.isSymbol()) {
             String* sym = child.asSymbol();
-            
+
             // Check if this symbol is the command name (not a marker)
             if (macro_name.empty() && sym->chars[0] == '\\') {
                 macro_name = sym->chars;
@@ -1696,25 +1696,25 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
         } else if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
-            
-            
+
+
+
             // Check for brack_group FIRST before other processing
             if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "brack_group_argc") == 0) {
                 fprintf(stderr, "DEBUG: Found bracket group '%s', have_num_params=%d\n", tag, have_num_params);
-                
+
                 // First brack_group is [num] - number of parameters
                 // Second brack_group is [default] - default value for first parameter
                 if (!have_num_params) {
                     // [num] parameter count - extract number from bracket group
                     Element* brack_elem = const_cast<Element*>(child_elem.element());
                     List* brack_list = (List*)brack_elem;
-                    
+
                     fprintf(stderr, "DEBUG: Bracket group has %lld items\n", brack_list->length);
-                    
+
                     // Look through items to find the number
                     fprintf(stderr, "DEBUG: Bracket group has extra=%lld items beyond length\n", brack_list->extra);
-                    
+
                     // Dump ALL items for debugging
                     for (int64_t j = 0; j < brack_list->length + brack_list->extra; j++) {
                         Item item = brack_list->items[j];
@@ -1732,17 +1732,17 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                         }
                         fprintf(stderr, "\n");
                     }
-                    
+
                     for (int64_t j = 0; j < brack_list->length; j++) {
                         Item item = brack_list->items[j];
                         TypeId item_type = get_type_id(item);
-                        
+
                         fprintf(stderr, "DEBUG:   Processing item %lld: type=%d\n", j, item_type);
-                        
+
                         if (item_type == LMD_TYPE_STRING) {
                             String* str = (String*)item.string_ptr;
                             fprintf(stderr, "DEBUG:   Item %lld: STRING '%s'\n", j, str->chars);
-                            
+
                             // Try to parse as number
                             if (str->len > 0 && str->chars[0] >= '0' && str->chars[0] <= '9') {
                                 num_params = atoi(str->chars);
@@ -1763,13 +1763,13 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                             elem_item.item = (uint64_t)item.element;
                             ElementReader elem_reader(elem_item);
                             const char* elem_tag = elem_reader.tagName();
-                            
+
                             if (strcmp(elem_tag, "argc") == 0) {
                                 Pool* pool = proc->pool();
                                 StringBuf* sb = stringbuf_new(pool);
                                 elem_reader.textContent(sb);
                                 String* argc_str = stringbuf_to_string(sb);
-                                
+
                                 if (argc_str->len > 0) {
                                     num_params = atoi(argc_str->chars);
                                     fprintf(stderr, "DEBUG:   Parsed num_params=%d from argc textContent\n", num_params);
@@ -1779,7 +1779,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                             }
                         }
                     }
-                    
+
                     // If we found brack_group but num_params is still 0, default to 1
                     if (num_params == 0) {
                         num_params = 1;
@@ -1792,50 +1792,50 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                     // (we'll wrap its content when needed)
                     MarkBuilder builder(proc->input());
                     auto default_elem = builder.element("arg");
-                    
+
                     // Copy children from brack_group to default_elem
                     auto brack_iter = child_elem.children();
                     ItemReader brack_child;
                     while (brack_iter.next(&brack_child)) {
                         default_elem.child(brack_child.item());
                     }
-                    
+
                     Item default_item = default_elem.final();
                     default_value = (Element*)default_item.item;
                     fprintf(stderr, "DEBUG: Stored default_value=%p\n", default_value);
                 }
-                
-                
+
+
                 continue;  // Don't process as regular arg
             }
-            
+
             // If element tag starts with \, it might be the command itself
             if (macro_name.empty() && tag[0] == '\\' && strcmp(tag, "\\newcommand") != 0) {
                 macro_name = tag;
             }
-            
+
             // Special case: check if this is the \newcommand token itself
             if (strcmp(tag, "\\newcommand") == 0) {
-                
+
                 // Check its raw items
                 Element* token_elem = const_cast<Element*>(child_elem.element());
                 List* token_list = (List*)token_elem;
-                
-                
+
+
                 for (int64_t k = 0; k < token_list->length; k++) {
                     Item token_item = token_list->items[k];
                     TypeId token_type = get_type_id(token_item);
-                    
-                    
+
+
                     if (token_type == LMD_TYPE_STRING) {
                         String* str = (String*)token_item.string_ptr;
-                        
+
                         if (macro_name.empty() && str->chars[0] == '\\') {
                             macro_name = str->chars;
                         }
                     } else if (token_type == LMD_TYPE_SYMBOL) {
                         String* sym = (String*)token_item.string_ptr;
-                        
+
                         if (macro_name.empty() && sym->chars[0] == '\\') {
                             macro_name = sym->chars;
                         }
@@ -1843,16 +1843,16 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                         Item elem_item;
                         elem_item.item = (uint64_t)token_item.element;
                         ElementReader elem_reader(elem_item);
-                        
+
                         if (macro_name.empty() && elem_reader.tagName()[0] == '\\') {
                             macro_name = elem_reader.tagName();
                         }
                     } else {
-                        
+
                     }
                 }
             }
-            
+
             // FALLBACK: Check if we still haven't found num_params and this looks like a number
             if (num_params == 0 && strcmp(tag, "curly_group") != 0 && strcmp(tag, "curly_group_command_name") != 0) {
                 // Try extracting text content to see if it's a number
@@ -1862,31 +1862,31 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                 String* text_str = stringbuf_to_string(sb);
                 if (text_str->len > 0 && text_str->chars[0] >= '0' && text_str->chars[0] <= '9') {
                     num_params = atoi(text_str->chars);
-                    
+
                 }
             }
-            
+
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
-                
+
                 // NEW: If macro_name is already set, treat this as the definition
                 if (!macro_name.empty()) {
                     definition = const_cast<Element*>(child_elem.element());
                     arg_index++;
                     continue;
                 }
-                
+
                 if (arg_index == 0) {
                     // First arg: command name (like {\greet})
                     // The command is stored as a symbol (if no children) or element (if has children)
                     Element* curly_elem = const_cast<Element*>(child_elem.element());
                     List* curly_list = (List*)curly_elem;
-                    
+
                     // Extract command name from curly_group_command_name
                     // After fix: command_name tokens are now strings (e.g., "greet"), not symbols
                     for (int64_t j = 0; j < curly_list->length; j++) {
                         Item item = curly_list->items[j];
                         TypeId item_type = get_type_id(item);
-                        
+
                         if (item_type == LMD_TYPE_STRING) {
                             String* str = (String*)item.string_ptr;
                             if (str->len > 0 && macro_name.empty()) {
@@ -1895,12 +1895,12 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                             }
                         }
                     }
-                    
+
                     // Remove leading backslash if present
                     if (!macro_name.empty() && macro_name[0] == '\\') {
                         macro_name = macro_name.substr(1);
                     }
-                    
+
                 } else if (arg_index == 1) {
                     // Could be [num] or {definition}
                     // Check if it looks like a number
@@ -1909,7 +1909,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                     child_elem.textContent(sb);
                     String* content_str = stringbuf_to_string(sb);
                     std::string content = content_str->chars;
-                    
+
                     if (!content.empty() && content[0] >= '0' && content[0] <= '9') {
                         num_params = atoi(content.c_str());
                     } else {
@@ -1924,14 +1924,14 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Remove leading backslash from macro_name if present
     if (!macro_name.empty() && macro_name[0] == '\\') {
         macro_name = macro_name.substr(1);
     }
-    
+
     fprintf(stderr, "DEBUG: newcommand parsed: name='%s', num_params=%d, definition=%p, default_value=%p\n", macro_name.c_str(), num_params, definition, default_value);
-    
+
     if (!macro_name.empty() && definition) {
         // Check if macro already exists
         if (proc->isMacro(macro_name)) {
@@ -1940,7 +1940,7 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             proc->registerMacro(macro_name, num_params, definition, default_value);
         }
     } else {
-        
+
     }
 }
 
@@ -1948,16 +1948,16 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
     // \renewcommand{\name}[num]{definition}
     // Redefines an existing macro (warning if doesn't exist)
     ElementReader reader(elem);
-    
+
     std::string macro_name;
     int num_params = 0;
     Element* definition = nullptr;
-    
+
     // Same parsing as newcommand
     auto iter = reader.children();
     ItemReader child;
     int arg_index = 0;
-    
+
     while (iter.next(&child)) {
         // NEW: Check for string child (macro name from hybrid grammar)
         if (child.isString()) {
@@ -1968,7 +1968,7 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
         } else if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
                 // NEW: If macro_name is already set, treat this as the definition
                 if (!macro_name.empty()) {
@@ -1976,7 +1976,7 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
                     arg_index++;
                     continue;
                 }
-                
+
                 if (arg_index == 0) {
                     Pool* pool = proc->pool();
                     StringBuf* sb = stringbuf_new(pool);
@@ -1992,7 +1992,7 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
                     child_elem.textContent(sb);
                     String* content_str = stringbuf_to_string(sb);
                     std::string content = content_str->chars;
-                    
+
                     if (!content.empty() && content[0] >= '0' && content[0] <= '9') {
                         num_params = atoi(content.c_str());
                     } else {
@@ -2011,12 +2011,12 @@ static void cmd_renewcommand(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Remove leading backslash from macro_name if present
     if (!macro_name.empty() && macro_name[0] == '\\') {
         macro_name = macro_name.substr(1);
     }
-    
+
     if (!macro_name.empty() && definition) {
         // Warn if doesn't exist but register anyway
         if (!proc->isMacro(macro_name)) {
@@ -2031,16 +2031,16 @@ static void cmd_providecommand(LatexProcessor* proc, Item elem) {
     // \providecommand{\name}[num]{definition}
     // Defines a macro only if it doesn't already exist
     ElementReader reader(elem);
-    
+
     std::string macro_name;
     int num_params = 0;
     Element* definition = nullptr;
-    
+
     // Same parsing as newcommand
     auto iter = reader.children();
     ItemReader child;
     int arg_index = 0;
-    
+
     while (iter.next(&child)) {
         // NEW: Check for string child (macro name from hybrid grammar)
         if (child.isString()) {
@@ -2051,7 +2051,7 @@ static void cmd_providecommand(LatexProcessor* proc, Item elem) {
         } else if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0) {
                 // NEW: If macro_name is already set, treat this as the definition
                 if (!macro_name.empty()) {
@@ -2059,7 +2059,7 @@ static void cmd_providecommand(LatexProcessor* proc, Item elem) {
                     arg_index++;
                     continue;
                 }
-                
+
                 if (arg_index == 0) {
                     Pool* pool = proc->pool();
                     StringBuf* sb = stringbuf_new(pool);
@@ -2075,7 +2075,7 @@ static void cmd_providecommand(LatexProcessor* proc, Item elem) {
                     child_elem.textContent(sb);
                     String* content_str = stringbuf_to_string(sb);
                     std::string content = content_str->chars;
-                    
+
                     if (!content.empty() && content[0] >= '0' && content[0] <= '9') {
                         num_params = atoi(content.c_str());
                     } else {
@@ -2094,12 +2094,12 @@ static void cmd_providecommand(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Remove leading backslash from macro_name if present
     if (!macro_name.empty() && macro_name[0] == '\\') {
         macro_name = macro_name.substr(1);
     }
-    
+
     if (!macro_name.empty() && definition) {
         // Only register if doesn't exist
         if (!proc->isMacro(macro_name)) {
@@ -2112,20 +2112,20 @@ static void cmd_def(LatexProcessor* proc, Item elem) {
     // \def\name{definition} - TeX primitive macro definition
     // Note: \def doesn't use the [n] syntax for parameters, but we'll support it for compatibility
     ElementReader reader(elem);
-    
+
     std::string macro_name;
     Element* definition = nullptr;
-    
+
     // Parse: first child is command name, second is definition
     auto iter = reader.children();
     ItemReader child;
     int arg_index = 0;
-    
+
     while (iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_command_name") == 0 ||
                 strcmp(tag, "generic_command") == 0) {
                 if (arg_index == 0) {
@@ -2146,7 +2146,7 @@ static void cmd_def(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     if (!macro_name.empty() && definition) {
         // Count #1, #2, etc. in definition to determine num_params
         int num_params = 0;
@@ -2157,7 +2157,7 @@ static void cmd_def(LatexProcessor* proc, Item elem) {
         ElementReader def_reader(def_item);
         def_reader.textContent(sb);
         String* def_text = stringbuf_to_string(sb);
-        
+
         for (size_t i = 0; i < def_text->len; i++) {
             if (def_text->chars[i] == '#' && i + 1 < def_text->len &&
                 def_text->chars[i + 1] >= '1' && def_text->chars[i + 1] <= '9') {
@@ -2167,7 +2167,7 @@ static void cmd_def(LatexProcessor* proc, Item elem) {
                 }
             }
         }
-        
+
         proc->registerMacro(macro_name, num_params, definition);
     }
 }
@@ -2183,7 +2183,7 @@ static void cmd_def(LatexProcessor* proc, Item elem) {
 static void cmd_tiny(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     // Check if this is declaration-style (no children) or argument-style (with children)
     if (reader.isEmpty()) {
         // Declaration-style: just set font state, no span here
@@ -2205,7 +2205,7 @@ static void cmd_tiny(LatexProcessor* proc, Item elem) {
 static void cmd_scriptsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::ScriptSize;
     } else {
@@ -2223,7 +2223,7 @@ static void cmd_scriptsize(LatexProcessor* proc, Item elem) {
 static void cmd_footnotesize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::FootnoteSize;
     } else {
@@ -2241,7 +2241,7 @@ static void cmd_footnotesize(LatexProcessor* proc, Item elem) {
 static void cmd_small(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Small;
     } else if (hasEnvironmentSyntax(elem)) {
@@ -2271,7 +2271,7 @@ static void cmd_small(LatexProcessor* proc, Item elem) {
 static void cmd_normalsize(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::NormalSize;
     } else {
@@ -2289,7 +2289,7 @@ static void cmd_normalsize(LatexProcessor* proc, Item elem) {
 static void cmd_large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Large;
     } else {
@@ -2307,7 +2307,7 @@ static void cmd_large(LatexProcessor* proc, Item elem) {
 static void cmd_Large(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Large2;
     } else {
@@ -2325,7 +2325,7 @@ static void cmd_Large(LatexProcessor* proc, Item elem) {
 static void cmd_LARGE(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Large3;
     } else {
@@ -2343,7 +2343,7 @@ static void cmd_LARGE(LatexProcessor* proc, Item elem) {
 static void cmd_huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Huge;
     } else {
@@ -2361,7 +2361,7 @@ static void cmd_huge(LatexProcessor* proc, Item elem) {
 static void cmd_Huge(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     if (reader.isEmpty()) {
         gen->currentFont().size = FontSize::Huge2;
     } else {
@@ -2384,7 +2384,7 @@ static void cmd_TeX(LatexProcessor* proc, Item elem) {
     // \TeX - TeX logo
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    
+
     gen->span("tex");
     gen->text("T");
     gen->span("e");
@@ -2392,7 +2392,7 @@ static void cmd_TeX(LatexProcessor* proc, Item elem) {
     gen->closeElement();  // close inner span
     gen->text("X");
     gen->closeElement();  // close outer span
-    
+
     // \TeX is a space-absorbing command - set flag for ZWS output
     proc->setPendingZWSOutput(true);
 }
@@ -2401,7 +2401,7 @@ static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
     // \LaTeX - LaTeX logo
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    
+
     gen->span("latex");
     gen->text("L");
     gen->span("a");
@@ -2413,7 +2413,7 @@ static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
     gen->closeElement();  // close inner span
     gen->text("X");
     gen->closeElement();  // close outer span
-    
+
     // \LaTeX is a space-absorbing command - set flag for ZWS output
     proc->setPendingZWSOutput(true);
 }
@@ -2422,13 +2422,13 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
     // \today - Current date
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    
+
     // Format: December 12, 2025 (example)
     time_t now = time(nullptr);
     struct tm* tm_info = localtime(&now);
     char buffer[100];
     strftime(buffer, sizeof(buffer), "%B %d, %Y", tm_info);
-    
+
     gen->text(buffer);
 }
 
@@ -2437,14 +2437,14 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
     // 1. \empty (no braces) - produces nothing (null command)
     // 2. \empty{} (empty braces) - output ZWS
     // 3. \begin{empty}...\end{empty} (environment) - process content + ZWS at boundaries
-    
+
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     // Check what kind of children we have
     bool has_empty_curly_group = false;
     bool has_other_content = false;
-    
+
     auto iter = reader.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -2487,7 +2487,7 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
             has_other_content = true;
         }
     }
-    
+
     // Case 3: Environment with content - ZWS at start (if leading whitespace) and end
     // ZWS at end prevents space after environment content from collapsing
     // with following content. ZWS at start (before leading whitespace) preserves
@@ -2528,25 +2528,25 @@ static void cmd_empty(LatexProcessor* proc, Item elem) {
                 break;  // First child is element, done checking
             }
         }
-        
+
         // Output ZWS at start if there's leading whitespace in content
         if (has_leading_whitespace) {
             proc->ensureParagraph();
             gen->text("\xE2\x80\x8B");  // ZWS at start
         }
-        
+
         proc->processChildren(elem);
         gen->text("\xE2\x80\x8B");  // ZWS at end
         return;
     }
-    
+
     // Case 2: Empty braces - output ZWS
     if (has_empty_curly_group) {
         proc->ensureParagraph();
         gen->text("\xE2\x80\x8B");  // UTF-8 encoding of U+200B
         return;
     }
-    
+
     // Case 1: No braces - output nothing (null command)
 }
 
@@ -2556,16 +2556,16 @@ static double convertLatexLengthToPixels(const char* length_str) {
     if (!length_str || !*length_str) {
         return 0.0;
     }
-    
+
     // Parse numeric value
     char* end_ptr;
     double value = strtod(length_str, &end_ptr);
-    
+
     // Skip whitespace after number
     while (*end_ptr == ' ' || *end_ptr == '\t') {
         end_ptr++;
     }
-    
+
     // Check unit (case-insensitive comparison)
     const char* unit = end_ptr;
     if (strncasecmp(unit, "pt", 2) == 0) {
@@ -2591,7 +2591,7 @@ static double convertLatexLengthToPixels(const char* length_str) {
     } else if (strncasecmp(unit, "sp", 2) == 0) {
         return value * 0.000020;  // 1sp = 1/65536 pt (scaled point, smallest TeX unit)
     }
-    
+
     // Default: assume pixels if no recognized unit
     return value;
 }
@@ -2603,7 +2603,7 @@ static void cmd_unskip(LatexProcessor* proc, Item elem) {
     (void)elem;
     HtmlGenerator* gen = proc->generator();
     gen->trimTrailingWhitespace();
-    
+
     // Mark that the containing group should not output ZWS
     LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
     mutable_proc->setSuppressGroupZWS(true);
@@ -2616,7 +2616,7 @@ static void cmd_ignorespaces(LatexProcessor* proc, Item elem) {
     (void)elem;
     LatexProcessor* mutable_proc = const_cast<LatexProcessor*>(proc);
     mutable_proc->setStripNextLeadingSpace(true);
-    
+
     // Mark that the containing group should not output ZWS
     mutable_proc->setSuppressGroupZWS(true);
 }
@@ -2706,28 +2706,28 @@ static void cmd_char(LatexProcessor* proc, Item elem) {
     // TODO: Fix parser to consume following number, or implement lookahead in formatter.
     HtmlGenerator* gen = proc->generator();
     proc->ensureParagraph();
-    
+
     // Get the argument text using ElementReader
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* arg_str = stringbuf_to_string(sb);
-    
+
     if (!arg_str || arg_str->len == 0) {
         return;
     }
-    
+
     // Skip leading whitespace
     const char* arg = arg_str->chars;
     while (*arg && (*arg == ' ' || *arg == '\t' || *arg == '\n' || *arg == '\r')) {
         arg++;
     }
-    
+
     if (!*arg) {
         return;
     }
-    
+
     uint32_t charcode = 0;
     // Check if hex notation (starts with " or 0x)
     if (arg[0] == '"') {
@@ -2737,7 +2737,7 @@ static void cmd_char(LatexProcessor* proc, Item elem) {
     } else {
         charcode = std::strtoul(arg, nullptr, 10);
     }
-    
+
     if (charcode > 0) {
         // Special case: 0xA0 is non-breaking space, output as HTML entity
         if (charcode == 0xA0) {
@@ -2775,20 +2775,20 @@ static void cmd_makeatother(LatexProcessor* proc, Item elem) {
 
 static void cmd_section(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    
+
     // Only end paragraph if we're NOT inside a styled span (inline context)
     // When section appears inside \emph{} or similar, keep inline flow
     // and let CSS handle the visual appearance (per LaTeX.js behavior)
     if (!proc->inStyledSpan()) {
         proc->endParagraph();
     }
-    
+
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
-    
+
     // Find the title argument (from "title" field or children/textContent)
     std::string title;
-    
+
     // First try to get title from "title" field (new grammar structure)
     if (elem_reader.has_attr("title")) {
         ItemReader title_reader = elem_reader.get_attr("title");
@@ -2800,7 +2800,7 @@ static void cmd_section(LatexProcessor* proc, Item elem) {
             title = title_str->chars;
         }
     }
-    
+
     // Fallback: collect text content from children (old parser structure)
     if (title.empty()) {
         StringBuf* title_sb = stringbuf_new(pool);
@@ -2823,9 +2823,9 @@ static void cmd_section(LatexProcessor* proc, Item elem) {
         String* title_str = stringbuf_to_string(title_sb);
         title = title_str->chars;
     }
-    
+
     gen->startSection("section", false, title, title);
-    
+
     // Now register any labels as children of section
     auto label_iter = elem_reader.children();
     ItemReader child;
@@ -2846,15 +2846,15 @@ static void cmd_section(LatexProcessor* proc, Item elem) {
 
 static void cmd_subsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    
+
     // End any open paragraph before section heading
     proc->endParagraph();
-    
+
     ElementReader elem_reader(elem);
-    
+
     // Find the title argument (from "title" field or first curly_group child)
     std::string title;
-    
+
     // First try to get title from "title" field (new grammar structure)
     if (elem_reader.has_attr("title")) {
         ItemReader title_reader = elem_reader.get_attr("title");
@@ -2867,7 +2867,7 @@ static void cmd_subsection(LatexProcessor* proc, Item elem) {
             title = title_str->chars;
         }
     }
-    
+
     // Fallback: try first curly_group child or string child (command parsing structure)
     if (title.empty()) {
         auto iter = elem_reader.children();
@@ -2890,7 +2890,7 @@ static void cmd_subsection(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     gen->startSection("subsection", false, title, title);
     // NOTE: Do NOT call processChildren - section heading is complete
     //       Sections are flat in new grammar, not containers
@@ -2898,15 +2898,15 @@ static void cmd_subsection(LatexProcessor* proc, Item elem) {
 
 static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    
+
     // End any open paragraph before section heading
     proc->endParagraph();
-    
+
     ElementReader elem_reader(elem);
-    
+
     // Find the title argument (from "title" field or first curly_group/string child)
     std::string title;
-    
+
     // First try to get title from "title" field (new grammar structure)
     if (elem_reader.has_attr("title")) {
         ItemReader title_reader = elem_reader.get_attr("title");
@@ -2919,7 +2919,7 @@ static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
             title = title_str->chars;
         }
     }
-    
+
     // Fallback: try first curly_group child or string child (command parsing structure)
     if (title.empty()) {
         auto iter = elem_reader.children();
@@ -2942,22 +2942,22 @@ static void cmd_subsubsection(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     gen->startSection("subsubsection", false, title, title);
     // NOTE: Do NOT call processChildren - section heading is complete
 }
 
 static void cmd_chapter(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    
+
     // End any open paragraph before section heading
     proc->endParagraph();
-    
+
     ElementReader elem_reader(elem);
-    
+
     // Find the title argument (from "title" field or textContent)
     std::string title;
-    
+
     if (elem_reader.has_attr("title")) {
         ItemReader title_reader = elem_reader.get_attr("title");
         if (title_reader.isElement()) {
@@ -2969,7 +2969,7 @@ static void cmd_chapter(LatexProcessor* proc, Item elem) {
             title = title_str->chars;
         }
     }
-    
+
     if (title.empty()) {
         Pool* pool = proc->pool();
         StringBuf* sb = stringbuf_new(pool);
@@ -2977,21 +2977,21 @@ static void cmd_chapter(LatexProcessor* proc, Item elem) {
         String* title_str = stringbuf_to_string(sb);
         title = title_str->chars;
     }
-    
+
     gen->startSection("chapter", false, title, title);
 }
 
 static void cmd_part(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
-    
+
     // End any open paragraph before section heading
     proc->endParagraph();
-    
+
     ElementReader elem_reader(elem);
-    
+
     // Find the title argument (from "title" field or textContent)
     std::string title;
-    
+
     if (elem_reader.has_attr("title")) {
         ItemReader title_reader = elem_reader.get_attr("title");
         if (title_reader.isElement()) {
@@ -3003,7 +3003,7 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
             title = title_str->chars;
         }
     }
-    
+
     if (title.empty()) {
         Pool* pool = proc->pool();
         StringBuf* sb = stringbuf_new(pool);
@@ -3011,7 +3011,7 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
         String* title_str = stringbuf_to_string(sb);
         title = title_str->chars;
     }
-    
+
     gen->startSection("part", false, title, title);
 }
 
@@ -3019,7 +3019,7 @@ static void cmd_part(LatexProcessor* proc, Item elem) {
 // For formatted labels, pass the brack_group Item to createItem
 static std::string extractLabelFromBrackGroup(ElementReader& brack_elem) {
     std::string label_buf;
-    
+
     for (size_t k = 0; k < brack_elem.childCount(); k++) {
         ItemReader brack_child = brack_elem.childAt(k);
         if (brack_child.isString()) {
@@ -3051,7 +3051,7 @@ static std::string extractLabelFromBrackGroup(ElementReader& brack_elem) {
             }
         }
     }
-    
+
     return label_buf;
 }
 
@@ -3059,31 +3059,31 @@ static std::string extractLabelFromBrackGroup(ElementReader& brack_elem) {
 static void processListItems(LatexProcessor* proc, Item elem, const char* list_type) {
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     bool in_item = false;
     bool at_item_start = false;  // Track if we're at the very start of an item (for whitespace trimming)
     bool item_paragraph_open = false;  // Track if we have an open <p> inside item
     bool next_paragraph_noindent = false;  // Track if next paragraph should have noindent class
-    
+
     for (size_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
-        
+
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
             if (!tag) continue;
-            
+
             // Handle paragraph wrapper
             if (strcmp(tag, "paragraph") == 0) {
                 // Process paragraph contents for items
                 for (size_t j = 0; j < child_elem.childCount(); j++) {
                     ItemReader para_child = child_elem.childAt(j);
-                    
+
                     if (para_child.isElement()) {
                         ElementReader para_child_elem = para_child.asElement();
                         const char* para_tag = para_child_elem.tagName();
                         if (!para_tag) continue;
-                        
+
                         if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
                             // Close previous item if open
                             if (in_item) {
@@ -3091,12 +3091,12 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                 item_paragraph_open = false;  // Reset paragraph tracking
                                 gen->endItem();  // Close li/dd with proper structure
                             }
-                            
+
                             // Get optional label from item
                             // For description/itemize/enumerate lists, label is in brack_group child: \item[label]
                             bool has_brack_group = false;  // Track if brack_group exists (for empty label)
                             std::string html_label;  // Rendered HTML label content
-                            
+
                             if (para_child_elem.childCount() > 0) {
                                 ItemReader first = para_child_elem.childAt(0);
                                 if (first.isElement()) {
@@ -3120,7 +3120,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     }
                                 }
                             }
-                            
+
                             if (has_brack_group) {
                                 gen->createItemWithHtmlLabel(html_label.c_str());
                             } else {
@@ -3135,7 +3135,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                             // Other element within paragraph
                             if (in_item) {
                                 const char* elem_tag = para_child_elem.tagName();
-                                
+
                                 // Check if this is the noindent command
                                 if (elem_tag && strcmp(elem_tag, "noindent") == 0) {
                                     // \noindent - close current paragraph and set flag for next
@@ -3149,7 +3149,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     at_item_start = true;  // Trim leading whitespace
                                     continue;
                                 }
-                                
+
                                 // Check if this is a block element (list, etc.)
                                 bool is_block = elem_tag && (
                                     strcmp(elem_tag, "itemize") == 0 ||
@@ -3162,7 +3162,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                     strcmp(elem_tag, "flushleft") == 0 ||
                                     strcmp(elem_tag, "flushright") == 0
                                 );
-                                
+
                                 if (is_block) {
                                     // Close <p> before block element
                                     if (item_paragraph_open) {
@@ -3196,7 +3196,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                     } else if (para_child.isString()) {
                         // Text content
                         const char* text = para_child.cstring();
-                        log_debug("processListItems: text child '%s', at_item_start=%d, item_paragraph_open=%d", 
+                        log_debug("processListItems: text child '%s', at_item_start=%d, item_paragraph_open=%d",
                                   text, at_item_start ? 1 : 0, item_paragraph_open ? 1 : 0);
                         if (in_item && text && text[0] != '\0') {
                             // Trim leading whitespace at start of item or after paragraph break
@@ -3207,12 +3207,12 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                                 // Only reset at_item_start when we have actual content
                                 // This way multiple whitespace-only text nodes are all skipped
                             }
-                            
+
                             // Skip if now empty after trimming
                             if (text[0] != '\0') {
                                 // Reset at_item_start now that we have actual content
                                 at_item_start = false;
-                                
+
                                 // Open paragraph if needed (lazy paragraph opening)
                                 if (!item_paragraph_open) {
                                     log_debug("processListItems: lazy opening p for text '%s'", text);
@@ -3231,20 +3231,20 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                 }
                 continue;
             }
-            
+
             // Direct item (not in paragraph wrapper)
             if (strcmp(tag, "item") == 0 || strcmp(tag, "enum_item") == 0) {
                 if (in_item) {
                     proc->setInParagraph(false);  // Reset paragraph state before closing item
                     gen->endItem();  // Close previous item with proper structure
                 }
-                
+
                 // Get optional label from item
                 // For description/itemize/enumerate lists, label is in brack_group child: \item[label]
                 const char* label = nullptr;
                 std::string label_buf2;  // Buffer to hold extracted label
                 bool has_brack_group2 = false;  // Track if brack_group exists
-                
+
                 if (child_elem.childCount() > 0) {
                     ItemReader first = child_elem.childAt(0);
                     if (first.isElement()) {
@@ -3260,7 +3260,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                         label = first.cstring();
                     }
                 }
-                
+
                 gen->createItem(has_brack_group2 ? label : nullptr);
                 proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
                 in_item = true;
@@ -3282,7 +3282,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
                     }
                     at_item_start = false;
                 }
-                
+
                 // Skip if now empty after trimming
                 if (text[0] != '\0') {
                     // Convert apostrophes and output text
@@ -3292,7 +3292,7 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
             }
         }
     }
-    
+
     // Close last item
     if (in_item) {
         proc->setInParagraph(false);  // Reset paragraph state before closing item
@@ -3303,34 +3303,34 @@ static void processListItems(LatexProcessor* proc, Item elem, const char* list_t
 // Helper to scan for alignment declarations at the start of list content
 static const char* scanForListAlignment(Item elem) {
     ElementReader elem_reader(elem);
-    
+
     // Scan element children for alignment declarations
-    
+
     // Look for centering/raggedright/raggedleft commands in first paragraph
     for (size_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
-        
+
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
             if (!tag) continue;
-            
+
             // Check paragraph wrapper
             if (strcmp(tag, "paragraph") == 0) {
                 // Scan paragraph content for alignment commands before first item
                 for (size_t j = 0; j < child_elem.childCount(); j++) {
                     ItemReader para_child = child_elem.childAt(j);
-                    
+
                     if (para_child.isElement()) {
                         ElementReader para_child_elem = para_child.asElement();
                         const char* para_tag = para_child_elem.tagName();
                         if (!para_tag) continue;
-                        
+
                         // Stop at first item - alignment must come before items
                         if (strcmp(para_tag, "item") == 0 || strcmp(para_tag, "enum_item") == 0) {
                             return nullptr;
                         }
-                        
+
                         // Check for alignment commands
                         if (strcmp(para_tag, "centering") == 0) {
                             return "centering";
@@ -3344,7 +3344,7 @@ static const char* scanForListAlignment(Item elem) {
             }
         }
     }
-    
+
     return nullptr;
 }
 
@@ -3353,30 +3353,30 @@ static const char* scanForListAlignment(Item elem) {
 static void cmd_itemize(LatexProcessor* proc, Item elem) {
     // \begin{itemize} ... \end{itemize}
     HtmlGenerator* gen = proc->generator();
-    
+
     // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
     bool saved_in_paragraph = proc->inParagraph();
-    
+
     // Scan for alignment declarations in list content
     const char* list_alignment = scanForListAlignment(elem);
     if (list_alignment) {
         // Set alignment in processor so items can use it
         proc->setNextParagraphAlignment(list_alignment);
     }
-    
+
     // Pass alignment to list
     gen->startItemize(list_alignment ? list_alignment : proc->getCurrentAlignment());
     processListItems(proc, elem, "itemize");
     gen->endItemize();
-    
+
     // Clear alignment if it was set by the list
     if (list_alignment) {
         proc->setNextParagraphAlignment(nullptr);
     }
-    
+
     // Restore paragraph state
     proc->setInParagraph(saved_in_paragraph);
-    
+
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
 }
@@ -3384,30 +3384,30 @@ static void cmd_itemize(LatexProcessor* proc, Item elem) {
 static void cmd_enumerate(LatexProcessor* proc, Item elem) {
     // \begin{enumerate} ... \end{enumerate}
     HtmlGenerator* gen = proc->generator();
-    
+
     // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
     bool saved_in_paragraph = proc->inParagraph();
-    
+
     // Scan for alignment declarations in list content
     const char* list_alignment = scanForListAlignment(elem);
     if (list_alignment) {
         // Set alignment in processor so items can use it
         proc->setNextParagraphAlignment(list_alignment);
     }
-    
+
     // Pass alignment to list
     gen->startEnumerate(list_alignment ? list_alignment : proc->getCurrentAlignment());
     processListItems(proc, elem, "enumerate");
     gen->endEnumerate();
-    
+
     // Clear alignment if it was set by the list
     if (list_alignment) {
         proc->setNextParagraphAlignment(nullptr);
     }
-    
+
     // Restore paragraph state
     proc->setInParagraph(saved_in_paragraph);
-    
+
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
 }
@@ -3415,17 +3415,17 @@ static void cmd_enumerate(LatexProcessor* proc, Item elem) {
 static void cmd_description(LatexProcessor* proc, Item elem) {
     // \begin{description} ... \end{description}
     HtmlGenerator* gen = proc->generator();
-    
+
     // Save paragraph state - nested lists shouldn't corrupt parent's paragraph tracking
     bool saved_in_paragraph = proc->inParagraph();
-    
+
     gen->startDescription();
     processListItems(proc, elem, "description");
     gen->endDescription();
-    
+
     // Restore paragraph state
     proc->setInParagraph(saved_in_paragraph);
-    
+
     // Next paragraph should have class="continue"
     proc->setNextParagraphIsContinue();
 }
@@ -3433,11 +3433,11 @@ static void cmd_description(LatexProcessor* proc, Item elem) {
 static void cmd_item(LatexProcessor* proc, Item elem) {
     // \item or \item[label]
     HtmlGenerator* gen = proc->generator();
-    
+
     // Check if there's an optional label argument
     ElementReader elem_reader(elem);
     const char* label = nullptr;
-    
+
     // Try to get first child as label (if it exists)
     if (elem_reader.childCount() > 0) {
         ItemReader first_child = elem_reader.childAt(0);
@@ -3445,7 +3445,7 @@ static void cmd_item(LatexProcessor* proc, Item elem) {
             label = first_child.cstring();
         }
     }
-    
+
     gen->createItem(label);
     proc->setInParagraph(true);  // Mark that we're now inside the item's <p>
     proc->processChildren(elem);
@@ -3458,7 +3458,7 @@ static void cmd_item(LatexProcessor* proc, Item elem) {
 static void cmd_quote(LatexProcessor* proc, Item elem) {
     // \begin{quote} ... \end{quote}
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->closeParagraphIfOpen();
     gen->startQuote();
     proc->processChildren(elem);
@@ -3470,7 +3470,7 @@ static void cmd_quote(LatexProcessor* proc, Item elem) {
 static void cmd_quotation(LatexProcessor* proc, Item elem) {
     // \begin{quotation} ... \end{quotation}
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->closeParagraphIfOpen();
     gen->startQuotation();
     proc->processChildren(elem);
@@ -3482,7 +3482,7 @@ static void cmd_quotation(LatexProcessor* proc, Item elem) {
 static void cmd_verse(LatexProcessor* proc, Item elem) {
     // \begin{verse} ... \end{verse}
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->closeParagraphIfOpen();
     gen->startVerse();
     proc->processChildren(elem);
@@ -3494,7 +3494,7 @@ static void cmd_verse(LatexProcessor* proc, Item elem) {
 static void cmd_center(LatexProcessor* proc, Item elem) {
     // \begin{center} ... \end{center}
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->closeParagraphIfOpen();
     gen->startCenter();
     proc->processChildren(elem);
@@ -3506,7 +3506,7 @@ static void cmd_center(LatexProcessor* proc, Item elem) {
 static void cmd_flushleft(LatexProcessor* proc, Item elem) {
     // \begin{flushleft} ... \end{flushleft}
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->closeParagraphIfOpen();
     gen->startFlushLeft();
     proc->processChildren(elem);
@@ -3518,7 +3518,7 @@ static void cmd_flushleft(LatexProcessor* proc, Item elem) {
 static void cmd_flushright(LatexProcessor* proc, Item elem) {
     // \begin{flushright} ... \end{flushright}
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->closeParagraphIfOpen();
     gen->startFlushRight();
     proc->processChildren(elem);
@@ -3540,14 +3540,14 @@ static void cmd_multicols(LatexProcessor* proc, Item elem) {
     // n = number of columns
     // [pretext] = optional text to span all columns before the multi-column content
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->closeParagraphIfOpen();
-    
+
     ElementReader reader(elem);
     int num_cols = 2;  // Default to 2 columns
     int first_content_idx = 0;  // Index of first content child (after column count)
     Item pretext_item = ItemNull;  // Optional pretext before multicol div
-    
+
     // First child should be the number of columns (wrapped in curly_group)
     if (reader.childCount() > 0) {
         ItemReader first_child = reader.childAt(0);
@@ -3581,7 +3581,7 @@ static void cmd_multicols(LatexProcessor* proc, Item elem) {
             first_content_idx = 1;
         }
     }
-    
+
     // Check for optional pretext (second argument in brackets)
     if (first_content_idx < reader.childCount()) {
         ItemReader second_child = reader.childAt(first_content_idx);
@@ -3594,7 +3594,7 @@ static void cmd_multicols(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Process pretext before the multicols div (spans all columns)
     if (pretext_item.map != nullptr) {
         ElementReader pretext_reader(pretext_item);
@@ -3602,24 +3602,24 @@ static void cmd_multicols(LatexProcessor* proc, Item elem) {
             proc->processNode(pretext_reader.childAt(i).item());
         }
     }
-    
+
     proc->closeParagraphIfOpen();
-    
+
     // Build attributes string including class and style
     char attrs[256];
     snprintf(attrs, sizeof(attrs), "class=\"multicols\" style=\"column-count:%d\"", num_cols);
-    
+
     // Open multicols container with all attributes
     gen->writer()->openTagRaw("div", attrs);
-    
+
     // Process content (skip first child which is the column count)
     for (int64_t i = first_content_idx; i < reader.childCount(); i++) {
         proc->processNode(reader.childAt(i).item());
     }
-    
+
     proc->closeParagraphIfOpen();
     gen->writer()->closeTag("div");
-    
+
     proc->setNextParagraphIsContinue();
 }
 
@@ -3631,19 +3631,19 @@ static void cmd_verb(LatexProcessor* proc, Item elem) {
     // In this case, the children contain the verbatim content
     // This happens when the scanner doesn't recognize the \verb pattern
     HtmlGenerator* gen = proc->generator();
-    
+
     proc->ensureParagraph();
-    
+
     ElementReader reader(elem);
     int64_t child_count = reader.childCount();
-    
+
     if (child_count == 0) {
         // No content - just output empty code block
         gen->writer()->openTagRaw("code", "class=\"tt\"");
         gen->writer()->closeTag("code");
         return;
     }
-    
+
     // Check if first child is a string that looks like the full \verb token
     // (scanner format: "\verb|content|")
     ItemReader first_child = reader.childAt(0);
@@ -3655,10 +3655,10 @@ static void cmd_verb(LatexProcessor* proc, Item elem) {
             return;
         }
     }
-    
+
     // Regular command form - extract content from children
     gen->writer()->openTagRaw("code", "class=\"tt\"");
-    
+
     // Collect all text content from children
     for (int64_t i = 0; i < child_count; i++) {
         ItemReader child = reader.childAt(i);
@@ -3673,7 +3673,7 @@ static void cmd_verb(LatexProcessor* proc, Item elem) {
             // Process child elements (might be nested commands)
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
-            
+
             // For curly groups, extract their text content
             if (tag && (strcmp(tag, "curly_group") == 0 || strcmp(tag, "curly_group_text") == 0)) {
                 StringBuf* sb = stringbuf_new(proc->pool());
@@ -3686,7 +3686,7 @@ static void cmd_verb(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     gen->writer()->closeTag("code");
 }
 
@@ -3695,43 +3695,43 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
     // The external scanner matched the full \verb<delim>text<delim> pattern
     // The AST builder stored it as a string child
     HtmlGenerator* gen = proc->generator();
-    
+
     log_debug("cmd_verb_command: CALLED");
-    
+
     // Ensure we're in a paragraph (verb is inline content)
     proc->ensureParagraph();
-    
+
     ElementReader elem_reader(elem);
-    
+
     // Get the token string from the first child
     if (elem_reader.childCount() < 1) {
         log_warn("verb_command: no children found");
         return;
     }
-    
+
     ItemReader first_child = elem_reader.childAt(0);
     if (!first_child.isString()) {
         log_warn("verb_command: first child is not a string");
         return;
     }
-    
+
     const char* text = first_child.cstring();
     if (!text) {
         log_warn("verb_command: first child string is null");
         return;
     }
-    
+
     log_debug("verb_command: processing text='%s'", text);
-    
+
     // Parse: "\verb<delim>content<delim>" or "\verb*<delim>content<delim>"
     // Skip "\verb" (5 chars)
     if (strlen(text) < 7) {  // Minimum: \verb||
         log_warn("verb_command: token too short: %s", text);
         return;
     }
-    
+
     const char* ptr = text + 5;  // After "\verb"
-    
+
     // Check for starred variant (\verb*)
     bool starred = false;
     if (*ptr == '*') {
@@ -3739,35 +3739,35 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
         ptr++;
         log_debug("verb_command: starred variant detected");
     }
-    
+
     // Next character is the delimiter
     char delim = *ptr;
     if (delim == '\0') {
         log_warn("verb_command: no delimiter after \\verb%s", starred ? "*" : "");
         return;
     }
-    
+
     log_debug("verb_command: delimiter='%c'", delim);
-    
+
     // Find content between delimiters
     const char* content_start = ptr + 1;
     const char* content_end = strchr(content_start, delim);
-    
+
     if (!content_end) {
         log_warn("verb_command: missing closing delimiter '%c' in: %s", delim, text);
         return;
     }
-    
+
     size_t content_len = content_end - content_start;
-    
+
     log_debug("verb_command: content='%.*s' (len=%zu)", (int)content_len, content_start, content_len);
-    
+
     // Open <code class="tt"> tag (matches LaTeX.js)
     gen->writer()->openTagRaw("code", "class=\"tt\"");
-    
+
     // Output verbatim content (extract substring)
     std::string content(content_start, content_len);
-    
+
     // For \verb*, replace spaces with visible space character (U+2423 OPEN BOX)
     if (starred) {
         for (size_t i = 0; i < content.length(); i++) {
@@ -3776,20 +3776,20 @@ static void cmd_verb_command(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     gen->writer()->writeText(content.c_str());
-    
+
     gen->writer()->closeTag("code");
-    
+
     log_debug("verb_command: DONE");
 }
 
 static void cmd_verbatim(LatexProcessor* proc, Item elem) {
     // \begin{verbatim} ... \end{verbatim}
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->startVerbatim();
-    
+
     // In verbatim mode, output text as-is without processing commands
     ElementReader elem_reader(elem);
     auto iter = elem_reader.children();
@@ -3799,7 +3799,7 @@ static void cmd_verbatim(LatexProcessor* proc, Item elem) {
             gen->verbatimText(child.cstring());
         }
     }
-    
+
     gen->endVerbatim();
 }
 
@@ -3808,7 +3808,7 @@ static void cmd_verbatim(LatexProcessor* proc, Item elem) {
 static void cmd_math(LatexProcessor* proc, Item elem) {
     // Inline math: $...$  or \(...\)
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->startInlineMath();
     proc->processChildren(elem);
     gen->endInlineMath();
@@ -3822,7 +3822,7 @@ static void cmd_inline_math(LatexProcessor* proc, Item elem) {
 static void cmd_displaymath(LatexProcessor* proc, Item elem) {
     // Display math: \[...\] or $$...$$
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->startDisplayMath();
     proc->processChildren(elem);
     gen->endDisplayMath();
@@ -3851,7 +3851,7 @@ static void cmd_math_environment(LatexProcessor* proc, Item elem) {
 static void cmd_equation(LatexProcessor* proc, Item elem) {
     // \begin{equation} ... \end{equation}
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->startEquation(false);  // numbered
     proc->processChildren(elem);
     gen->endEquation(false);
@@ -3860,7 +3860,7 @@ static void cmd_equation(LatexProcessor* proc, Item elem) {
 static void cmd_equation_star(LatexProcessor* proc, Item elem) {
     // \begin{equation*} ... \end{equation*}
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->startEquation(true);  // unnumbered
     proc->processChildren(elem);
     gen->endEquation(true);
@@ -3871,7 +3871,7 @@ static void cmd_text(LatexProcessor* proc, Item elem) {
     // \text{...} - text inside math mode (or standalone)
     // Output as regular text (not math font)
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->span("text");  // Use text class for Roman font in math
     proc->processChildren(elem);
     gen->closeElement();
@@ -3907,31 +3907,31 @@ static void cmd_frac(LatexProcessor* proc, Item elem) {
     // Output as inline fraction: (num)/(denom) or use MathML-like structure
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     proc->ensureParagraph();
-    
+
     // Get numerator and denominator from children
     int64_t count = reader.childCount();
     if (count >= 2) {
         // Open fraction container
         gen->writer()->openTagRaw("span", "class=\"frac\"");
-        
+
         // Numerator
         gen->writer()->openTagRaw("span", "class=\"numer\"");
         ItemReader num = reader.childAt(0);
         proc->processNode(num.item());
         gen->writer()->closeTag("span");
-        
+
         // Fraction bar is CSS
         gen->writer()->openTagRaw("span", "class=\"frac-line\"");
         gen->writer()->closeTag("span");
-        
+
         // Denominator
         gen->writer()->openTagRaw("span", "class=\"denom\"");
         ItemReader denom = reader.childAt(1);
         proc->processNode(denom.item());
         gen->writer()->closeTag("span");
-        
+
         gen->writer()->closeTag("span");
     } else if (count >= 1) {
         // Only numerator
@@ -4030,11 +4030,11 @@ static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
     // 'H' means: add brsp (ZWS + space) after IF optional arg was consumed
     // Note: Don't unskip - the preceding space should be preserved
     // Returns empty array (no output), but adds brsp if optional arg consumed
-    
+
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
     bool has_optional_arg = false;
-    
+
     // Check if optional argument was consumed (brack_group or curly_group child)
     auto iter = reader.children();
     ItemReader child;
@@ -4048,7 +4048,7 @@ static void cmd_gobbleO(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Output ZWS + space (brsp) if optional argument was consumed
     // LaTeX.js: brsp = '\u200B ' (breakable but non-collapsible space)
     if (has_optional_arg) {
@@ -4061,13 +4061,13 @@ static void cmd_echoO(LatexProcessor* proc, Item elem) {
     // \echoO[optional] - from echo package for testing
     // latex.js: args.echoO = <[ H o? ]>, \echoO : (o) -> [ "-", o, "-" ]
     // Outputs "-optional-" if optional arg present, otherwise just "-"
-    
+
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     ElementReader reader(elem);
-    
+
     gen->text("-");
-    
+
     // Find and output optional argument content
     auto iter = reader.children();
     ItemReader child;
@@ -4084,7 +4084,7 @@ static void cmd_echoO(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     gen->text("-");
 }
 
@@ -4093,30 +4093,30 @@ static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
     // latex.js: args.echoOGO = <[ H o? g o? ]>
     // Pattern: -optional- for optional args, +mandatory+ for mandatory args
     // For \echoOGO[o1]{g}[o2] -> outputs: -o1-+g+-o2-
-    // 
+    //
     // Parser behavior:
     // - First curly_group {g} is UNWRAPPED: its content becomes direct children of the command
     // - If [o1] is directly adjacent (no space), it becomes a child
     // - If [o2] is separated by space, it becomes a SIBLING
-    
+
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     ElementReader reader(elem);
-    
+
     std::vector<Item> brack_args_children;  // optional args from children (before mandatory)
     std::vector<Item> brack_args_siblings;  // optional args from siblings (after mandatory)
     std::vector<Item> curly_args;           // extra mandatory args from siblings (shouldn't normally happen)
-    
+
     // Mandatory arg: the unwrapped text content of the command element
     StringBuf* mandatory_sb = stringbuf_new(pool);
-    
+
     auto iter = reader.children();
     ItemReader child;
     while (iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "brack_group") == 0) {
                 // Optional arg as child (before mandatory, i.e. [o1])
                 brack_args_children.push_back(child.item());
@@ -4132,22 +4132,22 @@ static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
             stringbuf_append_str(mandatory_sb, child.cstring());
         }
     }
-    
+
     // Then, consume sibling arguments (pattern: o? after mandatory)
     proc->consumeSiblingArgs(brack_args_siblings, curly_args);
-    
+
     // Ensure we're in a paragraph before outputting content
     proc->ensureParagraph();
-    
+
     // Output: -o1- +g+ -o2-
-    
+
     // First optional(s) from children (use outputGroupContent to handle parbreak -> <br>)
     for (size_t i = 0; i < brack_args_children.size(); i++) {
         gen->text("-");
         proc->outputGroupContent(brack_args_children[i]);
         gen->text("-");
     }
-    
+
     // Mandatory (unwrapped text content)
     String* mandatory = stringbuf_to_string(mandatory_sb);
     if (mandatory && mandatory->len > 0) {
@@ -4155,7 +4155,7 @@ static void cmd_echoOGO(LatexProcessor* proc, Item elem) {
         gen->text(mandatory->chars);
         gen->text("+");
     }
-    
+
     // Second optional(s) from siblings (use outputGroupContent to handle parbreak -> <br>)
     for (size_t i = 0; i < brack_args_siblings.size(); i++) {
         gen->text("-");
@@ -4168,30 +4168,30 @@ static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
     // \echoGOG{g1}[o]{g2} - from echo package for testing
     // latex.js: args.echoGOG = <[ H g o? g ]>
     // Pattern: +g1+-o-+g2+ where optional is only if present
-    // 
+    //
     // Parser behavior:
     // - First curly_group {g1} is UNWRAPPED: its content becomes direct children of the command
     // - If [o] and {g2} are directly adjacent (no space), they become children
     // - If [o] and {g2} are separated by space, they become SIBLINGS
-    
+
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
     ElementReader reader(elem);
-    
+
     std::vector<Item> brack_args;  // optional args (from children and siblings)
     std::vector<Item> curly_args;  // mandatory args (from siblings only - first is unwrapped)
-    
+
     // First mandatory arg: the unwrapped text content of the command element
     // Collect all non-brack_group, non-curly_group children as the first mandatory
     StringBuf* first_mandatory_sb = stringbuf_new(pool);
-    
+
     auto iter = reader.children();
     ItemReader child;
     while (iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "brack_group") == 0) {
                 // Optional arg as child (no space between command and [])
                 brack_args.push_back(child.item());
@@ -4207,16 +4207,16 @@ static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
             stringbuf_append_str(first_mandatory_sb, child.cstring());
         }
     }
-    
+
     // Then, consume sibling arguments (optional and second mandatory)
     proc->consumeSiblingArgs(brack_args, curly_args);
-    
+
     // Ensure we're in a paragraph before outputting content
     proc->ensureParagraph();
-    
+
     // Pattern for echoGOG: g o? g
     // Output: +g1+ -o- +g2+ (or +g1+ +g2+ if no optional)
-    
+
     // First mandatory (unwrapped text content)
     String* first_mandatory = stringbuf_to_string(first_mandatory_sb);
     if (first_mandatory && first_mandatory->len > 0) {
@@ -4224,14 +4224,14 @@ static void cmd_echoGOG(LatexProcessor* proc, Item elem) {
         gen->text(first_mandatory->chars);
         gen->text("+");
     }
-    
+
     // Optional (if present) - use outputGroupContent to handle parbreak -> <br>
     for (size_t i = 0; i < brack_args.size(); i++) {
         gen->text("-");
         proc->outputGroupContent(brack_args[i]);
         gen->text("-");
     }
-    
+
     // Second mandatory (from siblings) - use outputGroupContent for consistency
     for (size_t i = 0; i < curly_args.size(); i++) {
         gen->text("+");
@@ -4255,11 +4255,11 @@ static void cmd_newpage(LatexProcessor* proc, Item elem) {
 static double convert_length_to_px(const char* length) {
     double value;
     char unit[16] = {0};
-    
+
     if (sscanf(length, "%lf%15s", &value, unit) < 1) {
         return -1;
     }
-    
+
     // Convert to pixels based on unit
     // Standard conversions: 1in = 96px, 1cm = 37.795px, 1mm = 3.7795px
     // 1pt = 1.333px, 1pc = 16px, 1em = 16px (assuming 16px base)
@@ -4280,24 +4280,24 @@ static double convert_length_to_px(const char* length) {
     } else if (strcmp(unit, "ex") == 0) {
         return value * 8.0;  // roughly half of em
     }
-    
+
     return -1;  // unknown unit
 }
 
 static void cmd_hspace(LatexProcessor* proc, Item elem) {
     // \hspace{length} - horizontal space
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract length from children
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* length_str = stringbuf_to_string(sb);
-    
+
     // Convert length to pixels
     double px = convert_length_to_px(length_str->chars);
-    
+
     // Create inline spacer with margin-right (matches LaTeX.js behavior)
     char style[256];
     if (px >= 0) {
@@ -4318,23 +4318,23 @@ static void cmd_vspace(LatexProcessor* proc, Item elem) {
     // - Horizontal mode (inline): stays inline with text → <span class="vspace-inline" style="margin-bottom:...">
     // - Vertical mode (block): creates space between paragraphs → <span class="vspace" style="margin-bottom:...">
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract length from children
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* length_str = stringbuf_to_string(sb);
-    
+
     // Convert LaTeX length to pixels (approximate conversion)
     // LaTeX units: pt, cm, mm, in, em, ex
     // For now, use browser's ability to handle these units directly
     double px_value = convertLatexLengthToPixels(length_str->chars);
-    
+
     // Create style with margin-bottom (not height, as vertical space affects flow)
     char style[256];
     snprintf(style, sizeof(style), "margin-bottom:%.3fpx", px_value);
-    
+
     // Context-dependent output
     if (proc->inParagraph()) {
         // Inline context: output inline span within paragraph
@@ -4382,34 +4382,34 @@ static void cmd_marginpar(LatexProcessor* proc, Item elem) {
     // \marginpar{text} - margin note
     // 1. Output inline placeholder: <span class="mpbaseline" id="marginref-N"></span>
     // 2. Capture marginpar content and store for later output after body div
-    
+
     HtmlGenerator* gen = proc->generator();
     ElementReader reader(elem);
-    
+
     // Enter a new group to isolate font changes from the main document
     gen->enterGroup();
-    
+
     // Enter inline mode to prevent paragraph creation inside marginpar
     proc->enterInlineMode();
-    
+
     // Get the marginpar content by capturing output
     gen->startCapture();
     proc->processChildren(elem);
     std::string content = gen->endCapture();
-    
+
     // Exit inline mode
     proc->exitInlineMode();
-    
+
     // Exit group to restore font state
     gen->exitGroup();
-    
+
     // Add to margin paragraphs list and get unique ID
     int id = proc->addMarginParagraph(content);
-    
+
     // Ensure we're in a paragraph before outputting the placeholder
     // This ensures the span appears inside <p> not before it
     proc->ensureParagraph();
-    
+
     // Output inline placeholder at current position
     char id_attr[64];
     snprintf(id_attr, sizeof(id_attr), "mpbaseline\" id=\"marginref-%d", id);
@@ -4437,7 +4437,7 @@ static void cmd_smallskip(LatexProcessor* proc, Item elem) {
     // - Horizontal mode (inline): stays inline with text → <span class="vspace-inline smallskip"></span>
     // - Vertical mode (block): creates space between paragraphs → <span class="vspace smallskip"></span>
     HtmlGenerator* gen = proc->generator();
-    
+
     if (proc->inParagraph()) {
         // Inline context: output inline span within paragraph
         gen->span("vspace-inline smallskip");
@@ -4452,7 +4452,7 @@ static void cmd_smallskip(LatexProcessor* proc, Item elem) {
 static void cmd_medskip(LatexProcessor* proc, Item elem) {
     // \medskip - medium vertical space
     HtmlGenerator* gen = proc->generator();
-    
+
     if (proc->inParagraph()) {
         gen->span("vspace-inline medskip");
         gen->closeElement();
@@ -4465,7 +4465,7 @@ static void cmd_medskip(LatexProcessor* proc, Item elem) {
 static void cmd_bigskip(LatexProcessor* proc, Item elem) {
     // \bigskip - large vertical space
     HtmlGenerator* gen = proc->generator();
-    
+
     if (proc->inParagraph()) {
         gen->span("vspace-inline bigskip");
         gen->closeElement();
@@ -4583,10 +4583,10 @@ static void cmd_qquad(LatexProcessor* proc, Item elem) {
 static void _box(LatexProcessor* proc, Item elem, const char* classes,
                  const char* width = nullptr, const char* pos = nullptr) {
     HtmlGenerator* gen = proc->generator();
-    
+
     // Build the class string based on position parameter
     std::string box_classes = classes ? classes : "hbox";
-    
+
     if (width && pos) {
         // \makebox[width][pos]{text} handling
         switch (pos[0]) {
@@ -4596,12 +4596,12 @@ static void _box(LatexProcessor* proc, Item elem, const char* classes,
         case 'r': box_classes += " llap"; break;
         }
     }
-    
+
     // Outer span with hbox class
     gen->span(box_classes.c_str());
     // Inner span for content (pass nullptr to get <span> without class)
     gen->span(nullptr);
-    
+
     // Process content in restricted horizontal mode AND inline mode
     // Inline mode prevents paragraph creation inside the box
     proc->enterRestrictedHMode();
@@ -4609,7 +4609,7 @@ static void _box(LatexProcessor* proc, Item elem, const char* classes,
     proc->processChildren(elem);
     proc->exitInlineMode();
     proc->exitRestrictedHMode();
-    
+
     gen->closeElement(); // close inner span
     gen->closeElement(); // close outer span
 }
@@ -4625,9 +4625,9 @@ static void cmd_fbox(LatexProcessor* proc, Item elem) {
     // \fbox{text} - framed box
     // Special handling: if content is a single parbox/minipage/makebox, add frame class to it
     // Otherwise, wrap in hbox frame
-    
+
     ElementReader reader(elem);
-    
+
     // Check if content is a single box command (parbox, minipage, makebox)
     std::vector<Item> children;
     for (int64_t i = 0; i < reader.childCount(); i++) {
@@ -4650,13 +4650,13 @@ static void cmd_fbox(LatexProcessor* proc, Item elem) {
             children.push_back(child.item());
         }
     }
-    
+
     // If exactly one child and it's a box element (parbox, minipage, makebox), add frame class to it
     if (children.size() == 1 && get_type_id(children[0]) == LMD_TYPE_ELEMENT) {
         ElementReader child_elem(children[0]);
         const char* elem_name = child_elem.tagName();
-        
-        if (strcmp(elem_name, "parbox") == 0 || strcmp(elem_name, "minipage") == 0 || 
+
+        if (strcmp(elem_name, "parbox") == 0 || strcmp(elem_name, "minipage") == 0 ||
             strcmp(elem_name, "makebox") == 0) {
             // Set flag in processor that next box should have frame class
             proc->set_next_box_frame(true);
@@ -4665,7 +4665,7 @@ static void cmd_fbox(LatexProcessor* proc, Item elem) {
             return;
         }
     }
-    
+
     // Default: wrap in hbox frame
     _box(proc, elem, "hbox frame");
 }
@@ -4677,22 +4677,22 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
-    
+
     // Default values
     std::string width = "";
     std::string pos = "";
-    
+
     // Collect bracket groups and content children
     std::vector<std::string> brack_params;
     std::vector<Item> content_items;
-    
+
     for (int64_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
-        
+
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "brack_group") == 0) {
                 // Optional parameter
                 StringBuf* sb = stringbuf_new(pool);
@@ -4708,7 +4708,7 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
             content_items.push_back(child.item());
         }
     }
-    
+
     // Parse bracket parameters
     if (brack_params.size() >= 1) {
         width = brack_params[0];  // Width
@@ -4716,10 +4716,10 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
     if (brack_params.size() >= 2) {
         pos = brack_params[1];  // Position: l, c, r, s
     }
-    
+
     // Build CSS classes - include frame
     std::string classes = "hbox frame";
-    
+
     // Position classes
     if (!pos.empty() && !width.empty()) {
         switch (pos[0]) {
@@ -4729,9 +4729,9 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
         case 'r': classes += " llap"; break;
         }
     }
-    
+
     proc->ensureParagraph();
-    
+
     // Build style attribute
     std::stringstream style;
     style << std::fixed << std::setprecision(3);
@@ -4741,17 +4741,17 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
             style << "width:" << width_px << "px";
         }
     }
-    
+
     // Generate HTML
     std::stringstream attrs;
     attrs << "class=\"" << classes << "\"";
     if (!style.str().empty()) {
         attrs << " style=\"" << style.str() << "\"";
     }
-    
+
     gen->writer()->openTagRaw("span", attrs.str().c_str());
     gen->span(nullptr);  // inner span for content
-    
+
     // Process content in restricted horizontal and inline mode
     proc->enterRestrictedHMode();
     proc->enterInlineMode();
@@ -4760,7 +4760,7 @@ static void cmd_framebox(LatexProcessor* proc, Item elem) {
     }
     proc->exitInlineMode();
     proc->exitRestrictedHMode();
-    
+
     gen->closeElement();  // close inner span
     gen->closeElement();  // close outer span
 }
@@ -4776,31 +4776,31 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     // pos: c,t,b (default: c)
     // height: optional length
     // inner-pos: t,c,b,s (default: same as pos)
-    // 
+    //
     // Parser output: <parbox [brack_group]* string string [element*]>
     // First string is width, second string/elements are content
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
-    
+
     // Default values
     std::string pos = "c";
     std::string inner_pos = "";
     std::string width = "";
     std::string height = "";
-    
+
     // Collect bracket groups and text children
     std::vector<std::string> brack_params;
     std::vector<Item> content_items;
     bool found_width = false;
-    
+
     for (int64_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
-        
+
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "brack_group") == 0) {
                 // Optional parameter
                 StringBuf* sb = stringbuf_new(pool);
@@ -4825,7 +4825,7 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Parse bracket parameters
     if (brack_params.size() >= 1) {
         pos = brack_params[0];  // Position: t, c, b
@@ -4836,35 +4836,35 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     if (brack_params.size() >= 3) {
         inner_pos = brack_params[2];  // Inner position: t, c, b, s
     }
-    
+
     // Default inner_pos to pos if not specified
     if (inner_pos.empty()) {
         inner_pos = pos;
     }
-    
+
     // Build CSS classes
     std::string classes = "parbox";
-    
+
     if (!height.empty()) {
         classes += " pbh";
     }
-    
+
     // Position classes
     if (pos == "c") classes += " p-c";
     else if (pos == "t") classes += " p-t";
     else if (pos == "b") classes += " p-b";
-    
+
     // Inner position classes
     if (inner_pos == "s") classes += " stretch";
     else if (inner_pos == "c") classes += " p-cc";
     else if (inner_pos == "t") classes += " p-ct";
     else if (inner_pos == "b") classes += " p-cb";
-    
+
     // Add frame class if requested by fbox
     if (proc->get_next_box_frame()) {
         classes += " frame";
     }
-    
+
     // Build style attribute
     std::stringstream style;
     style << std::fixed << std::setprecision(3);  // 3 decimal places for pixel values
@@ -4886,7 +4886,7 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
             style << "height:" << height << ";";  // fallback to original value
         }
     }
-    
+
     // Generate HTML
     proc->ensureParagraph();
     std::stringstream attrs;
@@ -4894,15 +4894,15 @@ static void cmd_parbox(LatexProcessor* proc, Item elem) {
     if (!style.str().empty()) {
         attrs << " style=\"" << style.str() << "\"";
     }
-    
+
     gen->writer()->openTagRaw("span", attrs.str().c_str());
     gen->writer()->openTag("span");
-    
+
     // Process content items
     for (const Item& item : content_items) {
         proc->processNode(item);
     }
-    
+
     gen->writer()->closeTag("span");
     gen->writer()->closeTag("span");
 }
@@ -4915,22 +4915,22 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
-    
+
     // Default values
     std::string width = "";
     std::string pos = "";
-    
+
     // Collect bracket groups and content children
     std::vector<std::string> brack_params;
     std::vector<Item> content_items;
-    
+
     for (int64_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
-        
+
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "brack_group") == 0) {
                 // Optional parameter
                 StringBuf* sb = stringbuf_new(pool);
@@ -4946,7 +4946,7 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
             content_items.push_back(child.item());
         }
     }
-    
+
     // Parse bracket parameters
     if (brack_params.size() >= 1) {
         width = brack_params[0];  // Width
@@ -4954,10 +4954,10 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
     if (brack_params.size() >= 2) {
         pos = brack_params[1];  // Position: l, c, r, s
     }
-    
+
     // Build CSS classes
     std::string classes = "hbox";
-    
+
     // Position classes
     // l = left (content appears at left, box extends right = rlap)
     // c = center (content centered, box extends both ways = clap)
@@ -4970,14 +4970,14 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
         case 'r': classes += " llap"; break;
         }
     }
-    
+
     // Add frame class if requested by \framebox
     if (proc->get_next_box_frame()) {
         classes += " frame";
     }
-    
+
     proc->ensureParagraph();
-    
+
     // Build style attribute
     std::stringstream style;
     style << std::fixed << std::setprecision(3);  // 3 decimal places
@@ -4987,17 +4987,17 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
             style << "width:" << width_px << "px";
         }
     }
-    
+
     // Generate HTML: <span class="classes" style="width:..."><span>content</span></span>
     std::stringstream attrs;
     attrs << "class=\"" << classes << "\"";
     if (!style.str().empty()) {
         attrs << " style=\"" << style.str() << "\"";
     }
-    
+
     gen->writer()->openTagRaw("span", attrs.str().c_str());
     gen->span(nullptr);  // inner span for content
-    
+
     // Process content in restricted horizontal and inline mode
     proc->enterRestrictedHMode();
     proc->enterInlineMode();
@@ -5006,7 +5006,7 @@ static void cmd_makebox(LatexProcessor* proc, Item elem) {
     }
     proc->exitInlineMode();
     proc->exitRestrictedHMode();
-    
+
     gen->closeElement();  // close inner span
     gen->closeElement();  // close outer span
 }
@@ -5147,26 +5147,26 @@ static void cmd_maketitle(LatexProcessor* proc, Item elem) {
     // Structure: div.list.center containing:
     //   - vspace 2em
     //   - div.title (inline content only, no <p> tags)
-    //   - vspace 1.5em  
+    //   - vspace 1.5em
     //   - div.author (inline content only)
     //   - vspace 1em
     //   - div.date (inline content only)
     //   - vspace 1.5em
     (void)elem;
     HtmlGenerator* gen = proc->generator();
-    
+
     // Close any open paragraph before title block
     proc->closeParagraphIfOpen();
-    
+
     // Start the centered title block container
     // Use raw HTML since we need class="list center" (two classes)
     gen->writer()->writeRawHtml("<div class=\"list center\">");
     gen->enterGroup();  // Track element depth
-    
+
     // Vertical space before title (2em)
     gen->spanWithClassAndStyle("vspace", "margin-bottom:2em");
     gen->closeElement();
-    
+
     // Title - enter inline mode to suppress <p> creation
     if (proc->hasTitle()) {
         gen->div("title");
@@ -5175,11 +5175,11 @@ static void cmd_maketitle(LatexProcessor* proc, Item elem) {
         proc->exitInlineMode();
         gen->closeElement();
     }
-    
+
     // Vertical space after title (1.5em)
     gen->spanWithClassAndStyle("vspace", "margin-bottom:1.5em");
     gen->closeElement();
-    
+
     // Author - enter inline mode to suppress <p> creation
     if (proc->hasAuthor()) {
         gen->div("author");
@@ -5188,11 +5188,11 @@ static void cmd_maketitle(LatexProcessor* proc, Item elem) {
         proc->exitInlineMode();
         gen->closeElement();
     }
-    
+
     // Vertical space after author (1em)
     gen->spanWithClassAndStyle("vspace", "margin-bottom:1em");
     gen->closeElement();
-    
+
     // Date (or today's date if not set) - enter inline mode
     gen->div("date");
     proc->enterInlineMode();
@@ -5208,11 +5208,11 @@ static void cmd_maketitle(LatexProcessor* proc, Item elem) {
     }
     proc->exitInlineMode();
     gen->closeElement();
-    
+
     // Vertical space after date (1.5em)
     gen->spanWithClassAndStyle("vspace", "margin-bottom:1.5em");
     gen->closeElement();
-    
+
     // Close the container
     gen->writer()->writeRawHtml("</div>");
     gen->exitGroup();
@@ -5227,17 +5227,17 @@ static void cmd_label(LatexProcessor* proc, Item elem) {
     // latex.js: label associates the label name with the current counter context
     // The anchor ID is already output by the section/counter command
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract label name from children
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* label_str = stringbuf_to_string(sb);
-    
+
     // Register the label with current context
     gen->setLabel(label_str->chars);
-    
+
     // NOTE: Do NOT output an anchor here - the anchor is already in the
     // section heading or counter element. The label just associates the
     // label name with that anchor.
@@ -5246,14 +5246,14 @@ static void cmd_label(LatexProcessor* proc, Item elem) {
 static void cmd_ref(LatexProcessor* proc, Item elem) {
     // \ref{name}
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract reference name
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* ref_str = stringbuf_to_string(sb);
-    
+
     // Create reference link
     gen->ref(ref_str->chars);
 }
@@ -5261,14 +5261,14 @@ static void cmd_ref(LatexProcessor* proc, Item elem) {
 static void cmd_pageref(LatexProcessor* proc, Item elem) {
     // \pageref{name}
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract reference name
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* ref_str = stringbuf_to_string(sb);
-    
+
     // Create page reference
     gen->pageref(ref_str->chars);
 }
@@ -5280,7 +5280,7 @@ static void cmd_url(LatexProcessor* proc, Item elem) {
     // Note: Tree-sitter doesn't extract URL text properly yet
     // For now, just skip processing (URL text is lost in parse tree)
     HtmlGenerator* gen = proc->generator();
-    
+
     // TODO: Need to fix Tree-sitter LaTeX parser to capture URL text content
     // For now, output a placeholder
     gen->text("[URL]");
@@ -5289,13 +5289,13 @@ static void cmd_url(LatexProcessor* proc, Item elem) {
 static void cmd_href(LatexProcessor* proc, Item elem) {
     // \href{url}{text}
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract URL and text (two children)
     ElementReader elem_reader(elem);
-    
+
     if (elem_reader.childCount() >= 2) {
         Pool* pool = proc->pool();
-        
+
         // First child: URL
         ItemReader url_child = elem_reader.childAt(0);
         StringBuf* url_sb = stringbuf_new(pool);
@@ -5305,7 +5305,7 @@ static void cmd_href(LatexProcessor* proc, Item elem) {
             ElementReader(url_child.item()).textContent(url_sb);
         }
         String* url_str = stringbuf_to_string(url_sb);
-        
+
         // Second child: text
         ItemReader text_child = elem_reader.childAt(1);
         StringBuf* text_sb = stringbuf_new(pool);
@@ -5315,7 +5315,7 @@ static void cmd_href(LatexProcessor* proc, Item elem) {
             ElementReader(text_child.item()).textContent(text_sb);
         }
         String* text_str = stringbuf_to_string(text_sb);
-        
+
         gen->hyperlink(url_str->chars, text_str->chars);
     }
 }
@@ -5325,14 +5325,14 @@ static void cmd_href(LatexProcessor* proc, Item elem) {
 static void cmd_footnote(LatexProcessor* proc, Item elem) {
     // \footnote{text}
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract footnote text
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* text_str = stringbuf_to_string(sb);
-    
+
     // Create footnote marker
     gen->footnote(text_str->chars);
 }
@@ -5345,7 +5345,7 @@ static void cmd_tabular(LatexProcessor* proc, Item elem) {
     // \begin{tabular}{column_spec}
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     // Find column specification (first curly_group child)
     std::string column_spec;
     auto iter = elem_reader.children();
@@ -5363,13 +5363,13 @@ static void cmd_tabular(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Start table
     gen->startTabular(column_spec.c_str());
-    
+
     // Process table content (rows and cells)
     proc->processChildren(elem);
-    
+
     // End table
     gen->endTabular();
 }
@@ -5377,7 +5377,7 @@ static void cmd_tabular(LatexProcessor* proc, Item elem) {
 static void cmd_hline(LatexProcessor* proc, Item elem) {
     // \hline - horizontal line in table
     HtmlGenerator* gen = proc->generator();
-    
+
     // Insert a special row with hline class
     gen->startRow();
     gen->startCell();
@@ -5392,7 +5392,7 @@ static void cmd_multicolumn(LatexProcessor* proc, Item elem) {
     // Parser gives us: {"$":"multicolumn", "_":["3", "c", "Title"]}
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     // Extract arguments - they come as direct text children
     std::vector<std::string> args;
     auto iter = elem_reader.children();
@@ -5411,23 +5411,23 @@ static void cmd_multicolumn(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     if (args.size() < 3) {
         log_error("\\multicolumn requires 3 arguments, got %zu", args.size());
         return;
     }
-    
+
     // Parse arguments
     int colspan = atoi(args[0].c_str());
     const char* align = args[1].c_str();
-    
+
     // Start cell with colspan
     gen->startCell(align);
     gen->writer()->writeAttribute("colspan", args[0].c_str());
-    
+
     // Output content (third argument)
     gen->text(args[2].c_str());
-    
+
     gen->endCell();
 }
 
@@ -5436,7 +5436,7 @@ static void cmd_figure(LatexProcessor* proc, Item elem) {
     // Parser gives: {"$":"figure", "_":[...children...]}
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     // Extract position from first bracket_group if present
     const char* position = nullptr;
     auto iter = elem_reader.children();
@@ -5453,7 +5453,7 @@ static void cmd_figure(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     gen->startFigure(position);
     proc->processChildren(elem);
     gen->endFigure();
@@ -5464,7 +5464,7 @@ static void cmd_table_float(LatexProcessor* proc, Item elem) {
     // Note: This is the float environment, not the tabular environment
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     // Extract position from first bracket_group if present
     const char* position = nullptr;
     auto iter = elem_reader.children();
@@ -5481,7 +5481,7 @@ static void cmd_table_float(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Use startTable/endTable for table float environment
     gen->startTable(position);
     proc->processChildren(elem);
@@ -5494,9 +5494,9 @@ static void cmd_caption(LatexProcessor* proc, Item elem) {
     // Or: {"$":"caption", "_":[<curly_group>, ...]} (old format)
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     gen->startCaption();
-    
+
     // Extract caption text from children (string or curly_group)
     auto iter = elem_reader.children();
     ItemReader child;
@@ -5519,7 +5519,7 @@ static void cmd_caption(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     gen->endCaption();
 }
 
@@ -5530,11 +5530,11 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
     // brack_group may contain direct string child like "width=5cm" or structured key_value_pairs
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     const char* filename = nullptr;
     Pool* pool = proc->pool();
     StringBuf* options_sb = stringbuf_new(pool);
-    
+
     // Extract filename and options
     auto iter = elem_reader.children();
     ItemReader child;
@@ -5546,7 +5546,7 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
         } else if (child.getType() == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group_path") == 0) {
                 // curly_group_path contains a STRING child with the filename
                 auto path_iter = child_elem.children();
@@ -5558,8 +5558,8 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
                         break;
                     }
                 }
-            } else if (strcmp(tag, "brack_group") == 0 || 
-                       strcmp(tag, "brack_group_key_value") == 0 || 
+            } else if (strcmp(tag, "brack_group") == 0 ||
+                       strcmp(tag, "brack_group_key_value") == 0 ||
                        strcmp(tag, "bracket_group") == 0) {
                 // Options bracket - could be direct string or structured key-value pairs
                 auto kv_iter = child_elem.children();
@@ -5595,7 +5595,7 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
                                     }
                                 }
                             }
-                            
+
                             // Add to options string
                             if (!key.empty() && !value.empty()) {
                                 if (!first) stringbuf_append_str(options_sb, ",");
@@ -5610,13 +5610,13 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     const char* options = nullptr;
     if (options_sb->length > 0) {
         String* options_str = stringbuf_to_string(options_sb);
         options = options_str->chars;
     }
-    
+
     if (filename) {
         gen->includegraphics(filename, options);
     }
@@ -5638,28 +5638,28 @@ static thread_local double g_unitlength_px = 1.333;  // 1pt default
 // Returns pointer to character after closing paren, or nullptr on failure
 static const char* parsePicCoordAdvance(const char* str, double* x, double* y) {
     if (!str || !x || !y) return nullptr;
-    
+
     // skip leading whitespace
     while (*str && (*str == ' ' || *str == '\t' || *str == '\n')) str++;
     if (*str != '(') return nullptr;
     str++;
-    
+
     char* end;
     *x = strtod(str, &end);
     if (end == str) return nullptr;
     str = end;
-    
+
     // skip comma and whitespace
     while (*str && (*str == ' ' || *str == '\t' || *str == ',')) str++;
-    
+
     *y = strtod(str, &end);
     if (end == str) return nullptr;
     str = end;
-    
+
     // skip to closing paren
     while (*str && *str != ')') str++;
     if (*str == ')') str++;
-    
+
     return str;
 }
 
@@ -5672,12 +5672,12 @@ static void cmd_picture(LatexProcessor* proc, Item elem);
 
 // Structure to hold parsed picture items for sequential processing
 struct PictureItem {
-    enum Type { TEXT, PUT, LINE, VECTOR, CIRCLE, CIRCLE_FILLED, OVAL, QBEZIER, 
+    enum Type { TEXT, PUT, LINE, VECTOR, CIRCLE, CIRCLE_FILLED, OVAL, QBEZIER,
                 MULTIPUT, THICKLINES, THINLINES, LINETHICKNESS, CURLY_GROUP, BRACK_GROUP, UNKNOWN };
     Type type;
     std::string text;
     Item elem;
-    
+
     PictureItem() : type(UNKNOWN), elem(ItemNull) {}
     PictureItem(Type t, const std::string& txt = "") : type(t), text(txt), elem(ItemNull) {}
     PictureItem(Type t, Item e) : type(t), elem(e) {}
@@ -5686,26 +5686,26 @@ struct PictureItem {
 // Flatten picture children into a sequential list
 static void flattenPictureChildren(Item elem, std::vector<PictureItem>& items, Pool* pool) {
     ElementReader elem_reader(elem);
-    
+
     auto iter = elem_reader.children();
     ItemReader child;
-    
+
     while (iter.next(&child)) {
         TypeId type = child.getType();
-        
+
         if (type == LMD_TYPE_STRING) {
             String* str = (String*)child.item().string_ptr;
             items.push_back(PictureItem(PictureItem::TEXT, str->chars));
             continue;
         }
-        
+
         if (type != LMD_TYPE_ELEMENT) continue;
-        
+
         ElementReader child_elem(child.item());
         const char* tag = child_elem.tagName();
-        
+
         if (!tag) continue;
-        
+
         if (strcmp(tag, "paragraph") == 0) {
             // Recurse into paragraphs
             flattenPictureChildren(child.item(), items, pool);
@@ -5760,26 +5760,26 @@ static void flattenPictureChildren(Item elem, std::vector<PictureItem>& items, P
 static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& items) {
     Pool* pool = proc->pool();
     size_t i = 0;
-    
+
     while (i < items.size()) {
         PictureItem& item = items[i];
-        
+
         switch (item.type) {
             case PictureItem::THICKLINES:
                 if (g_picture_renderer) g_picture_renderer->thicklines();
                 i++;
                 break;
-                
+
             case PictureItem::THINLINES:
                 if (g_picture_renderer) g_picture_renderer->thinlines();
                 i++;
                 break;
-                
+
             case PictureItem::LINETHICKNESS: {
                 // \linethickness{value}
                 // The value is in the element's children or next curly_group
                 double thickness = 0.4;  // default in pt
-                
+
                 if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
                     ElementReader lt_elem(item.elem);
                     StringBuf* sb = stringbuf_new(pool);
@@ -5790,7 +5790,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                         thickness = strtod(str->chars, &end);
                     }
                 }
-                
+
                 // Also check for next curly_group
                 if (thickness <= 0 && i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                     ElementReader grp(items[i+1].elem);
@@ -5803,7 +5803,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                     }
                     i++;
                 }
-                
+
                 if (g_picture_renderer && thickness > 0) {
                     g_picture_renderer->linethickness(thickness);
                 }
@@ -5811,31 +5811,31 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 i++;
                 break;
             }
-                
+
             case PictureItem::PUT: {
                 // \put(x,y){content}
                 // Next items should be: TEXT with "(x,y)", then CURLY_GROUP with content
                 double x = 0, y = 0;
-                
+
                 // Look for coordinates in next TEXT item
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
                     if (parsePicCoord(items[i+1].text.c_str(), &x, &y)) {
                         i++;  // consume the coord text
                     }
                 }
-                
+
                 // Set the current position for nested commands
                 if (g_picture_renderer) {
                     g_picture_renderer->setPosition(x, y);
                 }
-                
+
                 // Look for content in next CURLY_GROUP
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                     // Check if curly_group contains picture commands
                     ElementReader grp(items[i+1].elem);
                     std::vector<PictureItem> nested_items;
                     flattenPictureChildren(items[i+1].elem, nested_items, pool);
-                    
+
                     bool has_nested_commands = false;
                     for (const auto& ni : nested_items) {
                         if (ni.type == PictureItem::LINE || ni.type == PictureItem::VECTOR ||
@@ -5845,7 +5845,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                             break;
                         }
                     }
-                    
+
                     if (has_nested_commands) {
                         // Process nested picture commands at position (x, y)
                         log_debug("put: (%.2f,%.2f) processing nested commands", x, y);
@@ -5863,21 +5863,21 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                     }
                     i++;  // consume the curly group
                 }
-                
+
                 i++;
                 break;
             }
-            
+
             case PictureItem::LINE: {
                 // \line(slope_x,slope_y){length}
                 double sx = 0, sy = 0, len = 0;
-                
+
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
                     if (parsePicCoord(items[i+1].text.c_str(), &sx, &sy)) {
                         i++;
                     }
                 }
-                
+
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                     ElementReader grp(items[i+1].elem);
                     StringBuf* sb = stringbuf_new(pool);
@@ -5887,7 +5887,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                     len = strtod(str->chars, &end);
                     i++;
                 }
-                
+
                 if (g_picture_renderer) {
                     g_picture_renderer->line(sx, sy, len);
                 }
@@ -5895,17 +5895,17 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 i++;
                 break;
             }
-            
+
             case PictureItem::VECTOR: {
                 // \vector(slope_x,slope_y){length}
                 double sx = 0, sy = 0, len = 0;
-                
+
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
                     if (parsePicCoord(items[i+1].text.c_str(), &sx, &sy)) {
                         i++;
                     }
                 }
-                
+
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                     ElementReader grp(items[i+1].elem);
                     StringBuf* sb = stringbuf_new(pool);
@@ -5915,7 +5915,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                     len = strtod(str->chars, &end);
                     i++;
                 }
-                
+
                 if (g_picture_renderer) {
                     g_picture_renderer->vector(sx, sy, len);
                 }
@@ -5923,7 +5923,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 i++;
                 break;
             }
-            
+
             case PictureItem::CIRCLE: {
                 // \circle{diameter} or \circle*{diameter}
                 // The diameter might be:
@@ -5931,7 +5931,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 // 2. A sibling curly_group (when parsed separately)
                 double diameter = 0;
                 bool filled = false;
-                
+
                 // First, check if the circle element has children with the diameter
                 if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
                     ElementReader circle_elem(item.elem);
@@ -5950,7 +5950,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                         diameter = strtod(txt, &end);
                     }
                 }
-                
+
                 // If diameter still 0, check for sibling items
                 if (diameter == 0) {
                     // Check for * in next text
@@ -5962,7 +5962,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                             i++;  // consume the *
                         }
                     }
-                    
+
                     if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                         ElementReader grp(items[i+1].elem);
                         StringBuf* sb = stringbuf_new(pool);
@@ -5973,7 +5973,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                         i++;
                     }
                 }
-                
+
                 if (g_picture_renderer && diameter > 0) {
                     g_picture_renderer->circle(diameter, filled);
                 }
@@ -5981,11 +5981,11 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 i++;
                 break;
             }
-            
+
             case PictureItem::CIRCLE_FILLED: {
                 // \circle*{diameter} - filled circle (parsed as separate command)
                 double diameter = 0;
-                
+
                 // Check if the circle* element has children with the diameter
                 if (get_type_id(item.elem) == LMD_TYPE_ELEMENT) {
                     ElementReader circle_elem(item.elem);
@@ -5997,7 +5997,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                         diameter = strtod(str->chars, &end);
                     }
                 }
-                
+
                 // If diameter still 0, check for sibling curly_group
                 if (diameter == 0 && i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                     ElementReader grp(items[i+1].elem);
@@ -6008,7 +6008,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                     diameter = strtod(str->chars, &end);
                     i++;
                 }
-                
+
                 if (g_picture_renderer && diameter > 0) {
                     g_picture_renderer->circle(diameter, true);  // always filled
                 }
@@ -6016,18 +6016,18 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 i++;
                 break;
             }
-            
+
             case PictureItem::OVAL: {
                 // \oval(width,height)[portion]
                 double w = 0, h = 0;
                 std::string portion;
-                
+
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
                     if (parsePicCoord(items[i+1].text.c_str(), &w, &h)) {
                         i++;
                     }
                 }
-                
+
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::BRACK_GROUP) {
                     ElementReader grp(items[i+1].elem);
                     StringBuf* sb = stringbuf_new(pool);
@@ -6036,7 +6036,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                     portion = str->chars;
                     i++;
                 }
-                
+
                 if (g_picture_renderer && (w > 0 || h > 0)) {
                     g_picture_renderer->oval(w, h, portion);
                 }
@@ -6044,12 +6044,12 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 i++;
                 break;
             }
-            
+
             case PictureItem::QBEZIER: {
                 // \qbezier(x1,y1)(cx,cy)(x2,y2)
                 double x1 = 0, y1 = 0, cx = 0, cy = 0, x2 = 0, y2 = 0;
                 int coords = 0;
-                
+
                 // Look for three coordinate pairs in following TEXT items
                 while (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT && coords < 3) {
                     double tx, ty;
@@ -6063,7 +6063,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                         break;
                     }
                 }
-                
+
                 if (g_picture_renderer && coords >= 3) {
                     g_picture_renderer->qbezier(x1, y1, cx, cy, x2, y2);
                 }
@@ -6071,17 +6071,17 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                 i++;
                 break;
             }
-            
+
             case PictureItem::MULTIPUT: {
                 // \multiput(x,y)(dx,dy){n}{object}
                 double x = 0, y = 0, dx = 0, dy = 0;
                 int n = 0;
-                
+
                 // Parse coordinates from following TEXT items
                 // The text might contain both coordinates like "(0,0)(1,0)"
                 while (i + 1 < items.size() && items[i+1].type == PictureItem::TEXT) {
                     const char* text = items[i+1].text.c_str();
-                    
+
                     // Try to parse first coordinate pair
                     const char* after_first = parsePicCoordAdvance(text, &x, &y);
                     if (after_first) {
@@ -6093,12 +6093,12 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                             break;
                         }
                     }
-                    
+
                     // If we can't parse anything, stop
                     if (after_first == nullptr) break;
                     i++;
                 }
-                
+
                 // Get n from first curly group
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                     ElementReader grp(items[i+1].elem);
@@ -6108,38 +6108,38 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                     n = atoi(str->chars);
                     i++;
                 }
-                
+
                 // Get object from second curly group - process nested picture commands
                 std::vector<PictureItem> nested_items;
                 if (i + 1 < items.size() && items[i+1].type == PictureItem::CURLY_GROUP) {
                     flattenPictureChildren(items[i+1].elem, nested_items, pool);
                     i++;
                 }
-                
-                log_debug("multiput: start=(%.2f,%.2f) delta=(%.2f,%.2f) n=%d nested=%zu", 
+
+                log_debug("multiput: start=(%.2f,%.2f) delta=(%.2f,%.2f) n=%d nested=%zu",
                          x, y, dx, dy, n, nested_items.size());
-                
+
                 // Process n copies of the nested content with position offset
                 if (g_picture_renderer && n > 0) {
                     for (int copy = 0; copy < n; copy++) {
                         double pos_x = x + copy * dx;
                         double pos_y = y + copy * dy;
                         g_picture_renderer->setPosition(pos_x, pos_y);
-                        
+
                         // Process nested items (similar to main loop)
                         for (size_t ni = 0; ni < nested_items.size(); ni++) {
                             const auto& item = nested_items[ni];
-                            
+
                             if (item.type == PictureItem::LINE) {
                                 // Process nested line: LINE, TEXT(slope), CURLY_GROUP(length)
                                 double sx = 0, sy = 0, len = 0;
-                                
+
                                 // Check next item for slope text
                                 if (ni + 1 < nested_items.size() && nested_items[ni+1].type == PictureItem::TEXT) {
                                     parsePicCoord(nested_items[ni+1].text.c_str(), &sx, &sy);
                                     ni++;
                                 }
-                                
+
                                 // Check next item for length curly_group
                                 if (ni + 1 < nested_items.size() && nested_items[ni+1].type == PictureItem::CURLY_GROUP) {
                                     ElementReader grp(nested_items[ni+1].elem);
@@ -6150,14 +6150,14 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                                     len = strtod(str->chars, &end);
                                     ni++;
                                 }
-                                
+
                                 if (len > 0) {
                                     g_picture_renderer->line(sx, sy, len);
                                 }
                             } else if (item.type == PictureItem::CIRCLE || item.type == PictureItem::CIRCLE_FILLED) {
                                 // Process nested circle
                                 double diameter = 0;
-                                
+
                                 // Diameter might be in element content or following curly_group
                                 ElementReader circ_elem(item.elem);
                                 StringBuf* sb = stringbuf_new(pool);
@@ -6167,8 +6167,8 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                                     char* end;
                                     diameter = strtod(str->chars, &end);
                                 }
-                                
-                                if (diameter == 0 && ni + 1 < nested_items.size() && 
+
+                                if (diameter == 0 && ni + 1 < nested_items.size() &&
                                     nested_items[ni+1].type == PictureItem::CURLY_GROUP) {
                                     ElementReader grp(nested_items[ni+1].elem);
                                     StringBuf* sb2 = stringbuf_new(pool);
@@ -6178,7 +6178,7 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                                     diameter = strtod(str2->chars, &end);
                                     ni++;
                                 }
-                                
+
                                 if (diameter > 0) {
                                     g_picture_renderer->circle(diameter, item.type == PictureItem::CIRCLE_FILLED);
                                 }
@@ -6186,11 +6186,11 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
                         }
                     }
                 }
-                
+
                 i++;
                 break;
             }
-            
+
             case PictureItem::TEXT:
             case PictureItem::CURLY_GROUP:
             case PictureItem::BRACK_GROUP:
@@ -6208,44 +6208,44 @@ static void processPictureItems(LatexProcessor* proc, std::vector<PictureItem>& 
 static void cmd_begin(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
-    
+
     // Extract environment name from \begin element content
     ElementReader elem_reader(elem);
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* str = stringbuf_to_string(sb);
     const char* env_name = str ? str->chars : "";
-    
+
     log_debug("cmd_begin: environment='%s'", env_name);
-    
+
     // Only handle picture environment specially
     if (strcmp(env_name, "picture") != 0) {
         // For other environments, just process children
         proc->processChildren(elem);
         return;
     }
-    
+
     // For picture environment, we need to collect siblings until \end{picture}
     // Use sibling context to consume following elements
-    
+
     // Create a synthetic element to hold the picture content
     MarkBuilder builder(proc->input());
     ElementBuilder pic_elem = builder.element("picture");
-    
+
     // Consume following siblings until \end{picture}
     int64_t consumed = 0;
     bool found_end = false;
-    
+
     // Access sibling context through proc's internal method
     ElementReader* parent = proc->getSiblingParent();
     int64_t current_idx = proc->getSiblingCurrentIndex();
-    
+
     if (parent) {
         int64_t count = parent->childCount();
         for (int64_t i = current_idx + 1; i < count; i++) {
             ItemReader sibling = parent->childAt(i);
             consumed++;
-            
+
             // Check if this is \end{picture}
             if (sibling.isElement()) {
                 ElementReader sib_elem = sibling.asElement();
@@ -6261,19 +6261,19 @@ static void cmd_begin(LatexProcessor* proc, Item elem) {
                     }
                 }
             }
-            
+
             // Add this sibling to the picture element
             pic_elem.child(sibling.item());
         }
     }
-    
+
     if (!found_end) {
         log_warn("cmd_begin: no matching \\end{picture} found");
     }
-    
+
     // Tell processChildren how many siblings we consumed
     proc->setSiblingConsumed(consumed);
-    
+
     // Create the picture element and process it
     Item picture_item = pic_elem.final();
     cmd_picture(proc, picture_item);
@@ -6284,20 +6284,20 @@ static void cmd_picture(LatexProcessor* proc, Item elem) {
     // Parser gives: {"$":"picture", "_":[paragraph with coords and commands]}
     HtmlGenerator* gen = proc->generator();
     Pool* pool = proc->pool();
-    
+
     // Initialize picture context with current unitlength
     g_picture_ctx = PictureContext();
     g_picture_ctx.unitlength_px = g_unitlength_px;
     g_picture_renderer = new PictureRenderer(g_picture_ctx);
-    
+
     // Flatten picture children into sequential list
     std::vector<PictureItem> items;
     flattenPictureChildren(elem, items, pool);
-    
+
     // Parse picture dimensions from first text content
     double width = 100, height = 100;  // default
     double x_off = 0, y_off = 0;
-    
+
     for (size_t i = 0; i < items.size(); i++) {
         if (items[i].type == PictureItem::TEXT) {
             const char* text = items[i].text.c_str();
@@ -6309,22 +6309,22 @@ static void cmd_picture(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     log_debug("cmd_picture: size=(%.2f,%.2f) offset=(%.2f,%.2f) unitlength=%.3fpx",
               width, height, x_off, y_off, g_unitlength_px);
-    
+
     // Begin picture with parsed dimensions
     g_picture_renderer->beginPicture(width, height, x_off, y_off);
-    
+
     // Process picture items
     processPictureItems(proc, items);
-    
+
     // End picture and get HTML output
     std::string html = g_picture_renderer->endPicture();
-    
+
     // Output directly as raw HTML
     gen->rawHtml(html.c_str());
-    
+
     // Cleanup
     delete g_picture_renderer;
     g_picture_renderer = nullptr;
@@ -6351,7 +6351,7 @@ static void cmd_thinlines(LatexProcessor* proc, Item elem) {
 // Helper: Convert color specification to CSS color string
 static std::string colorToCss(const char* model, const char* spec) {
     if (!model || !spec) return "black";
-    
+
     if (strcmp(model, "rgb") == 0) {
         // rgb{r,g,b} with values 0-1
         float r, g, b;
@@ -6386,7 +6386,7 @@ static std::string colorToCss(const char* model, const char* spec) {
             return std::string(buf);
         }
     }
-    
+
     return "black";
 }
 
@@ -6402,13 +6402,13 @@ static void cmd_color_reference(LatexProcessor* proc, Item elem) {
     // Structure: <color_reference> <\textcolor|colorbox> <curly_group_text "color"> <curly_group "content">
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     std::string command_name;
     std::string color_name;
     Item content_group = ItemNull;
-    
+
     log_debug("cmd_color_reference called");  // DEBUG
-    
+
     // Extract command name, color, and content
     auto iter = elem_reader.children();
     ItemReader child;
@@ -6421,7 +6421,7 @@ static void cmd_color_reference(LatexProcessor* proc, Item elem) {
         } else if (child.getType() == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group_text") == 0) {
                 // Color name
                 Pool* pool = proc->pool();
@@ -6435,7 +6435,7 @@ static void cmd_color_reference(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Generate output based on command type
     if (command_name.find("textcolor") != std::string::npos) {
         // \textcolor - colored text
@@ -6462,26 +6462,26 @@ static void cmd_textcolor(LatexProcessor* proc, Item elem) {
     // Or with model: {"$":"textcolor", "_":[<bracket_group>, "spec", "text_content"]}
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     std::string color_model;
     std::string color_spec;
     std::string color_name;
     bool has_model = false;
     std::vector<Item> text_items;  // Collect text content items
-    
+
     // Extract color specification and text
     auto iter = elem_reader.children();
     ItemReader child;
     int child_index = 0;
-    
+
     while (iter.next(&child)) {
         TypeId child_type = child.getType();
-        
+
         if (child_type == LMD_TYPE_STRING) {
             // Direct string child
             String* str = (String*)child.item().string_ptr;
             const char* content = str->chars;
-            
+
             if (color_name.empty() && !has_model) {
                 // First string is the color name (named color like "red", "blue")
                 color_name = content;
@@ -6495,7 +6495,7 @@ static void cmd_textcolor(LatexProcessor* proc, Item elem) {
         } else if (child_type == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "brack_group_text") == 0 || strcmp(tag, "bracket_group") == 0) {
                 // Color model like [rgb] or [HTML]
                 Pool* pool = proc->pool();
@@ -6510,7 +6510,7 @@ static void cmd_textcolor(LatexProcessor* proc, Item elem) {
                 StringBuf* sb = stringbuf_new(pool);
                 child_elem.textContent(sb);
                 String* content = stringbuf_to_string(sb);
-                
+
                 if (color_name.empty() && !has_model) {
                     color_name = content->chars;
                 } else if (has_model && color_spec.empty()) {
@@ -6526,14 +6526,14 @@ static void cmd_textcolor(LatexProcessor* proc, Item elem) {
         }
         child_index++;
     }
-    
+
     // Generate colored span if we have text content
     if (!text_items.empty()) {
-        std::string style_value = "color: " + 
-             (has_model ? colorToCss(color_model.c_str(), color_spec.c_str()) 
+        std::string style_value = "color: " +
+             (has_model ? colorToCss(color_model.c_str(), color_spec.c_str())
                         : namedColorToCss(color_name.c_str()));
         gen->spanWithStyle(style_value.c_str());
-        
+
         // Process all text content items
         for (Item text_item : text_items) {
             if (get_type_id(text_item) == LMD_TYPE_STRING) {
@@ -6551,12 +6551,12 @@ static void cmd_color(LatexProcessor* proc, Item elem) {
     // \color{name} or \color[model]{spec} - changes current color
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     std::string color_model;
     std::string color_spec;
     std::string color_name;
     bool has_model = false;
-    
+
     // Extract color specification
     auto iter = elem_reader.children();
     ItemReader child;
@@ -6564,7 +6564,7 @@ static void cmd_color(LatexProcessor* proc, Item elem) {
         if (child.getType() == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "bracket_group") == 0) {
                 Pool* pool = proc->pool();
                 StringBuf* sb = stringbuf_new(pool);
@@ -6577,7 +6577,7 @@ static void cmd_color(LatexProcessor* proc, Item elem) {
                 StringBuf* sb = stringbuf_new(pool);
                 child_elem.textContent(sb);
                 String* content = stringbuf_to_string(sb);
-                
+
                 if (has_model) {
                     color_spec = content->chars;
                 } else {
@@ -6586,10 +6586,10 @@ static void cmd_color(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Open a span with the color style (contents will be added by parent)
-    std::string style_value = "color: " + 
-         (has_model ? colorToCss(color_model.c_str(), color_spec.c_str()) 
+    std::string style_value = "color: " +
+         (has_model ? colorToCss(color_model.c_str(), color_spec.c_str())
                     : namedColorToCss(color_name.c_str()));
     gen->spanWithStyle(style_value.c_str());
 }
@@ -6599,25 +6599,25 @@ static void cmd_colorbox(LatexProcessor* proc, Item elem) {
     // Parser produces: {"$":"colorbox", "_":["color_name", "text_content"]}
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     std::string color_model;
     std::string color_spec;
     std::string color_name;
     bool has_model = false;
     std::vector<Item> text_items;  // Collect text content items
-    
+
     // Extract color specification and text
     auto iter = elem_reader.children();
     ItemReader child;
-    
+
     while (iter.next(&child)) {
         TypeId child_type = child.getType();
-        
+
         if (child_type == LMD_TYPE_STRING) {
             // Direct string child
             String* str = (String*)child.item().string_ptr;
             const char* content = str->chars;
-            
+
             if (color_name.empty() && !has_model) {
                 // First string is the color name
                 color_name = content;
@@ -6631,7 +6631,7 @@ static void cmd_colorbox(LatexProcessor* proc, Item elem) {
         } else if (child_type == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "brack_group_text") == 0 || strcmp(tag, "bracket_group") == 0) {
                 Pool* pool = proc->pool();
                 StringBuf* sb = stringbuf_new(pool);
@@ -6644,7 +6644,7 @@ static void cmd_colorbox(LatexProcessor* proc, Item elem) {
                 StringBuf* sb = stringbuf_new(pool);
                 child_elem.textContent(sb);
                 String* content = stringbuf_to_string(sb);
-                
+
                 if (color_name.empty() && !has_model) {
                     color_name = content->chars;
                 } else if (has_model && color_spec.empty()) {
@@ -6659,14 +6659,14 @@ static void cmd_colorbox(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Generate colored box if we have text content
     if (!text_items.empty()) {
-        std::string style_value = "background-color: " + 
-             (has_model ? colorToCss(color_model.c_str(), color_spec.c_str()) 
+        std::string style_value = "background-color: " +
+             (has_model ? colorToCss(color_model.c_str(), color_spec.c_str())
                         : namedColorToCss(color_name.c_str()));
         gen->spanWithStyle(style_value.c_str());
-        
+
         // Process all text content items
         for (Item text_item : text_items) {
             if (get_type_id(text_item) == LMD_TYPE_STRING) {
@@ -6685,12 +6685,12 @@ static void cmd_fcolorbox(LatexProcessor* proc, Item elem) {
     // Tree-sitter parses this as <fcolorbox> with 3 direct STRING children (not curly_group!)
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     std::string frame_color;
     std::string bg_color;
     std::string text_content;
     int string_count = 0;
-    
+
     // Extract the 3 string children
     auto iter = elem_reader.children();
     ItemReader child;
@@ -6707,10 +6707,10 @@ static void cmd_fcolorbox(LatexProcessor* proc, Item elem) {
             string_count++;
         }
     }
-    
+
     // Generate output
     if (string_count >= 3) {
-        std::string style_value = "background-color: " + namedColorToCss(bg_color.c_str()) + 
+        std::string style_value = "background-color: " + namedColorToCss(bg_color.c_str()) +
                            "; border: 1px solid " + namedColorToCss(frame_color.c_str());
         gen->spanWithStyle(style_value.c_str());
         gen->text(text_content.c_str());
@@ -6724,12 +6724,12 @@ static void cmd_definecolor(LatexProcessor* proc, Item elem) {
     // For now, just output a comment - in full implementation would store in color registry
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     std::string color_name;
     std::string color_model;
     std::string color_spec;
     int string_index = 0;
-    
+
     auto iter = elem_reader.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -6750,7 +6750,7 @@ static void cmd_definecolor(LatexProcessor* proc, Item elem) {
             StringBuf* sb = stringbuf_new(pool);
             child_elem.textContent(sb);
             String* content = stringbuf_to_string(sb);
-            
+
             if (string_index == 0) {
                 color_name = content->chars;
             } else if (string_index == 1) {
@@ -6761,7 +6761,7 @@ static void cmd_definecolor(LatexProcessor* proc, Item elem) {
             string_index++;
         }
     }
-    
+
     // Output as an HTML comment for now (helps with debugging/testing)
     if (!color_name.empty() && !color_model.empty() && !color_spec.empty()) {
         // Convert to CSS to include in output for testing
@@ -6782,11 +6782,11 @@ static void cmd_cite(LatexProcessor* proc, Item elem) {
     // Generate citation reference like [key]
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     // Extract citation keys
     std::vector<std::string> keys;
     std::string optional_text;
-    
+
     auto iter = elem_reader.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -6794,7 +6794,7 @@ static void cmd_cite(LatexProcessor* proc, Item elem) {
             // Direct string child - citation key(s)
             String* str = (String*)child.item().string_ptr;
             const char* content = str->chars;
-            
+
             // Split by comma
             std::string current_key;
             for (size_t i = 0; i <= strlen(content); i++) {
@@ -6815,7 +6815,7 @@ static void cmd_cite(LatexProcessor* proc, Item elem) {
         } else if (child.getType() == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "bracket_group") == 0) {
                 // Optional text like "p. 42"
                 Pool* pool = proc->pool();
@@ -6829,7 +6829,7 @@ static void cmd_cite(LatexProcessor* proc, Item elem) {
                 StringBuf* sb = stringbuf_new(pool);
                 child_elem.textContent(sb);
                 String* keys_str = stringbuf_to_string(sb);
-                
+
                 // Split by comma
                 const char* str = keys_str->chars;
                 std::string current_key;
@@ -6851,22 +6851,22 @@ static void cmd_cite(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Generate citation
     gen->span("cite");
     gen->text("[");
-    
+
     for (size_t i = 0; i < keys.size(); i++) {
         if (i > 0) gen->text(",");
         // For now, just output the key - in full implementation would look up number
         gen->text(keys[i].c_str());
     }
-    
+
     if (!optional_text.empty()) {
         gen->text(", ");
         gen->text(optional_text.c_str());
     }
-    
+
     gen->text("]");
     gen->closeElement();  // close span
 }
@@ -6876,7 +6876,7 @@ static void cmd_citeauthor(LatexProcessor* proc, Item elem) {
     // Parser produces: {"$":"citeauthor", "_":["key"]}
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     // Extract key
     std::string key;
     auto iter = elem_reader.children();
@@ -6890,7 +6890,7 @@ static void cmd_citeauthor(LatexProcessor* proc, Item elem) {
         } else if (child.getType() == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group") == 0) {
                 Pool* pool = proc->pool();
                 StringBuf* sb = stringbuf_new(pool);
@@ -6901,7 +6901,7 @@ static void cmd_citeauthor(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // For now, just output the key - in full implementation would look up author
     gen->span("cite-author");
     gen->text(key.c_str());
@@ -6913,7 +6913,7 @@ static void cmd_citeyear(LatexProcessor* proc, Item elem) {
     // Parser produces: {"$":"citeyear", "_":["key"]}
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     // Extract key
     std::string key;
     auto iter = elem_reader.children();
@@ -6927,7 +6927,7 @@ static void cmd_citeyear(LatexProcessor* proc, Item elem) {
         } else if (child.getType() == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group") == 0) {
                 Pool* pool = proc->pool();
                 StringBuf* sb = stringbuf_new(pool);
@@ -6938,7 +6938,7 @@ static void cmd_citeyear(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // For now, just output the key - in full implementation would extract year
     gen->span("cite-year");
     gen->text(key.c_str());
@@ -6964,9 +6964,9 @@ static void cmd_bibliography(LatexProcessor* proc, Item elem) {
     // This would normally read a .bib file and generate the bibliography
     // For now, just output a placeholder section
     HtmlGenerator* gen = proc->generator();
-    
+
     gen->startSection("section", false, "References", "references");
-    
+
     // Process children (if any - though \bibliography usually has no content)
     proc->processChildren(elem);
 }
@@ -6976,10 +6976,10 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
     // Part of thebibliography environment
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
-    
+
     std::string label;
     std::string key;
-    
+
     // Extract optional label and key
     auto iter = elem_reader.children();
     ItemReader child;
@@ -6987,7 +6987,7 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
         if (child.getType() == LMD_TYPE_ELEMENT) {
             ElementReader child_elem(child.item());
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "bracket_group") == 0) {
                 // Optional custom label
                 Pool* pool = proc->pool();
@@ -7005,10 +7005,10 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Start bibliography item
     gen->div("bibitem");
-    
+
     // Output label/number
     gen->span("bibitem-label");
     if (!label.empty()) {
@@ -7022,12 +7022,12 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
         gen->text("]");
     }
     gen->closeElement();  // close span
-    
+
     gen->text(" ");
-    
+
     // The entry text will follow as siblings
     proc->processChildren(elem);
-    
+
     gen->closeElement();  // close div
 }
 
@@ -7039,14 +7039,14 @@ static void cmd_documentclass(LatexProcessor* proc, Item elem) {
     // \documentclass[options]{class}
     // Configure generator based on document class
     HtmlGenerator* gen = proc->generator();
-    
+
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* class_str = stringbuf_to_string(sb);
     std::string doc_class = class_str->chars;
-    
+
     // Configure counters based on document class
     if (doc_class == "book" || doc_class == "report") {
         // Book/Report class: sections have chapter as parent
@@ -7064,31 +7064,31 @@ static void cmd_documentclass(LatexProcessor* proc, Item elem) {
 static void cmd_usepackage(LatexProcessor* proc, Item elem) {
     // \usepackage[options]{package1,package2,...}
     // Parse options and package names, then load them via PackageRegistry
-    // 
+    //
     // AST structure: <usepackage "package1,package2,...">
     // - The curly group content is unwrapped to a direct string child
     // - Optional bracket_group for options
-    
+
     ElementReader reader(elem);
     std::vector<std::string> options;
     std::vector<std::string> package_names;
     Pool* pool = proc->pool();
-    
+
     int64_t child_count = reader.childCount();
     for (int64_t i = 0; i < child_count; i++) {
         ItemReader child = reader.childAt(i);
-        
+
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
-            
+
             if (tag && (strcmp(tag, "bracket_group") == 0 || strcmp(tag, "brack_group") == 0)) {
                 // Parse options (comma-separated in brackets)
                 StringBuf* sb = stringbuf_new(pool);
                 child_elem.textContent(sb);
                 std::string opt_text(sb->str ? sb->str->chars : "", sb->length);
                 stringbuf_free(sb);
-                
+
                 // Split by comma
                 std::istringstream iss(opt_text);
                 std::string opt;
@@ -7105,7 +7105,7 @@ static void cmd_usepackage(LatexProcessor* proc, Item elem) {
             String* str = child.asString();
             if (str && str->chars) {
                 std::string pkg_text(str->chars, str->len);
-                
+
                 // Split by comma
                 std::istringstream iss(pkg_text);
                 std::string pkg;
@@ -7119,7 +7119,7 @@ static void cmd_usepackage(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Load each package via the registry
     PackageRegistry& registry = PackageRegistry::instance();
     for (const auto& pkg_name : package_names) {
@@ -7150,14 +7150,14 @@ static void cmd_abstract(LatexProcessor* proc, Item elem) {
     // <div class="list center"><span class="bf small">Abstract</span></div>
     // <div class="list quotation"><p><span class="... small">content</span></p></div>
     HtmlGenerator* gen = proc->generator();
-    
+
     // Title div
     gen->div("list center");
     gen->span("bf small");
     gen->text("Abstract");
     gen->closeElement();  // close span
     gen->closeElement();  // close title div
-    
+
     // Content div with quotation styling and small font
     gen->div("list quotation");
     gen->enterGroup();
@@ -7226,14 +7226,14 @@ static void cmd_newcounter(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
-    
+
     // Find counter name (first curly_group or direct text)
     std::string counter_name;
     std::string parent_name;
-    
+
     for (int64_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
-        
+
         if (child.isString()) {
             String* str = child.asString();
             if (str && str->len > 0 && counter_name.empty()) {
@@ -7242,7 +7242,7 @@ static void cmd_newcounter(LatexProcessor* proc, Item elem) {
         } else if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
-            
+
             if (strcmp(tag, "curly_group") == 0) {
                 if (counter_name.empty()) {
                     StringBuf* sb = stringbuf_new(pool);
@@ -7259,7 +7259,7 @@ static void cmd_newcounter(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Create the counter with optional parent
     if (!counter_name.empty()) {
         gen->newCounter(counter_name, parent_name);
@@ -7273,13 +7273,13 @@ static std::string evaluate_numeric_expression_recursive(LatexProcessor* proc, E
 static std::string evaluate_numeric_expression(LatexProcessor* proc, Item expr_item) {
     std::ostringstream result;
     HtmlGenerator* gen = proc->generator();
-    
+
     ItemReader reader(expr_item.to_const());
     TypeId type = reader.getType();
-    
+
     if (type == LMD_TYPE_ELEMENT) {
         ElementReader elem_reader(expr_item);
-        
+
         // Process all children with lookahead for \real and \value
         int64_t count = elem_reader.childCount();
         int64_t i = 0;
@@ -7293,7 +7293,7 @@ static std::string evaluate_numeric_expression(LatexProcessor* proc, Item expr_i
             result << std::string(str->chars, str->len);
         }
     }
-    
+
     return result.str();
 }
 
@@ -7301,20 +7301,20 @@ static std::string evaluate_numeric_expression(LatexProcessor* proc, Item expr_i
 static std::string evaluate_numeric_expression_recursive(LatexProcessor* proc, ElementReader& elem_reader, int64_t& index) {
     std::ostringstream result;
     HtmlGenerator* gen = proc->generator();
-    
+
     ItemReader child = elem_reader.childAt(index);
     TypeId type = child.getType();
-    
+
     if (type == LMD_TYPE_STRING) {
         String* str = child.asString();
         if (str && str->len > 0) {
             std::string text(str->chars, str->len);
-            
+
             // Check if text ends with \real or \value command
             if (text.length() >= 5 && text.substr(text.length() - 5) == "\\real") {
                 // Output text before \real
                 result << text.substr(0, text.length() - 5);
-                
+
                 // Look ahead to next sibling for curly_group with value
                 if (index + 1 < elem_reader.childCount()) {
                     ItemReader next = elem_reader.childAt(index + 1);
@@ -7335,7 +7335,7 @@ static std::string evaluate_numeric_expression_recursive(LatexProcessor* proc, E
             } else if (text.length() >= 6 && text.substr(text.length() - 6) == "\\value") {
                 // Output text before \value
                 result << text.substr(0, text.length() - 6);
-                
+
                 // Look ahead to next sibling for curly_group with counter name
                 if (index + 1 < elem_reader.childCount()) {
                     ItemReader next = elem_reader.childAt(index + 1);
@@ -7369,29 +7369,29 @@ static std::string evaluate_numeric_expression_recursive(LatexProcessor* proc, E
             }
         }
     }
-    
+
     return result.str();
 }
 
 static void cmd_setcounter(LatexProcessor* proc, Item elem) {
     // \setcounter{counter}{value}
     // Sets counter to a specific value
-    
+
     FILE* debugf = fopen("/tmp/latex_debug.txt", "a");
     if (debugf) {
         fprintf(debugf, "=== cmd_setcounter CALLED ===\n");
         fclose(debugf);
     }
-    
+
     HtmlGenerator* gen = proc->generator();
-    
+
     // Extract counter name and value from children
     ElementReader elem_reader(elem);
     int child_count = elem_reader.childCount();
-    
+
     if (child_count >= 2) {
         Pool* pool = proc->pool();
-        
+
         // First child: counter name
         ItemReader first = elem_reader.childAt(0);
         StringBuf* sb1 = stringbuf_new(pool);
@@ -7401,16 +7401,16 @@ static void cmd_setcounter(LatexProcessor* proc, Item elem) {
             stringbuf_append_str(sb1, first.cstring());
         }
         String* counter_str = stringbuf_to_string(sb1);
-        
+
         // Remaining children (from index 1 onwards): value expression parts
         // Parser creates Element nodes for \real{} and \value{} commands
         // Example: [" 3*", {real: ["1.6"]}, " * ", {real: ["1.7"]}, " + -- 2"]
-        
+
         std::ostringstream expr_builder;
         for (int i = 1; i < child_count; i++) {
             ItemReader child = elem_reader.childAt(i);
             TypeId child_type = child.getType();
-            
+
             if (child_type == LMD_TYPE_STRING) {
                 // Plain text - append as-is
                 String* str = child.asString();
@@ -7420,7 +7420,7 @@ static void cmd_setcounter(LatexProcessor* proc, Item elem) {
             } else if (child_type == LMD_TYPE_ELEMENT) {
                 ElementReader child_elem(child.item());
                 const char* tag = child_elem.tagName();
-                
+
                 if (strcmp(tag, "real") == 0) {
                     // \real{x} - extract float value (keep as string for expression eval)
                     if (child_elem.childCount() > 0) {
@@ -7452,25 +7452,25 @@ static void cmd_setcounter(LatexProcessor* proc, Item elem) {
                 }
             }
         }
-        
+
         std::string expr_str = expr_builder.str();
-        
+
         // debug: write to file to see what's happening
         debugf = fopen("/tmp/latex_debug.txt", "a");
         if (debugf) {
             fprintf(debugf, "cmd_setcounter: counter='%s', expr_str='%s'\n", counter_str->chars, expr_str.c_str());
             fclose(debugf);
         }
-        
+
         // evaluate numeric expression (supports +, -, *, /, parentheses)
         int value = latex_eval_num_expr(expr_str.c_str());
-        
+
         debugf = fopen("/tmp/latex_debug.txt", "a");
         if (debugf) {
             fprintf(debugf, "cmd_setcounter: result=%d\n", value);
             fclose(debugf);
         }
-        
+
         gen->setCounter(counter_str->chars, value);
     }
 }
@@ -7479,13 +7479,13 @@ static void cmd_addtocounter(LatexProcessor* proc, Item elem) {
     // \addtocounter{counter}{value}
     // Adds to counter value
     HtmlGenerator* gen = proc->generator();
-    
+
     ElementReader elem_reader(elem);
     int child_count = elem_reader.childCount();
-    
+
     if (child_count >= 2) {
         Pool* pool = proc->pool();
-        
+
         // First child: counter name
         ItemReader first = elem_reader.childAt(0);
         StringBuf* sb1 = stringbuf_new(pool);
@@ -7495,29 +7495,29 @@ static void cmd_addtocounter(LatexProcessor* proc, Item elem) {
             stringbuf_append_str(sb1, first.cstring());
         }
         String* counter_str = stringbuf_to_string(sb1);
-        
+
         // Second child: value expression to add (may contain \real{}, \value{}, etc.)
         ItemReader second = elem_reader.childAt(1);
-        
+
         // Recursively evaluate the expression, resolving any embedded commands
         std::string expr_str = evaluate_numeric_expression(proc, second.item());
-        
+
         // debug: write to file to see what's happening
         FILE* debugf = fopen("/tmp/latex_debug.txt", "a");
         if (debugf) {
             fprintf(debugf, "cmd_addtocounter: counter='%s', expr_str='%s'\n", counter_str->chars, expr_str.c_str());
             fclose(debugf);
         }
-        
+
         // evaluate numeric expression (supports +, -, *, /, parentheses)
         int value = latex_eval_num_expr(expr_str.c_str());
-        
+
         debugf = fopen("/tmp/latex_debug.txt", "a");
         if (debugf) {
             fprintf(debugf, "cmd_addtocounter: result=%d\n", value);
             fclose(debugf);
         }
-        
+
         gen->addToCounter(counter_str->chars, value);
     }
 }
@@ -7526,13 +7526,13 @@ static void cmd_stepcounter(LatexProcessor* proc, Item elem) {
     // \stepcounter{counter}
     // Increments counter by 1
     HtmlGenerator* gen = proc->generator();
-    
+
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     gen->stepCounter(counter_str->chars);
 }
 
@@ -7540,26 +7540,26 @@ static void cmd_refstepcounter(LatexProcessor* proc, Item elem) {
     // \refstepcounter{counter}
     // Steps counter, makes it referenceable, and outputs an anchor
     HtmlGenerator* gen = proc->generator();
-    
+
     ElementReader elem_reader(elem);
     Pool* pool = proc->pool();
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     // Step the counter
     gen->stepCounter(counter_str->chars);
-    
+
     // Get the new counter value
     int value = gen->getCounter(counter_str->chars);
-    
+
     // Generate anchor ID and set as current label
     std::stringstream anchor;
     anchor << counter_str->chars << "-" << value;
-    
+
     std::string text_value = std::to_string(value);
     gen->setCurrentLabel(anchor.str(), text_value);
-    
+
     // Output an anchor element
     std::stringstream attrs;
     attrs << "id=\"" << anchor.str() << "\"";
@@ -7587,7 +7587,7 @@ static void cmd_value(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     if (gen->hasCounter(counter_str->chars)) {
         int value = gen->getCounter(counter_str->chars);
         std::string output = std::to_string(value);
@@ -7605,7 +7605,7 @@ static void cmd_arabic(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     if (gen->hasCounter(counter_str->chars)) {
         int value = gen->getCounter(counter_str->chars);
         std::string output = gen->formatArabic(value);
@@ -7625,7 +7625,7 @@ static void cmd_roman(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     if (gen->hasCounter(counter_str->chars)) {
         int value = gen->getCounter(counter_str->chars);
         std::string output = gen->formatRoman(value, false);  // lowercase
@@ -7644,7 +7644,7 @@ static void cmd_Roman(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     if (gen->hasCounter(counter_str->chars)) {
         int value = gen->getCounter(counter_str->chars);
         std::string output = gen->formatRoman(value, true);  // uppercase
@@ -7663,7 +7663,7 @@ static void cmd_alph(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     if (gen->hasCounter(counter_str->chars)) {
         int value = gen->getCounter(counter_str->chars);
         std::string output = gen->formatAlph(value, false);  // lowercase
@@ -7682,7 +7682,7 @@ static void cmd_Alph(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     if (gen->hasCounter(counter_str->chars)) {
         int value = gen->getCounter(counter_str->chars);
         std::string output = gen->formatAlph(value, true);  // uppercase
@@ -7701,7 +7701,7 @@ static void cmd_fnsymbol(LatexProcessor* proc, Item elem) {
     StringBuf* sb = stringbuf_new(pool);
     elem_reader.textContent(sb);
     String* counter_str = stringbuf_to_string(sb);
-    
+
     if (gen->hasCounter(counter_str->chars)) {
         int value = gen->getCounter(counter_str->chars);
         std::string output = gen->formatFnSymbol(value);
@@ -7724,18 +7724,18 @@ static void cmd_setlength(LatexProcessor* proc, Item elem) {
     // Sets a length to a specific value
     // Currently only unitlength is tracked (for picture environment)
     ElementReader elem_reader(elem);
-    
+
     std::string length_name;
     std::string length_value;
-    
+
     // Parse children to get length name and value
     for (int64_t i = 0; i < elem_reader.childCount(); i++) {
         ItemReader child = elem_reader.childAt(i);
-        
+
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
-            
+
             // First element child is the length name (e.g., "unitlength")
             // The tag name IS the length name
             if (length_name.empty()) {
@@ -7751,7 +7751,7 @@ static void cmd_setlength(LatexProcessor* proc, Item elem) {
             }
         }
     }
-    
+
     // Handle unitlength specially for picture environment
     if (length_name == "unitlength" && !length_value.empty()) {
         double px = convert_length_to_px(length_value.c_str());
@@ -7759,7 +7759,7 @@ static void cmd_setlength(LatexProcessor* proc, Item elem) {
             g_unitlength_px = px;
         }
     }
-    
+
     // No HTML output
 }
 
@@ -7773,7 +7773,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["renewcommand"] = cmd_renewcommand;
     command_table_["providecommand"] = cmd_providecommand;
     command_table_["def"] = cmd_def;
-    
+
     // Diacritic commands (accent marks)
     command_table_["'"] = cmd_acute;       // \'e -> é
     command_table_["`"] = cmd_grave;       // \`e -> è
@@ -7790,7 +7790,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["b"] = cmd_macron_below; // \b{a} -> a̲ (NOTE: conflicts with letter b)
     command_table_["r"] = cmd_ring_above;  // \r{a} -> å  (NOTE: conflicts with letter r)
     command_table_["k"] = cmd_ogonek;      // \k{a} -> ą  (NOTE: conflicts with letter k)
-    
+
     // Special character commands (non-combining letters)
     command_table_["i"] = cmd_i;           // \i -> ı (dotless i)
     command_table_["j"] = cmd_j;           // \j -> ȷ (dotless j)
@@ -7805,7 +7805,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["OE"] = cmd_OE;         // \OE -> Œ
     command_table_["aa"] = cmd_aa;         // \aa -> å
     command_table_["AA"] = cmd_AA;         // \AA -> Å
-    
+
     // Text formatting
     command_table_["textbf"] = cmd_textbf;
     command_table_["textit"] = cmd_textit;
@@ -7820,7 +7820,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["textup"] = cmd_textup;
     command_table_["textsl"] = cmd_textsl;
     command_table_["textnormal"] = cmd_textnormal;
-    
+
     // Font declarations
     command_table_["bfseries"] = cmd_bfseries;
     command_table_["mdseries"] = cmd_mdseries;
@@ -7833,7 +7833,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["scshape"] = cmd_scshape;
     command_table_["upshape"] = cmd_upshape;
     command_table_["normalfont"] = cmd_normalfont;
-    
+
     // Font sizes
     command_table_["tiny"] = cmd_tiny;
     command_table_["scriptsize"] = cmd_scriptsize;
@@ -7845,21 +7845,21 @@ void LatexProcessor::initCommandTable() {
     command_table_["LARGE"] = cmd_LARGE;
     command_table_["huge"] = cmd_huge;
     command_table_["Huge"] = cmd_Huge;
-    
+
     // Sectioning
     command_table_["part"] = cmd_part;
     command_table_["chapter"] = cmd_chapter;
     command_table_["section"] = cmd_section;
     command_table_["subsection"] = cmd_subsection;
     command_table_["subsubsection"] = cmd_subsubsection;
-    
+
     // List environments
     command_table_["itemize"] = cmd_itemize;
     command_table_["enumerate"] = cmd_enumerate;
     command_table_["description"] = cmd_description;
     command_table_["item"] = cmd_item;
     command_table_["enum_item"] = cmd_item;  // Tree-sitter node type for \item
-    
+
     // Basic environments
     command_table_["quote"] = cmd_quote;
     command_table_["quotation"] = cmd_quotation;
@@ -7872,7 +7872,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["verbatim"] = cmd_verbatim;
     command_table_["verb_command"] = cmd_verb_command;  // \verb|text| inline verbatim (scanner)
     command_table_["verb"] = cmd_verb;  // \verb fallback when scanner doesn't recognize
-    
+
     // Math environments
     command_table_["math"] = cmd_math;
     command_table_["inline_math"] = cmd_inline_math;  // Tree-sitter node for $...$
@@ -7883,7 +7883,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["displayed_equation"] = cmd_displaymath;  // Tree-sitter node for \[...\]
     command_table_["equation"] = cmd_equation;
     command_table_["equation*"] = cmd_equation_star;
-    
+
     // Math-mode commands
     command_table_["text"] = cmd_text;  // \text{...} inside math
     command_table_["xi"] = cmd_xi;
@@ -7894,7 +7894,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["superscript"] = cmd_superscript;
     command_table_["subscript"] = cmd_subscript;
     command_table_["hat"] = cmd_hat;
-    
+
     // Line breaks
     command_table_["\\"] = cmd_newline;
     command_table_["newline"] = cmd_newline;
@@ -7906,7 +7906,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["echoO"] = cmd_echoO;
     command_table_["echoOGO"] = cmd_echoOGO;
     command_table_["echoGOG"] = cmd_echoGOG;
-    
+
     // Special LaTeX commands
     command_table_["TeX"] = cmd_TeX;
     command_table_["LaTeX"] = cmd_LaTeX;
@@ -7925,7 +7925,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["symbol"] = cmd_symbol;
     command_table_["makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;
-    
+
     // Spacing commands
     command_table_["hspace"] = cmd_hspace;
     command_table_["vspace"] = cmd_vspace;
@@ -7954,7 +7954,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["enspace"] = cmd_enspace;
     command_table_["quad"] = cmd_quad;
     command_table_["qquad"] = cmd_qquad;
-    
+
     // Box commands
     command_table_["mbox"] = cmd_mbox;
     command_table_["fbox"] = cmd_fbox;
@@ -7969,47 +7969,47 @@ void LatexProcessor::initCommandTable() {
     command_table_["clap"] = cmd_clap;
     command_table_["llap"] = cmd_llap;
     command_table_["rlap"] = cmd_rlap;
-    
+
     // Alignment declarations
     command_table_["centering"] = cmd_centering;
     command_table_["raggedright"] = cmd_raggedright;
     command_table_["raggedleft"] = cmd_raggedleft;
-    
+
     // Document metadata
     command_table_["author"] = cmd_author;
     command_table_["title"] = cmd_title;
     command_table_["date"] = cmd_date;
     command_table_["thanks"] = cmd_thanks;
     command_table_["maketitle"] = cmd_maketitle;
-    
+
     // Labels and references
     command_table_["label"] = cmd_label;
     command_table_["ref"] = cmd_ref;
     command_table_["pageref"] = cmd_pageref;
-    
+
     // Hyperlinks
     command_table_["url"] = cmd_url;
     command_table_["hyperlink"] = cmd_href;  // Tree-sitter node type for \href
     command_table_["curly_group_uri"] = cmd_url;  // Tree-sitter uri group
     command_table_["href"] = cmd_href;
-    
+
     // Footnotes
     command_table_["footnote"] = cmd_footnote;
-    
+
     // Tables
     command_table_["tabular"] = cmd_tabular;
     command_table_["hline"] = cmd_hline;
     command_table_["multicolumn"] = cmd_multicolumn;
-    
+
     // Float environments
     command_table_["figure"] = cmd_figure;
     command_table_["table"] = cmd_table_float;
     command_table_["caption"] = cmd_caption;
-    
+
     // Graphics
     command_table_["graphics_include"] = cmd_includegraphics;
     command_table_["includegraphics"] = cmd_includegraphics;
-    
+
     // Picture environment (LaTeX picture graphics)
     command_table_["picture"] = cmd_picture;
     command_table_["begin"] = cmd_begin;  // Handle \begin{picture} inside curly groups
@@ -8019,7 +8019,7 @@ void LatexProcessor::initCommandTable() {
     };
     command_table_["thicklines"] = cmd_thicklines;
     command_table_["thinlines"] = cmd_thinlines;
-    
+
     // Color commands
     command_table_["color_reference"] = cmd_color_reference;  // Tree-sitter node for \textcolor and \colorbox
     command_table_["textcolor"] = cmd_textcolor;
@@ -8027,7 +8027,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["colorbox"] = cmd_colorbox;
     command_table_["fcolorbox"] = cmd_fcolorbox;
     command_table_["definecolor"] = cmd_definecolor;
-    
+
     // Bibliography & Citations
     command_table_["cite"] = cmd_cite;
     command_table_["citeauthor"] = cmd_citeauthor;
@@ -8036,7 +8036,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["bibliographystyle"] = cmd_bibliographystyle;
     command_table_["bibliography"] = cmd_bibliography;
     command_table_["bibitem"] = cmd_bibitem;
-    
+
     // Document structure (additional commands)
     command_table_["documentclass"] = cmd_documentclass;
     command_table_["usepackage"] = cmd_usepackage;
@@ -8050,7 +8050,7 @@ void LatexProcessor::initCommandTable() {
     command_table_["mainmatter"] = cmd_mainmatter;
     command_table_["frontmatter"] = cmd_frontmatter;
     command_table_["backmatter"] = cmd_backmatter;
-    
+
     // Counter and length system
     command_table_["newcounter"] = cmd_newcounter;
     command_table_["setcounter"] = cmd_setcounter;
@@ -8156,19 +8156,19 @@ void LatexProcessor::ensureParagraph() {
 
 void LatexProcessor::closeParagraphIfOpen() {
     if (in_paragraph_) {
-        log_debug("closeParagraphIfOpen: closing paragraph with alignment=%s, restricted=%d", 
+        log_debug("closeParagraphIfOpen: closing paragraph with alignment=%s, restricted=%d",
                   next_paragraph_alignment_ ? next_paragraph_alignment_ : "none", restricted_h_mode_);
-        
+
         // Get the captured paragraph content
         std::string para_content = gen_->endCapture();
-        
+
         // Trim trailing whitespace from captured content
-        while (!para_content.empty() && 
-               (para_content.back() == ' ' || para_content.back() == '\t' || 
+        while (!para_content.empty() &&
+               (para_content.back() == ' ' || para_content.back() == '\t' ||
                 para_content.back() == '\n' || para_content.back() == '\r')) {
             para_content.pop_back();
         }
-        
+
         // Only output paragraph if it has content
         if (!para_content.empty()) {
             // Determine paragraph class
@@ -8183,13 +8183,13 @@ void LatexProcessor::closeParagraphIfOpen() {
                 para_class = "continue";
                 next_paragraph_is_continue_ = false;
             }
-            
+
             // Write the paragraph with proper class
             gen_->p(para_class);
             gen_->writer()->writeRawHtml(para_content.c_str());
             gen_->closeElement();
         }
-        
+
         in_paragraph_ = false;
     }
 }
@@ -8201,13 +8201,13 @@ void LatexProcessor::endParagraph() {
 // Helper: Get next sibling argument, skipping whitespace/comments
 bool LatexProcessor::getNextSiblingArg(int64_t offset, Item* out_item, const char** out_type) {
     if (!sibling_ctx_.parent_reader) return false;
-    
+
     int64_t count = sibling_ctx_.parent_reader->childCount();
     int64_t idx = sibling_ctx_.current_index + offset;
-    
+
     while (idx < count) {
         ItemReader reader = sibling_ctx_.parent_reader->childAt(idx);
-        
+
         // Skip whitespace strings
         if (reader.isString()) {
             const char* text = reader.cstring();
@@ -8225,7 +8225,7 @@ bool LatexProcessor::getNextSiblingArg(int64_t offset, Item* out_item, const cha
                 }
             }
         }
-        
+
         // Skip space elements
         if (reader.isElement()) {
             ElementReader elem(reader.item());
@@ -8239,11 +8239,11 @@ bool LatexProcessor::getNextSiblingArg(int64_t offset, Item* out_item, const cha
             *out_type = tag;
             return true;
         }
-        
+
         // Any other content - not a valid argument
         break;
     }
-    
+
     return false;
 }
 
@@ -8252,7 +8252,7 @@ bool LatexProcessor::getNextSiblingArg(int64_t offset, Item* out_item, const cha
 void LatexProcessor::outputGroupContent(Item group_item) {
     HtmlGenerator* gen = generator();
     ElementReader reader(group_item);
-    
+
     auto iter = reader.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -8273,12 +8273,12 @@ void LatexProcessor::outputGroupContent(Item group_item) {
         } else if (child.isElement()) {
             ElementReader elem(child.item());
             const char* tag = elem.tagName();
-            
+
             if (tag && strcmp(tag, "line_comment") == 0) {
                 // Skip line comments in group content
                 continue;
             }
-            
+
             // For other elements, extract text content recursively
             Pool* pool = this->pool();
             StringBuf* sb = stringbuf_new(pool);
@@ -8296,26 +8296,26 @@ int LatexProcessor::consumeSiblingArgs(std::vector<Item>& brack_args, std::vecto
     // Debug logging
     FILE* debug_f = fopen("/tmp/sibling_debug.txt", "a");
     if (debug_f) {
-        fprintf(debug_f, "consumeSiblingArgs: parent_reader=%p, current_index=%lld\n", 
+        fprintf(debug_f, "consumeSiblingArgs: parent_reader=%p, current_index=%lld\n",
                 (void*)sibling_ctx_.parent_reader, (long long)sibling_ctx_.current_index);
     }
-    
+
     if (!sibling_ctx_.parent_reader) {
         if (debug_f) { fprintf(debug_f, "  -> no parent_reader, returning 0\n"); fclose(debug_f); }
         return 0;
     }
-    
+
     int consumed = 0;
     int64_t count = sibling_ctx_.parent_reader->childCount();
     int64_t idx = sibling_ctx_.current_index + 1;
-    
+
     if (debug_f) {
         fprintf(debug_f, "  -> count=%lld, starting at idx=%lld\n", (long long)count, (long long)idx);
     }
-    
+
     while (idx < count) {
         ItemReader reader = sibling_ctx_.parent_reader->childAt(idx);
-        
+
         // Skip whitespace strings
         if (reader.isString()) {
             const char* text = reader.cstring();
@@ -8336,51 +8336,51 @@ int LatexProcessor::consumeSiblingArgs(std::vector<Item>& brack_args, std::vecto
             // Non-whitespace text - stop consuming
             break;
         }
-        
+
         // Check for brack_group or curly_group elements
         if (reader.isElement()) {
             ElementReader elem(reader.item());
             const char* tag = elem.tagName();
-            
+
             if (tag && strcmp(tag, "space") == 0) {
                 consumed++;
                 idx++;
                 continue;
             }
-            
+
             if (tag && strcmp(tag, "brack_group") == 0) {
                 brack_args.push_back(reader.item());
                 consumed++;
                 idx++;
                 continue;
             }
-            
+
             if (tag && strcmp(tag, "curly_group") == 0) {
                 curly_args.push_back(reader.item());
                 consumed++;
                 idx++;
                 continue;
             }
-            
+
             // Any other element - stop consuming
             break;
         }
-        
+
         // Any other node type - stop consuming
         break;
     }
-    
+
     // Update the consumed count so processChildren can skip these siblings
     if (sibling_ctx_.consumed_count) {
         *sibling_ctx_.consumed_count = consumed;
     }
-    
+
     if (debug_f) {
-        fprintf(debug_f, "  -> returning consumed=%d, brack_args.size=%zu, curly_args.size=%zu\n", 
+        fprintf(debug_f, "  -> returning consumed=%d, brack_args.size=%zu, curly_args.size=%zu\n",
                 consumed, brack_args.size(), curly_args.size());
         fclose(debug_f);
     }
-    
+
     return consumed;
 }
 
@@ -8398,7 +8398,7 @@ void LatexProcessor::processNode(Item node) {
     if (depth_exceeded_) {
         return;
     }
-    
+
     DepthGuard guard(this);
     if (guard.exceeded()) {
         log_error("Processing depth exceeded maximum %d", MAX_MACRO_DEPTH);
@@ -8406,30 +8406,30 @@ void LatexProcessor::processNode(Item node) {
         depth_exceeded_ = true;  // Set flag to halt all further processing
         return;
     }
-    
+
     ItemReader reader(node.to_const());
     TypeId type = reader.getType();
-    
+
     if (type == LMD_TYPE_STRING) {
         // Text content
         String* str = reader.asString();
         if (str && str->len > 0) {
             const char* text = str->chars;
-            
+
             // Skip EMPTY_STRING sentinel (which has content "lambda.nil")
-            if (str == &EMPTY_STRING || 
+            if (str == &EMPTY_STRING ||
                 (str->len == 10 && strncmp(text, "lambda.nil", 10) == 0)) {
                 return;  // skip the empty string sentinel
             }
-            
+
             // Debug: log "document" string to track where it's coming from
             if (strcmp(text, "document") == 0) {
                 log_debug("processNode: found 'document' string - context unknown");
             }
-            
+
             // Find the first backslash to check for embedded command
             const char* backslash = strchr(text, '\\');
-            
+
             if (backslash && backslash[1] != '\0') {
                 // There's a backslash with content after it
                 // Process text before backslash (if any)
@@ -8441,21 +8441,21 @@ void LatexProcessor::processNode(Item node) {
                     prefix[prefix_len] = '\0';
                     processText(prefix);
                 }
-                
+
                 // Extract command name (everything after backslash until non-alpha or end)
                 const char* cmd_start = backslash + 1;
                 size_t cmd_len = 0;
                 while (cmd_start[cmd_len] && isalpha((unsigned char)cmd_start[cmd_len])) {
                     cmd_len++;
                 }
-                
+
                 if (cmd_len > 0) {
                     // It's an alphabetic command like \textbackslash
                     char* cmd_name = (char*)alloca(cmd_len + 1);
                     memcpy(cmd_name, cmd_start, cmd_len);
                     cmd_name[cmd_len] = '\0';
                     processCommand(cmd_name, node);
-                    
+
                     // Process any remaining text after command
                     const char* remainder = cmd_start + cmd_len;
                     if (*remainder) {
@@ -8472,13 +8472,13 @@ void LatexProcessor::processNode(Item node) {
         }
         return;
     }
-    
+
     if (type == LMD_TYPE_SYMBOL) {
         // Symbol (spacing, paragraph break, special characters, etc.)
         String* str = reader.asSymbol();
         if (str) {
             const char* sym_name = str->chars;
-            
+
             if (strcmp(sym_name, "parbreak") == 0) {
                 // In restricted horizontal mode (inside \mbox), paragraph breaks:
                 // 1. Trim trailing whitespace (unskip)
@@ -8544,7 +8544,7 @@ void LatexProcessor::processNode(Item node) {
         }
         return;
     }
-    
+
     if (type == LMD_TYPE_LIST) {
         // List (array of items) - process each item
         List* list = node.list;
@@ -8555,21 +8555,21 @@ void LatexProcessor::processNode(Item node) {
         }
         return;
     }
-    
+
     if (type == LMD_TYPE_ELEMENT) {
         // Command or environment - use ElementReader
         ElementReader elem_reader(node);
         const char* tag = elem_reader.tagName();
-        
+
         log_debug("processNode element tag='%s'", tag);
-        
+
         // Special handling for root element
         if (strcmp(tag, "latex_document") == 0) {
             // Just process children
             processChildren(node);
             return;
         }
-        
+
         // Skip "end" elements (malformed \end{...} that parser incorrectly included)
         // These occur when the parser fails to match environment closing tags correctly
         if (strcmp(tag, "end") == 0) {
@@ -8577,7 +8577,7 @@ void LatexProcessor::processNode(Item node) {
             log_debug("processNode: skipping malformed 'end' element");
             return;
         }
-        
+
         // Special handling for linebreak_command (\\)
         if (strcmp(tag, "linebreak_command") == 0) {
             // In restricted horizontal mode (inside \mbox, etc.), line breaks are ignored.
@@ -8588,14 +8588,14 @@ void LatexProcessor::processNode(Item node) {
                 return;
             }
             ensureParagraph();
-            
+
             // Check for optional length attribute
             if (elem_reader.has_attr("length")) {
                 String* length_str = elem_reader.get_string_attr("length");
                 if (length_str && length_str->len > 0) {
                     const char* dim_text = length_str->chars;
                     size_t dim_len = length_str->len;
-                    
+
                     // Check if it's a relative unit (em, ex) - preserve as-is
                     bool is_relative = false;
                     if (dim_len >= 2) {
@@ -8604,7 +8604,7 @@ void LatexProcessor::processNode(Item node) {
                             is_relative = true;
                         }
                     }
-                    
+
                     // Build the style string
                     char style[128];
                     if (is_relative) {
@@ -8617,7 +8617,7 @@ void LatexProcessor::processNode(Item node) {
                         }
                         snprintf(style, sizeof(style), "margin-bottom:%.3fpx", pixels);
                     }
-                    
+
                     // Check if font styling is active - wrap breakspace in font class for em-relative sizing
                     std::string font_class = gen_->getFontClass(gen_->currentFont());
                     if (!font_class.empty()) {
@@ -8639,26 +8639,26 @@ void LatexProcessor::processNode(Item node) {
             }
             return;
         }
-        
+
         // Special handling for spacing_command
         if (strcmp(tag, "spacing_command") == 0) {
             processSpacingCommand(node);
             return;
         }
-        
+
         // Special handling for space_cmd (\, \! \; \: \/ \@ \ )
         if (strcmp(tag, "space_cmd") == 0) {
             processSpacingCommand(node);
             return;
         }
-        
+
         // Special handling for nbsp (~) - non-breaking space
         if (strcmp(tag, "nbsp") == 0) {
             ensureParagraph();
             gen_->writer()->writeRawHtml("&nbsp;");
             return;
         }
-        
+
         // Special handling for space (horizontal whitespace or single newline)
         // In LaTeX, single newlines are treated as spaces
         // The space element contains the actual whitespace text as children
@@ -8668,33 +8668,33 @@ void LatexProcessor::processNode(Item node) {
             processText(" ");
             return;
         }
-        
+
         // Handle _seq elements (from error recovery in parser)
         // These are transparent containers - just process children
         if (strcmp(tag, "_seq") == 0) {
             processChildren(node);
             return;
         }
-        
+
         // Process command
         processCommand(tag, node);
         return;
     }
-    
+
     // Unknown type - skip
     log_warn("processNode: unknown type %d", type);
 }
 
 void LatexProcessor::processChildren(Item elem) {
     ElementReader elem_reader(elem);
-    
+
     if (elem_reader.childCount() == 0) {
         return;
     }
-    
+
     // Use index-based iteration for lookahead capability
     int64_t count = elem_reader.childCount();
-    
+
     // Debug: log first few children to understand structure
     FILE* debug_file = fopen("/tmp/zws_debug_direct.txt", "a");
     if (debug_file) {
@@ -8720,12 +8720,12 @@ void LatexProcessor::processChildren(Item elem) {
     }
     for (int64_t i = 0; i < count; i++) {
         ItemReader child_reader = elem_reader.childAt(i);
-        
+
         // Check for \char command that needs lookahead for its numeric argument
         if (child_reader.isElement()) {
             ElementReader child_elem(child_reader.item());
             const char* tag = child_elem.tagName();
-            
+
             if (tag && strcmp(tag, "char") == 0 && child_elem.childCount() == 0) {
                 // \char command with no children - parser limitation
                 // Look ahead to next sibling for the numeric argument
@@ -8738,7 +8738,7 @@ void LatexProcessor::processChildren(Item elem) {
                             ensureParagraph();
                             uint32_t charcode = 0;
                             char* endptr = nullptr;
-                            
+
                             if (text[0] == '"') {
                                 // Hex: \char"A0 - consume quote + hex digits
                                 charcode = std::strtoul(text + 1, &endptr, 16);
@@ -8749,7 +8749,7 @@ void LatexProcessor::processChildren(Item elem) {
                                 // Decimal: \char98 - consume decimal digits
                                 charcode = std::strtoul(text, &endptr, 10);
                             }
-                            
+
                             // Output the character
                             if (charcode > 0) {
                                 if (charcode == 0xA0) {
@@ -8759,43 +8759,43 @@ void LatexProcessor::processChildren(Item elem) {
                                     gen_->text(utf8.c_str());
                                 }
                             }
-                            
+
                             // Output remaining text after the number (e.g., " test" from "98 test")
                             if (endptr && *endptr) {
                                 processText(endptr);
                             }
-                            
+
                             // Skip the next string element since we consumed it
                             i++;
                             continue;
                         }
                     }
                 }
-                
+
                 // No valid number found - just skip the \char command
                 continue;
             }
         }
-        
+
         // Check if this is a linebreak element
         if (child_reader.isElement()) {
             ElementReader child_elem(child_reader.item());
             const char* tag = child_elem.tagName();
-            
+
             if (tag && (strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0 ||
                         strcmp(tag, "newline") == 0)) {
                 bool has_dimension = false;
                 bool preserve_unit = false;
                 double dimension_px = 0;
                 const char* dimension_text = nullptr;
-                
+
                 // For linebreak_command (new grammar), check for length attribute
                 if (strcmp(tag, "linebreak_command") == 0 && child_elem.has_attr("length")) {
                     String* length_str = child_elem.get_string_attr("length");
                     if (length_str && length_str->len > 0) {
                         const char* dim_text = length_str->chars;
                         size_t dim_len = length_str->len;
-                        
+
                         // Check if it's a relative unit (em, ex) - preserve as-is
                         bool is_relative = false;
                         if (dim_len >= 2) {
@@ -8804,7 +8804,7 @@ void LatexProcessor::processChildren(Item elem) {
                                 is_relative = true;
                             }
                         }
-                        
+
                         if (is_relative) {
                             has_dimension = true;
                             preserve_unit = true;
@@ -8817,22 +8817,22 @@ void LatexProcessor::processChildren(Item elem) {
                             }
                         }
                     }
-                } 
+                }
                 // For old linebreak/newline (old grammar), check if next sibling is a brack_group
                 else if (i + 1 < count) {
                     ItemReader next_reader = elem_reader.childAt(i + 1);
-                    
+
                     if (next_reader.isElement()) {
                         ElementReader next_elem(next_reader.item());
                         const char* next_tag = next_elem.tagName();
-                        
+
                         if (next_tag && strcmp(next_tag, "brack_group") == 0) {
                             // Extract dimension text from brack_group
                             Pool* pool = pool_;
                             StringBuf* sb = stringbuf_new(pool);
                             next_elem.textContent(sb);
                             String* dim_str = stringbuf_to_string(sb);
-                            
+
                             if (dim_str && dim_str->len > 0) {
                                 // Check if it's a relative unit (em, ex) - preserve as-is
                                 const char* dim_text = dim_str->chars;
@@ -8844,7 +8844,7 @@ void LatexProcessor::processChildren(Item elem) {
                                         is_relative = true;
                                     }
                                 }
-                                
+
                                 if (is_relative) {
                                     // Keep relative units as-is
                                     has_dimension = true;
@@ -8864,7 +8864,7 @@ void LatexProcessor::processChildren(Item elem) {
                         }
                     }
                 }
-                
+
                 // In restricted horizontal mode, linebreaks collapse surrounding whitespace.
                 //
                 // LaTeX behavior in restricted horizontal mode:
@@ -8879,7 +8879,7 @@ void LatexProcessor::processChildren(Item elem) {
                 //
                 // Summary:
                 // - \linebreak: outputs exactly one space
-                // - \\[dim] with next leading space: preserve one space  
+                // - \\[dim] with next leading space: preserve one space
                 // - \\ without dim, or next has no leading space: collapse all
                 // - \newline: collapse all
                 if (restricted_h_mode_) {
@@ -8888,14 +8888,14 @@ void LatexProcessor::processChildren(Item elem) {
                     bool is_linebreak_cmd = (strcmp(tag, "linebreak") == 0);
                     bool had_trailing_ws = gen_->hasTrailingWhitespace();
                     gen_->trimTrailingWhitespace();
-                    
+
                     if (is_linebreak_cmd) {
                         // \linebreak: always output exactly one space
                         gen_->text(" ");
                         strip_next_leading_space_ = true;
                         continue;
                     }
-                    
+
                     // Check for next text having leading whitespace
                     bool next_has_leading_ws = false;
                     for (int64_t j = i + 1; j < count; j++) {
@@ -8916,20 +8916,20 @@ void LatexProcessor::processChildren(Item elem) {
                             break;
                         }
                     }
-                    
+
                     // For \\[dim] with leading space after: preserve one space
                     // This handles cases like "one \\[4cm] space" where the dimension
                     // indicates intentional vertical space, and word separation should be preserved
                     // Note: has_dimension is set earlier when brack_group is consumed and i is incremented
                     // "linebreak" is old grammar, "linebreak_command" is new tree-sitter grammar for backslash-backslash
-                    if ((strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0) && 
+                    if ((strcmp(tag, "linebreak") == 0 || strcmp(tag, "linebreak_command") == 0) &&
                         has_dimension && had_trailing_ws && next_has_leading_ws) {
                         gen_->text(" ");
                     }
                     strip_next_leading_space_ = true;
                     continue;
                 }
-                
+
                 // Output the linebreak
                 ensureParagraph();;
                 if (has_dimension) {
@@ -8941,7 +8941,7 @@ void LatexProcessor::processChildren(Item elem) {
                     } else {
                         snprintf(style, sizeof(style), "margin-bottom:%.3fpx", dimension_px);
                     }
-                    
+
                     // Check if font styling is active - wrap breakspace in font class for em-relative sizing
                     std::string font_class = gen_->getFontClass(gen_->currentFont());
                     if (!font_class.empty()) {
@@ -8958,15 +8958,15 @@ void LatexProcessor::processChildren(Item elem) {
                 }
                 continue;
             }
-            
+
             // Check if this is a diacritic command (^, ', `, ", ~, =, ., u, v, H, c, d, b, r, k)
             if (tag && isDiacriticCommand(tag)) {
                 char diacritic_cmd = tag[0];
-                
+
                 // First check if the diacritic element has a curly_group child
                 bool has_child_arg = false;
                 std::string base_char;
-                
+
                 if (child_elem.childCount() > 0) {
                     // Diacritic has children - process first curly_group
                     auto dia_iter = child_elem.children();
@@ -8999,7 +8999,7 @@ void LatexProcessor::processChildren(Item elem) {
                         }
                     }
                 }
-                
+
                 if (has_child_arg) {
                     // Apply diacritic to the extracted base character
                     ensureParagraph();
@@ -9007,22 +9007,22 @@ void LatexProcessor::processChildren(Item elem) {
                     gen_->text(result.c_str());
                     continue;
                 }
-                
+
                 // Check next sibling for the base character
                 if (i + 1 < count) {
                     ItemReader next_reader = elem_reader.childAt(i + 1);
-                    
+
                     if (next_reader.isElement()) {
                         ElementReader next_elem(next_reader.item());
                         const char* next_tag = next_elem.tagName();
-                        
+
                         if (next_tag && strcmp(next_tag, "curly_group") == 0) {
                             // Extract content from curly_group
                             Pool* pool = pool_;
                             StringBuf* sb = stringbuf_new(pool);
                             next_elem.textContent(sb);
                             String* str = stringbuf_to_string(sb);
-                            
+
                             if (str && str->len > 0) {
                                 ensureParagraph();
                                 std::string result = applyDiacritic(diacritic_cmd, str->chars);
@@ -9037,7 +9037,7 @@ void LatexProcessor::processChildren(Item elem) {
                             i++;  // Skip the curly_group (even if empty)
                             continue;
                         }
-                        
+
                         // Check if next element is a command that resolves to a special character
                         // This handles cases like \"\i (umlaut on dotless-i), \'\i, \^\j, etc.
                         // The parser converts \i to an element with tag "i", not "command"
@@ -9061,7 +9061,7 @@ void LatexProcessor::processChildren(Item elem) {
                             } else if (strcmp(next_tag, "AE") == 0) {
                                 base_char = "Æ";  // AE ligature
                             } else if (strcmp(next_tag, "oe") == 0) {
-                                base_char = "œ";  // oe ligature  
+                                base_char = "œ";  // oe ligature
                             } else if (strcmp(next_tag, "OE") == 0) {
                                 base_char = "Œ";  // OE ligature
                             } else if (strcmp(next_tag, "command") == 0) {
@@ -9087,7 +9087,7 @@ void LatexProcessor::processChildren(Item elem) {
                                     }
                                 }
                             }
-                            
+
                             if (base_char) {
                                 ensureParagraph();
                                 std::string result = applyDiacritic(diacritic_cmd, base_char);
@@ -9107,7 +9107,7 @@ void LatexProcessor::processChildren(Item elem) {
                             std::string first_char(text, char_len);
                             std::string result = applyDiacritic(diacritic_cmd, first_char.c_str());
                             gen_->text(result.c_str());
-                            
+
                             // Output remaining text
                             if (strlen(text) > (size_t)char_len) {
                                 gen_->text(text + char_len);
@@ -9117,15 +9117,15 @@ void LatexProcessor::processChildren(Item elem) {
                         }
                     }
                 }
-                
+
                 // No base character found - just output the diacritic as-is (e.g., \^{})
                 ensureParagraph();
                 gen_->text(tag);
                 continue;
             }
-            
+
         }
-        
+
         // Check if this is a text node containing an embedded command followed by curly_group
         // This handles cases like \emph{text} where parser produces: ["\x1bmph", curly_group{text}]
         // The parser encodes \cmd as ESC (0x1B) + cmdname (e.g., \emph → 0x1B + "mph")
@@ -9143,7 +9143,7 @@ void LatexProcessor::processChildren(Item elem) {
                     while (cmd_start[cmd_len] && isalpha((unsigned char)cmd_start[cmd_len])) {
                         cmd_len++;
                     }
-                    
+
                     // Check if command ends at end of string (no trailing text after command name)
                     if (cmd_len > 0 && cmd_start[cmd_len] == '\0') {
                         // Text ends with a command - check if next sibling is curly_group
@@ -9152,7 +9152,7 @@ void LatexProcessor::processChildren(Item elem) {
                             if (next_reader.isElement()) {
                                 ElementReader next_elem(next_reader.item());
                                 const char* next_tag = next_elem.tagName();
-                                
+
                                 if (next_tag && strcmp(next_tag, "curly_group") == 0) {
                                     // Found command + curly_group pattern
                                     // Process text before command (if any)
@@ -9163,7 +9163,7 @@ void LatexProcessor::processChildren(Item elem) {
                                         prefix[prefix_len] = '\0';
                                         processText(prefix);
                                     }
-                                    
+
                                     // The command name after ESC might be missing the first letter
                                     // For \emph, we get ESC + "mph", but need to look up "emph"
                                     // Prepend 'e' to handle common \e... commands (\e → ESC)
@@ -9171,11 +9171,11 @@ void LatexProcessor::processChildren(Item elem) {
                                     cmd_name_with_e[0] = 'e';
                                     memcpy(cmd_name_with_e + 1, cmd_start, cmd_len);
                                     cmd_name_with_e[cmd_len + 1] = '\0';
-                                    
+
                                     // Pass the curly_group as the command's element
                                     // This allows cmd_emph etc to call processChildren on it
                                     processCommand(cmd_name_with_e, next_reader.item());
-                                    
+
                                     // Skip the curly_group sibling
                                     i++;
                                     continue;
@@ -9186,30 +9186,30 @@ void LatexProcessor::processChildren(Item elem) {
                 }
             }
         }
-        
+
         // Normal processing for other nodes
         // Set up sibling context so command handlers can access following arguments
         int64_t consumed_count = 0;
         sibling_ctx_.parent_reader = &elem_reader;
         sibling_ctx_.current_index = i;
         sibling_ctx_.consumed_count = &consumed_count;
-        
+
         processNode(child_reader.item());
-        
+
         // Skip any siblings that were consumed by command handlers
         if (consumed_count > 0) {
             i += consumed_count;
         }
-        
+
         // Clear sibling context
         sibling_ctx_ = {};
-        
+
         // Check if previous node set pending ZWS output flag (curly_group at document level)
         if (pending_zws_output_) {
             bool had_trailing_space = pending_zws_had_trailing_space_;
             pending_zws_output_ = false;  // Clear flags
             pending_zws_had_trailing_space_ = false;
-            
+
             // Only output ZWS if there's more contentful siblings after this
             // BUT not if there's a paragraph break (double newline) before the next content
             // ALSO not if group had trailing space AND next non-whitespace starts immediately
@@ -9217,10 +9217,10 @@ void LatexProcessor::processChildren(Item elem) {
             bool next_is_plain_text = false;
             bool found_first_content = false;
             int consecutive_newlines = 0;  // Track newlines across siblings
-            
+
             for (int64_t j = i + 1; j < count; j++) {
                 ItemReader next_reader = elem_reader.childAt(j);
-                
+
                 // Check for paragraph break symbol
                 if (next_reader.isSymbol()) {
                     const char* sym = next_reader.asSymbol()->chars;
@@ -9230,7 +9230,7 @@ void LatexProcessor::processChildren(Item elem) {
                         goto done_checking_siblings;
                     }
                 }
-                
+
                 if (next_reader.isString() || next_reader.isSymbol()) {
                     // Check strings and symbols (whitespace may be stored as symbols)
                     const char* next_text = next_reader.isString() ? next_reader.cstring() : (next_reader.isSymbol() ? next_reader.asSymbol()->chars : nullptr);
@@ -9246,7 +9246,7 @@ void LatexProcessor::processChildren(Item elem) {
                                 goto done_checking_siblings;
                             }
                         }
-                        
+
                         // Count consecutive newlines to detect paragraph break
                         for (const char* p = next_text; *p; p++) {
                             if (*p == '\n') {
@@ -9283,7 +9283,7 @@ void LatexProcessor::processChildren(Item elem) {
                     ElementReader next_elem(next_reader.item());
                     const char* next_tag = next_elem.tagName();
                     bool is_space_absorbing_cmd = false;
-                    
+
                     // Check if the element tag itself is a space-absorbing command
                     // (e.g., tag="LaTeX" from symbol processing)
                     if (next_tag && commandAbsorbsSpace(next_tag)) {
@@ -9317,13 +9317,13 @@ void LatexProcessor::processChildren(Item elem) {
                 }
             }
             done_checking_siblings:
-            
+
             // Suppress ZWS if: group had trailing space AND next is plain text
             // (the trailing space already provides word separation)
             if (had_trailing_space && next_is_plain_text) {
                 has_following_content = false;
             }
-            
+
             if (has_following_content) {
                 ensureParagraph();
                 // Output ZWS with current font styling (if any)
@@ -9337,7 +9337,7 @@ void LatexProcessor::processChildren(Item elem) {
                 }
             }
         }
-        
+
         // =============================================================================
         // Zero-Width Space (ZWS) Marker Logic
         // =============================================================================
@@ -9346,13 +9346,13 @@ void LatexProcessor::processChildren(Item elem) {
         // 1. Commands that absorb space (\LaTeX, \textbf, etc.)
         // 2. Empty curly groups {}
         // 3. Commands with empty arguments
-        
+
         if (child_reader.isElement()) {
             ElementReader cmd_elem(child_reader.item());
             const char* cmd_tag = cmd_elem.tagName();
-            
+
             bool needs_zws = false;
-            
+
             // Check if this is a curly_group with no content
             if (cmd_tag && strcmp(cmd_tag, "curly_group") == 0) {
                 auto group_iter = cmd_elem.children();
@@ -9380,7 +9380,7 @@ void LatexProcessor::processChildren(Item elem) {
                     needs_zws = true;
                 }
             }
-            
+
             // Check if this is a command that absorbs space
             if (cmd_tag && strcmp(cmd_tag, "command") == 0) {
                 // Get command name
@@ -9400,7 +9400,7 @@ void LatexProcessor::processChildren(Item elem) {
                         }
                     }
                 }
-                
+
                 if (cmd_name && commandAbsorbsSpace(cmd_name)) {
                     // Check if next sibling is NOT a curly_group/brack_group (command arguments)
                     // If it has arguments, they'll handle their own spacing
@@ -9410,29 +9410,29 @@ void LatexProcessor::processChildren(Item elem) {
                         if (next_reader.isElement()) {
                             ElementReader next_elem(next_reader.item());
                             const char* next_tag = next_elem.tagName();
-                            if (next_tag && (strcmp(next_tag, "curly_group") == 0 || 
+                            if (next_tag && (strcmp(next_tag, "curly_group") == 0 ||
                                            strcmp(next_tag, "brack_group") == 0)) {
                                 has_following_arg = true;
                             }
                         }
                     }
-                    
+
                     if (!has_following_arg) {
                         needs_zws = true;
                     }
                 }
             }
-            
-            // Output ZWS marker if needed and next sibling is text or another command  
+
+            // Output ZWS marker if needed and next sibling is text or another command
             if (needs_zws && i + 1 < count) {
                 // Skip whitespace-only strings to find next real content
                 int64_t next_idx = i + 1;
                 bool found_next = false;
                 bool next_is_space_absorbing = false;
-                
+
                 while (next_idx < count && !found_next) {
                     ItemReader scan_reader = elem_reader.childAt(next_idx);
-                    
+
                     if (scan_reader.isString()) {
                         const char* text = scan_reader.cstring();
                         bool is_whitespace_only = true;
@@ -9479,7 +9479,7 @@ void LatexProcessor::processChildren(Item elem) {
                         break;
                     }
                 }
-                
+
                 // Only output ZWS if we found next content and it's NOT space-absorbing
                 if (found_next && !next_is_space_absorbing) {
                     ensureParagraph();
@@ -9488,7 +9488,7 @@ void LatexProcessor::processChildren(Item elem) {
                 }
             }
         }
-        
+
         // =============================================================================
         // Space Consumption Logic (Original)
         // =============================================================================
@@ -9497,17 +9497,17 @@ void LatexProcessor::processChildren(Item elem) {
         // - \macro (no args): consumes space
         // - \macro{arg} (with args): consumes space
         // - \begin{empty}...\end{empty}: outputs ZWS, does NOT consume space
-        // 
+        //
         // Key distinction: \empty{} has {} as a SIBLING (following element)
         //                  \gobbleO{} has {} as a CHILD (argument to command)
         if (child_reader.isElement()) {
             // Check if this is an "empty" command or "curly_group" - they output ZWS and preserve spaces
             ElementReader cmd_elem(child_reader.item());
             const char* cmd_name = cmd_elem.tagName();
-            
+
             bool is_empty_cmd = (cmd_name && strcmp(cmd_name, "empty") == 0);
             bool is_curly_group = (cmd_name && strcmp(cmd_name, "curly_group") == 0);
-            
+
             // Commands with arguments should not consume following space
             // Check if this command has any non-whitespace children
             bool has_content_child = false;
@@ -9537,9 +9537,9 @@ void LatexProcessor::processChildren(Item elem) {
                     break;
                 }
             }
-            
+
             bool skip_space_consumption = is_empty_cmd || is_curly_group || has_content_child;
-            
+
             // Check if NEXT sibling is an empty curly_group (e.g., "\empty {}")
             bool next_is_empty_curly = false;
             if (i + 1 < count) {
@@ -9580,7 +9580,7 @@ void LatexProcessor::processChildren(Item elem) {
                     }
                 }
             }
-            
+
             if (next_is_empty_curly) {
                 // Next sibling is empty {}: output ZWS, skip the empty braces, don't consume space
                 ensureParagraph();
@@ -9611,7 +9611,7 @@ void LatexProcessor::processChildren(Item elem) {
 
 void LatexProcessor::processSpacingCommand(Item elem) {
     ElementReader reader(elem);
-    
+
     // Get the command field which contains the actual spacing command string
     auto iter = reader.children();
     ItemReader child;
@@ -9619,7 +9619,7 @@ void LatexProcessor::processSpacingCommand(Item elem) {
         if (child.isString()) {
             const char* cmd = child.asString()->chars;
             ensureParagraph();
-            
+
             if (strcmp(cmd, "\\,") == 0 || strcmp(cmd, "\\thinspace") == 0) {
                 // Thin space (1/6 em) - use Unicode thin space U+2009
                 gen_->text("\u2009");
@@ -9645,7 +9645,7 @@ void LatexProcessor::processSpacingCommand(Item elem) {
             } else if (strcmp(cmd, "\\space") == 0) {
                 // Normal space
                 gen_->text(" ");
-            } else if (strcmp(cmd, "\\ ") == 0 || strcmp(cmd, "\\\t") == 0 || 
+            } else if (strcmp(cmd, "\\ ") == 0 || strcmp(cmd, "\\\t") == 0 ||
                        strcmp(cmd, "\\\n") == 0 || strcmp(cmd, "\\\r") == 0) {
                 // Backslash-space/tab/newline (control space) - produces zero-width space + regular space
                 // The ZWS allows line breaking, the space provides word separation
@@ -9673,10 +9673,10 @@ void LatexProcessor::processSpacingCommand(Item elem) {
 // which must be output as &nbsp; HTML entity
 void LatexProcessor::outputTextWithSpecialChars(const char* text) {
     if (!text || *text == '\0') return;
-    
+
     const char* p = text;
     const char* segment_start = p;
-    
+
     while (*p) {
         // Check for UTF-8 encoded U+00A0 (non-breaking space): 0xC2 0xA0
         if ((unsigned char)*p == 0xC2 && (unsigned char)*(p+1) == 0xA0) {
@@ -9703,7 +9703,7 @@ void LatexProcessor::outputTextWithSpecialChars(const char* text) {
             }
         }
     }
-    
+
     // Output any remaining text
     if (p > segment_start) {
         gen_->text(segment_start);
@@ -9712,20 +9712,20 @@ void LatexProcessor::outputTextWithSpecialChars(const char* text) {
 
 void LatexProcessor::processText(const char* text) {
     if (!text) return;
-    
+
     // Skip EMPTY_STRING sentinel ("lambda.nil")
     if (strlen(text) == 10 && strncmp(text, "lambda.nil", 10) == 0) {
         return;
     }
-    
+
     // Debug: log text content to see what's being processed
     log_debug("processText: '%s' (len=%zu, in_paragraph=%d)", text, strlen(text), in_paragraph_ ? 1 : 0);
-    
+
     // Note: ZWS output is handled by processChildren() which checks for following content
     // Don't output ZWS here - let the sibling loop decide based on context
-    
+
     // In restricted h-mode, check if first text starts with newline (latex-js adds ZWS + space)
-    // This distinguishes "\mbox{\n..." from "\mbox{ ..." 
+    // This distinguishes "\mbox{\n..." from "\mbox{ ..."
     // Only applies to the very first text in restricted h-mode
     bool add_leading_zws = false;
     if (restricted_h_mode_first_text_) {
@@ -9735,12 +9735,12 @@ void LatexProcessor::processText(const char* text) {
             add_leading_zws = true;
         }
     }
-    
+
     // Normalize whitespace: collapse multiple spaces/newlines/tabs to single space
     // This matches LaTeX behavior where whitespace is collapsed
     std::string normalized;
     bool in_whitespace = false;
-    
+
     for (const char* p = text; *p; p++) {
         if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
             if (!in_whitespace) {
@@ -9755,21 +9755,21 @@ void LatexProcessor::processText(const char* text) {
             in_whitespace = false;
         }
     }
-    
+
     // Process LaTeX ^^ notation for special characters
     // This must be done before other text transformations
     normalized = processHatNotation(normalized.c_str());
-    
+
     // Convert ASCII apostrophe (') to right single quotation mark (')
     // Also handles dash ligatures (-- → en-dash, --- → em-dash)
     // And single hyphen → Unicode hyphen (U+2010)
     // In monospace mode, dash/ligature conversions are skipped
     normalized = convertApostrophes(normalized.c_str(), inMonospaceMode());
-    
+
     // Note: Automatic hyphenation (soft hyphen insertion) is disabled
     // Tests expect exact text without soft hyphens (U+00AD)
     // Hyphenation can be manually added with \- command if needed
-    
+
     // Check if result is pure whitespace (multiple spaces/newlines)
     // Don't skip single spaces - they're significant in inline content
     bool all_whitespace = true;
@@ -9779,39 +9779,39 @@ void LatexProcessor::processText(const char* text) {
             break;
         }
     }
-    
+
     // Skip if only whitespace AND more than one space (e.g., paragraph breaks)
     // Keep single spaces as they're part of inline formatting
     if (all_whitespace && normalized.length() > 1) {
         return;
     }
-    
+
     // Skip whitespace (even single space) if not inside a paragraph
     // This prevents empty paragraphs when whitespace appears between \par and parbreak
     if (all_whitespace && !in_paragraph_) {
         return;
     }
-    
+
     // Trim leading whitespace if starting a new paragraph (LaTeX ignores leading space)
     if (!in_paragraph_ && !normalized.empty() && normalized[0] == ' ') {
         normalized = normalized.substr(1);
     }
-    
+
     ensureParagraph();  // Auto-wrap text in <p> tags
-    
+
     // Check if we should strip leading space (set by font declaration commands)
     // LaTeX commands consume their trailing space, so text after a declaration
     // or special character command should have its leading space stripped
     bool should_strip_leading = strip_next_leading_space_;
     strip_next_leading_space_ = false;  // Reset flag after checking
-    
+
     // Also strip leading space if the output already ends with whitespace
     // This prevents consecutive spaces from adjacent text nodes
-    if (!should_strip_leading && gen_->hasTrailingWhitespace() && 
+    if (!should_strip_leading && gen_->hasTrailingWhitespace() &&
         !normalized.empty() && normalized[0] == ' ') {
         should_strip_leading = true;
     }
-    
+
     // Strip leading space if flagged (applies to all text, not just font-styled)
     if (should_strip_leading && !normalized.empty() && normalized[0] == ' ') {
         size_t start = 0;
@@ -9833,7 +9833,7 @@ void LatexProcessor::processText(const char* text) {
             }
         }
     }
-    
+
     // Check if current font differs from default - if so, wrap text in a span
     // BUT skip this if we're inside a styled span (like \textbf{}) to prevent double-wrapping
     // When inside a font environment, use only the innermost environment's class (not accumulated)
@@ -9845,20 +9845,20 @@ void LatexProcessor::processText(const char* text) {
         // Not in a font environment: use accumulated font class
         font_class = gen_->getFontClass(gen_->currentFont());
     }
-    
+
     // Output leading ZWS if needed (for restricted h-mode with leading newline)
     // This is output before the text content, creating "ZWS + space + text" pattern
     if (add_leading_zws && !normalized.empty() && normalized[0] == ' ') {
         gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
     }
-    
+
     if (!font_class.empty() && !inStyledSpan()) {
         // When font styling is active
         if (all_whitespace) {
             // Skip pure whitespace when font styling is active
             return;
         }
-        
+
         // Wrap content in span with font class
         if (!normalized.empty()) {
             gen_->span(font_class.c_str());
@@ -9882,38 +9882,38 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         gen_->text("]");
         return;
     }
-    
+
     // Handle curly_group (TeX brace groups) - important for font scoping
     // Groups in TeX (e.g., { \bfseries text }) limit the scope of declarations
     // latex.js adds zero-width space (U+200B) at group boundaries for visual separation
     if (strcmp(cmd_name, "curly_group") == 0) {
         gen_->enterGroup();
-        
+
         // Save alignment state - alignment declarations are scoped to groups
         // When we enter a group, save current alignment so we can restore it on exit
         pushAlignmentScope();
-        
+
         // Save strip_next_leading_space_ flag - it should not persist beyond group scope
         // Commands like \ignorespaces only affect whitespace in the current group
         bool saved_strip_flag = strip_next_leading_space_;
         strip_next_leading_space_ = false;  // Reset for group content
-        
+
         // Reset the group ZWS suppression flag for this group
         group_suppresses_zws_ = false;
-        
+
         // Check if group is empty (has no children or only whitespace)
         ElementReader reader(elem);
         bool is_empty_group = true;
         bool has_leading_space = false;
         bool has_trailing_space = false;
-        
+
         // Iterate through children to check emptiness and whitespace
         auto iter = reader.children();
         ItemReader child;
         ItemReader last_string_child;
         bool found_last_string = false;
         bool is_first = true;
-        
+
         while (iter.next(&child)) {
             if (child.isString()) {
                 String* str = child.asString();
@@ -9939,7 +9939,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             }
             is_first = false;
         }
-        
+
         // Check trailing space
         if (found_last_string) {
             String* str = last_string_child.asString();
@@ -9947,13 +9947,13 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                 has_trailing_space = true;
             }
         }
-        
+
         // Output ZWS at entry if leading space (and not empty group)
         if (has_leading_space && !is_empty_group) {
             ensureParagraph();
             gen_->text("\xe2\x80\x8b");  // U+200B zero-width space
         }
-        
+
         // For empty groups with only spaces, output ZWS separated by spaces
         // e.g., {  } → ZWS + space + ZWS, {   } → ZWS + space + ZWS + space + ZWS
         // Pattern: N spaces → N ZWS markers with (N-1) spaces between them
@@ -9974,7 +9974,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                     }
                 }
             }
-            
+
             // Output ZWS markers separated by spaces
             if (space_count > 0) {
                 ensureParagraph();
@@ -9990,19 +9990,19 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             processChildren(elem);
         }
         gen_->exitGroup();
-        
+
         // Restore alignment state after exiting group
         popAlignmentScope();
-        
+
         // Restore strip_next_leading_space_ flag after group
         strip_next_leading_space_ = saved_strip_flag;
-        
+
         // ZWS at exit for all curly groups
         // LaTeX groups break word concatenation, so output ZWS at boundaries
         // processChildren will check for paragraph breaks and suppress if needed
         int depth_after_exit = gen_->groupDepth();
         bool should_output_zws = false;
-        
+
         // At any depth, curly groups should output ZWS to preserve word boundaries
         if (is_empty_group && (has_leading_space || has_trailing_space)) {
             // Empty groups with spaces were already handled above
@@ -10015,7 +10015,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             // processChildren will check for paragraph breaks
             should_output_zws = true;
         }
-        
+
         // Don't output ZWS if we're at paragraph end or if paragraph is about to close
         // Signal to processChildren that ZWS should be output after this node
         // if there's more contentful siblings
@@ -10024,26 +10024,26 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             pending_zws_output_ = true;
             pending_zws_had_trailing_space_ = has_trailing_space;
         }
-        
+
         // Reset the flag for next group
         group_suppresses_zws_ = false;
-        
+
         return;
     }
-    
+
     // Handle document wrapper (from \begin{document}...\end{document})
     if (strcmp(cmd_name, "document") == 0) {
         // Just process children - document is a transparent container
         processChildren(elem);
         return;
     }
-    
+
     // Handle paragraph wrapper (transparent container for text content)
     if (strcmp(cmd_name, "paragraph") == 0) {
         processChildren(elem);
         return;
     }
-    
+
     // Handle Tree-sitter special node types that should be silent
     if (strcmp(cmd_name, "class_include") == 0) {
         cmd_documentclass(this, elem);
@@ -10057,13 +10057,13 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         cmd_value(this, elem);
         return;
     }
-    
+
     // Handle macro definition elements specially (from Tree-sitter)
     if (strcmp(cmd_name, "new_command_definition") == 0 || strcmp(cmd_name, "newcommand") == 0) {
         cmd_newcommand(this, elem);
         return;
     }
-    
+
     // Handle macro argument wrapper (transparent - just process children)
     if (strcmp(cmd_name, "arg") == 0) {
         processChildren(elem);
@@ -10081,18 +10081,18 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         cmd_def(this, elem);
         return;
     }
-    
+
     // Check if single-character command that's a literal escape sequence
     // Diacritic commands (', `, ^, ~, ", =, ., etc.) are NOT escape sequences
     // Escape sequences are: %, &, $, #, _, {, }, \, @, /, -, etc.
     if (strlen(cmd_name) == 1) {
         char c = cmd_name[0];
         // Diacritics that should be processed as commands
-        if (c == '\'' || c == '`' || c == '^' || c == '~' || c == '"' || 
+        if (c == '\'' || c == '`' || c == '^' || c == '~' || c == '"' ||
             c == '=' || c == '.' || c == 'u' || c == 'v' || c == 'H' ||
             c == 't' || c == 'c' || c == 'd' || c == 'b' || c == 'r' || c == 'k') {
             // Fall through to command processing
-        } else if (c == 'i' || c == 'j' || c == 'l' || c == 'L' || 
+        } else if (c == 'i' || c == 'j' || c == 'l' || c == 'L' ||
                    c == 'o' || c == 'O') {
             // Special characters: dotless i/j, Polish l/L, Scandinavian o/O
             // Fall through to command processing
@@ -10102,7 +10102,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             return;
         }
     }
-    
+
     // Check if this is a user-defined macro
     if (isMacro(cmd_name)) {
         log_debug("Processing macro invocation: %s (depth=%d)", cmd_name, recursion_depth_);
@@ -10113,20 +10113,20 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             // is parsed as direct children of the 'greet' element, not as curly_group
             std::vector<Element*> args;
             ElementReader reader(elem);
-            
+
             // Collect all children as macro arguments (up to num_params)
             // Wrap each sequence of children into a temporary element
             MarkBuilder builder(input_);
             auto iter = reader.children();
             ItemReader child;
             int args_collected = 0;
-            
+
             // Check if first child is a brack_group (optional arg override)
             // If so, use it for #1 instead of default; otherwise use default if available
             bool first_is_optional = false;
-            
+
             fprintf(stderr, "DEBUG: Macro %s needs %d params, has %lld children\n", cmd_name, macro->num_params, reader.childCount());
-            
+
             // Peek at first child to check if it's a brack_group (optional arg)
             ItemReader peek_child;
             auto peek_iter = reader.children();
@@ -10138,14 +10138,14 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                     fprintf(stderr, "DEBUG: Macro %s first arg is optional brack_group\n", cmd_name);
                 }
             }
-            
+
             while (iter.next(&child) && args_collected < macro->num_params) {
                 TypeId child_type = child.getType();
                 fprintf(stderr, "DEBUG:   Child %d: type=%d\n", args_collected, child_type);
-                
+
                 // Create a wrapper element for this argument
                 ElementBuilder arg_elem = builder.element("arg");
-                
+
                 // Check if this is a brack_group (optional arg) - extract content
                 if (child.isElement()) {
                     ElementReader child_elem(child.item());
@@ -10163,18 +10163,18 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                         continue;
                     }
                 }
-                
+
                 // Add the child to the wrapper
                 arg_elem.child(child.item());
-                
+
                 // Store the wrapped argument
                 Item arg_item = arg_elem.final();
                 args.push_back((Element*)arg_item.item);
                 args_collected++;
             }
-            
+
             fprintf(stderr, "DEBUG: Macro %s collected %d/%d args\n", cmd_name, args_collected, macro->num_params);
-            
+
             // If we have fewer args than num_params and there's a default value,
             // prepend the default value as the first argument
             // This handles \newcommand{\cmd}[2][default]{#1 #2} when called as \cmd{arg}
@@ -10189,7 +10189,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                 args = new_args;
                 fprintf(stderr, "DEBUG: Macro %s now has %zu args after adding default\n", cmd_name, args.size());
             }
-            
+
             // Expand the macro with arguments
             Element* expanded = expandMacro(cmd_name, args);
             if (expanded) {
@@ -10202,7 +10202,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             }
         }
     }
-    
+
     // Handle block vs inline commands differently
     // In restricted horizontal mode (inside \mbox), block commands should NOT close paragraph
     // Also, when inside a styled span (like \emph{}), block commands should stay inline
@@ -10215,13 +10215,13 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         ensureParagraph();
         // Track that we're entering an inline element
         inline_depth_++;
-    } else if (strcmp(cmd_name, "\\") == 0 || 
-               strcmp(cmd_name, "newline") == 0 || 
+    } else if (strcmp(cmd_name, "\\") == 0 ||
+               strcmp(cmd_name, "newline") == 0 ||
                strcmp(cmd_name, "linebreak") == 0) {
         // Line breaks: ensure paragraph but don't affect nesting depth
         ensureParagraph();
     }
-    
+
     // Check for \the<counter> commands (e.g., \thec, \thesection)
     // These are automatically created by \newcounter{name} and format the counter
     if (strncmp(cmd_name, "the", 3) == 0 && strlen(cmd_name) > 3) {
@@ -10236,7 +10236,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         }
         // Counter doesn't exist - fall through to unknown command handling
     }
-    
+
     // Look up command in table
     auto it = command_table_.find(cmd_name);
     if (it != command_table_.end()) {
@@ -10246,7 +10246,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             fprintf(debugf, "processCommand: dispatching '%s'\n", cmd_name);
             fclose(debugf);
         }
-        
+
         // Call command handler
         it->second(this, elem);
 
@@ -10255,7 +10255,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         }
         return;
     }
-    
+
     // Look up symbol in package registry (for symbols from textgreek, textcomp, gensymb, etc.)
     const char* symbol = PackageRegistry::instance().lookupSymbol(cmd_name);
     if (symbol && *symbol) {
@@ -10264,7 +10264,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         gen_->text(symbol);
         return;
     }
-    
+
     // Unknown command - just output children
     log_debug("Unknown command: %s - processing children", cmd_name);  // DEBUG
     processChildren(elem);
@@ -10281,16 +10281,16 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
         fprintf(debugf, "format_latex_html_v2: ENTRY text_mode=%d\n", text_mode ? 1 : 0);
         fclose(debugf);
     }
-    
+
     if (!input || !input->root.item) {
         log_error("format_latex_html_v2: invalid input");
         Item result;
         result.item = ITEM_NULL;
         return result;
     }
-    
+
     Pool* pool = input->pool;
-    
+
     // ==========================================================================
     // PASS 1: Label collection (forward reference resolution)
     // Process the document with a null writer to collect all labels
@@ -10298,14 +10298,14 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     NullHtmlWriter null_writer;
     HtmlGenerator label_gen(pool, &null_writer);
     LatexProcessor label_proc(&label_gen, pool, input);
-    
+
     // Process to collect labels (output is discarded)
     label_proc.process(input->root);
-    
+
     // ==========================================================================
     // PASS 2: HTML generation with all labels available
     // ==========================================================================
-    
+
     // Create HTML writer for actual output
     HtmlWriter* writer = nullptr;
     if (text_mode) {
@@ -10316,37 +10316,37 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
         // Node mode - generate Element tree
         writer = new NodeHtmlWriter(input);
     }
-    
+
     // Create HTML generator and copy labels from first pass
     HtmlGenerator gen(pool, writer);
     gen.copyLabelsFrom(label_gen);
-    
+
     // Create processor
     LatexProcessor proc(&gen, pool, input);
-    
+
     // Start HTML document container (using "body" class for LaTeX.js compatibility)
     writer->openTag("div", "body");
-    
+
     // Process LaTeX tree
     proc.process(input->root);
-    
+
     // Close any open paragraph at end of document
     proc.closeParagraphIfOpen();
-    
+
     // Close HTML document container
     writer->closeTag("div");
-    
+
     // Output margin paragraphs if any were collected
     if (proc.hasMarginParagraphs()) {
         proc.writeMarginParagraphs(writer);
     }
-    
+
     // Get result
     Item result = writer->getResult();
-    
+
     // Cleanup
     delete writer;
-    
+
     return result;
 }
 
@@ -10354,20 +10354,23 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
 // Full HTML Document Generation (with CSS and fonts)
 // =============================================================================
 
-std::string format_latex_html_v2_document(Input* input, const char* doc_class, 
+std::string format_latex_html_v2_document(Input* input, const char* doc_class,
                                            const char* asset_base_url, bool embed_css) {
     // Generate complete HTML document with CSS and fonts
     // asset_base_url: base URL for CSS/font files (e.g., "https://cdn.example.com/latex-assets/")
     // embed_css: if true, embed CSS inline; if false, use <link> tags
-    
+
+    log_info("format_latex_html_v2_document called: doc_class=%s, asset_url=%s, embed=%d",
+             doc_class ? doc_class : "(null)", asset_base_url ? asset_base_url : "(null)", embed_css);
+
     if (!input || !input->root.item) {
         log_error("format_latex_html_v2_document: invalid input");
         return "";
     }
-    
+
     // Reset package registry for fresh document processing
     PackageRegistry::instance().reset();
-    
+
     // Get HTML body content
     Item body_content = format_latex_html_v2(input, true);
     TypeId body_type = get_type_id(body_content);
@@ -10375,10 +10378,10 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
         log_error("format_latex_html_v2_document: failed to generate body content, got type %d", body_type);
         return "";
     }
-    
+
     String* body_str = (String*)body_content.item;
     std::string body_html(body_str->chars, body_str->len);
-    
+
     // Extract document title from the body content
     // Look for <div class="title">...</div> and extract plain text
     std::string doc_title = "LaTeX Document";  // Default title
@@ -10410,7 +10413,7 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
             }
         }
     }
-    
+
     // Configure asset loading
     LatexAssetConfig config;
     if (asset_base_url && *asset_base_url) {
@@ -10422,13 +10425,13 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
         config.mode = AssetMode::LINK;
     }
     config.asset_dir = LatexAssets::getDefaultAssetDir();
-    
+
     // Determine document class
     std::string docclass = doc_class ? doc_class : "article";
-    
+
     // Get head content
     std::string head_content = LatexAssets::generateHeadContent(docclass.c_str(), config);
-    
+
     // Build complete HTML document
     std::ostringstream oss;
     oss << "<!DOCTYPE html>\n";
@@ -10443,8 +10446,11 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
     oss << body_html;
     oss << "</body>\n";
     oss << "</html>\n";
-    
-    return oss.str();
+
+    std::string result = oss.str();
+    log_info("format_latex_html_v2_document: generated %zu bytes, starts with: %.80s",
+              result.size(), result.c_str());
+    return result;
 }
 
 } // namespace lambda
@@ -10461,7 +10467,7 @@ Item format_latex_html_v2_c(Input* input, int text_mode) {
 // Generate complete HTML document with CSS - returns allocated C string (caller must free)
 const char* format_latex_html_v2_document_c(Input* input, const char* doc_class,
                                              const char* asset_base_url, int embed_css) {
-    std::string result = lambda::format_latex_html_v2_document(input, doc_class, 
+    std::string result = lambda::format_latex_html_v2_document(input, doc_class,
                                                                  asset_base_url, embed_css != 0);
     if (result.empty()) {
         return nullptr;
