@@ -23,7 +23,7 @@ static const char** resolve_generic_family(const char* family) {
     // Chrome default fonts for macOS
     static const char* serif_fonts[] = {"Times New Roman", "Times", "Georgia", NULL};
     static const char* sans_serif_fonts[] = {"Arial", "Helvetica", NULL};
-    static const char* monospace_fonts[] = {"Courier New", "Courier", "Monaco", NULL};
+    static const char* monospace_fonts[] = {"Menlo", "Monaco", "Courier New", "Courier", NULL};
     static const char* cursive_fonts[] = {"Comic Sans MS", "Apple Chancery", NULL};
     static const char* fantasy_fonts[] = {"Impact", "Papyrus", NULL};
 

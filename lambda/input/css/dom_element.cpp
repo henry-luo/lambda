@@ -140,6 +140,11 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     element->doc = doc;
     element->native_element = native_element;
 
+    // Explicitly initialize display to {0, 0} to ensure no garbage values
+    // This is critical for table elements where display resolution depends on this field
+    element->display = {CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
+    element->styles_resolved = false;
+
     // Copy tag name
     size_t tag_len = strlen(tag_name);
     char* tag_copy = (char*)arena_alloc(doc->arena, tag_len + 1);
