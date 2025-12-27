@@ -251,6 +251,84 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
+    // Check for aspect-ratio with explicit height or resolvable percentage height
+    // If element has height and aspect-ratio, width = height * aspect-ratio
+    ViewBlock* view_block_for_aspect = (ViewBlock*)element;
+    float aspect_ratio = 0;
+    
+    // First check fi for resolved aspect-ratio
+    if (view_block_for_aspect->fi && view_block_for_aspect->fi->aspect_ratio > 0) {
+        aspect_ratio = view_block_for_aspect->fi->aspect_ratio;
+    }
+    // If not in fi, check specified_style directly
+    else if (element->specified_style) {
+        CssDeclaration* aspect_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_ASPECT_RATIO);
+        if (aspect_decl && aspect_decl->value) {
+            if (aspect_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                aspect_ratio = (float)aspect_decl->value->data.number.value;
+                log_debug("  -> aspect-ratio from specified_style: %.3f", aspect_ratio);
+            } else if (aspect_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                       aspect_decl->value->data.list.count == 2) {
+                // Handle "width / height" format
+                CssValue* width_val = aspect_decl->value->data.list.values[0];
+                CssValue* height_val = aspect_decl->value->data.list.values[1];
+                if (width_val && height_val &&
+                    width_val->type == CSS_VALUE_TYPE_NUMBER &&
+                    height_val->type == CSS_VALUE_TYPE_NUMBER) {
+                    float w = (float)width_val->data.number.value;
+                    float h = (float)height_val->data.number.value;
+                    if (h > 0) {
+                        aspect_ratio = w / h;
+                        log_debug("  -> aspect-ratio from specified_style list: %.3f (%.1f / %.1f)",
+                                  aspect_ratio, w, h);
+                    }
+                }
+            }
+        }
+    }
+    
+    if (aspect_ratio > 0) {
+        float height = -1;
+
+        // Check for explicit height from CSS
+        if (view_block_for_aspect->blk && view_block_for_aspect->blk->given_height > 0) {
+            height = view_block_for_aspect->blk->given_height;
+        }
+        
+        // If no explicit height, check for percentage height that can resolve
+        // against a parent with definite height
+        if (height <= 0 && element->specified_style) {
+            CssDeclaration* height_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_HEIGHT);
+            if (height_decl && height_decl->value &&
+                height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                float percentage = (float)height_decl->value->data.percentage.value;
+                // Check if parent has definite height
+                float parent_height = -1;
+                if (lycon->block.parent && lycon->block.parent->content_height > 0) {
+                    parent_height = lycon->block.parent->content_height;
+                } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
+                    parent_height = lycon->block.parent->given_height;
+                }
+                if (parent_height > 0) {
+                    height = parent_height * percentage / 100.0f;
+                    log_debug("  -> percentage height resolved: %.1f%% of %.1f = %.1f",
+                              percentage, parent_height, height);
+                }
+            }
+        }
+
+        if (height > 0) {
+            float aspect_width = height * aspect_ratio;
+            sizes.min_content = (int)(aspect_width + 0.5f);
+            sizes.max_content = (int)(aspect_width + 0.5f);
+            log_debug("  -> aspect-ratio width: %.1f (height=%.1f, ratio=%.3f)",
+                      aspect_width, height, aspect_ratio);
+            return sizes;
+        }
+    }
+
     // Track inline-level content separately
     int inline_min_sum = 0;  // Sum of min-content widths for inline children
     int inline_max_sum = 0;  // Sum of max-content widths for inline children
@@ -263,6 +341,39 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     float flex_gap = 0;
     int flex_child_count = 0;  // Count of flex children for gap calculation
     ViewBlock* view_block = (ViewBlock*)element;
+
+    // Check if this is a grid container with explicit height
+    // Grid children with percentage heights should resolve against this height
+    bool is_grid_container = false;
+    float grid_explicit_height = -1;
+    if (view_block->display.inner == CSS_VALUE_GRID) {
+        is_grid_container = true;
+    }
+    if (!is_grid_container && element->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum dv = display_decl->value->data.keyword;
+            if (dv == CSS_VALUE_GRID || dv == CSS_VALUE_INLINE_GRID) {
+                is_grid_container = true;
+            }
+        }
+    }
+    if (is_grid_container) {
+        // Get explicit height from view or CSS
+        if (view_block->blk && view_block->blk->given_height > 0) {
+            grid_explicit_height = view_block->blk->given_height;
+        } else if (element->specified_style) {
+            CssDeclaration* height_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_HEIGHT);
+            if (height_decl && height_decl->value &&
+                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                grid_explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+            }
+        }
+        log_debug("measure_element_intrinsic_widths: grid container with explicit height=%.1f", grid_explicit_height);
+    }
 
     // First check resolved display.inner
     if (view_block->display.inner == CSS_VALUE_FLEX) {
@@ -311,6 +422,64 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
         log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f",
                   element->node_name(), is_flex_container, is_row_flex, flex_gap);
+    }
+
+    // Set up parent context for children to inherit definite height
+    // This allows children with percentage heights and aspect-ratio to compute their width
+    BlockContext* saved_parent = lycon->block.parent;
+    BlockContext temp_parent = {};
+    bool need_restore_parent = false;
+    
+    // Determine if this element has a definite height to propagate
+    float element_definite_height = -1;
+    
+    log_debug("  -> checking height for %s: blk=%p, given_height=%.1f",
+              element->node_name(), 
+              (void*)(view_block->blk), 
+              view_block->blk ? view_block->blk->given_height : -999);
+    
+    // First check for explicit height from CSS (length value)
+    if (view_block->blk && view_block->blk->given_height > 0) {
+        element_definite_height = view_block->blk->given_height;
+        log_debug("  -> got explicit height from blk: %.1f", element_definite_height);
+    } else if (element->specified_style) {
+        CssDeclaration* height_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_HEIGHT);
+        log_debug("  -> checking specified_style for height: decl=%p, value=%p",
+                  (void*)height_decl, height_decl ? (void*)height_decl->value : nullptr);
+        if (height_decl && height_decl->value) {
+            log_debug("  -> height decl value type=%d (LENGTH=%d, PERCENTAGE=%d)",
+                      height_decl->value->type, CSS_VALUE_TYPE_LENGTH, CSS_VALUE_TYPE_PERCENTAGE);
+            if (height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                element_definite_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                log_debug("  -> resolved length height: %.1f", element_definite_height);
+            } else if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                // Check if parent has definite height for percentage resolution
+                float percentage = (float)height_decl->value->data.percentage.value;
+                float parent_height = -1;
+                if (lycon->block.parent && lycon->block.parent->content_height > 0) {
+                    parent_height = lycon->block.parent->content_height;
+                } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
+                    parent_height = lycon->block.parent->given_height;
+                }
+                log_debug("  -> percentage height: %.1f%%, parent_height=%.1f",
+                          percentage, parent_height);
+                if (parent_height > 0) {
+                    element_definite_height = parent_height * percentage / 100.0f;
+                    log_debug("  -> element percentage height resolved: %.1f%% of %.1f = %.1f",
+                              percentage, parent_height, element_definite_height);
+                }
+            }
+        }
+    }
+    
+    // If this element has a definite height, propagate it to children
+    if (element_definite_height > 0) {
+        temp_parent.content_height = element_definite_height;
+        temp_parent.given_height = element_definite_height;
+        lycon->block.parent = &temp_parent;
+        need_restore_parent = true;
+        log_debug("  -> set up temp parent context with height=%.1f for children", element_definite_height);
     }
 
     // Measure children recursively
@@ -386,6 +555,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.min_content = max(sizes.min_content, child_sizes.min_content);
             sizes.max_content = max(sizes.max_content, child_sizes.max_content);
         }
+    }
+
+    // Restore parent context
+    if (need_restore_parent) {
+        lycon->block.parent = saved_parent;
     }
 
     // Add gaps for row flex containers

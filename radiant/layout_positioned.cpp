@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
+#include "available_space.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
@@ -207,16 +208,29 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     float content_width, content_height;
     // calculate horizontal position
-    log_debug("given_width=%f, given_height=%f", lycon->block.given_width, lycon->block.given_height);
+    log_debug("given_width=%f, given_height=%f, width_type=%d", lycon->block.given_width, lycon->block.given_height,
+              block->blk ? block->blk->given_width_type : -1);
+
+    // Check if width uses intrinsic sizing keywords (max-content, min-content, fit-content)
+    bool is_intrinsic_width = block->blk &&
+        (block->blk->given_width_type == CSS_VALUE_MAX_CONTENT ||
+         block->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
+         block->blk->given_width_type == CSS_VALUE_FIT_CONTENT);
 
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints
-    if (lycon->block.given_width >= 0) {
+    if (lycon->block.given_width >= 0 && !is_intrinsic_width) {
         content_width = lycon->block.given_width;
-    } else if (block->position->has_left && block->position->has_right) {
+    } else if (block->position->has_left && block->position->has_right && !is_intrinsic_width) {
         // both left and right specified - calculate width from constraints
         float left_edge = block->position->left + (block->bound ? block->bound->margin.left : 0);
         float right_edge = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0);
         content_width = max(right_edge - left_edge, 0.0f);
+    } else if (is_intrinsic_width) {
+        // For max-content/min-content/fit-content, use 0 as initial width
+        // The actual width will be determined by content and adjusted post-layout
+        // Set content_width to 0 to trigger shrink-to-fit behavior
+        content_width = 0;
+        log_debug("Using intrinsic sizing for absolutely positioned element: content_width=0 (shrink-to-fit)");
     } else {
         // shrink-to-fit: will be determined by content (start with 0, let content grow it)
         // For now, fall back to containing block width minus margins
@@ -410,6 +424,27 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     block_context_reset_floats(&lycon->block);
     log_debug("[ABS BFC] Established new BFC for absolutely positioned element %s", block->node_name());
 
+    // Check if width uses intrinsic sizing keywords (max-content, min-content, fit-content)
+    bool is_intrinsic_width = block->blk &&
+        (block->blk->given_width_type == CSS_VALUE_MAX_CONTENT ||
+         block->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
+         block->blk->given_width_type == CSS_VALUE_FIT_CONTENT);
+
+    // Set available space for intrinsic sizing if needed
+    if (is_intrinsic_width) {
+        if (block->blk->given_width_type == CSS_VALUE_MAX_CONTENT) {
+            lycon->available_space = AvailableSpace::make_max_content();
+            log_debug("[ABS] Setting max-content intrinsic sizing mode");
+        } else if (block->blk->given_width_type == CSS_VALUE_MIN_CONTENT) {
+            lycon->available_space = AvailableSpace::make_min_content();
+            log_debug("[ABS] Setting min-content intrinsic sizing mode");
+        } else {
+            // fit-content uses max-content with clamping (for now, treat as max-content)
+            lycon->available_space = AvailableSpace::make_max_content();
+            log_debug("[ABS] Setting fit-content (max-content) intrinsic sizing mode");
+        }
+    }
+
     // setup inline context
     setup_inline(lycon, block);
 
@@ -460,19 +495,31 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     log_debug("block position: x=%f, y=%f, width=%f, height=%f, advance_y=%f, max_width=%f, given_height=%f, has_top=%d, has_bottom=%d",
         block->x, block->y, block->width, block->height, lycon->block.advance_y, lycon->block.max_width,
         lycon->block.given_height, block->position->has_top, block->position->has_bottom);
+    
+    // CRITICAL: Check if this is a flex/grid container that already calculated its dimensions
+    bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
+    bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);
+    // Only grid containers explicitly calculate width post-layout (in layout_grid_multipass.cpp)
+    // Flex containers handle shrink-to-fit within their algorithm
+    bool has_grid_calculated_width = is_grid_container && block->width > 0;
+    
     // Width is auto-sized when no explicit width AND neither left+right constraints
     if (!(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
-        // Note: max_width already includes left border + left padding from setup_inline
-        // So we only need to add right padding and right border
-        float flow_width = lycon->block.max_width;
-        float padding_right = block->bound ? block->bound->padding.right : 0;
-        float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
-        block->width = flow_width + padding_right + border_right;
+        // Don't override grid calculated width with flow-based auto-sizing
+        if (has_grid_calculated_width) {
+            log_debug("auto-sizing width: SKIPPED - grid container already has calculated width %.1f",
+                      block->width);
+        } else {
+            // Note: max_width already includes left border + left padding from setup_inline
+            // So we only need to add right padding and right border
+            float flow_width = lycon->block.max_width;
+            float padding_right = block->bound ? block->bound->padding.right : 0;
+            float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
+            block->width = flow_width + padding_right + border_right;
+        }
     }
     // Height is auto-sized when no explicit height AND neither top+bottom constraints
     // CRITICAL: Skip auto-sizing for flex/grid containers - they calculate their own height
-    bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
-    bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);
     bool has_flex_calculated_height = is_flex_container && block->height > 0;
     bool has_grid_calculated_height = is_grid_container && block->height > 0;
 

@@ -2337,9 +2337,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing width property");
             // CSS 'width: auto' should be represented as -1, not 0
             // This distinguishes from explicit 'width: 0'
+            // Same for 'max-content', 'min-content', 'fit-content' - these are intrinsic sizing keywords
             float width;
-            if (value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                width = -1;  // auto width
+            if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+                (value->data.keyword == CSS_VALUE_AUTO ||
+                 value->data.keyword == CSS_VALUE_MAX_CONTENT ||
+                 value->data.keyword == CSS_VALUE_MIN_CONTENT ||
+                 value->data.keyword == CSS_VALUE_FIT_CONTENT)) {
+                width = -1;  // auto/intrinsic width - will be calculated during layout
             } else {
                 width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
                 width = isnan(width) ? -1 : max(width, 0.0f);  // width cannot be negative
@@ -2367,9 +2372,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing height property");
             // CSS 'height: auto' should be represented as -1, not 0
             // This distinguishes from explicit 'height: 0'
+            // Same for 'max-content', 'min-content', 'fit-content' - these are intrinsic sizing keywords
             float height;
-            if (value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                height = -1;  // auto height
+            if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+                (value->data.keyword == CSS_VALUE_AUTO ||
+                 value->data.keyword == CSS_VALUE_MAX_CONTENT ||
+                 value->data.keyword == CSS_VALUE_MIN_CONTENT ||
+                 value->data.keyword == CSS_VALUE_FIT_CONTENT)) {
+                height = -1;  // auto/intrinsic height - will be calculated during layout
             } else {
                 height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, value);
                 height = isnan(height) ? -1 : max(height, 0.0f);  // height cannot be negative
@@ -4054,6 +4064,54 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_ASPECT_RATIO: {
+            log_debug("[CSS] Processing aspect-ratio property");
+            // aspect-ratio can apply to block-level and flex/grid items
+            // It's stored in FlexItemProp for flex/grid item sizing
+            if (!span) break;
+            if (!span->fi) { alloc_flex_item_prop(lycon, span); }
+            if (!span->fi) break;
+
+            // aspect-ratio values: auto | <ratio> | auto && <ratio>
+            // <ratio> is expressed as "width / height" (e.g., "16 / 9") or just a number (e.g., "2")
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // "auto" means no aspect ratio enforced
+                span->fi->aspect_ratio = 0;
+                log_debug("[CSS] aspect-ratio: auto");
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                // Single number means ratio = number (e.g., aspect-ratio: 2 means 2/1)
+                span->fi->aspect_ratio = (float)value->data.number.value;
+                log_debug("[CSS] aspect-ratio: %.3f (from number)", span->fi->aspect_ratio);
+            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 2) {
+                // List format: [number, "/", number] for "16 / 9" syntax
+                // Find two numbers in the list
+                double numerator = 0, denominator = 0;
+                bool got_numerator = false, got_denominator = false;
+                for (int i = 0; i < value->data.list.count && !got_denominator; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (item && item->type == CSS_VALUE_TYPE_NUMBER) {
+                        if (!got_numerator) {
+                            numerator = item->data.number.value;
+                            got_numerator = true;
+                        } else {
+                            denominator = item->data.number.value;
+                            got_denominator = true;
+                        }
+                    }
+                }
+                if (got_numerator && got_denominator && denominator > 0) {
+                    span->fi->aspect_ratio = (float)(numerator / denominator);
+                    log_debug("[CSS] aspect-ratio: %.3f (from %g / %g)", span->fi->aspect_ratio,
+                              numerator, denominator);
+                } else if (got_numerator) {
+                    // Just one number in list means ratio = number
+                    span->fi->aspect_ratio = (float)numerator;
+                    log_debug("[CSS] aspect-ratio: %.3f (from single number in list)", span->fi->aspect_ratio);
+                }
+            }
+            break;
+        }
+
         // ===== GROUP 12: Advanced Typography Properties =====
 
         case CSS_PROPERTY_FONT_STYLE: {
@@ -4708,6 +4766,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         span->gi->grid_column_start = 0;  // auto
                         span->gi->grid_column_end = -span_value;  // negative for span
                         span->gi->has_explicit_grid_column_end = true;
+                        span->gi->grid_column_end_is_span = true;
                     } else if (line_value != 0) {
                         // Just a line number
                         span->gi->grid_column_start = line_value;
@@ -4726,8 +4785,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 if (value_idx == 0) {
                                     span->gi->grid_column_start = -num;
                                     span->gi->has_explicit_grid_column_start = true;
+                                    span->gi->grid_column_start_is_span = true;
                                 } else {
                                     span->gi->grid_column_end = -num;
+                                    span->gi->grid_column_end_is_span = true;
                                     span->gi->has_explicit_grid_column_end = true;
                                 }
                                 saw_span = false;
@@ -4833,6 +4894,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         span->gi->grid_row_start = 0;  // auto
                         span->gi->grid_row_end = -span_value;  // negative for span
                         span->gi->has_explicit_grid_row_end = true;
+                        span->gi->grid_row_end_is_span = true;
                     } else if (line_value != 0) {
                         span->gi->grid_row_start = line_value;
                         span->gi->has_explicit_grid_row_start = true;
@@ -4850,9 +4912,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 if (value_idx == 0) {
                                     span->gi->grid_row_start = -num;
                                     span->gi->has_explicit_grid_row_start = true;
+                                    span->gi->grid_row_start_is_span = true;
                                 } else {
                                     span->gi->grid_row_end = -num;
                                     span->gi->has_explicit_grid_row_end = true;
+                                    span->gi->grid_row_end_is_span = true;
                                 }
                                 saw_span = false;
                             } else {

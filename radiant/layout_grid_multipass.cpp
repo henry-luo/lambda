@@ -112,6 +112,49 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     }
 
     // ========================================================================
+    // Update container width based on grid content (for shrink-to-fit containers)
+    // ========================================================================
+    if (grid_layout && grid_layout->computed_column_count > 0) {
+        // Check if container is shrink-to-fit (absolutely positioned with no explicit width)
+        bool is_shrink_to_fit = false;
+        if (grid_container->position &&
+            (grid_container->position->position == CSS_VALUE_ABSOLUTE ||
+             grid_container->position->position == CSS_VALUE_FIXED)) {
+            // Check if width is auto (not explicitly set)
+            bool has_explicit_width = grid_container->blk && grid_container->blk->given_width > 0;
+            bool has_left_right = grid_container->position->has_left && grid_container->position->has_right;
+            if (!has_explicit_width && !has_left_right) {
+                is_shrink_to_fit = true;
+            }
+        }
+
+        if (is_shrink_to_fit) {
+            // Calculate total width from column sizes plus gaps
+            float total_column_width = 0;
+            for (int i = 0; i < grid_layout->computed_column_count; i++) {
+                total_column_width += grid_layout->computed_columns[i].base_size;
+            }
+            // Add gaps between columns
+            total_column_width += grid_layout->column_gap * (grid_layout->computed_column_count - 1);
+
+            // Add padding and border
+            float container_width = total_column_width;
+            if (grid_container->bound) {
+                container_width += grid_container->bound->padding.left + grid_container->bound->padding.right;
+                if (grid_container->bound->border) {
+                    container_width += grid_container->bound->border->width.left +
+                                       grid_container->bound->border->width.right;
+                }
+            }
+
+            log_info("GRID: Updating container width from %d to %.1f (columns=%.1f, gaps=%.1f)",
+                     grid_container->width, container_width, total_column_width,
+                     grid_layout->column_gap * (grid_layout->computed_column_count - 1));
+            grid_container->width = (int)container_width;
+        }
+    }
+
+    // ========================================================================
     // PASS 4: Absolute Positioned Children
     // ========================================================================
     log_info("=== GRID PASS 4: Absolute positioned children ===");
