@@ -429,28 +429,32 @@ void line_break(LayoutContext* lycon) {
     line_align(lycon);
 
     // advance to next line
-    // CRITICAL FIX: Smart line height selection for mixed font sizes vs uniform text
-    // For mixed font sizes (spans), use max to accommodate larger fonts
-    // For uniform text, prefer CSS line height for browser compatibility
+    // CSS 2.1 10.8.1: Line height controls vertical spacing between line boxes
+    // When line-height is explicitly set (e.g., line-height: 1), use it exactly
+    // even if it's smaller than font metrics (allowing lines to overlap)
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     float css_line_height = lycon->block.line_height;
 
-    // BUGFIX: If css_line_height is not set (0 or negative), use font-based line height
+    // If css_line_height is not set (0 or negative), use font-based line height
     // This ensures text in elements without explicit line-height gets proper spacing
     if (css_line_height <= 0) {
         css_line_height = font_line_height;
     }
 
     // Check if we have mixed font sizes by comparing font height to CSS height
+    // Only expand for mixed fonts when the larger font significantly exceeds line-height
     bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
     float used_line_height;
 
     if (has_mixed_fonts) {
         // Mixed font sizes - use max to accommodate larger fonts
+        // CSS 2.1: "The height of a line box is determined by the rules given in the section on line height calculations"
         used_line_height = max(css_line_height, font_line_height);
     } else {
-        // Uniform font size - prefer CSS line height, but ensure minimum font height
-        used_line_height = max(css_line_height, font_line_height - 1); // -1px adjustment for browser compatibility
+        // Uniform font size - use CSS line height exactly as specified
+        // CSS 2.1: The computed line-height is used for line box spacing
+        // Even if lines overlap (line-height < font metrics), this is correct CSS behavior
+        used_line_height = css_line_height;
     }
 
     // printf("DEBUG: Line advance - font: %d, css: %d, mixed: %s, used: %d\n",
