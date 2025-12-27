@@ -37,6 +37,24 @@ static const char** resolve_generic_family(const char* family) {
 
     return NULL;  // not a generic family
 }
+
+// Glyph fallback cache: caches which FT_Face (from fallback fonts) can render a given codepoint
+typedef struct GlyphFallbackEntry {
+    uint32_t codepoint;
+    FT_Face fallback_face;  // NULL if no fallback found (negative cache)
+} GlyphFallbackEntry;
+
+static int glyph_fallback_compare(const void *a, const void *b, void *udata) {
+    const GlyphFallbackEntry *ga = (const GlyphFallbackEntry*)a;
+    const GlyphFallbackEntry *gb = (const GlyphFallbackEntry*)b;
+    return ga->codepoint == gb->codepoint ? 0 : (ga->codepoint < gb->codepoint ? -1 : 1);
+}
+
+static uint64_t glyph_fallback_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const GlyphFallbackEntry *entry = (const GlyphFallbackEntry*)item;
+    return hashmap_xxhash3(&entry->codepoint, sizeof(entry->codepoint), seed0, seed1);
+}
+
 typedef struct FontfaceEntry {
     char* name;
     FT_Face face;
@@ -72,10 +90,8 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
         if (matches) arraylist_free(matches);
 
         // Fallback: Try platform-specific font lookup
-        log_debug("Font database lookup failed, trying platform-specific lookup for: %s", font_name);
         char* result = find_font_path_fallback(font_name);
         if (result) {
-            log_debug("Found font via platform lookup: %s", result);
             return result;
         }
         return NULL;
@@ -84,8 +100,6 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
     // Just take the first match for now - could be enhanced to prefer normal weight/style
     FontEntry* font = (FontEntry*)matches->data[0];
     char* result = strdup(font->file_path);
-
-    log_debug("Found font '%s' at: %s", font_name, font->file_path);
     arraylist_free(matches);
     return result;
 }
@@ -104,12 +118,8 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
     FontfaceEntry search_key = {.name = name_and_size->str, .face = NULL};
     FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
     if (entry) {
-        log_debug("Fontface loaded from cache: %s", name_and_size->str);
         strbuf_free(name_and_size);
         return entry->face;
-    }
-    else {
-        log_debug("Fontface not found in cache: %s", name_and_size->str);
     }
 
     FT_Face face = NULL;
@@ -176,211 +186,102 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
 }
 
 FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style) {
-    log_debug("load_styled_font: font_name='%s', font_weight=%d, CSS_VALUE_BOLD=%d",
-        font_name, font_style->font_weight, CSS_VALUE_BOLD);
+    // Create cache key with (family, weight, style, size) - deterministic based on input parameters
+    StrBuf* style_cache_key = strbuf_create(font_name);
+    strbuf_append_str(style_cache_key, font_style->font_weight == CSS_VALUE_BOLD ? ":bold:" : ":normal:");
+    strbuf_append_str(style_cache_key, font_style->font_style == CSS_VALUE_ITALIC ? "italic:" : "normal:");
+    strbuf_append_int(style_cache_key, (int)font_style->font_size);
 
-    // Use FontDatabaseCriteria to find font with specific weight and style
+    // Initialize fontface map if needed
+    if (uicon->fontface_map == NULL) {
+        uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
+            fontface_hash, fontface_compare, NULL, NULL);
+    }
+
+    // Check cache first - this avoids expensive database lookup for repeated fonts
+    if (uicon->fontface_map) {
+        FontfaceEntry search_key = {.name = style_cache_key->str, .face = NULL};
+        FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
+        if (entry) {
+            strbuf_free(style_cache_key);
+            return entry->face;  // cache hit - skip database lookup
+        }
+    }
+
+    // Cache miss - do the full database lookup
     FontDatabaseCriteria criteria;
     memset(&criteria, 0, sizeof(criteria));
     strncpy(criteria.family_name, font_name, sizeof(criteria.family_name) - 1);
+    criteria.weight = (font_style->font_weight == CSS_VALUE_BOLD) ? 700 : 400;
+    criteria.style = (font_style->font_style == CSS_VALUE_ITALIC) ? FONT_STYLE_ITALIC : FONT_STYLE_NORMAL;
 
-    // Convert CSS weight to font weight
-    if (font_style->font_weight == CSS_VALUE_BOLD) {
-        criteria.weight = 700;  // Bold
-    } else {
-        criteria.weight = 400;  // Normal
-    }
-
-    // Convert CSS style to font style
-    if (font_style->font_style == CSS_VALUE_ITALIC) {
-        criteria.style = FONT_STYLE_ITALIC;
-    } else {
-        criteria.style = FONT_STYLE_NORMAL;
-    }
-
-    // Try to find a font matching the criteria
     FontDatabaseResult result = font_database_find_best_match(uicon->font_db, &criteria);
     FT_Face face = NULL;
 
-    // If score is too low (< 0.5), the match is poor - try platform lookup instead
     const float SCORE_THRESHOLD = 0.5f;
     bool use_database_result = (result.font && result.font->file_path && result.match_score >= SCORE_THRESHOLD);
 
     if (use_database_result) {
         FontEntry* font = result.font;
-        // Create cache key for this specific font file and size
-        StrBuf* cache_key = strbuf_create(font->file_path);
-        strbuf_append_str(cache_key, ":");
-        strbuf_append_int(cache_key, (int)font_style->font_size);
-
-        // Initialize fontface map if needed
-        if (uicon->fontface_map == NULL) {
-            uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
-                fontface_hash, fontface_compare, NULL, NULL);
-        }
-
-        // Check cache first
-        if (uicon->fontface_map) {
-            FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
-            FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
-            if (entry) {
-                log_debug("Fontface loaded from cache: %s", cache_key->str);
-                FT_Face cached_face = entry->face;
-                // Ensure color emoji fonts have correct size selected
-                if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
-                    (cached_face->face_flags & FT_FACE_FLAG_COLOR) &&
-                    cached_face->num_fixed_sizes > 0) {
-                    int best_idx = 0;
-                    int best_diff = INT_MAX;
-                    for (int i = 0; i < cached_face->num_fixed_sizes; i++) {
-                        int ppem = cached_face->available_sizes[i].y_ppem >> 6;
-                        int diff = abs(ppem - (int)font_style->font_size);
-                        if (diff < best_diff) {
-                            best_diff = diff;
-                            best_idx = i;
-                        }
-                    }
-                    FT_Select_Size(cached_face, best_idx);
-                }
-                strbuf_free(cache_key);
-                return cached_face;
-            }
-        }
-
-        // Load the font file (use collection_index for TTC files)
         FT_Long face_index = font->is_collection ? font->collection_index : 0;
         if (FT_New_Face(uicon->ft_library, font->file_path, face_index, &face) == 0) {
             // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
             if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
                 (face->face_flags & FT_FACE_FLAG_COLOR) &&
                 face->num_fixed_sizes > 0) {
-                // Find the best matching fixed size
-                int best_idx = 0;
-                int best_diff = INT_MAX;
+                int best_idx = 0, best_diff = INT_MAX;
                 for (int i = 0; i < face->num_fixed_sizes; i++) {
                     int ppem = face->available_sizes[i].y_ppem >> 6;
                     int diff = abs(ppem - (int)font_style->font_size);
-                    if (diff < best_diff) {
-                        best_diff = diff;
-                        best_idx = i;
-                    }
+                    if (diff < best_diff) { best_diff = diff; best_idx = i; }
                 }
                 FT_Select_Size(face, best_idx);
-                log_debug("Color emoji font (database): %s, selected fixed size index: %d", font_name, best_idx);
             } else {
                 FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
             }
-
-            // Cache the loaded font
-            if (uicon->fontface_map) {
-                char* name = (char*)malloc(cache_key->length + 1);
-                memcpy(name, cache_key->str, cache_key->length);
-                name[cache_key->length] = '\0';
-                FontfaceEntry new_entry = {.name=name, .face=face};
-                hashmap_set(uicon->fontface_map, &new_entry);
-            }
-
-            log_info("Loading styled font: %s (family: %s, weight: %d, style: %s, %s), ascd: %f, desc: %f, em size: %f, font height: %f",
-                font_name, font->family_name, font->weight,
-                font_style_to_string(font->style),
-                font->is_collection ? "TTC" : "single",
-                face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0,
-                face->units_per_EM / 64.0, face->size->metrics.height / 64.0);
+            log_info("Loading styled font: %s (family: %s, weight: %d, style: %s)",
+                font_name, font->family_name, font->weight, font_style_to_string(font->style));
         } else {
             log_error("Failed to load font face for: %s (found font: %s)", font_name, font->file_path);
         }
-
-        strbuf_free(cache_key);
     } else {
         // Font not found in database, fall back to platform-specific lookup
         char* font_path = find_font_path_fallback(font_name);
         if (font_path) {
-            log_debug("Found font via platform lookup: %s", font_path);
-
-            // Create cache key for this font
-            StrBuf* cache_key = strbuf_create(font_path);
-            strbuf_append_str(cache_key, ":");
-            strbuf_append_int(cache_key, (int)font_style->font_size);
-
-            // Initialize fontface map if needed
-            if (uicon->fontface_map == NULL) {
-                uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
-                    fontface_hash, fontface_compare, NULL, NULL);
-            }
-
-            // Check cache first
-            if (uicon->fontface_map) {
-                FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
-                FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
-                if (entry) {
-                    log_debug("Fontface loaded from cache (platform): %s", cache_key->str);
-                    FT_Face cached_face = entry->face;
-                    // Ensure color emoji fonts have correct size selected
-                    if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
-                        (cached_face->face_flags & FT_FACE_FLAG_COLOR) &&
-                        cached_face->num_fixed_sizes > 0) {
-                        int best_idx = 0;
-                        int best_diff = INT_MAX;
-                        for (int i = 0; i < cached_face->num_fixed_sizes; i++) {
-                            int ppem = cached_face->available_sizes[i].y_ppem >> 6;
-                            int diff = abs(ppem - (int)font_style->font_size);
-                            if (diff < best_diff) {
-                                best_diff = diff;
-                                best_idx = i;
-                            }
-                        }
-                        FT_Select_Size(cached_face, best_idx);
-                    }
-                    strbuf_free(cache_key);
-                    free(font_path);
-                    return cached_face;
-                }
-            }
-
-            // Load the font file
             if (FT_New_Face(uicon->ft_library, font_path, 0, &face) == 0) {
                 // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
                 if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
                     (face->face_flags & FT_FACE_FLAG_COLOR) &&
                     face->num_fixed_sizes > 0) {
-                    // Find the best matching fixed size
-                    int best_idx = 0;
-                    int best_diff = INT_MAX;
+                    int best_idx = 0, best_diff = INT_MAX;
                     for (int i = 0; i < face->num_fixed_sizes; i++) {
                         int ppem = face->available_sizes[i].y_ppem >> 6;
                         int diff = abs(ppem - (int)font_style->font_size);
-                        if (diff < best_diff) {
-                            best_diff = diff;
-                            best_idx = i;
-                        }
+                        if (diff < best_diff) { best_diff = diff; best_idx = i; }
                     }
                     FT_Select_Size(face, best_idx);
-                    log_debug("Color emoji font (platform): %s, selected fixed size index: %d", font_name, best_idx);
                 } else {
                     FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
                 }
-
-                // Cache the loaded font
-                if (uicon->fontface_map) {
-                    char* name = (char*)malloc(cache_key->length + 1);
-                    memcpy(name, cache_key->str, cache_key->length);
-                    name[cache_key->length] = '\0';
-                    FontfaceEntry new_entry = {.name=name, .face=face};
-                    hashmap_set(uicon->fontface_map, &new_entry);
-                }
-
                 log_info("Loaded font via platform lookup: %s (path: %s)", font_name, font_path);
             } else {
                 log_error("Failed to load font face via platform lookup: %s (path: %s)", font_name, font_path);
             }
-
-            strbuf_free(cache_key);
             free(font_path);
         } else {
             log_error("Platform lookup also failed for: %s", font_name);
         }
     }
 
+    // Cache result under style key for fast lookup on next call
+    if (face) {
+        char* name = (char*)malloc(style_cache_key->length + 1);
+        memcpy(name, style_cache_key->str, style_cache_key->length);
+        name[style_cache_key->length] = '\0';
+        FontfaceEntry new_entry = {.name=name, .face=face};
+        hashmap_set(uicon->fontface_map, &new_entry);
+    }
+    strbuf_free(style_cache_key);
     return face;
 }
 
@@ -395,7 +296,32 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
         if (!error) { slot = face->glyph;  return slot; }
     }
 
-    // failed to load glyph under current font, try fallback fonts
+    // failed to load glyph under current font, check fallback cache first
+    if (uicon->glyph_fallback_cache == NULL) {
+        uicon->glyph_fallback_cache = hashmap_new(sizeof(GlyphFallbackEntry), 256, 0, 0,
+            glyph_fallback_hash, glyph_fallback_compare, NULL, NULL);
+    }
+
+    // check cache for this codepoint
+    GlyphFallbackEntry search_key = {.codepoint = codepoint, .fallback_face = NULL};
+    GlyphFallbackEntry* cached = (GlyphFallbackEntry*)hashmap_get(uicon->glyph_fallback_cache, &search_key);
+    if (cached) {
+        if (cached->fallback_face == NULL) {
+            // negative cache hit - we already know no fallback has this glyph
+            return NULL;
+        }
+        // cache hit - use the cached fallback face
+        char_index = FT_Get_Char_Index(cached->fallback_face, codepoint);
+        if (char_index > 0) {
+            error = FT_Load_Glyph(cached->fallback_face, char_index, load_flags);
+            if (!error) {
+                slot = cached->fallback_face->glyph;
+                return slot;
+            }
+        }
+    }
+
+    // cache miss - search through fallback fonts
     log_debug("Failed to load glyph: U+%04X", codepoint);
     char** font_ptr = uicon->fallback_fonts;
     while (*font_ptr) {
@@ -407,6 +333,9 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
                 error = FT_Load_Glyph(fallback_face, char_index, load_flags);
                 if (!error) {
                     log_font_fallback_triggered(face ? face->family_name : "unknown", *font_ptr);
+                    // cache this codepoint -> fallback_face mapping
+                    GlyphFallbackEntry new_entry = {.codepoint = codepoint, .fallback_face = fallback_face};
+                    hashmap_set(uicon->glyph_fallback_cache, &new_entry);
                     slot = fallback_face->glyph;
                     return slot;
                 }
@@ -415,6 +344,10 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
         }
         font_ptr++;
     }
+
+    // negative cache - no fallback font has this glyph
+    GlyphFallbackEntry negative_entry = {.codepoint = codepoint, .fallback_face = NULL};
+    hashmap_set(uicon->glyph_fallback_cache, &negative_entry);
     return NULL;
 }
 
@@ -425,7 +358,6 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     // Try @font-face descriptors first, then fall back to system fonts
     const char* family_to_load = fprop->family;
     bool is_fallback = false;
-    log_debug("Setting up font: family_to_load '%s', size %.1f", family_to_load, fprop->font_size);
     fbox->ft_face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
 
     // If @font-face loading failed, fall back to original method
@@ -504,8 +436,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     fbox->style->ascender = fbox->ft_face->size->metrics.ascender / 64.0;
     fbox->style->descender = -fbox->ft_face->size->metrics.descender / 64.0;
     fbox->style->font_height = fbox->ft_face->size->metrics.height / 64.0;
-    log_debug("Font setup complete: %s (space_width: %.1f, has_kerning: %s)",
-        family_to_load, fbox->style->space_width, fbox->style->has_kerning ? "yes" : "no");
+    // Font setup complete - logging removed to avoid hot path overhead
 }
 
 bool fontface_entry_free(const void *item, void *udata) {
@@ -522,6 +453,11 @@ void fontface_cleanup(UiContext* uicon) {
         hashmap_scan(uicon->fontface_map, fontface_entry_free, NULL);
         hashmap_free(uicon->fontface_map);
         uicon->fontface_map = NULL;
+    }
+    // free glyph fallback cache (no resources to free per entry, just the hashmap)
+    if (uicon->glyph_fallback_cache) {
+        hashmap_free(uicon->glyph_fallback_cache);
+        uicon->glyph_fallback_cache = NULL;
     }
 }
 

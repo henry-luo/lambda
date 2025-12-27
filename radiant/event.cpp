@@ -22,25 +22,19 @@ void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
             ViewBlock* block = (ViewBlock*)view;
-            log_debug("target view block:%s, x:%f, y:%f, wd:%f, hg:%f",
-                block->node_name(), block->x, block->y, block->width, block->height);
             if (block->position && block->position->position != CSS_VALUE_STATIC) {
-                log_debug("skip absolute/fixed positioned block");
+                // skip absolute/fixed positioned block
             } else {
                 target_block_view(evcon, block);
             }
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            log_debug("target view inline:%s", span->node_name());
             target_inline_view(evcon, span);
         }
         else if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             target_text_view(evcon, text);
-        }
-        else {
-            log_debug("Invalid target view type: %d", view->view_type);
         }
         view = view->next();
     } while (view && !evcon->target);
@@ -86,11 +80,9 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     assert(text_rect->next != text_rect);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
-    log_debug("hit not on text");
 }
 
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
-    log_debug("targetting inline: %s", view_span->node_name());
     log_enter();
     FontBox pa_font = evcon->font;
     View* view = view_span->first_child;
@@ -100,15 +92,11 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
         }
         target_children(evcon, view);
     }
-    else {
-        log_debug("view has no child");
-    }
     evcon->font = pa_font;
     log_leave();
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
-    log_debug("targetting block: %s", block->node_name());
     log_enter();
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
