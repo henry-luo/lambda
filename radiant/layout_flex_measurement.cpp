@@ -984,6 +984,30 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         {
             DomNode* c = child;
             LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
+            
+            // Set up parent context with item's height so children with percentage heights
+            // and aspect-ratio can compute their intrinsic width
+            BlockContext* saved_parent = nullptr;
+            BlockContext temp_parent = {};
+            bool need_restore_parent = false;
+            if (lycon) {
+                // Get item's explicit height (from CSS or resolved)
+                float item_height = -1;
+                if (item->blk && item->blk->given_height > 0) {
+                    item_height = item->blk->given_height;
+                } else {
+                    // Try to get from CSS
+                    item_height = get_explicit_css_height(lycon, item);
+                }
+                if (item_height > 0) {
+                    saved_parent = lycon->block.parent;
+                    temp_parent.content_height = item_height;
+                    temp_parent.given_height = item_height;
+                    lycon->block.parent = &temp_parent;
+                    need_restore_parent = true;
+                    log_debug("calculate_item_intrinsic_sizes: set up parent context with height=%.1f", item_height);
+                }
+            }
 
             while (c) {
                 if (c->is_text()) {
@@ -1158,6 +1182,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
             log_debug("Traversed children: min_width=%.1f, max_width=%.1f, total_width=%.1f, total_height=%.1f, is_row_flex=%d",
                       min_child_width, max_child_width, total_child_width, total_child_height, is_row_flex_container);
+            
+            // Restore parent context
+            if (need_restore_parent && lycon) {
+                lycon->block.parent = saved_parent;
+            }
         }
 
         // Use cached width if available and item has explicit width, otherwise use calculated
