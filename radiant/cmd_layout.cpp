@@ -1353,15 +1353,18 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
  * @return DomDocument structure with Lambda CSS DOM, ready for layout
  */
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
     if (!markdown_url || !pool) {
         log_error("load_markdown_doc: invalid parameters");
         return nullptr;
     }
 
     char* markdown_filepath = url_to_local_path(markdown_url);
-    log_debug("[Lambda Markdown] Loading markdown document: %s", markdown_filepath);
+    log_info("[TIMING] Loading markdown document: %s", markdown_filepath);
 
     // Step 1: Parse markdown with Lambda parser
+    auto step1_start = std::chrono::high_resolution_clock::now();
     char* markdown_content = read_text_file(markdown_filepath);
     if (!markdown_content) {
         log_error("Failed to read markdown file: %s", markdown_filepath);
@@ -1404,10 +1407,12 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         return nullptr;
     }
 
-    log_debug("[Lambda Markdown] Parsed markdown root element");
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Parse markdown: %.1fms",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
 
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
-    log_debug("[Lambda Markdown] Building DomElement tree from markdown");
+    auto step2_start = std::chrono::high_resolution_clock::now();
     DomDocument* dom_doc = dom_document_create(input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
@@ -1421,9 +1426,12 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         return nullptr;
     }
 
-    log_debug("[Lambda Markdown] Built DomElement tree: root=%p", (void*)dom_root);
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Build DOM tree: %.1fms",
+        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
 
     // Step 3: Initialize CSS engine
+    auto step3_start = std::chrono::high_resolution_clock::now();
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("Failed to create CSS engine");
@@ -1459,13 +1467,19 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         log_warn("Continuing without stylesheet - markdown will use browser defaults");
     }
 
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - CSS parse: %.1fms",
+        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
     // Step 5: Apply CSS cascade to DOM tree
+    auto step4_start = std::chrono::high_resolution_clock::now();
     if (markdown_stylesheet && markdown_stylesheet->rule_count > 0) {
-        log_debug("[Lambda Markdown] Applying CSS cascade...");
         SelectorMatcher* matcher = selector_matcher_create(pool);
         apply_stylesheet_to_dom_tree_fast(dom_root, markdown_stylesheet, matcher, pool, css_engine);
-        log_debug("[Lambda Markdown] CSS cascade complete");
     }
+    auto step4_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
+        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
 
     // Step 6: Populate DomDocument structure
     dom_doc->root = dom_root;
@@ -1475,7 +1489,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
 
-    log_debug("[Lambda Markdown] Document loaded and styled");
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_markdown_doc total: %.1fms",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
     return dom_doc;
 }
 
