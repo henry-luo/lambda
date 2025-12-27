@@ -140,7 +140,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     TextRect *text_rect = text->rect;
     NEXT_RECT:
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
-    
+
     // Apply text-transform if needed
     char* text_content = (char*)malloc(text_rect->length * 4 + 1);  // Extra space for UTF-8 expansion
     if (text_transform != CSS_VALUE_NONE) {
@@ -148,26 +148,26 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         unsigned char* src_end = src + text_rect->length;
         char* dst = text_content;
         bool is_word_start = true;
-        
+
         while (src < src_end) {
             uint32_t codepoint = *src;
             int bytes = 1;
-            
+
             if (codepoint >= 128) {
                 bytes = utf8_to_codepoint(src, &codepoint);
                 if (bytes <= 0) bytes = 1;
             }
-            
+
             if (is_space(codepoint)) {
                 is_word_start = true;
                 *dst++ = *src;
                 src += bytes;
                 continue;
             }
-            
+
             uint32_t transformed = apply_text_transform(codepoint, text_transform, is_word_start);
             is_word_start = false;
-            
+
             // Encode back to UTF-8
             if (transformed < 0x80) {
                 *dst++ = (char)transformed;
@@ -495,6 +495,14 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
     log_debug("render_html_to_pdf called with html_file='%s', pdf_file='%s', viewport=%dx%d",
               html_file, pdf_file, viewport_width, viewport_height);
 
+    // Remember if we need to auto-size (viewport was 0)
+    bool auto_width = (viewport_width == 0);
+    bool auto_height = (viewport_height == 0);
+
+    // Use reasonable defaults for layout if auto-sizing
+    int layout_width = viewport_width > 0 ? viewport_width : 800;
+    int layout_height = viewport_height > 0 ? viewport_height : 1200;
+
     // Initialize UI context in headless mode
     UiContext ui_context;
     if (ui_context_init(&ui_context, true) != 0) {
@@ -502,12 +510,12 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
         return 1;
     }
 
-    // Create a surface for layout calculations with specified viewport dimensions
-    ui_context_create_surface(&ui_context, viewport_width, viewport_height);
+    // Create a surface for layout calculations with layout dimensions
+    ui_context_create_surface(&ui_context, layout_width, layout_height);
 
     // Update UI context viewport dimensions for layout calculations
-    ui_context.window_width = viewport_width;
-    ui_context.window_height = viewport_height;
+    ui_context.window_width = layout_width;
+    ui_context.window_height = layout_height;
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -519,7 +527,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
 
     // Load HTML document
     log_debug("Loading HTML document: %s", html_file);
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
     if (!doc) {
         log_debug("Could not load HTML file: %s", html_file);
         url_destroy(cwd);
@@ -537,18 +545,32 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
     layout_html_doc(&ui_context, doc, false);
 
     // Calculate actual content dimensions
-    int content_max_x = 0, content_max_y = 0;
+    int content_max_x = layout_width;
+    int content_max_y = layout_height;
     if (doc->view_tree && doc->view_tree->root) {
-        calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
+        int bounds_x = 0, bounds_y = 0;
+        calculate_content_bounds(doc->view_tree->root, &bounds_x, &bounds_y);
         // Add some padding to ensure nothing is cut off
-        content_max_x += 50;
-        content_max_y += 50;
+        bounds_x += 50;
+        bounds_y += 50;
 
-        // Use minimum dimensions to ensure reasonable PDF size
-        if (content_max_x < viewport_width) content_max_x = viewport_width;
-        if (content_max_y < viewport_height) content_max_y = viewport_height;
+        // If auto-sizing, use content bounds; otherwise use minimum of viewport and content
+        if (auto_width) {
+            content_max_x = bounds_x;
+        } else {
+            content_max_x = (bounds_x > layout_width) ? bounds_x : layout_width;
+        }
+        if (auto_height) {
+            content_max_y = bounds_y;
+        } else {
+            content_max_y = (bounds_y > layout_height) ? bounds_y : layout_height;
+        }
 
-        log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
+        if (auto_width || auto_height) {
+            log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding)", content_max_x, content_max_y);
+        } else {
+            log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
+        }
     }
 
     // Render to PDF

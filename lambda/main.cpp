@@ -455,8 +455,8 @@ int exec_convert(int argc, char* argv[]) {
 
         // Capture the effective type by checking if LaTeX parsing was used
         bool is_latex_input = false;
-        if (from_format && (strcmp(from_format, "latex") == 0 || 
-                           strcmp(from_format, "tex") == 0 || 
+        if (from_format && (strcmp(from_format, "latex") == 0 ||
+                           strcmp(from_format, "tex") == 0 ||
                            strcmp(from_format, "latex-ts") == 0)) {
             is_latex_input = true;
         } else if (!from_format && strcmp(type_string->chars, "auto") == 0) {
@@ -885,15 +885,15 @@ int main(int argc, char *argv[]) {
             printf("  .jpeg   Joint Photographic Experts Group (JPEG)\n");
             printf("\nOptions:\n");
             printf("  -o <output>              Output file path (required, format detected by extension)\n");
-            printf("  -vw, --viewport-width    Viewport width in pixels (default: 1200 for SVG/PNG/JPEG, 800 for PDF)\n");
-            printf("  -vh, --viewport-height   Viewport height in pixels (default: 800 for SVG/PNG/JPEG, 1200 for PDF)\n");
+            printf("  -vw, --viewport-width    Viewport width in pixels (default: auto-size to content)\n");
+            printf("  -vh, --viewport-height   Viewport height in pixels (default: auto-size to content)\n");
             printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
-            printf("  %s render index.html -o output.svg        # Render HTML to SVG\n", argv[0]);
-            printf("  %s render index.html -o output.pdf        # Render HTML to PDF\n", argv[0]);
-            printf("  %s render index.html -o output.png        # Render HTML to PNG\n", argv[0]);
-            printf("  %s render index.html -o output.jpg        # Render HTML to JPEG\n", argv[0]);
-            printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport\n", argv[0]);
+            printf("  %s render index.html -o output.svg        # Auto-size to content\n", argv[0]);
+            printf("  %s render index.html -o output.pdf        # Auto-size to content\n", argv[0]);
+            printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
+            printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
+            printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
             printf("  %s render test/page.html -o result.svg    # Render with relative paths\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
@@ -988,28 +988,28 @@ int main(int argc, char *argv[]) {
         int exit_code;
 
         if (ext && strcmp(ext, ".pdf") == 0) {
-            // Call the PDF rendering function (defaults to A4 portrait: 800x1200)
+            // Call the PDF rendering function (pass 0 for auto-sizing)
             log_debug("Detected PDF output format");
-            int pdf_width = viewport_width > 0 ? viewport_width : 800;
-            int pdf_height = viewport_height > 0 ? viewport_height : 1200;
+            int pdf_width = viewport_width;   // 0 means auto-size
+            int pdf_height = viewport_height; // 0 means auto-size
             exit_code = render_html_to_pdf(html_file, output_file, pdf_width, pdf_height);
         } else if (ext && strcmp(ext, ".svg") == 0) {
-            // Call the SVG rendering function (defaults to 1200x800)
+            // Call the SVG rendering function (pass 0 for auto-sizing)
             log_debug("Detected SVG output format");
-            int svg_width = viewport_width > 0 ? viewport_width : 1200;
-            int svg_height = viewport_height > 0 ? viewport_height : 800;
+            int svg_width = viewport_width;   // 0 means auto-size
+            int svg_height = viewport_height; // 0 means auto-size
             exit_code = render_html_to_svg(html_file, output_file, svg_width, svg_height);
         } else if (ext && strcmp(ext, ".png") == 0) {
-            // Call the PNG rendering function (defaults to 1200x800)
+            // Call the PNG rendering function (pass 0 for auto-sizing)
             log_debug("Detected PNG output format");
-            int png_width = viewport_width > 0 ? viewport_width : 1200;
-            int png_height = viewport_height > 0 ? viewport_height : 800;
+            int png_width = viewport_width;   // 0 means auto-size
+            int png_height = viewport_height; // 0 means auto-size
             exit_code = render_html_to_png(html_file, output_file, png_width, png_height);
         } else if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
-            // Call the JPEG rendering function with default quality of 85 (defaults to 1200x800)
+            // Call the JPEG rendering function with default quality of 85 (pass 0 for auto-sizing)
             log_debug("Detected JPEG output format");
-            int jpeg_width = viewport_width > 0 ? viewport_width : 1200;
-            int jpeg_height = viewport_height > 0 ? viewport_height : 800;
+            int jpeg_width = viewport_width;   // 0 means auto-size
+            int jpeg_height = viewport_height; // 0 means auto-size
             exit_code = render_html_to_jpeg(html_file, output_file, 85, jpeg_width, jpeg_height);
         } else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
