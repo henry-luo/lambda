@@ -349,6 +349,10 @@ struct GridItemProp {
     bool has_explicit_grid_column_start;
     bool has_explicit_grid_column_end;
     bool is_grid_auto_placed;
+    bool grid_row_start_is_span;     // True if grid_row_start negative value means "span N", not "negative line"
+    bool grid_row_end_is_span;       // True if grid_row_end negative value means "span N", not "negative line"
+    bool grid_column_start_is_span;  // True if grid_column_start negative value means "span N", not "negative line"
+    bool grid_column_end_is_span;    // True if grid_column_end negative value means "span N", not "negative line"
 
     // Measured dimensions (from multipass measurement phase)
     float measured_width;          // Content-based width (from measure pass)

@@ -3,6 +3,7 @@
 #include "view.hpp"
 #include "layout_flex_measurement.hpp"
 #include "form_control.hpp"
+#include "available_space.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -739,6 +740,49 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("Phase 2.5: Resolving constraints for flex items");
     apply_constraints_to_flex_items(flex_layout);
 
+    // SHRINK-TO-FIT RECALCULATION: Now that items have intrinsic sizes (calculated by
+    // apply_constraints_to_flex_items), recalculate main_axis_size for indefinite containers
+    if (flex_layout->main_axis_is_indefinite && item_count > 0) {
+        bool is_horizontal = is_main_axis_horizontal(flex_layout);
+        if (is_horizontal) {
+            // Row flex with indefinite width: use sum of item max-content widths
+            float total_item_width = 0.0f;
+            for (int i = 0; i < item_count; i++) {
+                ViewElement* item = (ViewElement*)items[i]->as_element();
+                if (item) {
+                    float item_width = 0.0f;
+                    // Priority: 1) explicit width, 2) fi->intrinsic_width, 3) measured width
+                    if (item->blk && item->blk->given_width > 0) {
+                        item_width = item->blk->given_width;
+                    } else if (item->fi && item->fi->has_intrinsic_width) {
+                        item_width = item->fi->intrinsic_width.max_content;
+                    } else if (item->width > 0) {
+                        item_width = item->width;
+                    }
+                    total_item_width += item_width;
+                    log_debug("SHRINK-TO-FIT RECALC: item %d width=%.1f (has_intrinsic=%d), total=%.1f",
+                              i, item_width, item->fi ? item->fi->has_intrinsic_width : -1, total_item_width);
+                }
+            }
+            // Add gaps
+            if (item_count > 1) {
+                total_item_width += flex_layout->column_gap * (item_count - 1);
+            }
+            
+            if (total_item_width > 0) {
+                flex_layout->main_axis_size = total_item_width;
+                // Also update container width
+                float padding_width = 0.0f;
+                if (container->bound) {
+                    padding_width = container->bound->padding.left + container->bound->padding.right;
+                }
+                container->width = (int)(total_item_width + padding_width);
+                log_debug("SHRINK-TO-FIT RECALC: main_axis_size=%.1f, container.width=%d",
+                          flex_layout->main_axis_size, container->width);
+            }
+        }
+    }
+
     // Phase 3: Create flex lines (handle wrapping)
     int line_count = create_flex_lines(flex_layout, items, item_count);
 
@@ -1287,6 +1331,9 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // Step 5: Re-resolve percentage widths/heights relative to flex container
         // CSS percentages were resolved during style resolution with wrong parent context.
         // For flex items, percentages should be relative to the flex container's content size.
+        // EXCEPTION: In intrinsic sizing mode (max-content/min-content), percentage widths
+        // are treated as auto per CSS Sizing spec - they contribute intrinsic size instead.
+        bool is_intrinsic_sizing = lycon->available_space.is_intrinsic_sizing();
         if (item->blk) {
             bool is_row = is_main_axis_horizontal(flex_layout);
             float container_main = flex_layout->main_axis_size;
@@ -1294,16 +1341,25 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 
             // Re-resolve width percentage
             if (!isnan(item->blk->given_width_percent)) {
-                float width_percent = item->blk->given_width_percent;
-                // For row: width is main axis, resolve against container width
-                // For column: width is cross axis
-                float resolve_against = is_row ? container_main : container_cross;
-                if (resolve_against > 0) {
-                    float new_width = resolve_against * width_percent / 100.0f;
-                    log_info("FLEX: Re-resolving width percentage: %.1f%% of %.1f = %.1f (was %.1f)",
-                             width_percent, resolve_against, new_width, item->blk->given_width);
-                    item->blk->given_width = new_width;
-                    item->width = new_width;
+                if (is_intrinsic_sizing && is_row) {
+                    // In intrinsic sizing mode with percentage width in main axis,
+                    // treat as auto - use intrinsic content width instead
+                    log_info("FLEX: Intrinsic sizing mode - percentage width %.1f%% treated as auto",
+                             item->blk->given_width_percent);
+                    item->blk->given_width = -1;  // Auto width
+                    item->width = 0;  // Will be determined by content
+                } else {
+                    float width_percent = item->blk->given_width_percent;
+                    // For row: width is main axis, resolve against container width
+                    // For column: width is cross axis
+                    float resolve_against = is_row ? container_main : container_cross;
+                    if (resolve_against > 0) {
+                        float new_width = resolve_against * width_percent / 100.0f;
+                        log_info("FLEX: Re-resolving width percentage: %.1f%% of %.1f = %.1f (was %.1f)",
+                                 width_percent, resolve_against, new_width, item->blk->given_width);
+                        item->blk->given_width = new_width;
+                        item->width = new_width;
+                    }
                 }
             }
 
@@ -1333,6 +1389,20 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             if (isnan(item->blk->given_height_percent) && item->blk->given_height > 0) {
                 log_debug("Applying CSS height: %.1f", item->blk->given_height);
                 item->height = item->blk->given_height;
+            }
+        }
+
+        // Step 6a: Apply aspect-ratio if item has height but no width
+        // This handles cases like height: 100%; aspect-ratio: 1
+        if (item->fi && item->fi->aspect_ratio > 0) {
+            if (item->height > 0 && item->width <= 0) {
+                item->width = item->height * item->fi->aspect_ratio;
+                log_debug("Applied aspect-ratio: width=%.1f from height=%.1f * ratio=%.3f",
+                          item->width, item->height, item->fi->aspect_ratio);
+            } else if (item->width > 0 && item->height <= 0) {
+                item->height = item->width / item->fi->aspect_ratio;
+                log_debug("Applied aspect-ratio: height=%.1f from width=%.1f / ratio=%.3f",
+                          item->height, item->width, item->fi->aspect_ratio);
             }
         }
 
@@ -1501,6 +1571,24 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         }
 
         return item->blk->given_height;
+    }
+
+    // Case 2b: aspect-ratio with explicit cross-axis size
+    // If item has aspect-ratio and explicit height (for horizontal) or width (for vertical),
+    // compute main-axis size from cross-axis and aspect-ratio
+    if (item->fi && item->fi->aspect_ratio > 0) {
+        if (is_horizontal && item->blk && item->blk->given_height > 0) {
+            float basis = item->blk->given_height * item->fi->aspect_ratio;
+            log_debug("calculate_flex_basis - aspect-ratio: height=%.1f * ratio=%.3f = %.1f",
+                      item->blk->given_height, item->fi->aspect_ratio, basis);
+            return basis;
+        }
+        if (!is_horizontal && item->blk && item->blk->given_width > 0) {
+            float basis = item->blk->given_width / item->fi->aspect_ratio;
+            log_debug("calculate_flex_basis - aspect-ratio: width=%.1f / ratio=%.3f = %.1f",
+                      item->blk->given_width, item->fi->aspect_ratio, basis);
+            return basis;
+        }
     }
 
     // Case 3: flex-basis: auto + no explicit size = use content size (intrinsic sizing)
