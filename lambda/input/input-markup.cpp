@@ -911,12 +911,14 @@ static Item parse_list_item(MarkupParser* parser, const char* line) {
 
 // Parse code blocks (```, ```, ~~~, etc.)
 static Item parse_code_block(MarkupParser* parser, const char* line) {
+    // Create code element with type="block" attribute
     Element* code = create_element(parser, "code");
     if (!code) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
     }
 
+    // Mark as block-level code
     add_attribute_to_element(parser, code, "type", "block");
 
     // Extract language from fence line (```python, ~~~javascript, etc.)
