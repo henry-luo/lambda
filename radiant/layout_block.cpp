@@ -307,6 +307,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         block->content_width = lycon->block.max_width + block->bound->padding.right;
         // advance_y already includes padding.top and border.top
         block->content_height = lycon->block.advance_y + block->bound->padding.bottom;
+        log_debug("FINALIZE TRACE: advance_y=%.1f, padding.bottom=%.1f, content_height=%.1f",
+            lycon->block.advance_y, block->bound->padding.bottom, block->content_height);
         flow_width = block->content_width +
             (block->bound->border ? block->bound->border->width.right : 0);
         flow_height = block->content_height +
@@ -314,6 +316,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     } else {
         flow_width = block->content_width = lycon->block.max_width;
         flow_height = block->content_height = lycon->block.advance_y;
+        log_debug("FINALIZE TRACE: (no bound) advance_y=%.1f, content_height=%.1f",
+            lycon->block.advance_y, block->content_height);
     }
 
     log_debug("finalizing block, display=%d, given wd:%f", display, lycon->block.given_width);
@@ -500,7 +504,9 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                 block->embed->doc = doc; // assign loaded document to embed property
                 if (doc->html_root) {
+                    log_debug("IFRAME TRACE: about to layout iframe document (src: %s)", src->str);
                     layout_html_doc(lycon->ui_context, doc, false);
+                    log_debug("IFRAME TRACE: finished layout iframe document");
                 }
             }
         } else {
@@ -512,10 +518,14 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     }
     if (doc && doc->view_tree && doc->view_tree->root) {
         ViewBlock* root = (ViewBlock*)doc->view_tree->root;
+        log_debug("IFRAME TRACE: iframe embedded doc root->content_width=%.1f, root->content_height=%.1f",
+            root->content_width, root->content_height);
         lycon->block.max_width = root->content_width;
         lycon->block.advance_y = root->content_height;
+        log_debug("IFRAME TRACE: set lycon->block.advance_y = %.1f from root->content_height", lycon->block.advance_y);
     }
     finalize_block_flow(lycon, block, display.outer);
+    log_debug("IFRAME TRACE: after finalize_block_flow, iframe block->content_height=%.1f", block->content_height);
 }
 
 /**
@@ -1039,6 +1049,20 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 layout_flex_content(lycon, block);
                 log_debug("Finished flex container layout for %s", block->node_name());
                 g_flex_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_flex_start).count();
+
+                // After flex layout, update content_height/advance_y from container height
+                // so that parent containers (like iframes) get the correct scroll height
+                lycon->block.advance_y = block->height;
+                if (block->bound && block->bound->border) {
+                    lycon->block.advance_y -= block->bound->border->width.bottom;
+                }
+                if (block->bound) {
+                    lycon->block.advance_y -= block->bound->padding.bottom;
+                }
+                log_debug("FLEX FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
+                    lycon->block.advance_y, block->height);
+
+                finalize_block_flow(lycon, block, block->display.outer);
                 return;
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
@@ -1048,6 +1072,20 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 layout_grid_content(lycon, block);
                 log_debug("Finished grid container layout for %s", block->node_name());
                 g_grid_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_grid_start).count();
+
+                // After grid layout, update content_height/advance_y from container height
+                // so that parent containers (like iframes) get the correct scroll height
+                lycon->block.advance_y = block->height;
+                if (block->bound && block->bound->border) {
+                    lycon->block.advance_y -= block->bound->border->width.bottom;
+                }
+                if (block->bound) {
+                    lycon->block.advance_y -= block->bound->padding.bottom;
+                }
+                log_debug("GRID FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
+                    lycon->block.advance_y, block->height);
+
+                finalize_block_flow(lycon, block, block->display.outer);
                 return;
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
@@ -1056,6 +1094,20 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     block->display.outer, block->display.inner, block->node_name());
                 layout_table_content(lycon, block, block->display);
                 g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
+
+                // After table layout, update content_height/advance_y from container height
+                // so that parent containers (like iframes) get the correct scroll height
+                lycon->block.advance_y = block->height;
+                if (block->bound && block->bound->border) {
+                    lycon->block.advance_y -= block->bound->border->width.bottom;
+                }
+                if (block->bound) {
+                    lycon->block.advance_y -= block->bound->padding.bottom;
+                }
+                log_debug("TABLE FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
+                    lycon->block.advance_y, block->height);
+
+                finalize_block_flow(lycon, block, block->display.outer);
                 return;
             }
             else {
@@ -1396,7 +1448,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                          block->blk->given_width_type == CSS_VALUE_AUTO ||
                          block->blk->given_width_type == CSS_VALUE__UNDEF;
     bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && width_is_auto;
-    
+
     // Check for width: max-content or min-content (intrinsic sizing keywords)
     bool is_max_content_width = block->blk && block->blk->given_width_type == CSS_VALUE_MAX_CONTENT;
     bool is_min_content_width = block->blk && block->blk->given_width_type == CSS_VALUE_MIN_CONTENT;
@@ -1585,7 +1637,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         // Calculate fit-content width (shrink-to-fit)
         int fit_content = calculate_fit_content_width(lycon, dom_element, (int)available);
-        
+
         // For min-content, use min-content width instead of fit-content
         if (is_min_content_width) {
             fit_content = (int)calculate_min_content_width(lycon, (DomNode*)dom_element);
@@ -1630,7 +1682,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     // check for margin collapsing with children
     // CSS 2.2 Section 8.3.1: Margins collapse when parent has no border/padding
-    // This applies when block->bound is NULL (no border/padding/margin) OR 
+    // This applies when block->bound is NULL (no border/padding/margin) OR
     // when block->bound exists but has no bottom border/padding
     // IMPORTANT: Elements that establish a BFC do NOT collapse margins with their children
     bool has_border_bottom = block->bound && block->bound->border && block->bound->border->width.bottom > 0;
@@ -1638,7 +1690,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool creates_bfc_for_collapse = block->scroller &&
                        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
                         block->scroller->overflow_y != CSS_VALUE_VISIBLE);
-    
+
     if (!has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse && block->first_child) {
         // collapse bottom margin with last in-flow child block
         // Skip absolutely positioned and floated children - they're out of normal flow
@@ -1700,7 +1752,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     child_of_vb = (View*)child_of_vb->next_sibling;
                 }
             }
-            
+
             if (vb->height == 0 && !has_in_flow_children) {
                 float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;
                 float border_bottom = vb->bound && vb->bound->border ? vb->bound->border->width.bottom : 0;
@@ -1766,7 +1818,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     float parent_margin = block->bound ? block->bound->margin.bottom : 0;
                     float margin_bottom = max(parent_margin, last_child_block->bound->margin.bottom);
                     block->height -= last_child_block->bound->margin.bottom;
-                    
+
                     // If parent has no bound yet, allocate one to store the collapsed margin
                     if (!block->bound) {
                         block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
@@ -2201,13 +2253,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // - Non-replaced inline-block with no in-flow line boxes OR overflow != visible:
                 //   baseline = bottom margin edge
                 // - Replaced inline-block (like img): baseline = bottom margin edge
-                
+
                 // Check if this inline-block has overflow:visible and in-flow line boxes
                 bool overflow_visible = !block->scroller ||
                     (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
                      block->scroller->overflow_y == CSS_VALUE_VISIBLE);
                 bool uses_content_baseline = content_has_line_boxes && overflow_visible;
-                
+
                 if (uses_content_baseline) {
                     // Non-replaced inline-block with text content and overflow:visible
                     // Baseline is at content_last_line_ascender from top of content box
