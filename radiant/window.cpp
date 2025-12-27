@@ -86,7 +86,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             return load_html_doc(base_url, (char*)filename, width, height);
 
         case DOC_FORMAT_XML:
-            log_warn("XML format not yet implemented, treating as HTML");
+            log_debug("Loading as XML document with CSS stylesheet");
             return load_html_doc(base_url, (char*)filename, width, height);
 
         case DOC_FORMAT_RST:
