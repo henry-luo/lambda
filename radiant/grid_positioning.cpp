@@ -302,6 +302,77 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     int available_width = item->gi->track_area_width;
     int available_height = item->gi->track_area_height;
 
+    // Check if item has aspect-ratio constraint
+    float aspect_ratio = (item->fi && item->fi->aspect_ratio > 0) ? item->fi->aspect_ratio : 0;
+    bool has_explicit_width = (item->blk && item->blk->given_width > 0);
+    bool has_explicit_height = (item->blk && item->blk->given_height > 0);
+    float max_width = (item->blk && item->blk->given_max_width > 0) ? item->blk->given_max_width : 0;
+    float max_height = (item->blk && item->blk->given_max_height > 0) ? item->blk->given_max_height : 0;
+
+    log_debug("align_grid_item: aspect_ratio=%.3f, has_explicit_width=%d, has_explicit_height=%d, max_width=%.1f, max_height=%.1f",
+              aspect_ratio, has_explicit_width, has_explicit_height, max_width, max_height);
+
+    // If aspect-ratio is set, compute the missing dimension
+    if (aspect_ratio > 0) {
+        if (has_explicit_width && !has_explicit_height) {
+            // Width is explicit, compute height from aspect ratio
+            item->height = item->width / aspect_ratio;
+            log_debug("align_grid_item: computed height=%.1f from width=%.1f and aspect_ratio=%.3f",
+                      item->height, item->width, aspect_ratio);
+        } else if (has_explicit_height && !has_explicit_width) {
+            // Height is explicit, compute width from aspect ratio
+            item->width = item->height * aspect_ratio;
+            log_debug("align_grid_item: computed width=%.1f from height=%.1f and aspect_ratio=%.3f",
+                      item->width, item->height, aspect_ratio);
+        } else if (!has_explicit_width && !has_explicit_height) {
+            // Neither dimension is explicit
+            // Check for max-width/max-height constraints first
+            if (max_width > 0 && max_height > 0) {
+                // Both max constraints - use whichever is more constraining
+                float w1 = max_width;
+                float h1 = max_width / aspect_ratio;
+                float w2 = max_height * aspect_ratio;
+                float h2 = max_height;
+                if (h1 <= max_height) {
+                    item->width = w1;
+                    item->height = h1;
+                } else {
+                    item->width = w2;
+                    item->height = h2;
+                }
+            } else if (max_width > 0) {
+                // max-width constraint, compute height from it
+                item->width = max_width;
+                item->height = max_width / aspect_ratio;
+                log_debug("align_grid_item: computed from max_width=%.1f: width=%.1f, height=%.1f",
+                          max_width, item->width, item->height);
+            } else if (max_height > 0) {
+                // max-height constraint, compute width from it
+                item->height = max_height;
+                item->width = max_height * aspect_ratio;
+                log_debug("align_grid_item: computed from max_height=%.1f: width=%.1f, height=%.1f",
+                          max_height, item->width, item->height);
+            } else {
+                // No constraints - use available height to determine width
+                // (common case: grid cell gives height, aspect-ratio determines width)
+                item->width = available_height * aspect_ratio;
+                item->height = available_height;
+                log_debug("align_grid_item: computed from available_height=%d: width=%.1f, height=%.1f",
+                          available_height, item->width, item->height);
+            }
+        }
+        
+        // Apply max-width/max-height constraints after aspect-ratio calculation
+        if (max_width > 0 && item->width > max_width) {
+            item->width = max_width;
+            item->height = max_width / aspect_ratio;
+        }
+        if (max_height > 0 && item->height > max_height) {
+            item->height = max_height;
+            item->width = max_height * aspect_ratio;
+        }
+    }
+
     // Apply justify-self (horizontal alignment)
     int justify = (item->gi->justify_self != CSS_VALUE_AUTO) ?
                   item->gi->justify_self : grid_layout->justify_items;
@@ -320,15 +391,15 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             break;
 
         case CSS_VALUE_STRETCH:
-            // Stretch to fill track area (unless item has explicit width)
-            if (!(item->blk && item->blk->given_width > 0)) {
+            // Stretch to fill track area (unless item has explicit width or aspect-ratio)
+            if (!has_explicit_width && aspect_ratio <= 0) {
                 item->width = available_width;
             }
             break;
 
         default:
-            // Default to stretch for grid items (unless item has explicit width)
-            if (!(item->blk && item->blk->given_width > 0)) {
+            // Default to stretch for grid items (unless item has explicit width or aspect-ratio)
+            if (!has_explicit_width && aspect_ratio <= 0) {
                 item->width = available_width;
             }
             break;
@@ -352,15 +423,15 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             break;
 
         case CSS_VALUE_STRETCH:
-            // Stretch to fill track area (unless item has explicit height)
-            if (!(item->blk && item->blk->given_height > 0)) {
+            // Stretch to fill track area (unless item has explicit height or aspect-ratio)
+            if (!has_explicit_height && aspect_ratio <= 0) {
                 item->height = available_height;
             }
             break;
 
         default:
-            // Default to stretch for grid items (unless item has explicit height)
-            if (!(item->blk && item->blk->given_height > 0)) {
+            // Default to stretch for grid items (unless item has explicit height or aspect-ratio)
+            if (!has_explicit_height && aspect_ratio <= 0) {
                 item->height = available_height;
             }
             break;
