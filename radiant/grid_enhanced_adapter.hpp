@@ -224,13 +224,40 @@ inline int grid_line_to_css_line(GridLine line) {
 // ============================================================================
 
 /**
- * Get span from start/end values (handles negative = span N convention)
+ * Get span from start/end values
+ * @param start Start line number
+ * @param end End line number
+ * @param end_is_span True if negative end value means "span N", false if it's a negative line number
+ * @param explicit_column_count Number of explicit columns (needed to resolve negative line numbers)
+ */
+inline int get_span_value_ex(int start, int end, bool end_is_span, int explicit_track_count) {
+    if (start > 0 && end > 0) {
+        return end - start;
+    } else if (start > 0 && end < 0) {
+        if (end_is_span) {
+            return -end;  // end is negative span value (e.g., "span 2" stored as -2)
+        } else {
+            // end is negative line number (e.g., -1 = last line)
+            // Resolve: -1 means (track_count + 1), -2 means track_count, etc.
+            int resolved_end = explicit_track_count + end + 2;  // +2 because lines are 1-indexed
+            if (resolved_end <= start) resolved_end = start + 1;  // Ensure positive span
+            return resolved_end - start;
+        }
+    } else if (end < 0 && end_is_span) {
+        return -end;  // span only (auto start)
+    }
+    return 1;  // default span
+}
+
+/**
+ * Legacy get_span_value - assumes negative end is always span
+ * @deprecated Use get_span_value_ex with is_span flag instead
  */
 inline int get_span_value(int start, int end) {
     if (start > 0 && end > 0) {
         return end - start;
     } else if (start > 0 && end < 0) {
-        return -end;  // end is negative span
+        return -end;  // end is negative span (LEGACY: doesn't distinguish from negative line)
     } else if (end < 0) {
         return -end;  // end is negative span
     }
@@ -239,8 +266,13 @@ inline int get_span_value(int start, int end) {
 
 /**
  * Extract GridItemInfo from ViewBlock with GridItemProp
+ * @param item The ViewBlock to extract info from
+ * @param item_index Index of this item in the items array
+ * @param explicit_col_count Number of explicit columns (for resolving negative lines)
+ * @param explicit_row_count Number of explicit rows (for resolving negative lines)
  */
-inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index) {
+inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
+                                           int explicit_col_count = 0, int explicit_row_count = 0) {
     GridItemInfo info;
     info.item_index = item_index;
 
@@ -256,13 +288,14 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index) {
     // Column placement
     int col_start = gi->grid_column_start;
     int col_end = gi->grid_column_end;
-    int col_span = get_span_value(col_start, col_end);
+    bool col_end_is_span = gi->grid_column_end_is_span;
+    int col_span = get_span_value_ex(col_start, col_end, col_end_is_span, explicit_col_count);
 
     if (col_start != 0) {
         // Definite start position (positive or negative line number)
         info.column = GridPlacement::FromStartSpan(static_cast<int16_t>(col_start),
                                                     static_cast<uint16_t>(col_span));
-    } else if (col_end < 0) {
+    } else if (col_end < 0 && col_end_is_span) {
         // span only - auto placement with span
         info.column = GridPlacement::Auto(static_cast<uint16_t>(-col_end));
     } else {
@@ -272,13 +305,14 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index) {
     // Row placement
     int row_start = gi->grid_row_start;
     int row_end = gi->grid_row_end;
-    int row_span = get_span_value(row_start, row_end);
+    bool row_end_is_span = gi->grid_row_end_is_span;
+    int row_span = get_span_value_ex(row_start, row_end, row_end_is_span, explicit_row_count);
 
     if (row_start != 0) {
         // Definite start position (positive or negative line number)
         info.row = GridPlacement::FromStartSpan(static_cast<int16_t>(row_start),
                                                  static_cast<uint16_t>(row_span));
-    } else if (row_end < 0) {
+    } else if (row_end < 0 && row_end_is_span) {
         // span only - auto placement with span
         info.row = GridPlacement::Auto(static_cast<uint16_t>(-row_end));
     } else {
@@ -351,11 +385,13 @@ inline void place_items_with_occupancy(
         flow = is_dense ? GridAutoFlow::RowDense : GridAutoFlow::Row;
     }
 
-    // Extract item info
+    // Extract item info - pass explicit track counts for resolving negative line numbers
     std::vector<GridItemInfo> item_infos;
     item_infos.reserve(item_count);
+    int explicit_col_count = grid_layout->explicit_column_count;
+    int explicit_row_count = grid_layout->explicit_row_count;
     for (int i = 0; i < item_count; i++) {
-        item_infos.push_back(extract_grid_item_info(items[i], i));
+        item_infos.push_back(extract_grid_item_info(items[i], i, explicit_col_count, explicit_row_count));
     }
 
     // Per CSS Grid spec: If there's no explicit grid-template-columns,
