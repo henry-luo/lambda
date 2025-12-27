@@ -104,6 +104,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
 
     {CSS_PROPERTY_BOX_SIZING, "box-sizing", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "content-box", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ASPECT_RATIO, "aspect-ratio", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
 
     // Typography Properties
     {CSS_PROPERTY_COLOR, "color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
