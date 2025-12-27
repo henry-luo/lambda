@@ -1543,6 +1543,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         block->blk && block->blk->given_max_height >= 0 ? block->blk->given_max_height : -1);
     lycon->block.content_width = content_width;  lycon->block.content_height = content_height;
 
+    // If this block establishes a BFC, update the float edge boundaries
+    // This must be done AFTER content_width is calculated
+    if (lycon->block.is_bfc_root && lycon->block.establishing_element == block) {
+        lycon->block.float_left_edge = 0;
+        lycon->block.float_right_edge = content_width;
+        log_debug("[BFC] Updated float edges for %s: left=0, right=%.1f", block->node_name(), content_width);
+    }
+
     // Update available space to match content dimensions
     // Preserve intrinsic sizing mode if already set (for nested measurement)
     if (!lycon->available_space.is_intrinsic_sizing()) {
