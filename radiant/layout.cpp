@@ -199,6 +199,8 @@ extern "C" int get_font_metrics_platform(const char* font_family, float font_siz
 //
 // Chrome's algorithm:
 // 1. Get ascent/descent from Skia (which uses CoreText on macOS, FreeType on Linux)
+//    - On Linux: Skia checks OS/2 USE_TYPO_METRICS flag and uses typo metrics when set
+//    - Otherwise uses HHEA metrics (ascender/descender from face->size->metrics)
 // 2. Round ascent and descent individually: SkScalarRoundToScalar()
 // 3. On macOS only: for Times, Helvetica, Courier - apply 15% adjustment to ascent
 //    ascent += floorf(((ascent + descent) * 0.15f) + 0.5f)
@@ -214,13 +216,30 @@ float calc_normal_line_height(FT_Face face) {
         return line_height;
     }
 
-    // Fallback: use FreeType HHEA metrics (Chrome on Linux uses this via Skia)
-    ascent = face->size->metrics.ascender / 64.0f;
-    descent = -face->size->metrics.descender / 64.0f;  // Make positive
-    float leading = (face->size->metrics.height / 64.0f) - ascent - descent;
-    if (leading < 0) leading = 0;
+    // Fallback: use FreeType metrics following Chrome/Skia behavior
+    // Chrome/Skia on Linux checks OS/2 USE_TYPO_METRICS flag (bit 7 of fsSelection)
+    // Reference: SkScalerContext_FreeType::generateFontMetrics() in Chromium
+    TypoMetrics typo = get_os2_typo_metrics(face);
+    float leading;
+    
+    if (typo.valid && typo.use_typo_metrics) {
+        // Font has OS/2 table with USE_TYPO_METRICS flag set - use typo metrics
+        // This matches Chrome's behavior via Skia on Linux
+        ascent = typo.ascender;
+        descent = typo.descender;
+        leading = typo.line_gap;
+        log_debug("Using OS/2 typo metrics (USE_TYPO_METRICS=1) for %s", family);
+    } else {
+        // Use HHEA metrics (FreeType default)
+        // This is what Skia uses when USE_TYPO_METRICS is not set
+        ascent = face->size->metrics.ascender / 64.0f;
+        descent = -face->size->metrics.descender / 64.0f;  // Make positive
+        leading = (face->size->metrics.height / 64.0f) - ascent - descent;
+        if (leading < 0) leading = 0;
+        log_debug("Using HHEA metrics (USE_TYPO_METRICS=0 or no OS/2) for %s", family);
+    }
 
-    // Round each component individually
+    // Round each component individually (Chrome's SkScalarRoundToScalar)
     float rounded_ascent = roundf(ascent);
     float rounded_descent = roundf(descent);
     float rounded_leading = roundf(leading);
