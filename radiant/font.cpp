@@ -13,17 +13,23 @@ extern char *strdup(const char *s);
 
 /**
  * Resolve CSS generic font family to system font names.
- * Chrome default fonts (macOS):
- * - serif: Times New Roman
- * - sans-serif: Arial
- * - monospace: Courier New
+ * Chrome default fonts with cross-platform fallbacks:
+ * - serif: Times New Roman (Mac/Win) → Liberation Serif (Linux)
+ * - sans-serif: Arial (Mac/Win) → Liberation Sans (Linux)
+ * - monospace: Courier New (Mac/Win) → Liberation Mono (Linux)
  * Returns a list of font names to try in order.
  */
 static const char** resolve_generic_family(const char* family) {
-    // Chrome default fonts for macOS
-    static const char* serif_fonts[] = {"Times New Roman", "Times", "Georgia", NULL};
-    static const char* sans_serif_fonts[] = {"Arial", "Helvetica", NULL};
-    static const char* monospace_fonts[] = {"Menlo", "Monaco", "Courier New", "Courier", NULL};
+    // Cross-platform font families (Mac → Linux equivalents)
+    static const char* serif_fonts[] = {
+        "Times New Roman", "Liberation Serif", "Times", "Nimbus Roman", "Georgia", "DejaVu Serif", NULL
+    };
+    static const char* sans_serif_fonts[] = {
+        "Arial", "Liberation Sans", "Helvetica", "Nimbus Sans", "DejaVu Sans", NULL
+    };
+    static const char* monospace_fonts[] = {
+        "Menlo", "Monaco", "Courier New", "Liberation Mono", "Courier", "Nimbus Mono PS", "DejaVu Sans Mono", NULL
+    };
     static const char* cursive_fonts[] = {"Comic Sans MS", "Apple Chancery", NULL};
     static const char* fantasy_fonts[] = {"Impact", "Papyrus", NULL};
 
@@ -35,7 +41,19 @@ static const char** resolve_generic_family(const char* family) {
     if (strcmp(family, "cursive") == 0) return cursive_fonts;
     if (strcmp(family, "fantasy") == 0) return fantasy_fonts;
 
-    return NULL;  // not a generic family
+    // Cross-platform font aliases (map Windows/Mac fonts to Linux equivalents)
+    // These are not generic families but common specific fonts that need cross-platform mapping
+    if (strcmp(family, "Times New Roman") == 0 || strcmp(family, "Times") == 0) {
+        return serif_fonts;  // Times → Liberation Serif on Linux
+    }
+    if (strcmp(family, "Arial") == 0 || strcmp(family, "Helvetica") == 0) {
+        return sans_serif_fonts;  // Arial/Helvetica → Liberation Sans on Linux
+    }
+    if (strcmp(family, "Courier New") == 0 || strcmp(family, "Courier") == 0) {
+        return monospace_fonts;  // Courier → Liberation Mono on Linux
+    }
+
+    return NULL;  // not a generic family or known alias
 }
 
 // Glyph fallback cache: caches which FT_Face (from fallback fonts) can render a given codepoint
@@ -397,13 +415,17 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (!fbox->ft_face) {
         log_debug("Font '%s' not found, trying fallbacks...", family_to_load);
 
-        // Try some common fallback fonts
+        // Try common cross-platform fallback fonts (prioritize Liberation/DejaVu on Linux, system fonts on Mac)
         const char* fallbacks[] = {
+            "Liberation Sans",  // Common on Linux (Arial equivalent)
+            "DejaVu Sans",      // Common on Linux
             "Helvetica",        // Common on macOS
+            "Arial",            // Common on Windows/Mac
             "SF Pro Display",   // New macOS default
             "Arial Unicode MS", // Available on most systems
-            "DejaVu Sans",      // Common on Linux
-            "Times New Roman",  // Serif fallback
+            "Liberation Serif", // Linux serif fallback (Times equivalent)
+            "Times New Roman",  // Mac/Win serif fallback
+            "Nimbus Sans",      // Linux sans fallback
             "AppleSDGothicNeo", // We know this one exists from our scan
             NULL
         };
