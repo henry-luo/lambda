@@ -975,8 +975,11 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     rdcon->canvas = tvg_swcanvas_create();
-    tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)uicon->surface->pixels, uicon->surface->width,
+    Tvg_Result result = tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)uicon->surface->pixels, uicon->surface->width,
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888);
+    if (result != TVG_RESULT_SUCCESS) {
+        log_error("render_init: tvg_swcanvas_set_target failed with result=%d", result);
+    }
 
     // load default font
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;

@@ -157,6 +157,11 @@ constexpr uint16_t OS2_FS_SELECTION_USE_TYPO_METRICS = 0x0080;
 TypoMetrics get_os2_typo_metrics(FT_Face face) {
     TypoMetrics result = {0, 0, 0, false, false};
 
+    if (!face) {
+        log_error("get_os2_typo_metrics called with NULL face");
+        return result;
+    }
+
     TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
     if (!os2) {
         log_debug("No OS/2 table available for font: %s", face->family_name);
@@ -949,9 +954,14 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     if (typo.valid && typo.use_typo_metrics) {
         lycon->block.init_ascender = typo.ascender;
         lycon->block.init_descender = typo.descender;
-    } else {
+    } else if (lycon->font.ft_face) {
         lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
         lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    } else {
+        // Fallback when no font face is available - use reasonable defaults
+        log_error("No font face available for layout, using fallback metrics");
+        lycon->block.init_ascender = 12.0;  // Default ascender
+        lycon->block.init_descender = 3.0;  // Default descender
     }
 
     // navigate DomNode tree to find body
