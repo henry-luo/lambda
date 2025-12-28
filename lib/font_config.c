@@ -1297,6 +1297,24 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
         font->family_name = arena_strdup(arena, "Arial");
     } else if (strstr(filename, "Verdana") || strstr(filename, "verdana")) {
         font->family_name = arena_strdup(arena, "Verdana");
+    } else if (strstr(filename, "DejaVuSans") || strstr(filename, "DejaVu Sans") ||
+               strstr(filename, "dejavu-sans") || strstr(filename, "DejaVu-Sans")) {
+        font->family_name = arena_strdup(arena, "DejaVu Sans");
+    } else if (strstr(filename, "DejaVuSerif") || strstr(filename, "DejaVu Serif") ||
+               strstr(filename, "dejavu-serif") || strstr(filename, "DejaVu-Serif")) {
+        font->family_name = arena_strdup(arena, "DejaVu Serif");
+    } else if (strstr(filename, "DejaVuSansMono") || strstr(filename, "DejaVu Sans Mono") ||
+               strstr(filename, "dejavu-sans-mono") || strstr(filename, "DejaVu-Sans-Mono")) {
+        font->family_name = arena_strdup(arena, "DejaVu Sans Mono");
+    } else if (strstr(filename, "Liberation") || strstr(filename, "liberation")) {
+        // Liberation fonts (common on Linux)
+        if (strstr(filename, "Sans")) {
+            font->family_name = arena_strdup(arena, "Liberation Sans");
+        } else if (strstr(filename, "Serif")) {
+            font->family_name = arena_strdup(arena, "Liberation Serif");
+        } else if (strstr(filename, "Mono")) {
+            font->family_name = arena_strdup(arena, "Liberation Mono");
+        }
     } else if (strstr(filename, "Times New Roman") || strstr(filename, "times new roman")) {
         // Must check "Times New Roman" before "Times" since strstr("Times New Roman", "Times") == true
         font->family_name = arena_strdup(arena, "Times New Roman");
@@ -1546,8 +1564,9 @@ bool font_database_scan(FontDatabase* db) {
         int scan_depth = 1;
         if (strstr(directory, "/System/Library/Fonts") ||
             strstr(directory, "/Library/Fonts") ||
+            strstr(directory, "/usr/share/fonts") ||  // Linux system fonts need depth 3
             strstr(directory, "supplemental") || strstr(directory, "Supplemental")) {
-            scan_depth = 2;
+            scan_depth = 3;  // Need 3 levels: /usr/share/fonts → truetype → dejavu
         }
 
         scan_directory_recursive(db, directory, scan_depth);

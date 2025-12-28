@@ -896,10 +896,19 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             unsigned char* text_data = text->text_data();
             if (text_data && rect->length > 0) {
                 char content[2048];
-                int len = min((int)sizeof(content) - 1, rect->length);
-                strncpy(content, (char*)(text_data + rect->start_index), len);
-                content[len] = '\0';
-                append_json_string(buf, content);
+                int len = rect->length;
+                // Ensure len doesn't exceed buffer size
+                if (len >= (int)sizeof(content)) {
+                    len = (int)sizeof(content) - 1;
+                }
+                // Safe copy with explicit bounds
+                if (len > 0) {
+                    memcpy(content, (char*)(text_data + rect->start_index), len);
+                    content[len] = '\0';
+                    append_json_string(buf, content);
+                } else {
+                    append_json_string(buf, "[empty]");
+                }
             } else {
                 append_json_string(buf, "[empty]");
             }
