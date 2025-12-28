@@ -45,8 +45,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     if (uicon->surface) image_surface_destroy(uicon->surface);
     uicon->surface = image_surface_create(pixel_width, pixel_height);
     if (!uicon->surface) {
-        fprintf(stderr, "Error: Could not create image surface.\n");
-        return;
+        log_error("Error: Could not create image surface.");
     }
 }
 
@@ -89,6 +88,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
         uicon->window_height = window_height;
     } else {
         // GUI mode: create window
+        // Force X11 backend on Linux to ensure window visibility in mixed Wayland/XWayland environments
+        #ifdef __linux__
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+        #endif
         if (!glfwInit()) {
             fprintf(stderr, "Error: Could not initialize GLFW.\n");
             return EXIT_FAILURE;
@@ -100,6 +103,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
             fprintf(stderr, "Error: Could not create GLFW window.\n");
             return EXIT_FAILURE;
         }
+
+        // ensure window is shown and focused (needed on some Wayland/XWayland setups)
+        glfwShowWindow(uicon->window);
+        glfwFocusWindow(uicon->window);
 
         // get logical and actual pixel ratio
         int pixel_w, pixel_h;

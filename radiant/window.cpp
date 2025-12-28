@@ -255,8 +255,10 @@ void to_repaint() {
 }
 
 void repaint_window() {
-    // test rendering
-    // render_rectangles(ui_context.surface->pixels, ui_context.surface->width);
+    if (!ui_context.surface || !ui_context.surface->pixels) {
+        log_error("repaint_window: surface or pixels is NULL");
+        return;
+    }
 
     // generate a texture from the bitmap
     log_debug("creating rendering texture");
@@ -293,8 +295,20 @@ void render(GLFWwindow* window) {
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
 
+    // set up OpenGL viewport and projection for 2D rendering
+    glViewport(0, 0, width, height);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1, 1, -1, 1, -1, 1);  // normalized device coordinates for quad rendering
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    // clear the framebuffer
+    glClear(GL_COLOR_BUFFER_BIT);
+
     // reflow the document if window size has changed
     if (width != ui_context.window_width || height != ui_context.window_height) {
+        log_debug("render: window size changed to %dx%d, reflowing", width, height);
         double start_time = glfwGetTime();
         ui_context.window_width = width;  ui_context.window_height = height;
         // resize the surface
@@ -306,7 +320,7 @@ void render(GLFWwindow* window) {
         log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
     // rerender if the document is dirty
-    if (ui_context.document->state && ui_context.document->state->is_dirty) {
+    if (ui_context.document && ui_context.document->state && ui_context.document->state->is_dirty) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
     }
 
@@ -467,6 +481,9 @@ int view_doc_in_window(const char* doc_file) {
         log_info("First frame rendered, auto-closing window for testing");
         glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
+
+    // Initial render to screen - must call render() to set up OpenGL state and blit surface to screen
+    do_redraw = 1;
 
     // Main loop
     double lastTime = glfwGetTime();
