@@ -274,7 +274,8 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     }
 
     // Cache result under style key for fast lookup on next call
-    if (face) {
+    // Cache both successful (face != NULL) and failed (face == NULL) lookups to avoid retrying
+    {
         char* name = (char*)malloc(style_cache_key->length + 1);
         memcpy(name, style_cache_key->str, style_cache_key->length);
         name[style_cache_key->length] = '\0';

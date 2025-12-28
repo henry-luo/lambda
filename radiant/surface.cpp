@@ -2,6 +2,7 @@
 
 #include "../lib/image.h"
 #include "../lib/log.h"
+#include <algorithm>  // for std::max, std::min
 typedef struct ImageEntry {
     // ImageFormat format;
     const char* path;  // todo: change to URL
@@ -160,14 +161,18 @@ void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
 
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip) {
     Rect r;
-    if (!surface) return;
+    if (!surface || !surface->pixels) return;
     if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
     log_debug("fill rect: x:%.0f, y:%.0f, wd:%.0f, hg:%.0f, color:%x", rect->x, rect->y, rect->width, rect->height, color);
-    int left = max(clip->left, rect->x), right = min(clip->right, rect->x + rect->width);
-    int top = max(clip->top, rect->y), bottom = min(clip->bottom, rect->y + rect->height);
-    if (left >= right || top >= bottom) return; // rect outside the surface
+    
+    // Use explicit std::max/min to avoid template resolution issues
+    int left = (int)std::max(clip->left, rect->x);
+    int right = (int)std::min(clip->right, rect->x + rect->width);
+    int top = (int)std::max(clip->top, rect->y);
+    int bottom = (int)std::min(clip->bottom, rect->y + rect->height);
+    if (left >= right || top >= bottom) return; // rect outside clip
     for (int i = top; i < bottom; i++) {
-        uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch; // updated to use 'i'
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
         _fill_row(row_pixels, left, right - left, color);
     }
 }
@@ -180,10 +185,10 @@ static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y
     int y2 = y1 + 1;
 
     // clamp coordinates to source bounds
-    x1 = max(0, min(x1, src->width - 1));
-    y1 = max(0, min(y1, src->height - 1));
-    x2 = max(0, min(x2, src->width - 1));
-    y2 = max(0, min(y2, src->height - 1));
+    x1 = std::max(0, std::min(x1, src->width - 1));
+    y1 = std::max(0, std::min(y1, src->height - 1));
+    x2 = std::max(0, std::min(x2, src->width - 1));
+    y2 = std::max(0, std::min(y2, src->height - 1));
 
     float fx = src_x - (int)src_x;
     float fy = src_y - (int)src_y;
@@ -231,8 +236,10 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
 
     float x_ratio = (float)src_rect->width / dst_rect->width;
     float y_ratio = (float)src_rect->height / dst_rect->height;
-    int left = max(clip->left, dst_rect->x), right = min(clip->right, dst_rect->x + dst_rect->width);
-    int top = max(clip->top, dst_rect->y), bottom = min(clip->bottom, dst_rect->y + dst_rect->height);
+    int left = (int)std::max(clip->left, dst_rect->x);
+    int right = (int)std::min(clip->right, dst_rect->x + dst_rect->width);
+    int top = (int)std::max(clip->top, dst_rect->y);
+    int bottom = (int)std::min(clip->bottom, dst_rect->y + dst_rect->height);
     if (left >= right || top >= bottom) return; // dst_rect outside the dst surface
 
     for (int i = top; i < bottom; i++) {
