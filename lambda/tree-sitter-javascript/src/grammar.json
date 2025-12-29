@@ -6927,5 +6927,6 @@
     "expression",
     "primary_expression",
     "pattern"
-  ]
+  ],
+  "reserved": {}
 }
