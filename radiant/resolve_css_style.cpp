@@ -8,6 +8,45 @@
 #include <cmath>
 #include FT_TRUETYPE_TABLES_H
 
+// Forward declaration for CSS variable lookup
+static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
+
+/**
+ * Look up a CSS custom property (variable) value
+ * Searches current element and ancestors (CSS variables inherit)
+ * @param lycon Layout context containing current element
+ * @param var_name Variable name (e.g., "--primary-color")
+ * @return CssValue* if found, nullptr otherwise
+ */
+static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name) {
+    if (!lycon || !lycon->view || !var_name) return nullptr;
+    
+    DomElement* element = (DomElement*)lycon->view;
+    
+    // Search up the DOM tree (CSS variables inherit)
+    while (element) {
+        // Check if this element has CSS variables
+        if (element->css_variables) {
+            CssCustomProp* var = element->css_variables;
+            while (var) {
+                if (var->name && strcmp(var->name, var_name) == 0) {
+                    return var->value;
+                }
+                var = var->next;
+            }
+        }
+        
+        // Move to parent element
+        if (element->parent && element->parent->is_element()) {
+            element = (DomElement*)element->parent;
+        } else {
+            break;
+        }
+    }
+    
+    return nullptr;
+}
+
 /**
  * Get x-height ratio for a font (x-height / em-size).
  * Tries OS/2 sxHeight first, then measures 'x' glyph, fallback to 0.5.
@@ -1131,9 +1170,14 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             // min(), max(), clamp() functions
             log_debug("CSS function %s() not yet implemented, treating as unset", func->name);
             result = NAN;
+        } else if (strcmp(func->name, "var") == 0) {
+            // var(--custom-property-name) or var(--custom-property-name, fallback)
+            // TODO: Implement proper var() resolution
+            log_debug("var() called but not yet implemented, using 0");
+            result = 0.0f;
         } else {
-            log_warn("unknown CSS function: %s()", func->name);
-            result = NAN;
+            log_warn("unknown CSS function: %s(), using 0 instead of NaN", func->name);
+            result = 0.0f;  // Use 0 instead of NAN to prevent crash
         }
         break;
     }
@@ -1969,6 +2013,29 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         prop_id, css_property_name_from_id(prop_id), value->type);
     int32_t specificity = get_lambda_specificity(decl);
     log_debug("[Lambda CSS Property] Specificity: %d", specificity);
+
+    // Handle CSS custom properties (--variable-name: value)
+    if (decl->property_name && decl->property_name[0] == '-' && decl->property_name[1] == '-') {
+        // This is a CSS custom property, store it
+        DomElement* element = (DomElement*)lycon->view;
+        
+        // Create new custom property entry
+        CssCustomProp* new_var = (CssCustomProp*)pool_calloc(lycon->doc->view_tree->pool, sizeof(CssCustomProp));
+        if (new_var) {
+            // Allocate name from arena
+            size_t name_len = strlen(decl->property_name);
+            char* name_copy = (char*)arena_alloc(lycon->doc->arena, name_len + 1);
+            if (name_copy) {
+                memcpy(name_copy, decl->property_name, name_len + 1);
+                new_var->name = name_copy;
+                new_var->value = value;
+                new_var->next = element->css_variables;
+                element->css_variables = new_var;
+                log_debug("[CSS] Stored custom property: %s", decl->property_name);
+            }
+        }
+        return;  // Custom properties don't have standard processing
+    }
 
     // Dispatch based on property ID
     // Parallel implementation to resolve_element_style() in resolve_style.cpp
