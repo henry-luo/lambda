@@ -128,6 +128,9 @@ install_msys2_package "$COMPILER_PACKAGE" "C/C++ compiler"
 install_msys2_package "${TOOLCHAIN_PREFIX}-cmake" "CMake build system"
 install_msys2_package "${TOOLCHAIN_PREFIX}-ninja" "Ninja build system"
 
+# Compiler cache for faster rebuilds
+install_msys2_package "ccache" "Compiler cache (dramatically speeds up rebuilds)"
+
 # Premake5 - try toolchain-specific first, fall back to base if not available
 if ! install_msys2_package "${TOOLCHAIN_PREFIX}-premake" "Premake5 build system generator (required for Lambda)"; then
     # Try base premake5 package
@@ -1022,6 +1025,40 @@ for tool in "${tools[@]}"; do
     fi
 done
 
+# Configure ccache for optimal performance
+echo ""
+echo "Configuring ccache..."
+if command_exists ccache; then
+    ccache_version=$(ccache --version 2>/dev/null | head -1 || echo "version unknown")
+    echo "✅ ccache: $ccache_version"
+
+    # Set up ccache configuration
+    ccache --set-config=max_size=5G
+    ccache --set-config=compression=true
+    ccache --set-config=compression_level=6
+    ccache --set-config=stats=true
+
+    echo "✅ ccache configured (5GB cache, compression enabled)"
+
+    # Add ccache environment variables to ~/.bashrc if not already present
+    if ! grep -q "export CC=\"ccache gcc\"" ~/.bashrc 2>/dev/null; then
+        echo "" >> ~/.bashrc
+        echo "# ccache configuration for faster compilation" >> ~/.bashrc
+        echo "export MAKEFLAGS=\"-j\$(nproc)\"" >> ~/.bashrc
+        echo "export CC=\"ccache gcc\"" >> ~/.bashrc
+        echo "export CXX=\"ccache g++\"" >> ~/.bashrc
+        echo "export CCACHE_DIR=\"\$HOME/.ccache\"" >> ~/.bashrc
+        echo "export CCACHE_MAXSIZE=\"5G\"" >> ~/.bashrc
+        echo "export CCACHE_COMPRESS=\"true\"" >> ~/.bashrc
+        echo "✅ Added ccache configuration to ~/.bashrc"
+        echo "   Note: Source your ~/.bashrc or restart your terminal for changes to take effect"
+    else
+        echo "✅ ccache already configured in ~/.bashrc"
+    fi
+else
+    echo "⚠️  ccache: not found"
+fi
+
 # Create build configuration for native Windows
 echo ""
 echo "Creating build configuration for native Windows..."
@@ -1042,10 +1079,12 @@ echo "Summary:"
 echo "  • Dependencies directory: $DEPS_DIR"
 echo "  • Build system: Premake5 (generates Makefiles from build_lambda_config.json)"
 echo "  • Target environment: $MSYSTEM ($COMPILER_NAME)"
+echo "  • Compiler cache: ccache enabled for faster rebuilds (5GB cache)"
 echo ""
 echo "To build Lambda for Windows natively:"
 echo "  1. Ensure you're in MSYS2 terminal (CLANG64 or MINGW64)"
-echo "  2. Run: make build"
+echo "  2. Restart terminal or run: source ~/.bashrc"
+echo "  3. Run: make build"
 echo ""
 echo "For debug build:"
 echo "  make build-debug"
@@ -1056,6 +1095,7 @@ echo ""
 echo "Dependencies installed:"
 echo "  ✅ Build tools (make, cmake, ninja, premake5, meson)"
 echo "  ✅ Compiler toolchain ($COMPILER_NAME)"
+echo "  ✅ ccache (compiler cache for 5-30x faster rebuilds)"
 echo "  ✅ mpdecimal (multi-precision decimal arithmetic)"
 echo "  ✅ mbedTLS (SSL/TLS library)"
 echo "  ✅ FreeType (font rendering)"
