@@ -2,13 +2,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>  // for strncasecmp
+#endif
 #include <stdbool.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <ctype.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <libgen.h>
 #include <dirent.h>
+#include <sys/wait.h>
+#else
+#include <direct.h>
+#include <io.h>
+// Windows-compatible macros for pclose status
+#define WIFEXITED(status) (1)
+#define WEXITSTATUS(status) (status)
+#endif
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -1329,6 +1342,7 @@ TEST_F(AdvancedHtmlTests, HtmlWithSelfClosingTagsRoundtrip) {
     printf("HTML with self-closing tags roundtrip completed\n");
 }
 
+#ifndef _WIN32
 // ==== DYNAMIC BASELINE SUITE TEST ====
 // Dynamically scans and tests all HTML files in the baseline and page directories
 class LayoutDataBaselineTests : public HtmlRoundtripTest {
@@ -1427,6 +1441,7 @@ TEST_F(LayoutDataBaselineTests, AllBaselineAndPageFiles) {
     double pass_rate = 100.0 * passed / total;
     EXPECT_GE(pass_rate, 90.0) << "Pass rate should be at least 90%";
 }
+#endif // !_WIN32 - LayoutDataBaselineTests uses POSIX directory APIs
 
 // HTML5 Semantic Elements Tests
 class Html5SemanticTests : public HtmlRoundtripTest {};

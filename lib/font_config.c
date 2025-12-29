@@ -98,6 +98,9 @@
 static FontDatabase* g_global_font_db = NULL;
 static bool g_font_db_initialized = false;
 
+// Forward declarations
+static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *arena);
+
 // Platform-specific font directories
 static const char* macos_font_dirs[] = {
     "/System/Library/Fonts",
@@ -422,13 +425,13 @@ static void add_windows_font_directories(ArrayList *directories) {
 
     // System fonts directory
     if (SHGetFolderPathA(NULL, 0x0014, NULL, 0, windows_fonts) == 0) {  // CSIDL_FONTS, SHGFP_TYPE_CURRENT, S_OK
-        arraylist_add(directories, strdup(windows_fonts));
+        arraylist_append(directories, strdup(windows_fonts));
     }
 
     // User fonts directory
     if (SHGetFolderPathA(NULL, 0x001c, NULL, 0, user_fonts) == 0) {  // CSIDL_LOCAL_APPDATA, SHGFP_TYPE_CURRENT, S_OK
         strcat(user_fonts, "\\Microsoft\\Windows\\Fonts");
-        arraylist_add(directories, strdup(user_fonts));
+        arraylist_append(directories, strdup(user_fonts));
     }
 }
 

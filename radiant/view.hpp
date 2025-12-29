@@ -11,6 +11,18 @@
 #include "../lambda/input/css/css_value.hpp"
 
 #include <GLFW/glfw3.h>
+
+// Windows OpenGL headers may not define these constants (they're from OpenGL 1.2+)
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#ifndef GL_CLAMP_TO_BORDER
+#define GL_CLAMP_TO_BORDER 0x812D
+#endif
+#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
+#define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
+#endif
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_SFNT_NAMES_H
@@ -300,7 +312,7 @@ typedef struct ImageSurface {
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
-    Tvg_Paint* pic;        // ThorVG picture for SVG image
+    Tvg_Paint pic;        // ThorVG picture for SVG image
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
 } ImageSurface;
