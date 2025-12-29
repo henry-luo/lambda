@@ -945,26 +945,33 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
  * Resolve length/percentage value to pixels using Lambda CSS value structures
  *
  * @param lycon Layout context for font size, viewport, and parent dimensions
- * @param property CSS property ID for context-specific resolution
+ * @param property CSS property ID for context-specific resolution.
+ *                 Use negative value to suppress line-height NUMBER multiplication (for calc() operands)
+ *                 while still using absolute value for percentage base selection.
  * @param value Lambda CssValue pointer (CSS_VALUE_LENGTH, CSS_VALUE_PERCENTAGE, or CSS_VALUE_NUMBER)
  * @return Resolved value in pixels
  */
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
 
+    // Check if we're in "raw mode" (negative property) - used for calc() operands
+    // In raw mode, NUMBER values are not multiplied by font-size for line-height
+    bool raw_number_mode = (intptr_t)property < 0;
+    uintptr_t effective_property = raw_number_mode ? (uintptr_t)(-(intptr_t)property) : property;
+
     float result = 0.0f;
     switch (value->type) {
     case CSS_VALUE_TYPE_NUMBER:
         // unitless number
         log_debug("number value: %.2f", value->data.number.value);
-        if (property == CSS_PROPERTY_LINE_HEIGHT) {
+        if (!raw_number_mode && effective_property == CSS_PROPERTY_LINE_HEIGHT) {
             if (lycon->font.current_font_size < 0) {
                 log_debug("resolving font size for em value");
                 resolve_font_size(lycon, NULL);
             }
             result = value->data.number.value * lycon->font.current_font_size;
         } else {
-            // treat as pixels for most properties
+            // treat as pixels for most properties (or in raw mode for calc operands)
             result = (float)value->data.number.value;
         }
         break;
@@ -1008,7 +1015,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = num * lycon->root_font_size;
             break;
         case CSS_UNIT_EM:
-            if (property == CSS_PROPERTY_FONT_SIZE) {
+            if (effective_property == CSS_PROPERTY_FONT_SIZE) {
                 result = num * lycon->font.style->font_size;
             } else {
                 if (lycon->font.current_font_size < 0) {
@@ -1066,12 +1073,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     case CSS_VALUE_TYPE_PERCENTAGE: {
         double percentage = value->data.percentage.value;
-        if (property == CSS_PROPERTY_FONT_SIZE || property == CSS_PROPERTY_LINE_HEIGHT || property == CSS_PROPERTY_VERTICAL_ALIGN) {
+        if (effective_property == CSS_PROPERTY_FONT_SIZE || effective_property == CSS_PROPERTY_LINE_HEIGHT || effective_property == CSS_PROPERTY_VERTICAL_ALIGN) {
             // font-size percentage is relative to parent font size
             result = percentage * lycon->font.style->font_size / 100.0;
-        } else if (property == CSS_PROPERTY_HEIGHT || property == CSS_PROPERTY_MIN_HEIGHT ||
-                   property == CSS_PROPERTY_MAX_HEIGHT || property == CSS_PROPERTY_TOP ||
-                   property == CSS_PROPERTY_BOTTOM) {
+        } else if (effective_property == CSS_PROPERTY_HEIGHT || effective_property == CSS_PROPERTY_MIN_HEIGHT ||
+                   effective_property == CSS_PROPERTY_MAX_HEIGHT || effective_property == CSS_PROPERTY_TOP ||
+                   effective_property == CSS_PROPERTY_BOTTOM) {
             // height-related properties: percentage relative to parent HEIGHT
             if (lycon->block.parent) {
                 log_debug("percentage height calculation: %.2f%% of parent height %.1f = %.2f",
@@ -1122,6 +1129,11 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (strcmp(func->name, "calc") == 0) {
             // calc() expression - evaluate the expression
             // For now, handle simple cases like "calc(100% - 2rem)"
+            
+            // Use negative property to enable raw number mode (no line-height multiplication)
+            // while preserving the property ID for correct percentage base selection
+            uintptr_t raw_prop = (uintptr_t)(-(intptr_t)property);
+            
             if (func->arg_count >= 1 && func->args && func->args[0]) {
                 // Check for simple binary operations in a list value
                 CssValue* arg = func->args[0];
@@ -1132,8 +1144,10 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     CssValue* val2 = arg->data.list.values[2];
 
                     if (op && op->type == CSS_VALUE_TYPE_KEYWORD) {
-                        float left = resolve_length_value(lycon, property, val1);
-                        float right = resolve_length_value(lycon, property, val2);
+                        // inside calc(), resolve operands without line-height special behavior
+                        // unitless numbers inside calc() stay raw, not multiplied by font-size
+                        float left = resolve_length_value(lycon, raw_prop, val1);
+                        float right = resolve_length_value(lycon, raw_prop, val2);
                         const CssEnumInfo* op_info = css_enum_info(op->data.keyword);
                         const char* op_name = op_info ? op_info->name : "";
 
@@ -1153,8 +1167,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                         }
                     } else if (op && op->type == CSS_VALUE_TYPE_CUSTOM && op->data.custom_property.name) {
                         // Operator stored as custom property (e.g. "-" parsed as CSS_TOKEN_DELIM)
-                        float left = resolve_length_value(lycon, property, val1);
-                        float right = resolve_length_value(lycon, property, val2);
+                        // inside calc(), resolve operands without line-height special behavior
+                        float left = resolve_length_value(lycon, raw_prop, val1);
+                        float right = resolve_length_value(lycon, raw_prop, val2);
                         const char* op_name = op->data.custom_property.name;
 
                         log_debug("calc (custom op): %.2f %s %.2f", left, op_name, right);
@@ -1207,8 +1222,8 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                             else if (strcmp(op_name, "*") == 0) pending_op = '*';
                             else if (strcmp(op_name, "/") == 0) pending_op = '/';
                         } else {
-                            // This is a value
-                            float val = resolve_length_value(lycon, property, item);
+                            // This is a value - resolve with raw_prop for correct percentage base
+                            float val = resolve_length_value(lycon, raw_prop, item);
                             if (!std::isnan(val)) {
                                 switch (pending_op) {
                                     case '+': result += val; break;
@@ -1222,13 +1237,20 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     }
                     log_debug("calc list expression result: %.2f", result);
                 } else {
-                    // Single value in calc - just resolve it
-                    result = resolve_length_value(lycon, property, arg);
+                    // Single value in calc - resolve with raw_prop for correct percentage base
+                    result = resolve_length_value(lycon, raw_prop, arg);
                 }
             } else {
                 log_warn("calc() with no arguments");
                 result = NAN;
             }
+            
+            // Note: We do NOT apply line-height unitless multiplier here because:
+            // 1. calc() results lose type information - we can't distinguish calc(1.2) from calc(10px + 8px)
+            // 2. The heuristic (< 10 means unitless) is too fragile for complex CSS with variables
+            // 3. If the result is truly unitless for line-height, the caller should handle it
+            // This matches browser behavior where calc(1.5) returns a dimensionless value, 
+            // and calc(10px + 8px) returns a length value.
         } else if (strcmp(func->name, "min") == 0 || strcmp(func->name, "max") == 0 ||
                    strcmp(func->name, "clamp") == 0) {
             // min(), max(), clamp() functions
