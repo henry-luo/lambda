@@ -381,6 +381,9 @@ int32_t get_lambda_specificity(const CssDeclaration* decl);
 // Resolve CSS length value to pixels
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
 
+// Resolve var() function to get the actual CSS value
+const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
+
 // Resolve Lambda CSS styles for a DomElement
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 

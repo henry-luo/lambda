@@ -1529,6 +1529,13 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             break;
         }
 
+        // Stop at unexpected colon (indicates malformed CSS like "width: 600px: height: 100px;")
+        // Colons should only appear after property names, not in values
+        if (t == CSS_TOKEN_COLON) {
+            log_debug("[CSS Parser] Unexpected colon in value, stopping parse (malformed CSS)");
+            return NULL;  // Invalid declaration
+        }
+
         // Handle function tokens - skip entire function as one value
         if (t == CSS_TOKEN_FUNCTION) {
             value_count++;

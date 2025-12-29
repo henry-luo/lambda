@@ -1168,15 +1168,49 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
                     count, child_elmt->blk->given_width, child_elmt->blk->given_height);
 
                 // CRITICAL FIX: Apply CSS dimensions to flex items if specified
+                // Must clamp against max-width/max-height constraints
                 if (child_elmt->blk->given_width > 0 && child->width != child_elmt->blk->given_width) {
+                    float target_width = child_elmt->blk->given_width;
+                    
+                    // Clamp against max-width constraint if present
+                    if (child_elmt->blk->given_max_width > 0 && target_width > child_elmt->blk->given_max_width) {
+                        log_debug("Flex item %d width %.1f exceeds max-width %.1f, clamping",
+                                 count, target_width, child_elmt->blk->given_max_width);
+                        target_width = child_elmt->blk->given_max_width;
+                    }
+                    
+                    // Clamp against min-width constraint if present
+                    if (child_elmt->blk->given_min_width > 0 && target_width < child_elmt->blk->given_min_width) {
+                        log_debug("Flex item %d width %.1f below min-width %.1f, clamping",
+                                 count, target_width, child_elmt->blk->given_min_width);
+                        target_width = child_elmt->blk->given_min_width;
+                    }
+                    
                     log_debug("Setting flex item %d width from CSS: %.1f -> %.1f",
-                             count, child->width, child_elmt->blk->given_width);
-                    child->width = child_elmt->blk->given_width;
+                             count, child->width, target_width);
+                    child->width = target_width;
                 }
+                
                 if (child_elmt->blk->given_height > 0 && child->height != child_elmt->blk->given_height) {
+                    float target_height = child_elmt->blk->given_height;
+                    
+                    // Clamp against max-height constraint if present
+                    if (child_elmt->blk->given_max_height > 0 && target_height > child_elmt->blk->given_max_height) {
+                        log_debug("Flex item %d height %.1f exceeds max-height %.1f, clamping",
+                                 count, target_height, child_elmt->blk->given_max_height);
+                        target_height = child_elmt->blk->given_max_height;
+                    }
+                    
+                    // Clamp against min-height constraint if present
+                    if (child_elmt->blk->given_min_height > 0 && target_height < child_elmt->blk->given_min_height) {
+                        log_debug("Flex item %d height %.1f below min-height %.1f, clamping",
+                                 count, target_height, child_elmt->blk->given_min_height);
+                        target_height = child_elmt->blk->given_min_height;
+                    }
+                    
                     log_debug("Setting flex item %d height from CSS: %.1f -> %.1f",
-                             count, child->height, child_elmt->blk->given_height);
-                    child->height = child_elmt->blk->given_height;
+                             count, child->height, target_height);
+                    child->height = target_height;
                 }
             } else {
                 log_debug("Flex item %d has no blk (CSS properties)", count);
@@ -1383,12 +1417,40 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         if (item->blk) {
             // Only apply if not a percentage (already handled above)
             if (isnan(item->blk->given_width_percent) && item->blk->given_width > 0) {
-                log_debug("Applying CSS width: %.1f", item->blk->given_width);
-                item->width = item->blk->given_width;
+                float target_width = item->blk->given_width;
+                
+                // CRITICAL: Clamp against max-width constraint
+                if (item->blk->given_max_width > 0 && target_width > item->blk->given_max_width) {
+                    log_debug("Width %.1f exceeds max-width %.1f, clamping", target_width, item->blk->given_max_width);
+                    target_width = item->blk->given_max_width;
+                }
+                
+                // Clamp against min-width constraint (min takes precedence)
+                if (item->blk->given_min_width > 0 && target_width < item->blk->given_min_width) {
+                    log_debug("Width %.1f below min-width %.1f, clamping", target_width, item->blk->given_min_width);
+                    target_width = item->blk->given_min_width;
+                }
+                
+                log_debug("Applying CSS width (clamped): %.1f", target_width);
+                item->width = target_width;
             }
             if (isnan(item->blk->given_height_percent) && item->blk->given_height > 0) {
-                log_debug("Applying CSS height: %.1f", item->blk->given_height);
-                item->height = item->blk->given_height;
+                float target_height = item->blk->given_height;
+                
+                // CRITICAL: Clamp against max-height constraint
+                if (item->blk->given_max_height > 0 && target_height > item->blk->given_max_height) {
+                    log_debug("Height %.1f exceeds max-height %.1f, clamping", target_height, item->blk->given_max_height);
+                    target_height = item->blk->given_max_height;
+                }
+                
+                // Clamp against min-height constraint (min takes precedence)
+                if (item->blk->given_min_height > 0 && target_height < item->blk->given_min_height) {
+                    log_debug("Height %.1f below min-height %.1f, clamping", target_height, item->blk->given_min_height);
+                    target_height = item->blk->given_min_height;
+                }
+                
+                log_debug("Applying CSS height (clamped): %.1f", target_height);
+                item->height = target_height;
             }
         }
 
@@ -3356,10 +3418,24 @@ float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layo
 float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (is_main_axis_horizontal(flex_layout)) {
         // Cross-axis is height for horizontal flex containers
-        // CRITICAL FIX: Check CSS height first
+        // CRITICAL FIX: Check CSS height first and clamp against max-height
         if (item->blk && item->blk->given_height > 0) {
-            log_debug("Using CSS height for cross-axis: %.1f", item->blk->given_height);
-            return item->blk->given_height;
+            float height = item->blk->given_height;
+            
+            // Clamp against max-height constraint if present
+            if (item->blk->given_max_height > 0 && height > item->blk->given_max_height) {
+                log_debug("Cross-axis height %.1f exceeds max-height %.1f, clamping", height, item->blk->given_max_height);
+                height = item->blk->given_max_height;
+            }
+            
+            // Clamp against min-height constraint if present (min takes precedence)
+            if (item->blk->given_min_height > 0 && height < item->blk->given_min_height) {
+                height = item->blk->given_min_height;
+                log_debug("Using CSS min-height for cross-axis: %.1f", height);
+            }
+            
+            log_debug("Using CSS height for cross-axis (clamped): %.1f", height);
+            return height;
         }
         // Also check min-height constraint
         float height = item->height;
@@ -3370,17 +3446,47 @@ float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
         return height;
     } else {
         // Cross-axis is width for vertical flex containers
-        // CRITICAL FIX: Check CSS width first
-        if (item->blk && item->blk->given_width > 0) {
-            log_debug("Using CSS width for cross-axis: %.1f", item->blk->given_width);
-            return item->blk->given_width;
+        log_debug("get_cross_axis_size (vertical flex): item->width=%.1f, blk=%p", item->width, item->blk);
+        
+        if (item->blk) {
+            log_debug("  given_width=%.1f, given_max_width=%.1f, given_min_width=%.1f",
+                     item->blk->given_width, item->blk->given_max_width, item->blk->given_min_width);
         }
-        // Also check min-width constraint
+        
+        // CRITICAL FIX: Check CSS width first and clamp against max-width
+        if (item->blk && item->blk->given_width > 0) {
+            float width = item->blk->given_width;
+            
+            // Clamp against max-width constraint if present
+            if (item->blk->given_max_width > 0 && width > item->blk->given_max_width) {
+                log_debug("Cross-axis width %.1f exceeds max-width %.1f, clamping", width, item->blk->given_max_width);
+                width = item->blk->given_max_width;
+            }
+            
+            // Clamp against min-width constraint if present (min takes precedence)
+            if (item->blk->given_min_width > 0 && width < item->blk->given_min_width) {
+                width = item->blk->given_min_width;
+                log_debug("Using CSS min-width for cross-axis: %.1f", width);
+            }
+            
+            log_debug("Using CSS width for cross-axis (clamped): %.1f", width);
+            return width;
+        }
+        
+        // Fallback: use item->width but check max-width constraint
         float width = item->width;
+        
+        if (item->blk && item->blk->given_max_width > 0 && width > item->blk->given_max_width) {
+            log_debug("Item width %.1f exceeds max-width %.1f, clamping", width, item->blk->given_max_width);
+            width = item->blk->given_max_width;
+        }
+        
         if (item->blk && item->blk->given_min_width > 0 && width < item->blk->given_min_width) {
             width = item->blk->given_min_width;
             log_debug("Using CSS min-width for cross-axis: %.1f", width);
         }
+        
+        log_debug("Using item->width for cross-axis (clamped): %.1f", width);
         return width;
     }
 }
