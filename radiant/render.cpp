@@ -390,6 +390,116 @@ void formatListNumber(StrBuf* buf, int num, CssEnum list_style) {
 }
 */
 
+/**
+ * Render a ViewMarker (list bullet or number) using vector graphics.
+ * Bullets (disc, circle, square) are drawn as shapes with fixed width.
+ * Text markers (decimal, roman, alpha) render text right-aligned within fixed width.
+ */
+void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
+    if (!marker || !marker->is_element()) return;
+
+    DomElement* elem = (DomElement*)marker;
+    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    if (!marker_prop) {
+        log_debug("[MARKER RENDER] No marker_prop found");
+        return;
+    }
+
+    float x = rdcon->block.x + marker->x;
+    float y = rdcon->block.y + marker->y;
+    float width = marker_prop->width;
+    float bullet_size = marker_prop->bullet_size;
+    CssEnum marker_type = marker_prop->marker_type;
+
+    // Get current color (inherit from parent text color)
+    Color color = rdcon->color;
+
+    log_debug("[MARKER RENDER] type=%d, x=%.1f, y=%.1f, width=%.1f, bullet_size=%.1f",
+             marker_type, x, y, width, bullet_size);
+
+    switch (marker_type) {
+        case CSS_VALUE_DISC: {
+            // Filled circle - center vertically in line, positioned at right side of marker box
+            // Note: y_ppem is already in pixels, but ascender is in 26.6 fixed point
+            float font_size = rdcon->font.ft_face ? (float)rdcon->font.ft_face->size->metrics.y_ppem : 16.0f;
+            float baseline_offset = rdcon->font.ft_face ? (rdcon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
+            // Position bullet center: x at right side of marker box (with small gap), y at middle of x-height
+            float cx = x + width - bullet_size - 4.0f;  // 4px gap from right edge
+            float cy = y + baseline_offset - font_size * 0.35f;  // center on x-height
+            float radius = bullet_size / 2.0f;
+
+            // Draw filled circle using ThorVG
+            Tvg_Canvas* canvas = rdcon->canvas;
+            Tvg_Paint* shape = tvg_shape_new();
+            tvg_shape_append_circle(shape, cx, cy, radius, radius);
+            tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
+            tvg_canvas_push(canvas, shape);
+            tvg_canvas_draw(canvas, false);
+            tvg_canvas_sync(canvas);
+            log_debug("[MARKER RENDER] Drew disc at (%.1f, %.1f) r=%.1f", cx, cy, radius);
+            break;
+        }
+
+        case CSS_VALUE_CIRCLE: {
+            // Stroked circle (outline only)
+            float font_size = rdcon->font.ft_face ? (float)rdcon->font.ft_face->size->metrics.y_ppem : 16.0f;
+            float baseline_offset = rdcon->font.ft_face ? (rdcon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
+            float cx = x + width - bullet_size - 4.0f;
+            float cy = y + baseline_offset - font_size * 0.35f;
+            float radius = bullet_size / 2.0f;
+            float stroke_width = 1.0f;
+
+            Tvg_Canvas* canvas = rdcon->canvas;
+            Tvg_Paint* shape = tvg_shape_new();
+            tvg_shape_append_circle(shape, cx, cy, radius - stroke_width/2, radius - stroke_width/2);
+            tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
+            tvg_shape_set_stroke_width(shape, stroke_width);
+            tvg_canvas_push(canvas, shape);
+            tvg_canvas_draw(canvas, false);
+            tvg_canvas_sync(canvas);
+            log_debug("[MARKER RENDER] Drew circle outline at (%.1f, %.1f) r=%.1f", cx, cy, radius);
+            break;
+        }
+
+        case CSS_VALUE_SQUARE: {
+            // Filled square
+            float font_size = rdcon->font.ft_face ? (float)rdcon->font.ft_face->size->metrics.y_ppem : 16.0f;
+            float baseline_offset = rdcon->font.ft_face ? (rdcon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
+            float sx = x + width - bullet_size - 4.0f;
+            float sy = y + baseline_offset - font_size * 0.35f - bullet_size/2;
+
+            Tvg_Canvas* canvas = rdcon->canvas;
+            Tvg_Paint* shape = tvg_shape_new();
+            tvg_shape_append_rect(shape, sx, sy, bullet_size, bullet_size, 0, 0);
+            tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
+            tvg_canvas_push(canvas, shape);
+            tvg_canvas_draw(canvas, false);
+            tvg_canvas_sync(canvas);
+            log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
+            break;
+        }
+
+        case CSS_VALUE_DECIMAL:
+        case CSS_VALUE_LOWER_ROMAN:
+        case CSS_VALUE_UPPER_ROMAN:
+        case CSS_VALUE_LOWER_ALPHA:
+        case CSS_VALUE_UPPER_ALPHA: {
+            // Text markers - render the text_content right-aligned within marker width
+            if (marker_prop->text_content && *marker_prop->text_content) {
+                // TODO: Implement text rendering for numbered markers
+                // For now, log that we need to render text
+                log_debug("[MARKER RENDER] Text marker: '%s' (type=%d)",
+                         marker_prop->text_content, marker_type);
+            }
+            break;
+        }
+
+        default:
+            log_debug("[MARKER RENDER] Unsupported marker type: %d", marker_type);
+            break;
+    }
+}
+
 void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     // bullets are aligned to the top and right side of the list item
     float ratio = rdcon->ui_context->pixel_ratio;
@@ -963,6 +1073,11 @@ void render_children(RenderContext* rdcon, View* view) {
         else if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             render_text_view(rdcon, text);
+        }
+        else if (view->view_type == RDT_VIEW_MARKER) {
+            // List marker (bullet/number) with fixed width and vector graphics
+            ViewSpan* marker = (ViewSpan*)view;
+            render_marker_view(rdcon, marker);
         }
         else {
             log_debug("unknown view in rendering: %d", view->view_type);

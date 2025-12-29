@@ -31,6 +31,7 @@ typedef enum {
     RDT_VIEW_NONE = 0,
     RDT_VIEW_TEXT,
     RDT_VIEW_BR,
+    RDT_VIEW_MARKER,  // List marker (bullet/number) - renders with fixed width
     // ViewSpan
     RDT_VIEW_INLINE,
     // ViewBlock

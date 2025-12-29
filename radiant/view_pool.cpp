@@ -21,6 +21,7 @@ const char* View::view_name() {
         case RDT_VIEW_INLINE: return "inline";
         case RDT_VIEW_TEXT: return "text";
         case RDT_VIEW_BR: return "br";
+        case RDT_VIEW_MARKER: return "marker";
         default: return "unknown";
     }
 }
@@ -31,6 +32,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
         case RDT_VIEW_TABLE_ROW_GROUP:  case RDT_VIEW_TABLE_ROW:
         case RDT_VIEW_INLINE:  case RDT_VIEW_TEXT:  case RDT_VIEW_BR:
+        case RDT_VIEW_MARKER:
             break;
         case RDT_VIEW_TABLE: {
             ViewTable* table = (ViewTable*)node;

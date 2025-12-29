@@ -511,6 +511,17 @@ typedef struct PositionProp {
 } PositionProp;
 
 /**
+ * MarkerProp - Stores list marker (bullet) properties
+ * Used for ::marker pseudo-element rendering with fixed width and vector graphics
+ */
+typedef struct MarkerProp {
+    CssEnum marker_type;     // CSS_VALUE_DISC, CSS_VALUE_CIRCLE, CSS_VALUE_SQUARE, CSS_VALUE_DECIMAL, etc.
+    float width;             // Fixed marker width (typically ~1.4em = 22px at 16px font)
+    float bullet_size;       // Size of the bullet shape (typically ~0.35em = 5-6px)
+    char* text_content;      // Text content for numbered markers (decimal, roman, alpha)
+} MarkerProp;
+
+/**
  * PseudoContentProp - Stores dynamically created ::before and ::after pseudo-elements
 /*
  * Instead of storing content strings and layout bounds, we create actual DomElement
@@ -589,6 +600,16 @@ typedef struct ViewText : DomText {
     // FontProp *font;  // font for this text
     // Color color;     // text color (for PDF text fill color)
 } ViewText;
+
+/**
+ * ViewMarker - Represents a list marker (bullet or number)
+ * Fixed-width element that renders bullets using vector graphics
+ */
+typedef struct ViewMarker : DomElement {
+    MarkerProp* marker;  // Marker properties (type, size, text content for numbers)
+    float width;         // Fixed marker width
+    float height;        // Marker height (line height)
+} ViewMarker;
 
 struct ViewElement : DomElement {
     // exclude those skipped text nodes
