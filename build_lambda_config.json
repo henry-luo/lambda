@@ -753,8 +753,7 @@
                 "D_TIMESPEC_DEFINED",
                 "DUTF8PROC_STATIC",
                 "DCURL_STATICLIB",
-                "DTVG_STATIC",
-                "v"
+                "DTVG_STATIC"
             ],
             "linker_flags": [
                 "Wl,--subsystem,console"
