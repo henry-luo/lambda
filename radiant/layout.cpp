@@ -768,6 +768,38 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
 
+        // Handle ViewMarker (list bullet/number) with fixed width
+        // These are created with view_type = RDT_VIEW_MARKER in layout_block.cpp
+        if (elem->view_type == RDT_VIEW_MARKER) {
+            // Get marker properties from blk (which stores MarkerProp* for markers)
+            MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+            if (marker_prop) {
+                // Create inline view for the marker with fixed width
+                ViewSpan* marker_span = (ViewSpan*)set_view(lycon, RDT_VIEW_MARKER, elem);
+                if (marker_span) {
+                    marker_span->width = marker_prop->width;
+                    marker_span->height = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.height / 64.0f) : 16.0f;
+                    
+                    // Set marker position
+                    marker_span->x = lycon->line.advance_x;
+                    marker_span->y = lycon->block.advance_y;
+                    
+                    // Advance inline position by fixed marker width
+                    lycon->line.advance_x += marker_prop->width;
+                    
+                    // Update line metrics (marker contributes to line height)
+                    float ascender = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
+                    float descender = lycon->font.ft_face ? (-lycon->font.ft_face->size->metrics.descender / 64.0f) : 4.0f;
+                    if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
+                    if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
+                    
+                    log_debug("[MARKER] Laid out marker with fixed width=%.1f, height=%.1f at (%.1f, %.1f)",
+                             marker_prop->width, marker_span->height, marker_span->x, marker_span->y);
+                }
+            }
+            return;
+        }
+
         // Skip floats that were pre-laid in the float pre-pass
         if (elem->float_prelaid) {
             log_debug("skipping pre-laid float: %s", node->node_name());
