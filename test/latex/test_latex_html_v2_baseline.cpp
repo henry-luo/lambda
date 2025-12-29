@@ -6,6 +6,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -22,7 +23,7 @@ protected:
     void SetUp() override {
         // Initialize logging
         log_init(NULL);
-        
+
         // Initialize memory pool
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
@@ -68,8 +69,8 @@ protected:
 
             // Generate HTML using V2 formatter (text_mode=1 for HTML string)
             Item result_item = format_latex_html_v2_c(input, 1);  // 1 = text mode → HTML string
-            
-            ASSERT_EQ(get_type_id(result_item), LMD_TYPE_STRING) 
+
+            ASSERT_EQ(get_type_id(result_item), LMD_TYPE_STRING)
                 << "V2 formatter should return string in text mode for fixture '" << fixture.header << "'";
 
             String* html_result = (String*)result_item.string_ptr;
@@ -228,14 +229,14 @@ std::vector<LatexHtmlFixture> load_v2_baseline_fixtures() {
             if (baseline_files.find(fixture.filename) != baseline_files.end()) {
                 // Skip tests that are in the excluded list for this file
                 bool exclude = false;
-                
+
                 // Check ID-based exclusion
                 auto excluded_id_it = excluded_test_ids.find(fixture.filename);
                 if (excluded_id_it != excluded_test_ids.end() &&
                     excluded_id_it->second.find(fixture.id) != excluded_id_it->second.end()) {
                     exclude = true;
                 }
-                
+
                 if (!exclude) {
                     baseline_fixtures.push_back(fixture);
                 }

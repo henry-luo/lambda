@@ -35,18 +35,18 @@ char* execute_lambda_script(const char* script_path) {
 #else
     snprintf(command, sizeof(command), "./lambda.exe \"%s\"", script_path);
 #endif
-    
+
     FILE* pipe = popen(command, "r");
     if (!pipe) {
         fprintf(stderr, "Error: Could not execute command: %s\n", command);
         return nullptr;
     }
-    
+
     // Read output in chunks
     char buffer[1024];
     size_t total_size = 0;
     char* full_output = nullptr;
-    
+
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         size_t len = strlen(buffer);
         char* new_output = (char*)realloc(full_output, total_size + len + 1);
@@ -59,15 +59,15 @@ char* execute_lambda_script(const char* script_path) {
         strcpy(full_output + total_size, buffer);
         total_size += len;
     }
-    
+
     int exit_code = pclose(pipe);
     if (WEXITSTATUS(exit_code) != 0) {
-        fprintf(stderr, "Error: lambda.exe exited with code %d for script: %s\n", 
+        fprintf(stderr, "Error: lambda.exe exited with code %d for script: %s\n",
                 WEXITSTATUS(exit_code), script_path);
         free(full_output);
         return nullptr;
     }
-    
+
     // Extract result from "##### Script" marker
     char* marker = strstr(full_output, "##### Script");
     if (marker) {
@@ -80,7 +80,7 @@ char* execute_lambda_script(const char* script_path) {
             return result;
         }
     }
-    
+
     return full_output;
 }
 
@@ -99,21 +99,21 @@ char* read_expected_output(const char* expected_file_path) {
     if (!file) {
         return nullptr;
     }
-    
+
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    
+
     char* content = (char*)malloc(file_size + 1);
     if (!content) {
         fclose(file);
         return nullptr;
     }
-    
+
     size_t read_size = fread(content, 1, file_size, file);
     content[read_size] = '\0';
     fclose(file);
-    
+
     trim_trailing_whitespace(content);
     return content;
 }
@@ -123,28 +123,28 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     // Get script name for better error messages
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
-    
+
     // Create expected output file path if it doesn't exist
     char expected_path[512];
     strncpy(expected_path, script_path, sizeof(expected_path) - 1);
     expected_path[sizeof(expected_path) - 1] = '\0';
     char* dot = strrchr(expected_path, '.');
     if (dot) { strcpy(dot, ".txt"); }
-    
+
     char* expected_output = read_expected_output(expected_file_path);
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
-    
+
     char* actual_output = execute_lambda_script(script_path);
     ASSERT_NE(actual_output, nullptr) << "Could not execute lambda script: " << script_path;
-    
+
     // Trim whitespace from actual output
     trim_trailing_whitespace(actual_output);
-    
+
     // Compare outputs
-    ASSERT_STREQ(expected_output, actual_output) 
-        << "Output mismatch for script: " << script_path 
+    ASSERT_STREQ(expected_output, actual_output)
+        << "Output mismatch for script: " << script_path
         << " (expected " << strlen(expected_output) << " chars, got " << strlen(actual_output) << " chars)";
-    
+
     free(expected_output);
     free(actual_output);
 }
@@ -215,6 +215,9 @@ TEST(LambdaTests, test_input_csv) {
 }
 
 TEST(LambdaTests, test_input_dir) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Skipping on Windows: directory listing results differ (size, symlinks, ordering)";
+#endif
     test_lambda_script_against_file("test/lambda/input_dir.ls", "test/lambda/input_dir.txt");
 }
 

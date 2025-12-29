@@ -66,7 +66,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         Tvg_Result ret = tvg_picture_load(surface->pic, file_path);
         if (ret != TVG_RESULT_SUCCESS) {
             log_debug("failed to load SVG image: %s", file_path);
-            tvg_paint_del(surface->pic);
+            tvg_paint_rel(surface->pic);
             free(surface);
             return NULL;
         }
@@ -302,7 +302,7 @@ void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
         if (img_surface->pixels) free(img_surface->pixels);
         if (img_surface->pic) {
-            tvg_paint_del(img_surface->pic);
+            tvg_paint_rel(img_surface->pic);
         }
         free(img_surface);
     }
