@@ -89,7 +89,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
     } else {
         // GUI mode: create window
         // Force X11 backend on Linux to ensure window visibility in mixed Wayland/XWayland environments
-        #ifdef __linux__
+        #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
         #endif
         if (!glfwInit()) {

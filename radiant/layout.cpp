@@ -239,13 +239,32 @@ float calc_normal_line_height(FT_Face face) {
         line_height = rounded_ascent + rounded_descent + rounded_leading;
     } else {
         // Use HHEA metrics (FreeType default)
-        // Chrome/Skia uses the height metric directly from FreeType, not ascent+descent+leading
-        // This is because FreeType's height may not equal ascent+descent+lineGap due to font design
-        // Reference: Skia SkFontMetrics, Chrome SimpleFontData
-        float raw_height = face->size->metrics.height / 64.0f;
-        line_height = roundf(raw_height);
-        log_debug("Using HHEA height directly (USE_TYPO_METRICS=0 or no OS/2) for %s: raw_height=%.2f, rounded=%.0f", 
-                  family, raw_height, line_height);
+        // IMPORTANT: Chrome/Skia computes from face->ascender and face->descender (font units),
+        // scales them to pixel size, and rounds each component individually.
+        // This is different from using face->size->metrics which are already scaled and rounded
+        // by FreeType, losing precision that affects the final rounding.
+        // Reference: Skia SkScalerContext_FreeType::generateFontMetrics() in Chromium
+        //            Blink SimpleFontData::AscentDescentWithHacks()
+        
+        float scale = font_size / (float)face->units_per_EM;
+        // face->ascender is positive, face->descender is negative
+        float raw_ascent = (float)face->ascender * scale;
+        float raw_descent = -(float)face->descender * scale;  // make positive
+        
+        // Compute line gap (leading) from HHEA: height - ascender + descender
+        // Note: descender is negative, so height = ascender - descender + line_gap
+        int hhea_line_gap = face->height - face->ascender + face->descender;
+        float raw_leading = (float)hhea_line_gap * scale;
+        
+        // Round each component individually (Chrome's SkScalarRoundToScalar)
+        float rounded_ascent = roundf(raw_ascent);
+        float rounded_descent = roundf(raw_descent);
+        float rounded_leading = roundf(raw_leading);
+        
+        // LineSpacing = ascent + descent + leading (matches Chrome's Blink behavior)
+        line_height = rounded_ascent + rounded_descent + rounded_leading;
+        log_debug("Using HHEA metrics (USE_TYPO_METRICS=0) for %s: raw_ascent=%.4f->%.0f, raw_descent=%.4f->%.0f, raw_leading=%.4f->%.0f, line_height=%.0f", 
+                  family, raw_ascent, rounded_ascent, raw_descent, rounded_descent, raw_leading, rounded_leading, line_height);
     }
 
     log_debug("Normal line height: %.0f for %s", line_height, family);
