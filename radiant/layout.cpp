@@ -229,27 +229,26 @@ float calc_normal_line_height(FT_Face face) {
         descent = typo.descender;
         leading = typo.line_gap;
         log_debug("Using OS/2 typo metrics (USE_TYPO_METRICS=1) for %s", family);
+        
+        // Round each component individually (Chrome's SkScalarRoundToScalar)
+        float rounded_ascent = roundf(ascent);
+        float rounded_descent = roundf(descent);
+        float rounded_leading = roundf(leading);
+
+        // LineSpacing = ascent + descent + leading
+        line_height = rounded_ascent + rounded_descent + rounded_leading;
     } else {
         // Use HHEA metrics (FreeType default)
-        // This is what Skia uses when USE_TYPO_METRICS is not set
-        ascent = face->size->metrics.ascender / 64.0f;
-        descent = -face->size->metrics.descender / 64.0f;  // Make positive
-        leading = (face->size->metrics.height / 64.0f) - ascent - descent;
-        if (leading < 0) leading = 0;
-        log_debug("Using HHEA metrics (USE_TYPO_METRICS=0 or no OS/2) for %s", family);
+        // Chrome/Skia uses the height metric directly from FreeType, not ascent+descent+leading
+        // This is because FreeType's height may not equal ascent+descent+lineGap due to font design
+        // Reference: Skia SkFontMetrics, Chrome SimpleFontData
+        float raw_height = face->size->metrics.height / 64.0f;
+        line_height = roundf(raw_height);
+        log_debug("Using HHEA height directly (USE_TYPO_METRICS=0 or no OS/2) for %s: raw_height=%.2f, rounded=%.0f", 
+                  family, raw_height, line_height);
     }
 
-    // Round each component individually (Chrome's SkScalarRoundToScalar)
-    float rounded_ascent = roundf(ascent);
-    float rounded_descent = roundf(descent);
-    float rounded_leading = roundf(leading);
-
-    // LineSpacing = ascent + descent + leading
-    line_height = rounded_ascent + rounded_descent + rounded_leading;
-
-    log_debug("Normal line height (FreeType): %.2f (asc=%.2f->%.0f, desc=%.2f->%.0f, lead=%.2f->%.0f) for %s",
-              line_height, ascent, rounded_ascent, descent, rounded_descent,
-              leading, rounded_leading, family);
+    log_debug("Normal line height: %.0f for %s", line_height, family);
     return line_height;
 }
 

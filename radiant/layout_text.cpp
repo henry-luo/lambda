@@ -125,6 +125,32 @@ static inline bool is_cjk_character(uint32_t codepoint) {
 }
 
 /**
+ * Get the Unicode-specified width for special space characters.
+ * These characters have fixed widths defined by Unicode standard, which browsers
+ * enforce regardless of what the font's glyph metrics say.
+ * Returns the width as a fraction of 1em, or 0 if the character doesn't have
+ * a Unicode-specified width.
+ *
+ * Reference: Unicode Standard, Chapter 6 "Writing Systems and Punctuation"
+ */
+static inline float get_unicode_space_width_em(uint32_t codepoint) {
+    switch (codepoint) {
+        case 0x2000: return 0.5f;   // EN QUAD - width of 'n' (nominally 1/2 em)
+        case 0x2001: return 1.0f;   // EM QUAD - width of 'm' (nominally 1 em)
+        case 0x2002: return 0.5f;   // EN SPACE - 1/2 em
+        case 0x2003: return 1.0f;   // EM SPACE - 1 em
+        case 0x2004: return 1.0f/3; // THREE-PER-EM SPACE - 1/3 em
+        case 0x2005: return 0.25f;  // FOUR-PER-EM SPACE - 1/4 em
+        case 0x2006: return 1.0f/6; // SIX-PER-EM SPACE - 1/6 em
+        case 0x2009: return 1.0f/5; // THIN SPACE - ~1/5 em (or 1/6 em)
+        case 0x200A: return 1.0f/10; // HAIR SPACE - very thin (~1/10 to 1/16 em)
+        // U+2007 FIGURE SPACE and U+2008 PUNCTUATION SPACE are font-dependent
+        // so we return 0 to use the font's glyph width
+        default: return 0.0f;
+    }
+}
+
+/**
  * Check if whitespace should be collapsed according to white-space property.
  * Returns true for: normal, nowrap, pre-line
  * Returns false for: pre, pre-wrap, break-spaces
@@ -491,15 +517,22 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
         is_word_start = false;  // Only first char is word start in this context
 
-        // Use sub-pixel rendering flags for better quality
-        FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-        if (FT_Load_Char(lycon->font.ft_face, codepoint, load_flags)) {
-            fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
-            return RDT_LINE_NOT_FILLED;
+        // Check for Unicode space characters with defined widths
+        float unicode_space_em = get_unicode_space_width_em(codepoint);
+        if (unicode_space_em > 0.0f) {
+            // Use Unicode-specified width (fraction of em)
+            text_width += unicode_space_em * lycon->font.current_font_size;
+        } else {
+            // Use sub-pixel rendering flags for better quality
+            FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
+            if (FT_Load_Char(lycon->font.ft_face, codepoint, load_flags)) {
+                fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
+                return RDT_LINE_NOT_FILLED;
+            }
+            FT_GlyphSlot slot = lycon->font.ft_face->glyph;
+            // Use precise float calculation for advance
+            text_width += (float)(slot->advance.x) / 64.0f;
         }
-        FT_GlyphSlot slot = lycon->font.ft_face->glyph;
-        // Use precise float calculation for advance
-        text_width += (float)(slot->advance.x) / 64.0f;
         // Apply letter-spacing (but not after the last character)
         str++;
         if (*str) {  // Not the last character
@@ -793,8 +826,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
             is_word_start = false;  // No longer at word start
 
-            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
-            wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
+            // Check for Unicode space characters with defined widths
+            float unicode_space_em = get_unicode_space_width_em(codepoint);
+            if (unicode_space_em > 0.0f) {
+                // Use Unicode-specified width (fraction of em)
+                wd = unicode_space_em * lycon->font.current_font_size;
+            } else {
+                FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
+                wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
+            }
             // Apply letter-spacing (add to character width)
             // Note: letter-spacing is NOT applied after the last character (CSS spec)
             // We'll check if next character exists before adding letter-spacing
