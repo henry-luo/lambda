@@ -1,7 +1,3 @@
-ifeq ($(OS),Windows_NT)
-$(error Windows is not supported)
-endif
-
 VERSION := 0.25.0
 DESCRIPTION := An incremental parsing system for programming tools
 HOMEPAGE_URL := https://tree-sitter.github.io/tree-sitter/
