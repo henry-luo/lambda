@@ -817,22 +817,22 @@
                 {
                     "name": "mbedtls",
                     "description": "mbedTLS - SSL/TLS library",
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmbedtls.a",
                     "link": "static"
                 },
                 {
                     "name": "mbedx509",
                     "description": "mbedTLS - X.509 certificate parsing",
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmbedx509.a",
                     "link": "static"
                 },
                 {
                     "name": "mbedcrypto",
                     "description": "mbedTLS - Cryptographic primitives",
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmbedcrypto.a",
                     "link": "static"
                 },
                 {
