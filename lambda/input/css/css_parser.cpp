@@ -519,6 +519,23 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             break;
         }
 
+        case CSS_TOKEN_CUSTOM_PROPERTY: {
+            // Custom property token (e.g., --my-var)
+            value->type = CSS_VALUE_TYPE_CUSTOM;
+            const char* token_val = token->value;
+            if (!token_val && token->start && token->length > 0) {
+                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                if (buf) {
+                    memcpy(buf, token->start, token->length);
+                    buf[token->length] = '\0';
+                    token_val = buf;
+                }
+            }
+            value->data.custom_property.name = token_val ? pool_strdup(pool, token_val) : "";
+            value->data.custom_property.fallback = NULL;
+            break;
+        }
+
         default:
             // Unknown token type - treat as custom value
             value->type = CSS_VALUE_TYPE_CUSTOM;
@@ -1450,9 +1467,9 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
     if (*pos >= token_count) return NULL;
 
-    // Expect property name (identifier)
-    if (tokens[*pos].type != CSS_TOKEN_IDENT) {
-        log_debug("[CSS Parser] Expected IDENT for property, got token type %d", tokens[*pos].type);
+    // Expect property name (identifier or custom property)
+    if (tokens[*pos].type != CSS_TOKEN_IDENT && tokens[*pos].type != CSS_TOKEN_CUSTOM_PROPERTY) {
+        log_debug("[CSS Parser] Expected IDENT or CUSTOM_PROPERTY for property, got token type %d", tokens[*pos].type);
         // Skip to next semicolon or right brace to avoid infinite loop
         while (*pos < token_count &&
                tokens[*pos].type != CSS_TOKEN_SEMICOLON &&
