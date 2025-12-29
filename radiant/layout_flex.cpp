@@ -3331,12 +3331,22 @@ float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
 float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
 
+    // defensive check: if base_size is NaN, use 0
+    if (std::isnan(base_size)) {
+        log_warn("NaN detected in base_size for item, using 0");
+        base_size = 0.0f;
+    }
+
     // Include margins in main axis size for positioning calculations
     if (item->bound) {
         if (is_main_axis_horizontal(flex_layout)) {
-            base_size += item->bound->margin.left + item->bound->margin.right;
+            float margin_left = std::isnan(item->bound->margin.left) ? 0.0f : item->bound->margin.left;
+            float margin_right = std::isnan(item->bound->margin.right) ? 0.0f : item->bound->margin.right;
+            base_size += margin_left + margin_right;
         } else {
-            base_size += item->bound->margin.top + item->bound->margin.bottom;
+            float margin_top = std::isnan(item->bound->margin.top) ? 0.0f : item->bound->margin.top;
+            float margin_bottom = std::isnan(item->bound->margin.bottom) ? 0.0f : item->bound->margin.bottom;
+            base_size += margin_top + margin_bottom;
         }
     }
 
