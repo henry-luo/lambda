@@ -261,7 +261,7 @@ project "lambda-input-full-cpp"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libmbedtls.a",
         "/mingw64/lib/libmbedx509.a",
         "/mingw64/lib/libmbedcrypto.a",
@@ -559,9 +559,9 @@ project "lambda"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -573,43 +573,44 @@ project "lambda"
     }
     
     linkoptions {
-        "/mingw64/lib/libcurl.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
         "../../lambda/tree-sitter-latex/libtree-sitter-latex.a",
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
+        "../../win-native-deps/lib/librpmalloc.a",
         "/mingw64/lib/libmbedtls.a",
         "/mingw64/lib/libmbedx509.a",
         "/mingw64/lib/libmbedcrypto.a",
-        "/mingw64/lib/libz.a",
-        "/mingw64/lib/libbz2.a",
+        "/mingw64/lib/libmpdec.a",
+        "/mingw64/lib/libmingwex.a",
+        "/mingw64/lib/binmode.o",
         "/mingw64/lib/libfreetype.a",
         "../../win-native-deps/lib/libthorvg.a",
         "/mingw64/lib/libglfw3.a",
         "/mingw64/lib/libpng.a",
         "/mingw64/lib/libturbojpeg.a",
         "/mingw64/lib/libgif.a",
-        "../../win-native-deps/lib/librpmalloc.a",
-        "/mingw64/lib/libmingwex.a",
-        "/mingw64/lib/binmode.o",
         "/mingw64/lib/libgomp.a",
+        "/mingw64/lib/libharfbuzz.a",
+        "/mingw64/lib/libgraphite2.a",
+        "/mingw64/lib/libwebp.a",
         "/mingw64/lib/libbrotlidec.a",
         "/mingw64/lib/libbrotlicommon.a",
+        "/mingw64/lib/libz.a",
+        "/mingw64/lib/libbz2.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Dynamic libraries
     filter "platforms:native"
         links {
             "mingw32",
-            "gcc",
-            "gcc_s",
             "msvcrt",
             "kernel32",
             "user32",
@@ -627,6 +628,7 @@ project "lambda"
             "secur32",
             "moldname",
             "opengl32",
+            "dwrite",
             "rpcrt4",
         }
     
@@ -691,9 +693,9 @@ project "test_strbuf_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -755,9 +757,9 @@ project "test_stringbuf_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -821,9 +823,9 @@ project "test_strview_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -885,9 +887,9 @@ project "test_num_stack_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -949,9 +951,9 @@ project "test_datetime_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1019,9 +1021,9 @@ project "test_font_config_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1085,9 +1087,9 @@ project "test_url_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1149,9 +1151,9 @@ project "test_url_extra_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1213,9 +1215,9 @@ project "test_cmdedit_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1284,9 +1286,9 @@ project "test_mempool_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1351,9 +1353,9 @@ project "test_avl_tree"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1416,9 +1418,9 @@ project "test_arena_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1461,14 +1463,12 @@ project "test_arena_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -1486,6 +1486,7 @@ project "test_arena_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -1543,9 +1544,9 @@ project "test_pdf_writer_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1611,9 +1612,9 @@ project "test_avl_tree_perf"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1676,9 +1677,9 @@ project "test_mime_detect_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1719,14 +1720,12 @@ project "test_mime_detect_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -1744,6 +1743,7 @@ project "test_mime_detect_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -1801,9 +1801,9 @@ project "test_mark_builder_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1846,14 +1846,12 @@ project "test_mark_builder_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -1871,6 +1869,7 @@ project "test_mark_builder_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -1928,9 +1927,9 @@ project "test_mark_builder_deepcopy_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -1973,14 +1972,12 @@ project "test_mark_builder_deepcopy_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -1998,6 +1995,7 @@ project "test_mark_builder_deepcopy_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2055,9 +2053,9 @@ project "test_mark_editor_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2100,14 +2098,12 @@ project "test_mark_editor_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -2125,6 +2121,7 @@ project "test_mark_editor_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2182,9 +2179,9 @@ project "test_name_pool_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2227,14 +2224,12 @@ project "test_name_pool_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -2252,6 +2247,7 @@ project "test_name_pool_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2309,9 +2305,9 @@ project "test_mark_reader_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2354,14 +2350,12 @@ project "test_mark_reader_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -2379,6 +2373,7 @@ project "test_mark_reader_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2436,9 +2431,9 @@ project "test_error_tracking"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2481,14 +2476,12 @@ project "test_error_tracking"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -2506,6 +2499,7 @@ project "test_error_tracking"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2563,9 +2557,9 @@ project "test_math_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2608,14 +2602,12 @@ project "test_math_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -2633,6 +2625,7 @@ project "test_math_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2690,9 +2683,9 @@ project "test_math_ascii_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2735,14 +2728,12 @@ project "test_math_ascii_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -2760,6 +2751,7 @@ project "test_math_ascii_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2817,9 +2809,9 @@ project "test_markup_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2862,14 +2854,12 @@ project "test_markup_roundtrip_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -2887,6 +2877,7 @@ project "test_markup_roundtrip_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -2944,9 +2935,9 @@ project "test_entity_emoji_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -2989,14 +2980,12 @@ project "test_entity_emoji_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3014,6 +3003,7 @@ project "test_entity_emoji_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3071,9 +3061,9 @@ project "test_input_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -3116,14 +3106,12 @@ project "test_input_roundtrip_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3141,6 +3129,7 @@ project "test_input_roundtrip_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3198,9 +3187,9 @@ project "test_wpt_html_parser_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -3243,14 +3232,12 @@ project "test_wpt_html_parser_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3268,6 +3255,7 @@ project "test_wpt_html_parser_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3325,9 +3313,9 @@ project "test_latex_ts_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -3371,14 +3359,12 @@ project "test_latex_ts_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3396,6 +3382,7 @@ project "test_latex_ts_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3453,9 +3440,9 @@ project "test_html_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -3498,14 +3485,12 @@ project "test_html_roundtrip_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3523,6 +3508,7 @@ project "test_html_roundtrip_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3580,9 +3566,9 @@ project "test_html_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -3625,14 +3611,12 @@ project "test_html_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3650,6 +3634,7 @@ project "test_html_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3707,9 +3692,9 @@ project "test_html_negative_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -3752,14 +3737,12 @@ project "test_html_negative_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3777,6 +3760,7 @@ project "test_html_negative_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3840,9 +3824,9 @@ project "test_lambda_domnode_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -3885,14 +3869,12 @@ project "test_lambda_domnode_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -3910,6 +3892,7 @@ project "test_lambda_domnode_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -3967,9 +3950,9 @@ project "test_dir_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4010,14 +3993,12 @@ project "test_dir_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4035,6 +4016,7 @@ project "test_dir_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4092,9 +4074,9 @@ project "test_graph_parser_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4137,14 +4119,12 @@ project "test_graph_parser_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4162,6 +4142,7 @@ project "test_graph_parser_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4219,9 +4200,9 @@ project "test_validator_input_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4264,14 +4245,12 @@ project "test_validator_input_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4289,6 +4268,7 @@ project "test_validator_input_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4346,9 +4326,9 @@ project "test_validator_features_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4391,14 +4371,12 @@ project "test_validator_features_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4416,6 +4394,7 @@ project "test_validator_features_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4473,9 +4452,9 @@ project "test_null_vs_missing_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4518,14 +4497,12 @@ project "test_null_vs_missing_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4543,6 +4520,7 @@ project "test_null_vs_missing_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4600,9 +4578,9 @@ project "test_enhanced_errors"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4645,14 +4623,12 @@ project "test_enhanced_errors"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4670,6 +4646,7 @@ project "test_enhanced_errors"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4727,9 +4704,9 @@ project "test_validation_options"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4772,14 +4749,12 @@ project "test_validation_options"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4797,6 +4772,7 @@ project "test_validation_options"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4854,9 +4830,9 @@ project "test_format_validation"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -4899,14 +4875,12 @@ project "test_format_validation"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -4924,6 +4898,7 @@ project "test_format_validation"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -4981,9 +4956,9 @@ project "test_validator_integration"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5026,14 +5001,12 @@ project "test_validator_integration"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -5051,6 +5024,7 @@ project "test_validator_integration"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -5108,9 +5082,9 @@ project "test_type_references_simple"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5153,14 +5127,12 @@ project "test_type_references_simple"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -5178,6 +5150,7 @@ project "test_type_references_simple"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -5235,9 +5208,9 @@ project "test_graph_formatter_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5280,14 +5253,12 @@ project "test_graph_formatter_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -5305,6 +5276,7 @@ project "test_graph_formatter_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -5362,9 +5334,9 @@ project "test_sysinfo_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5407,14 +5379,12 @@ project "test_sysinfo_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -5432,6 +5402,7 @@ project "test_sysinfo_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -5489,9 +5460,9 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5534,14 +5505,12 @@ project "test_jsx_roundtrip_new_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -5559,6 +5528,7 @@ project "test_jsx_roundtrip_new_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -5616,9 +5586,9 @@ project "test_mdx_roundtrip_new_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5659,14 +5629,12 @@ project "test_mdx_roundtrip_new_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -5684,6 +5652,7 @@ project "test_mdx_roundtrip_new_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -5750,9 +5719,9 @@ project "test_css_style_node"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5825,9 +5794,9 @@ project "test_css_system"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5902,9 +5871,9 @@ project "test_css_dom_integration"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -5947,14 +5916,12 @@ project "test_css_dom_integration"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -5972,6 +5939,7 @@ project "test_css_dom_integration"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6041,9 +6009,9 @@ project "test_css_dom_crud"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6086,14 +6054,12 @@ project "test_css_dom_crud"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -6111,6 +6077,7 @@ project "test_css_dom_crud"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6180,9 +6147,9 @@ project "test_css_style_application_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6225,14 +6192,12 @@ project "test_css_style_application_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -6250,6 +6215,7 @@ project "test_css_style_application_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6312,9 +6278,9 @@ project "test_html_css_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6357,14 +6323,12 @@ project "test_html_css_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -6382,6 +6346,7 @@ project "test_html_css_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6439,9 +6404,9 @@ project "test_css_tokenizer_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6484,14 +6449,12 @@ project "test_css_tokenizer_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -6509,6 +6472,7 @@ project "test_css_tokenizer_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6566,9 +6530,9 @@ project "test_css_tokenizer_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6611,14 +6575,12 @@ project "test_css_tokenizer_unit"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -6636,6 +6598,7 @@ project "test_css_tokenizer_unit"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6693,9 +6656,9 @@ project "test_css_parser_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6738,14 +6701,12 @@ project "test_css_parser_unit"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -6763,6 +6724,7 @@ project "test_css_parser_unit"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6820,9 +6782,9 @@ project "test_css_engine_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6865,14 +6827,12 @@ project "test_css_engine_unit"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -6890,6 +6850,7 @@ project "test_css_engine_unit"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -6947,9 +6908,9 @@ project "test_css_engine_negative"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -6992,14 +6953,12 @@ project "test_css_engine_negative"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7017,6 +6976,7 @@ project "test_css_engine_negative"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7074,9 +7034,9 @@ project "test_css_formatter_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -7119,14 +7079,12 @@ project "test_css_formatter_unit"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7144,6 +7102,7 @@ project "test_css_formatter_unit"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7201,9 +7160,9 @@ project "test_css_roundtrip_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -7246,14 +7205,12 @@ project "test_css_roundtrip_unit"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7271,6 +7228,7 @@ project "test_css_roundtrip_unit"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7328,9 +7286,9 @@ project "test_compound_descendant_selectors"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -7373,14 +7331,12 @@ project "test_compound_descendant_selectors"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7398,6 +7354,7 @@ project "test_compound_descendant_selectors"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7455,9 +7412,9 @@ project "test_selector_groups"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -7500,14 +7457,12 @@ project "test_selector_groups"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7525,6 +7480,7 @@ project "test_selector_groups"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7582,9 +7538,9 @@ project "test_css_parser_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -7627,14 +7583,12 @@ project "test_css_parser_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7652,6 +7606,7 @@ project "test_css_parser_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7709,9 +7664,9 @@ project "test_css_integration_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -7754,14 +7709,12 @@ project "test_css_integration_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7779,6 +7732,7 @@ project "test_css_integration_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7836,9 +7790,9 @@ project "test_css_files_safe_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -7881,14 +7835,12 @@ project "test_css_files_safe_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -7906,6 +7858,7 @@ project "test_css_files_safe_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -7963,9 +7916,9 @@ project "test_css_frameworks_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8008,14 +7961,12 @@ project "test_css_frameworks_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8033,6 +7984,7 @@ project "test_css_frameworks_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -8090,9 +8042,9 @@ project "test_css_to_mark_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8135,14 +8087,12 @@ project "test_css_to_mark_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8160,6 +8110,7 @@ project "test_css_to_mark_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -8217,9 +8168,9 @@ project "test_mdx_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8260,14 +8211,12 @@ project "test_mdx_roundtrip_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8285,6 +8234,7 @@ project "test_mdx_roundtrip_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -8342,9 +8292,9 @@ project "test_jsx_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8385,14 +8335,12 @@ project "test_jsx_roundtrip_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8410,6 +8358,7 @@ project "test_jsx_roundtrip_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -8467,9 +8416,9 @@ project "test_latex_parser_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8510,14 +8459,12 @@ project "test_latex_parser_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8535,6 +8482,7 @@ project "test_latex_parser_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -8592,9 +8540,9 @@ project "test_latex_treesitter"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8635,14 +8583,12 @@ project "test_latex_treesitter"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8660,6 +8606,7 @@ project "test_latex_treesitter"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -8718,9 +8665,9 @@ project "test_html_encoder_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8783,9 +8730,9 @@ project "test_latex_html_v2_baseline"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8828,14 +8775,12 @@ project "test_latex_html_v2_baseline"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8853,6 +8798,7 @@ project "test_latex_html_v2_baseline"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -8912,9 +8858,9 @@ project "test_latex_html_v2_lists_envs"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -8955,14 +8901,12 @@ project "test_latex_html_v2_lists_envs"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -8980,6 +8924,7 @@ project "test_latex_html_v2_lists_envs"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9037,9 +8982,9 @@ project "test_latex_html_v2_tables"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9080,14 +9025,12 @@ project "test_latex_html_v2_tables"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9105,6 +9048,7 @@ project "test_latex_html_v2_tables"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9162,9 +9106,9 @@ project "test_latex_html_v2_floats"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9205,14 +9149,12 @@ project "test_latex_html_v2_floats"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9230,6 +9172,7 @@ project "test_latex_html_v2_floats"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9287,9 +9230,9 @@ project "test_latex_html_v2_special_chars"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9330,14 +9273,12 @@ project "test_latex_html_v2_special_chars"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9355,6 +9296,7 @@ project "test_latex_html_v2_special_chars"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9412,9 +9354,9 @@ project "test_latex_html_v2_bibliography"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9455,14 +9397,12 @@ project "test_latex_html_v2_bibliography"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9480,6 +9420,7 @@ project "test_latex_html_v2_bibliography"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9537,9 +9478,9 @@ project "test_latex_html_v2_graphics_color"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9580,14 +9521,12 @@ project "test_latex_html_v2_graphics_color"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9605,6 +9544,7 @@ project "test_latex_html_v2_graphics_color"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9662,9 +9602,9 @@ project "test_latex_html_v2_macros"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9705,14 +9645,12 @@ project "test_latex_html_v2_macros"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9730,6 +9668,7 @@ project "test_latex_html_v2_macros"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9787,9 +9726,9 @@ project "test_latex_html_v2_new_commands"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9830,14 +9769,12 @@ project "test_latex_html_v2_new_commands"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9855,6 +9792,7 @@ project "test_latex_html_v2_new_commands"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -9912,9 +9850,9 @@ project "test_validator_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -9955,14 +9893,12 @@ project "test_validator_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -9980,6 +9916,7 @@ project "test_validator_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -10037,9 +9974,9 @@ project "test_ast_validator_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10082,14 +10019,12 @@ project "test_ast_validator_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -10107,6 +10042,7 @@ project "test_ast_validator_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -10164,9 +10100,9 @@ project "test_validator_path_reporting"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10209,14 +10145,12 @@ project "test_validator_path_reporting"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -10234,6 +10168,7 @@ project "test_validator_path_reporting"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -10291,9 +10226,9 @@ project "test_lambda_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10354,9 +10289,9 @@ project "test_lambda_repl_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10417,9 +10352,9 @@ project "test_lambda_proc_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10480,9 +10415,9 @@ project "test_js_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10543,9 +10478,9 @@ project "test_mir_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10606,9 +10541,9 @@ project "test_http_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }
@@ -10649,14 +10584,12 @@ project "test_http_gtest"
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/lib/libmir.a",
-        "/mingw64/lib/libcurl.a",
+        "../../win-native-deps/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
         "mingw32",
-        "gcc",
-        "gcc_s",
         "msvcrt",
         "kernel32",
         "user32",
@@ -10674,6 +10607,7 @@ project "test_http_gtest"
         "secur32",
         "moldname",
         "opengl32",
+        "dwrite",
         "rpcrt4",
     }
     
@@ -10731,9 +10665,9 @@ project "test_lambda_proc_extended_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/mem-pool/include",
-        "/mingw64/include",
-        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "win-native-deps/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/mingw64/include",
         "/mingw64/include/freetype2",
         "win-native-deps/include/rpmalloc",
     }

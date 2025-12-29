@@ -882,7 +882,8 @@ build_thorvg() {
         mkdir -p "$DEPS_DIR/src"
         cd "$DEPS_DIR/src"
         echo "Cloning ThorVG repository..."
-        if ! git clone --depth 1 --branch v0.15.16 https://github.com/thorvg/thorvg.git; then
+        # Use v1.0-pre11 to match Mac version for API compatibility
+        if ! git clone --depth 1 --branch v1.0-pre11 https://github.com/thorvg/thorvg.git; then
             echo "Warning: Could not clone ThorVG repository"
             cd - > /dev/null
             return 1
