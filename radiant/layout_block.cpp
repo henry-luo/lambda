@@ -2184,42 +2184,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 const CssEnumInfo* info = css_enum_info(marker_style);
                 log_debug("    [List] Generating marker with style: %s (0x%04X)", info ? info->name : "unknown", marker_style);
 
-                // Format the counter value using list-style-type
-                char marker_text[64];
-                int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
+                // Determine if this is a bullet marker (disc, circle, square) or text marker (decimal, roman, alpha)
+                bool is_bullet_marker = (marker_style == CSS_VALUE_DISC ||
+                                        marker_style == CSS_VALUE_CIRCLE ||
+                                        marker_style == CSS_VALUE_SQUARE);
 
-                if (marker_len > 0 && !is_outside_position) {
-                    // Only create ::marker pseudo-element for 'inside' positioned markers
-                    // Add suffix for non-bullet markers (decimal, alpha, roman get periods)
-                    bool needs_period = (marker_style == CSS_VALUE_DECIMAL ||
-                                       marker_style == CSS_VALUE_LOWER_ALPHA || marker_style == CSS_VALUE_UPPER_ALPHA ||
-                                       marker_style == CSS_VALUE_LOWER_ROMAN || marker_style == CSS_VALUE_UPPER_ROMAN);
-
-                    if (needs_period && marker_len + 2 < (int)sizeof(marker_text)) {
-                        marker_text[marker_len] = '.';
-                        marker_text[marker_len + 1] = ' ';
-                        marker_text[marker_len + 2] = '\0';
-                        marker_len += 2;
-                    } else if (marker_len + 10 < (int)sizeof(marker_text)) {
-                        // For disc/circle/square, add spacing after bullet
-                        // Browsers typically render markers with ~1em total width
-                        // Using regular space + non-breaking spaces (0xC2 0xA0 in UTF-8) to prevent collapse
-                        marker_text[marker_len] = ' ';      // Regular space
-                        marker_len += 1;
-
-                        for (int sp = 0; sp < 3 && marker_len + 2 < (int)sizeof(marker_text); sp++) {
-                            marker_text[marker_len] = 0xC2;     // Non-breaking space (UTF-8)
-                            marker_text[marker_len + 1] = 0xA0;
-                            marker_len += 2;
-                        }
-                        marker_text[marker_len] = '\0';
-                    }
-
-                    log_debug("    [List] Created 'inside' marker: '%s' (length=%d)", marker_text, marker_len);
-
+                if (!is_outside_position) {
                     // Create ::marker pseudo-element for 'inside' positioned markers
-                    // (using ::before infrastructure to add inline content)
-                    // Cast block to DomElement to access DOM fields
                     DomElement* parent_elem = (DomElement*)elmt;
 
                     if (!block->pseudo) {
@@ -2228,34 +2199,60 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
 
                     if (!block->pseudo->before_generated) {
-                        // Create DomElement for ::marker (as ::before)
+                        // Create ViewMarker element for the ::marker pseudo-element
+                        // Use fixed width of ~1.4em (22px at 16px font) to match browser behavior
+                        // Note: y_ppem is already in pixels, not 26.6 fixed point
+                        float font_size = lycon->font.ft_face ? (float)lycon->font.ft_face->size->metrics.y_ppem : 16.0f;
+                        float fixed_marker_width = font_size * 1.375f;  // ~22px at 16px font
+                        float bullet_size = font_size * 0.35f;  // ~5-6px at 16px font
+
+                        // Create DomElement for ::marker (using ViewMarker structure)
                         DomElement* marker_elem = dom_element_create(parent_elem->doc, "::marker", nullptr);
                         if (marker_elem) {
                             marker_elem->parent = parent_elem;
 
-                            // Create Lambda String for marker text
-                            String* text_string = (String*)arena_alloc(parent_elem->doc->arena,
-                                                                        sizeof(String) + marker_len + 1);
-                            if (text_string) {
-                                text_string->ref_cnt = 1;
-                                text_string->len = marker_len;
-                                memcpy(text_string->chars, marker_text, marker_len);
-                                text_string->chars[marker_len] = '\0';
+                            // Allocate and set MarkerProp
+                            MarkerProp* marker_prop = (MarkerProp*)alloc_prop(lycon, sizeof(MarkerProp));
+                            memset(marker_prop, 0, sizeof(MarkerProp));
+                            marker_prop->marker_type = marker_style;
+                            marker_prop->width = fixed_marker_width;
+                            marker_prop->bullet_size = bullet_size;
 
-                                // Create text node with Lambda String
-                                DomText* text_node = dom_text_create(text_string, marker_elem);
-                                if (text_node) {
-                                    marker_elem->first_child = text_node;
-                                    log_debug("    [List] Created ::marker text content: \"%s\"", marker_text);
+                            // For text markers (decimal, roman, alpha), format the counter text
+                            if (!is_bullet_marker) {
+                                char marker_text[64];
+                                int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
+                                if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
+                                    marker_text[marker_len] = '.';
+                                    marker_text[marker_len + 1] = ' ';
+                                    marker_text[marker_len + 2] = '\0';
+                                    marker_len += 2;
+
+                                    // Copy text to arena
+                                    char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, marker_len + 1);
+                                    if (text_copy) {
+                                        memcpy(text_copy, marker_text, marker_len + 1);
+                                        marker_prop->text_content = text_copy;
+                                    }
                                 }
                             }
 
+                            // Store marker_prop in the element (use embed as a generic storage or cast)
+                            // We'll use the view_type to identify it's a marker during rendering
+                            marker_elem->view_type = RDT_VIEW_MARKER;
+
+                            // Store marker properties - use blk field to store marker prop pointer
+                            // (reusing the blk pointer since markers don't need BlockProp)
+                            marker_elem->blk = (BlockProp*)marker_prop;
+
+                            log_debug("    [List] Created ::marker with fixed width=%.1f, bullet_size=%.1f, type=%s",
+                                     fixed_marker_width, bullet_size, is_bullet_marker ? "bullet" : "text");
+
                             block->pseudo->before = marker_elem;
                             block->pseudo->before_generated = true;
-                            log_debug("    [List] Created ::marker pseudo-element");
                         }
                     }
-                } else if (marker_len > 0 && is_outside_position) {
+                } else {
                     // Outside markers are not added to DOM tree
                     // They should be rendered directly in the margin area during paint
                     log_debug("    [List] Skipping 'outside' marker creation (should render in margin area)");
