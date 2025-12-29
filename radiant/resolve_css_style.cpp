@@ -80,6 +80,53 @@ static float get_font_x_height_ratio(FT_Face face) {
     return 0.5f;
 }
 
+// Helper: resolve var() function to get the actual CSS value
+// Returns the resolved value, or the original value if not a var() function
+// Recursively resolves nested var() calls
+const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION) {
+        return value;  // Not a function, return as-is
+    }
+    
+    const CssFunction* func = value->data.function;
+    if (!func || !func->name || strcmp(func->name, "var") != 0) {
+        return value;  // Not a var() function, return as-is
+    }
+    
+    // Extract variable name
+    const char* var_name = nullptr;
+    if (func->args && func->arg_count >= 1 && func->args[0]) {
+        CssValue* first_arg = func->args[0];
+        if (first_arg->type == CSS_VALUE_TYPE_CUSTOM && first_arg->data.custom_property.name) {
+            var_name = first_arg->data.custom_property.name;
+        } else if (first_arg->type == CSS_VALUE_TYPE_STRING && first_arg->data.string) {
+            var_name = first_arg->data.string;
+        }
+    }
+    
+    if (!var_name) {
+        // No variable name found, try fallback
+        if (func->arg_count >= 2 && func->args[1]) {
+            return resolve_var_function(lycon, func->args[1]);
+        }
+        return nullptr;  // No value found
+    }
+    
+    // Look up the variable
+    const CssValue* var_value = lookup_css_variable(lycon, var_name);
+    if (var_value) {
+        // Recursively resolve in case the variable value is also a var()
+        return resolve_var_function(lycon, var_value);
+    }
+    
+    // Variable not found, try fallback
+    if (func->arg_count >= 2 && func->args[1]) {
+        return resolve_var_function(lycon, func->args[1]);
+    }
+    
+    return nullptr;  // No value found
+}
+
 // Helper: extract a numeric value from a CssValue (number, percentage, length)
 // For colors, percentages are relative to 255 (for RGB) or 1.0 (for alpha)
 static double resolve_color_component(const CssValue* v, bool is_alpha = false) {
@@ -97,7 +144,7 @@ static double resolve_color_component(const CssValue* v, bool is_alpha = false) 
     }
 }
 
-Color resolve_color_value(const CssValue* value) {
+Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
     Color result;
     result.r = 0;
     result.g = 0;
@@ -105,6 +152,11 @@ Color resolve_color_value(const CssValue* value) {
     result.a = 255; // default black, opaque
 
     if (!value) return result;
+    
+    // Resolve var() if present
+    value = resolve_var_function(lycon, value);
+    if (!value) return result;
+    
     switch (value->type) {
     case CSS_VALUE_TYPE_COLOR: {
         // Access color data from CssValue anonymous struct
@@ -847,6 +899,18 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
     if (decl && decl->value) {
         // resolve font size from declaration
         const CssValue* value = decl->value;
+        
+        // Resolve var() if present
+        value = resolve_var_function(lycon, value);
+        if (!value) {
+            // var() couldn't be resolved, use fallback
+            if (lycon->font.style && lycon->font.style->font_size > 0) {
+                lycon->font.current_font_size = lycon->font.style->font_size;
+            } else {
+                lycon->font.current_font_size = 16.0f;
+            }
+            return;
+        }
 
         if (value->type == CSS_VALUE_TYPE_LENGTH) {
             // Direct length value
@@ -1172,15 +1236,65 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = NAN;
         } else if (strcmp(func->name, "var") == 0) {
             // var(--custom-property-name) or var(--custom-property-name, fallback)
-            // TODO: Implement proper var() resolution
-            log_debug("var() called but not yet implemented, using 0");
-            result = 0.0f;
+            const char* var_name = nullptr;
+            
+            // Safety checks for arguments
+            if (func->args && func->arg_count >= 1 && func->args[0]) {
+                CssValue* first_arg = func->args[0];
+                
+                // Extract variable name based on argument type
+                if (first_arg->type == CSS_VALUE_TYPE_CUSTOM && first_arg->data.custom_property.name) {
+                    var_name = first_arg->data.custom_property.name;
+                } else if (first_arg->type == CSS_VALUE_TYPE_STRING && first_arg->data.string) {
+                    var_name = first_arg->data.string;
+                }
+            }
+            
+            if (var_name) {
+                // Look up the variable value
+                const CssValue* var_value = lookup_css_variable(lycon, var_name);
+                if (var_value) {
+                    // Recursively resolve the variable value
+                    result = resolve_length_value(lycon, property, var_value);
+                } else {
+                    // Variable not found, use fallback if available
+                    if (func->arg_count >= 2 && func->args[1]) {
+                        result = resolve_length_value(lycon, property, func->args[1]);
+                    } else {
+                        result = 0.0f;
+                    }
+                }
+            } else {
+                result = 0.0f;
+            }
         } else {
             log_warn("unknown CSS function: %s(), using 0 instead of NaN", func->name);
             result = 0.0f;  // Use 0 instead of NAN to prevent crash
         }
         break;
     }
+    case CSS_VALUE_TYPE_LIST:
+        // List of values - typically used in shorthand properties or multi-value contexts
+        // For length values, just take the first value if available
+        if (value->data.list.count > 0 && value->data.list.values[0]) {
+            result = resolve_length_value(lycon, property, value->data.list.values[0]);
+        } else {
+            log_debug("empty list for length value, returning 0");
+            result = 0.0f;
+        }
+        break;
+    case CSS_VALUE_TYPE_CUSTOM:
+        // Custom property value (e.g., --main-color: red;)
+        // This should not be resolved directly - it should be stored and retrieved via var()
+        log_debug("custom property value type encountered, returning 0");
+        result = 0.0f;
+        break;
+    case CSS_VALUE_TYPE_VAR:
+        // var() reference that wasn't handled in function case
+        // This might be a standalone var reference without being wrapped in a function
+        log_debug("var reference encountered outside function context, returning 0");
+        result = 0.0f;
+        break;
     default:
         log_warn("unknown length value type: %d", value->type);
         result = NAN;  // Use NAN instead of 0 to indicate unresolvable value
@@ -2049,7 +2163,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->in_line) {
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
-            span->in_line->color = resolve_color_value(value);
+            span->in_line->color = resolve_color_value(lycon, value);
             break;
         }
 
@@ -2770,7 +2884,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->background) {
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
-            span->bound->background->color = resolve_color_value(value);
+            span->bound->background->color = resolve_color_value(lycon, value);
             break;
         }
 
@@ -3194,7 +3308,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->top_color_specificity) {
-                span->bound->border->top_color = resolve_color_value(value);
+                span->bound->border->top_color = resolve_color_value(lycon, value);
                 span->bound->border->top_color_specificity = specificity;
             }
             break;
@@ -3208,7 +3322,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->right_color_specificity) {
-                span->bound->border->right_color = resolve_color_value(value);
+                span->bound->border->right_color = resolve_color_value(lycon, value);
                 span->bound->border->right_color_specificity = specificity;
             }
             break;
@@ -3222,7 +3336,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->bottom_color_specificity) {
-                span->bound->border->bottom_color = resolve_color_value(value);
+                span->bound->border->bottom_color = resolve_color_value(lycon, value);
                 span->bound->border->bottom_color_specificity = specificity;
             }
             break;
@@ -3236,7 +3350,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->left_color_specificity) {
-                span->bound->border->left_color = resolve_color_value(value);
+                span->bound->border->left_color = resolve_color_value(lycon, value);
                 span->bound->border->left_color_specificity = specificity;
             }
             break;
@@ -3325,7 +3439,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     else if (val->type == CSS_VALUE_TYPE_COLOR) {
                         // Color
                         log_debug("[CSS] Border color value type: %d", val->data.color.type);
-                        border_color = resolve_color_value(val);
+                        border_color = resolve_color_value(lycon, val);
                     }
                     else {
                         log_debug("[CSS] Unrecognized border shorthand value type: %d", val->type);
@@ -3355,7 +3469,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         border_color = color_name_to_rgb(keyword);
                     }
                 } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                    border_color = resolve_color_value(value);
+                    border_color = resolve_color_value(lycon, value);
                 }
             }
 
@@ -3430,7 +3544,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->width.top_specificity = specificity;
             }
             if (border.color) {
-                span->bound->border->top_color = resolve_color_value(border.color);
+                span->bound->border->top_color = resolve_color_value(lycon, border.color);
                 span->bound->border->top_color_specificity = specificity;
             }
             break;
@@ -3467,7 +3581,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->width.right_specificity = specificity;
             }
             if (border.color) {
-                span->bound->border->right_color = resolve_color_value(border.color);
+                span->bound->border->right_color = resolve_color_value(lycon, border.color);
                 span->bound->border->right_color_specificity = specificity;
             }
             break;
@@ -3504,7 +3618,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->width.bottom_specificity = specificity;
             }
             if (border.color) {
-                span->bound->border->bottom_color = resolve_color_value(border.color);
+                span->bound->border->bottom_color = resolve_color_value(lycon, border.color);
                 span->bound->border->bottom_color_specificity = specificity;
             }
             break;
@@ -3541,7 +3655,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->width.left_specificity = specificity;
             }
             if (border.color) {
-                span->bound->border->left_color = resolve_color_value(border.color);
+                span->bound->border->left_color = resolve_color_value(lycon, border.color);
                 span->bound->border->left_color_specificity = specificity;
             }
             break;
@@ -3652,7 +3766,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Single value - all sides get same color
-                Color color = resolve_color_value(value);
+                Color color = resolve_color_value(lycon, value);
 
                 // Check specificity for each side before setting
                 if (specificity >= span->bound->border->top_color_specificity) {
@@ -3679,8 +3793,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 CssValue** values = value->data.list.values;
                 if (count == 2) {
                     // top/bottom, left/right
-                    Color vertical = resolve_color_value(values[0]);
-                    Color horizontal = resolve_color_value(values[1]);
+                    Color vertical = resolve_color_value(lycon, values[0]);
+                    Color horizontal = resolve_color_value(lycon, values[1]);
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->top_color_specificity) {
@@ -3703,9 +3817,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
                 else if (count == 3) {
                     // top, left/right, bottom
-                    Color top = resolve_color_value(values[0]);
-                    Color horizontal = resolve_color_value(values[1]);
-                    Color bottom = resolve_color_value(values[2]);
+                    Color top = resolve_color_value(lycon, values[0]);
+                    Color horizontal = resolve_color_value(lycon, values[1]);
+                    Color bottom = resolve_color_value(lycon, values[2]);
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->top_color_specificity) {
@@ -3728,10 +3842,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
                 else if (count == 4) {
                     // top, right, bottom, left
-                    Color top = resolve_color_value(values[0]);
-                    Color right = resolve_color_value(values[1]);
-                    Color bottom = resolve_color_value(values[2]);
-                    Color left = resolve_color_value(values[3]);
+                    Color top = resolve_color_value(lycon, values[0]);
+                    Color right = resolve_color_value(lycon, values[1]);
+                    Color bottom = resolve_color_value(lycon, values[2]);
+                    Color left = resolve_color_value(lycon, values[3]);
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->top_color_specificity) {
@@ -6286,7 +6400,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                         if (arg->type == CSS_VALUE_TYPE_COLOR) {
                             // Simple color without position
-                            lg->stops[stop_idx].color = resolve_color_value(arg);
+                            lg->stops[stop_idx].color = resolve_color_value(lycon, arg);
                             lg->stops[stop_idx].position = -1;  // auto position
                             log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x", stop_idx,
                                 lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
@@ -6295,7 +6409,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             // Color stop with position: [color, position]
                             CssValue** items = arg->data.list.values;
                             if (items[0] && items[0]->type == CSS_VALUE_TYPE_COLOR) {
-                                lg->stops[stop_idx].color = resolve_color_value(items[0]);
+                                lg->stops[stop_idx].color = resolve_color_value(lycon, items[0]);
                                 lg->stops[stop_idx].position = -1;  // default auto
 
                                 // Parse position if present

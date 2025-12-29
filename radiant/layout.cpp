@@ -314,16 +314,25 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
         log_debug("normal lineHeight: %f", lycon->block.line_height);
     } else {
+        // Resolve var() if present
+        const CssValue* resolved_value = resolve_var_function(lycon, &value);
+        if (!resolved_value) {
+            // var() couldn't be resolved, use normal
+            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
+            log_debug("line-height var() unresolved, using normal: %f", lycon->block.line_height);
+            return;
+        }
+        
         // resolve length/number/percentage
         float resolved_height =
-        value.type == CSS_VALUE_TYPE_NUMBER ?
-            value.data.number.value * lycon->font.current_font_size :
-            resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, &value);
+        resolved_value->type == CSS_VALUE_TYPE_NUMBER ?
+            resolved_value->data.number.value * lycon->font.current_font_size :
+            resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, resolved_value);
 
         // CSS 2.1: "Negative values are not allowed" for line-height
-        // If negative, fall back to 'normal' (use default line height)
-        if (resolved_height < 0) {
-            log_debug("invalid negative line-height: %f, falling back to normal", resolved_height);
+        // If negative or zero/NaN, fall back to 'normal' (use default line height)
+        if (resolved_height <= 0 || std::isnan(resolved_height)) {
+            log_debug("invalid line-height: %f, falling back to normal", resolved_height);
             lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
         } else {
             lycon->block.line_height = resolved_height;
