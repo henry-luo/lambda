@@ -276,7 +276,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float bottom_edge = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
         content_height = max(bottom_edge - top_edge, 0.0f);
         // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
+        // finalize_block_flow uses block->blk->given_height (not lycon->block.given_height) to
+        // determine if height is explicitly set, so we must also update block->blk->given_height
         lycon->block.given_height = content_height;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->given_height = content_height;
         log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, content_height=%.1f (stored in given_height)",
                   top_edge, bottom_edge, content_height);
     } else {
