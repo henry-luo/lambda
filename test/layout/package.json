@@ -8,7 +8,7 @@
     },
     "dependencies": {
         "glob": "^10.0.0",
-        "puppeteer": "^24.22.3"
+        "puppeteer": "^24.34.0"
     },
     "author": "Lambda Project",
     "license": "MIT"

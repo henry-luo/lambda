@@ -7,85 +7,550 @@
     }
   },
   "layout_tree": {
-    "type": "block",
-    "tag": "html",
+    "nodeType": "element",
     "selector": "html",
+    "tag": "html",
+    "id": null,
     "classes": [],
     "layout": {
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 149
+      "height": 150,
+      "contentWidth": 1200,
+      "contentHeight": 800,
+      "scrollWidth": 1200,
+      "scrollHeight": 800
     },
     "computed": {
       "display": "block",
+      "position": "static",
+      "marginTop": 0,
+      "marginRight": 0,
+      "marginBottom": 0,
+      "marginLeft": 0,
+      "paddingTop": 0,
+      "paddingRight": 0,
+      "paddingBottom": 0,
+      "paddingLeft": 0,
+      "borderTopWidth": 0,
+      "borderRightWidth": 0,
+      "borderBottomWidth": 0,
+      "borderLeftWidth": 0,
+      "flexDirection": "row",
       "flexWrap": "nowrap",
-      "margin": {
-        "top": 0,
-        "right": 0,
-        "bottom": 0,
-        "left": 0
-      },
-      "padding": {
-        "top": 0,
-        "right": 0,
-        "bottom": 0,
-        "left": 0
-      },
-      "position": {
-        "type": "static",
-        "zIndex": 0,
-        "float": "none",
-        "clear": "none"
-      },
-      "font": {
-        "family": "Times",
-        "size": 16,
-        "style": "normal",
-        "weight": "400"
-      },
-      "_cssPropertiesComplete": true
+      "justifyContent": "normal",
+      "alignItems": "normal",
+      "alignContent": "normal",
+      "flexGrow": 0,
+      "flexShrink": 1,
+      "flexBasis": "auto",
+      "alignSelf": "auto",
+      "order": 0,
+      "gap": "normal",
+      "fontSize": 16,
+      "lineHeight": "normal",
+      "fontFamily": "\"Times New Roman\"",
+      "fontWeight": "400",
+      "textAlign": "start",
+      "verticalAlign": "baseline",
+      "top": "auto",
+      "right": "auto",
+      "bottom": "auto",
+      "left": "auto",
+      "zIndex": "auto",
+      "overflow": "visible",
+      "overflowX": "visible",
+      "overflowY": "visible"
     },
+    "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
-        "type": "block",
-        "tag": "body",
+        "nodeType": "element",
+        "selector": "head",
+        "tag": "head",
+        "id": null,
+        "classes": [],
+        "layout": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0,
+          "contentWidth": 0,
+          "contentHeight": 0,
+          "scrollWidth": 0,
+          "scrollHeight": 0
+        },
+        "computed": {
+          "display": "none",
+          "position": "static",
+          "marginTop": 0,
+          "marginRight": 0,
+          "marginBottom": 0,
+          "marginLeft": 0,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "borderTopWidth": 0,
+          "borderRightWidth": 0,
+          "borderBottomWidth": 0,
+          "borderLeftWidth": 0,
+          "flexDirection": "row",
+          "flexWrap": "nowrap",
+          "justifyContent": "normal",
+          "alignItems": "normal",
+          "alignContent": "normal",
+          "flexGrow": 0,
+          "flexShrink": 1,
+          "flexBasis": "auto",
+          "alignSelf": "auto",
+          "order": 0,
+          "gap": "normal",
+          "fontSize": 16,
+          "lineHeight": "normal",
+          "fontFamily": "\"Times New Roman\"",
+          "fontWeight": "400",
+          "textAlign": "start",
+          "verticalAlign": "baseline",
+          "top": "auto",
+          "right": "auto",
+          "bottom": "auto",
+          "left": "auto",
+          "zIndex": "auto",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible"
+        },
+        "depth": 1,
+        "elementIndex": 0,
+        "children": [
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "meta:nth-of-type(1)",
+            "tag": "meta",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "\"Times New Roman\"",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 1,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "meta:nth-of-type(2)",
+            "tag": "meta",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "\"Times New Roman\"",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "title",
+            "tag": "title",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "\"Times New Roman\"",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Vertical Align",
+                "length": 29,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
+            "nodeType": "element",
+            "selector": "style",
+            "tag": "style",
+            "id": null,
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "\"Times New Roman\"",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            line-height: 60px;\n            border: 1px solid black;\n            margin: 10px;\n            padding: 10px;\n            font-size: 18px;\n        }\n        .box {\n            display: inline-block;\n            width: 40px;\n            height: 40px;\n            background-color: lightblue;\n            border: 1px solid blue;\n            margin: 0 5px;\n        }\n        .baseline { vertical-align: baseline; }\n        .top { vertical-align: top; }\n        .middle { vertical-align: middle; }\n        .bottom { vertical-align: bottom; }\n        .text-top { vertical-align: text-top; }\n    ",
+                "length": 724,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
+          }
+        ]
+      },
+      {
+        "nodeType": "element",
         "selector": "body",
+        "tag": "body",
+        "id": null,
         "classes": [],
         "layout": {
           "x": 0,
           "y": 0,
           "width": 1200,
-          "height": 149
+          "height": 150,
+          "contentWidth": 1200,
+          "contentHeight": 150,
+          "scrollWidth": 1200,
+          "scrollHeight": 150
         },
         "computed": {
           "display": "block",
+          "position": "static",
+          "marginTop": 0,
+          "marginRight": 0,
+          "marginBottom": 0,
+          "marginLeft": 0,
+          "paddingTop": 20,
+          "paddingRight": 20,
+          "paddingBottom": 20,
+          "paddingLeft": 20,
+          "borderTopWidth": 0,
+          "borderRightWidth": 0,
+          "borderBottomWidth": 0,
+          "borderLeftWidth": 0,
+          "flexDirection": "row",
           "flexWrap": "nowrap",
-          "margin": {
-            "top": 0,
-            "right": 0,
-            "bottom": 0,
-            "left": 0
-          },
-          "padding": {
-            "top": 20,
-            "right": 20,
-            "bottom": 20,
-            "left": 20
-          },
-          "font": {
-            "family": "sans-serif",
-            "size": 16,
-            "style": "normal",
-            "weight": "normal"
-          },
-          "_cssPropertiesComplete": true
+          "justifyContent": "normal",
+          "alignItems": "normal",
+          "alignContent": "normal",
+          "flexGrow": 0,
+          "flexShrink": 1,
+          "flexBasis": "auto",
+          "alignSelf": "auto",
+          "order": 0,
+          "gap": "normal",
+          "fontSize": 16,
+          "lineHeight": "normal",
+          "fontFamily": "Arial, sans-serif",
+          "fontWeight": "400",
+          "textAlign": "start",
+          "verticalAlign": "baseline",
+          "top": "auto",
+          "right": "auto",
+          "bottom": "auto",
+          "left": "auto",
+          "zIndex": "auto",
+          "overflow": "visible",
+          "overflowX": "visible",
+          "overflowY": "visible"
         },
+        "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
-            "type": "block",
-            "tag": "div",
+            "nodeType": "element",
             "selector": "div.container",
+            "tag": "div",
+            "id": null,
             "classes": [
               "container"
             ],
@@ -93,590 +558,726 @@
               "x": 30,
               "y": 30,
               "width": 1140,
-              "height": 89
+              "height": 90,
+              "contentWidth": 1138,
+              "contentHeight": 88,
+              "scrollWidth": 1138,
+              "scrollHeight": 88
             },
             "computed": {
               "display": "block",
-              "line_height": 0,
-              "text_align": "left",
-              "text_indent": 0,
-              "min_width": -1,
-              "max_width": -1,
-              "min_height": -1,
-              "max_height": -1,
-              "box_sizing": "content-box",
+              "position": "static",
+              "marginTop": 10,
+              "marginRight": 10,
+              "marginBottom": 10,
+              "marginLeft": 10,
+              "paddingTop": 10,
+              "paddingRight": 10,
+              "paddingBottom": 10,
+              "paddingLeft": 10,
+              "borderTopWidth": 1,
+              "borderRightWidth": 1,
+              "borderBottomWidth": 1,
+              "borderLeftWidth": 1,
+              "flexDirection": "row",
               "flexWrap": "nowrap",
-              "margin": {
-                "top": 10,
-                "right": 10,
-                "bottom": 10,
-                "left": 10
-              },
-              "padding": {
-                "top": 10,
-                "right": 10,
-                "bottom": 10,
-                "left": 10
-              },
-              "borderWidth": {
-                "top": 1,
-                "right": 1,
-                "bottom": 1,
-                "left": 1
-              },
-              "borderColor": {
-                "top": "rgba(0, 0, 0, 1.00)",
-                "right": "rgba(0, 0, 0, 1.00)",
-                "bottom": "rgba(0, 0, 0, 1.00)",
-                "left": "rgba(0, 0, 0, 1.00)"
-              },
-              "borderRadius": {
-                "topLeft": 0,
-                "topRight": 0,
-                "bottomRight": 0,
-                "bottomLeft": 0
-              },
-              "font": {
-                "family": "sans-serif",
-                "size": 18,
-                "style": "normal",
-                "weight": "normal"
-              },
-              "_cssPropertiesComplete": true
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 18,
+              "lineHeight": "60px",
+              "fontFamily": "Arial, sans-serif",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
             },
+            "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
-                "type": "text",
-                "tag": "text",
-                "selector": "text",
-                "content": "Text baseline\n        ",
-                "text_info": {
-                  "start_index": 9,
-                  "length": 22
-                },
+                "nodeType": "text",
+                "text": "\n        Text baseline\n        ",
+                "length": 31,
+                "isWhitespaceOnly": false,
                 "layout": {
-                  "x": 41,
-                  "y": 66,
-                  "width": 111.1,
-                  "height": 21
-                }
+                  "rects": [
+                    {
+                      "x": 41,
+                      "y": 67,
+                      "width": 110.08,
+                      "height": 20,
+                      "right": 151.08,
+                      "bottom": 87,
+                      "text": "\n        Text baseline\n        ",
+                      "startIndex": 0,
+                      "endIndex": 31
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               },
               {
-                "type": "inline-block",
+                "nodeType": "element",
+                "selector": "span.box.baseline:nth-of-type(1)",
                 "tag": "span",
-                "selector": "span.box baseline:nth-of-type(1)",
+                "id": null,
                 "classes": [
-                  "box baseline"
+                  "box",
+                  "baseline"
                 ],
                 "layout": {
-                  "x": 157.1,
+                  "x": 156.08,
                   "y": 41,
                   "width": 42,
-                  "height": 42
+                  "height": 42,
+                  "contentWidth": 40,
+                  "contentHeight": 40,
+                  "scrollWidth": 40,
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "inline-block",
-                  "line_height": 0,
-                  "text_align": "left",
-                  "text_indent": 0,
-                  "min_width": -1,
-                  "max_width": -1,
-                  "min_height": -1,
-                  "max_height": -1,
-                  "box_sizing": "content-box",
-                  "given_width": 40,
-                  "given_height": 40,
+                  "position": "static",
+                  "marginTop": 0,
+                  "marginRight": 5,
+                  "marginBottom": 0,
+                  "marginLeft": 5,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 1,
+                  "borderRightWidth": 1,
+                  "borderBottomWidth": 1,
+                  "borderLeftWidth": 1,
+                  "flexDirection": "row",
                   "flexWrap": "nowrap",
-                  "margin": {
-                    "top": 0,
-                    "right": 5,
-                    "bottom": 0,
-                    "left": 5
-                  },
-                  "padding": {
-                    "top": 0,
-                    "right": 0,
-                    "bottom": 0,
-                    "left": 0
-                  },
-                  "borderWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "bottom": 1,
-                    "left": 1
-                  },
-                  "borderColor": {
-                    "top": "rgba(0, 0, 255, 1.00)",
-                    "right": "rgba(0, 0, 255, 1.00)",
-                    "bottom": "rgba(0, 0, 255, 1.00)",
-                    "left": "rgba(0, 0, 255, 1.00)"
-                  },
-                  "borderRadius": {
-                    "topLeft": 0,
-                    "topRight": 0,
-                    "bottomRight": 0,
-                    "bottomLeft": 0
-                  },
-                  "backgroundColor": "rgba(173, 216, 230, 1.00)",
-                  "font": {
-                    "family": "sans-serif",
-                    "size": 18,
-                    "style": "normal",
-                    "weight": "normal"
-                  },
-                  "color": "rgba(0, 0, 0, 0.00)",
-                  "opacity": 0,
-                  "_cssPropertiesComplete": true
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 18,
+                  "lineHeight": "60px",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "baseline",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
+                "depth": 3,
+                "elementIndex": 1,
                 "children": []
               },
               {
-                "type": "text",
-                "tag": "text",
-                "selector": "text",
-                "content": "\n        ",
-                "text_info": {
-                  "start_index": 0,
-                  "length": 9
-                },
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
                 "layout": {
-                  "x": 204.1,
-                  "y": 66,
-                  "width": 5,
-                  "height": 21
-                }
+                  "rects": [
+                    {
+                      "x": 203.08,
+                      "y": 67,
+                      "width": 5.02,
+                      "height": 20,
+                      "right": 208.09,
+                      "bottom": 87
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 2,
+                "children": []
               },
               {
-                "type": "inline-block",
+                "nodeType": "element",
+                "selector": "span.box.top:nth-of-type(2)",
                 "tag": "span",
-                "selector": "span.box top:nth-of-type(2)",
+                "id": null,
                 "classes": [
-                  "box top"
+                  "box",
+                  "top"
                 ],
                 "layout": {
-                  "x": 214.1,
+                  "x": 213.09,
                   "y": 41,
                   "width": 42,
-                  "height": 42
+                  "height": 42,
+                  "contentWidth": 40,
+                  "contentHeight": 40,
+                  "scrollWidth": 40,
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "inline-block",
-                  "line_height": 0,
-                  "text_align": "left",
-                  "text_indent": 0,
-                  "min_width": -1,
-                  "max_width": -1,
-                  "min_height": -1,
-                  "max_height": -1,
-                  "box_sizing": "content-box",
-                  "given_width": 40,
-                  "given_height": 40,
+                  "position": "static",
+                  "marginTop": 0,
+                  "marginRight": 5,
+                  "marginBottom": 0,
+                  "marginLeft": 5,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 1,
+                  "borderRightWidth": 1,
+                  "borderBottomWidth": 1,
+                  "borderLeftWidth": 1,
+                  "flexDirection": "row",
                   "flexWrap": "nowrap",
-                  "margin": {
-                    "top": 0,
-                    "right": 5,
-                    "bottom": 0,
-                    "left": 5
-                  },
-                  "padding": {
-                    "top": 0,
-                    "right": 0,
-                    "bottom": 0,
-                    "left": 0
-                  },
-                  "borderWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "bottom": 1,
-                    "left": 1
-                  },
-                  "borderColor": {
-                    "top": "rgba(0, 0, 255, 1.00)",
-                    "right": "rgba(0, 0, 255, 1.00)",
-                    "bottom": "rgba(0, 0, 255, 1.00)",
-                    "left": "rgba(0, 0, 255, 1.00)"
-                  },
-                  "borderRadius": {
-                    "topLeft": 0,
-                    "topRight": 0,
-                    "bottomRight": 0,
-                    "bottomLeft": 0
-                  },
-                  "backgroundColor": "rgba(173, 216, 230, 1.00)",
-                  "font": {
-                    "family": "sans-serif",
-                    "size": 18,
-                    "style": "normal",
-                    "weight": "normal"
-                  },
-                  "color": "rgba(0, 0, 0, 0.00)",
-                  "opacity": 0,
-                  "_cssPropertiesComplete": true
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 18,
+                  "lineHeight": "60px",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "top",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
+                "depth": 3,
+                "elementIndex": 3,
                 "children": []
               },
               {
-                "type": "text",
-                "tag": "text",
-                "selector": "text",
-                "content": "\n        ",
-                "text_info": {
-                  "start_index": 0,
-                  "length": 9
-                },
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
                 "layout": {
-                  "x": 261.1,
-                  "y": 66,
-                  "width": 5,
-                  "height": 21
-                }
+                  "rects": [
+                    {
+                      "x": 260.09,
+                      "y": 67,
+                      "width": 5.02,
+                      "height": 20,
+                      "right": 265.11,
+                      "bottom": 87
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 4,
+                "children": []
               },
               {
-                "type": "inline-block",
+                "nodeType": "element",
+                "selector": "span.box.middle:nth-of-type(3)",
                 "tag": "span",
-                "selector": "span.box middle:nth-of-type(3)",
+                "id": null,
                 "classes": [
-                  "box middle"
+                  "box",
+                  "middle"
                 ],
                 "layout": {
-                  "x": 271.1,
-                  "y": 53.5,
+                  "x": 270.11,
+                  "y": 57,
                   "width": 42,
-                  "height": 42
+                  "height": 42,
+                  "contentWidth": 40,
+                  "contentHeight": 40,
+                  "scrollWidth": 40,
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "inline-block",
-                  "line_height": 0,
-                  "text_align": "left",
-                  "text_indent": 0,
-                  "min_width": -1,
-                  "max_width": -1,
-                  "min_height": -1,
-                  "max_height": -1,
-                  "box_sizing": "content-box",
-                  "given_width": 40,
-                  "given_height": 40,
+                  "position": "static",
+                  "marginTop": 0,
+                  "marginRight": 5,
+                  "marginBottom": 0,
+                  "marginLeft": 5,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 1,
+                  "borderRightWidth": 1,
+                  "borderBottomWidth": 1,
+                  "borderLeftWidth": 1,
+                  "flexDirection": "row",
                   "flexWrap": "nowrap",
-                  "margin": {
-                    "top": 0,
-                    "right": 5,
-                    "bottom": 0,
-                    "left": 5
-                  },
-                  "padding": {
-                    "top": 0,
-                    "right": 0,
-                    "bottom": 0,
-                    "left": 0
-                  },
-                  "borderWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "bottom": 1,
-                    "left": 1
-                  },
-                  "borderColor": {
-                    "top": "rgba(0, 0, 255, 1.00)",
-                    "right": "rgba(0, 0, 255, 1.00)",
-                    "bottom": "rgba(0, 0, 255, 1.00)",
-                    "left": "rgba(0, 0, 255, 1.00)"
-                  },
-                  "borderRadius": {
-                    "topLeft": 0,
-                    "topRight": 0,
-                    "bottomRight": 0,
-                    "bottomLeft": 0
-                  },
-                  "backgroundColor": "rgba(173, 216, 230, 1.00)",
-                  "font": {
-                    "family": "sans-serif",
-                    "size": 18,
-                    "style": "normal",
-                    "weight": "normal"
-                  },
-                  "color": "rgba(0, 0, 0, 0.00)",
-                  "opacity": 0,
-                  "_cssPropertiesComplete": true
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 18,
+                  "lineHeight": "60px",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "middle",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
+                "depth": 3,
+                "elementIndex": 5,
                 "children": []
               },
               {
-                "type": "text",
-                "tag": "text",
-                "selector": "text",
-                "content": "\n        ",
-                "text_info": {
-                  "start_index": 0,
-                  "length": 9
-                },
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
                 "layout": {
-                  "x": 318.1,
-                  "y": 66,
-                  "width": 5,
-                  "height": 21
-                }
+                  "rects": [
+                    {
+                      "x": 317.11,
+                      "y": 67,
+                      "width": 5.02,
+                      "height": 20,
+                      "right": 322.13,
+                      "bottom": 87
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 6,
+                "children": []
               },
               {
-                "type": "inline-block",
+                "nodeType": "element",
+                "selector": "span.box.bottom:nth-of-type(4)",
                 "tag": "span",
-                "selector": "span.box bottom:nth-of-type(4)",
+                "id": null,
                 "classes": [
-                  "box bottom"
+                  "box",
+                  "bottom"
                 ],
                 "layout": {
-                  "x": 328.1,
-                  "y": 66,
+                  "x": 327.13,
+                  "y": 67,
                   "width": 42,
-                  "height": 42
+                  "height": 42,
+                  "contentWidth": 40,
+                  "contentHeight": 40,
+                  "scrollWidth": 40,
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "inline-block",
-                  "line_height": 0,
-                  "text_align": "left",
-                  "text_indent": 0,
-                  "min_width": -1,
-                  "max_width": -1,
-                  "min_height": -1,
-                  "max_height": -1,
-                  "box_sizing": "content-box",
-                  "given_width": 40,
-                  "given_height": 40,
+                  "position": "static",
+                  "marginTop": 0,
+                  "marginRight": 5,
+                  "marginBottom": 0,
+                  "marginLeft": 5,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 1,
+                  "borderRightWidth": 1,
+                  "borderBottomWidth": 1,
+                  "borderLeftWidth": 1,
+                  "flexDirection": "row",
                   "flexWrap": "nowrap",
-                  "margin": {
-                    "top": 0,
-                    "right": 5,
-                    "bottom": 0,
-                    "left": 5
-                  },
-                  "padding": {
-                    "top": 0,
-                    "right": 0,
-                    "bottom": 0,
-                    "left": 0
-                  },
-                  "borderWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "bottom": 1,
-                    "left": 1
-                  },
-                  "borderColor": {
-                    "top": "rgba(0, 0, 255, 1.00)",
-                    "right": "rgba(0, 0, 255, 1.00)",
-                    "bottom": "rgba(0, 0, 255, 1.00)",
-                    "left": "rgba(0, 0, 255, 1.00)"
-                  },
-                  "borderRadius": {
-                    "topLeft": 0,
-                    "topRight": 0,
-                    "bottomRight": 0,
-                    "bottomLeft": 0
-                  },
-                  "backgroundColor": "rgba(173, 216, 230, 1.00)",
-                  "font": {
-                    "family": "sans-serif",
-                    "size": 18,
-                    "style": "normal",
-                    "weight": "normal"
-                  },
-                  "color": "rgba(0, 0, 0, 0.00)",
-                  "opacity": 0,
-                  "_cssPropertiesComplete": true
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 18,
+                  "lineHeight": "60px",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "bottom",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
+                "depth": 3,
+                "elementIndex": 7,
                 "children": []
               },
               {
-                "type": "text",
-                "tag": "text",
-                "selector": "text",
-                "content": "\n        ",
-                "text_info": {
-                  "start_index": 0,
-                  "length": 9
-                },
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
                 "layout": {
-                  "x": 375.1,
-                  "y": 66,
-                  "width": 5,
-                  "height": 21
-                }
+                  "rects": [
+                    {
+                      "x": 374.13,
+                      "y": 67,
+                      "width": 5.02,
+                      "height": 20,
+                      "right": 379.14,
+                      "bottom": 87
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 8,
+                "children": []
               },
               {
-                "type": "inline-block",
+                "nodeType": "element",
+                "selector": "span.box.text-top:nth-of-type(5)",
                 "tag": "span",
-                "selector": "span.box text-top:nth-of-type(5)",
+                "id": null,
                 "classes": [
-                  "box text-top"
+                  "box",
+                  "text-top"
                 ],
                 "layout": {
-                  "x": 385.1,
-                  "y": 66,
+                  "x": 384.14,
+                  "y": 67,
                   "width": 42,
-                  "height": 42
+                  "height": 42,
+                  "contentWidth": 40,
+                  "contentHeight": 40,
+                  "scrollWidth": 40,
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "inline-block",
-                  "line_height": 0,
-                  "text_align": "left",
-                  "text_indent": 0,
-                  "min_width": -1,
-                  "max_width": -1,
-                  "min_height": -1,
-                  "max_height": -1,
-                  "box_sizing": "content-box",
-                  "given_width": 40,
-                  "given_height": 40,
+                  "position": "static",
+                  "marginTop": 0,
+                  "marginRight": 5,
+                  "marginBottom": 0,
+                  "marginLeft": 5,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 1,
+                  "borderRightWidth": 1,
+                  "borderBottomWidth": 1,
+                  "borderLeftWidth": 1,
+                  "flexDirection": "row",
                   "flexWrap": "nowrap",
-                  "margin": {
-                    "top": 0,
-                    "right": 5,
-                    "bottom": 0,
-                    "left": 5
-                  },
-                  "padding": {
-                    "top": 0,
-                    "right": 0,
-                    "bottom": 0,
-                    "left": 0
-                  },
-                  "borderWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "bottom": 1,
-                    "left": 1
-                  },
-                  "borderColor": {
-                    "top": "rgba(0, 0, 255, 1.00)",
-                    "right": "rgba(0, 0, 255, 1.00)",
-                    "bottom": "rgba(0, 0, 255, 1.00)",
-                    "left": "rgba(0, 0, 255, 1.00)"
-                  },
-                  "borderRadius": {
-                    "topLeft": 0,
-                    "topRight": 0,
-                    "bottomRight": 0,
-                    "bottomLeft": 0
-                  },
-                  "backgroundColor": "rgba(173, 216, 230, 1.00)",
-                  "font": {
-                    "family": "sans-serif",
-                    "size": 18,
-                    "style": "normal",
-                    "weight": "normal"
-                  },
-                  "color": "rgba(0, 0, 0, 0.00)",
-                  "opacity": 0,
-                  "_cssPropertiesComplete": true
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 18,
+                  "lineHeight": "60px",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "text-top",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
+                "depth": 3,
+                "elementIndex": 9,
                 "children": []
               },
               {
-                "type": "text",
-                "tag": "text",
-                "selector": "text",
-                "content": "\n        ",
-                "text_info": {
-                  "start_index": 0,
-                  "length": 9
-                },
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
                 "layout": {
-                  "x": 432.1,
-                  "y": 66,
-                  "width": 5,
-                  "height": 21
-                }
+                  "rects": [
+                    {
+                      "x": 431.14,
+                      "y": 67,
+                      "width": 5.02,
+                      "height": 20,
+                      "right": 436.16,
+                      "bottom": 87
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 10,
+                "children": []
               },
               {
-                "type": "inline-block",
+                "nodeType": "element",
+                "selector": "span.box.text-top:nth-of-type(6)",
                 "tag": "span",
-                "selector": "span.box text-top:nth-of-type(6)",
+                "id": null,
                 "classes": [
-                  "box text-top"
+                  "box",
+                  "text-top"
                 ],
                 "layout": {
-                  "x": 442.1,
-                  "y": 66,
+                  "x": 441.16,
+                  "y": 67,
                   "width": 42,
-                  "height": 22
+                  "height": 22,
+                  "contentWidth": 40,
+                  "contentHeight": 20,
+                  "scrollWidth": 40,
+                  "scrollHeight": 20
                 },
                 "computed": {
                   "display": "inline-block",
-                  "line_height": 0,
-                  "text_align": "left",
-                  "text_indent": 0,
-                  "min_width": -1,
-                  "max_width": -1,
-                  "min_height": -1,
-                  "max_height": -1,
-                  "box_sizing": "content-box",
-                  "given_width": 40,
-                  "given_height": 20,
+                  "position": "static",
+                  "marginTop": 0,
+                  "marginRight": 5,
+                  "marginBottom": 0,
+                  "marginLeft": 5,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 1,
+                  "borderRightWidth": 1,
+                  "borderBottomWidth": 1,
+                  "borderLeftWidth": 1,
+                  "flexDirection": "row",
                   "flexWrap": "nowrap",
-                  "margin": {
-                    "top": 0,
-                    "right": 5,
-                    "bottom": 0,
-                    "left": 5
-                  },
-                  "padding": {
-                    "top": 0,
-                    "right": 0,
-                    "bottom": 0,
-                    "left": 0
-                  },
-                  "borderWidth": {
-                    "top": 1,
-                    "right": 1,
-                    "bottom": 1,
-                    "left": 1
-                  },
-                  "borderColor": {
-                    "top": "rgba(0, 0, 255, 1.00)",
-                    "right": "rgba(0, 0, 255, 1.00)",
-                    "bottom": "rgba(0, 0, 255, 1.00)",
-                    "left": "rgba(0, 0, 255, 1.00)"
-                  },
-                  "borderRadius": {
-                    "topLeft": 0,
-                    "topRight": 0,
-                    "bottomRight": 0,
-                    "bottomLeft": 0
-                  },
-                  "backgroundColor": "rgba(173, 216, 230, 1.00)",
-                  "font": {
-                    "family": "sans-serif",
-                    "size": 18,
-                    "style": "normal",
-                    "weight": "normal"
-                  },
-                  "color": "rgba(0, 0, 0, 0.00)",
-                  "opacity": 0,
-                  "_cssPropertiesComplete": true
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 18,
+                  "lineHeight": "60px",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "text-top",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
+                "depth": 3,
+                "elementIndex": 11,
                 "children": []
               },
               {
-                "type": "text",
-                "tag": "text",
-                "selector": "text",
-                "content": "\n        more tall text\n    ",
-                "text_info": {
-                  "start_index": 0,
-                  "length": 28
-                },
+                "nodeType": "text",
+                "text": "\n        more tall text\n    ",
+                "length": 28,
+                "isWhitespaceOnly": false,
                 "layout": {
-                  "x": 489.1,
-                  "y": 66,
-                  "width": 113.1,
-                  "height": 21
-                }
+                  "rects": [
+                    {
+                      "x": 488.16,
+                      "y": 67,
+                      "width": 108.05,
+                      "height": 20,
+                      "right": 596.2,
+                      "bottom": 87,
+                      "text": "\n        more tall text\n    ",
+                      "startIndex": 0,
+                      "endIndex": 28
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 12,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "element",
+            "selector": "#test-metadata",
+            "tag": "script",
+            "id": "test-metadata",
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "contentWidth": 0,
+              "contentHeight": 0,
+              "scrollWidth": 0,
+              "scrollHeight": 0
+            },
+            "computed": {
+              "display": "none",
+              "position": "static",
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 0,
+              "borderRightWidth": 0,
+              "borderBottomWidth": 0,
+              "borderLeftWidth": 0,
+              "flexDirection": "row",
+              "flexWrap": "nowrap",
+              "justifyContent": "normal",
+              "alignItems": "normal",
+              "alignContent": "normal",
+              "flexGrow": 0,
+              "flexShrink": 1,
+              "flexBasis": "auto",
+              "alignSelf": "auto",
+              "order": 0,
+              "gap": "normal",
+              "fontSize": 16,
+              "lineHeight": "normal",
+              "fontFamily": "Arial, sans-serif",
+              "fontWeight": "400",
+              "textAlign": "start",
+              "verticalAlign": "baseline",
+              "top": "auto",
+              "right": "auto",
+              "bottom": "auto",
+              "left": "auto",
+              "zIndex": "auto",
+              "overflow": "visible",
+              "overflowX": "visible",
+              "overflowY": "visible"
+            },
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_817_vertical_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"vertical-align\", \"baseline\", \"top\", \"middle\", \"bottom\", \"text-top\"],\n        \"description\": \"Vertical alignment of inline elements\",\n        \"original_css_test\": \"vertical-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Five blue boxes aligned differently relative to the text baseline\"\n    }\n    ",
+                "length": 528,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
             ]
           }
         ]
       }
-    ]
-  },
-  "_source": "radiant",
-  "_platform": "linux"
+    ],
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    },
+    "metadata": {
+      "test_id": "baseline_817_vertical_align",
+      "category": "baseline",
+      "features": [
+        "vertical-align",
+        "baseline",
+        "top",
+        "middle",
+        "bottom",
+        "text-top"
+      ],
+      "description": "Vertical alignment of inline elements",
+      "original_css_test": "vertical-align-001.htm",
+      "spec_references": [
+        "https://www.w3.org/TR/CSS21/visudet.html#line-height"
+      ],
+      "complexity": "fundamental",
+      "expected_behavior": "Five blue boxes aligned differently relative to the text baseline"
+    }
+  }
 }

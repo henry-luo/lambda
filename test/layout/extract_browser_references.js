@@ -47,9 +47,9 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, plat
 
     let browser = null;
     try {
-        // Launch browser
+        // Launch browser - use system Chromium on ARM Linux if available
         console.log('🚀 Launching browser...');
-        browser = await puppeteer.launch({
+        const launchOptions = {
             headless: 'new',
             args: [
                 '--no-sandbox',
@@ -63,7 +63,24 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, plat
                 '--disable-default-apps'
             ],
             timeout: 30000
-        });
+        };
+        
+        // On ARM Linux, use system Chromium instead of Puppeteer's bundled Chrome
+        const os = require('os');
+        const { execSync } = require('child_process');
+        if (os.arch() === 'arm64' && os.platform() === 'linux') {
+            try {
+                const chromiumPath = execSync('which chromium-browser || which chromium', { encoding: 'utf8' }).trim();
+                if (chromiumPath) {
+                    console.log(`📦 Using system Chromium: ${chromiumPath}`);
+                    launchOptions.executablePath = chromiumPath;
+                }
+            } catch (e) {
+                // Fall back to bundled Chrome
+            }
+        }
+        
+        browser = await puppeteer.launch(launchOptions);
 
         const page = await browser.newPage();
 
