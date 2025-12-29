@@ -1313,9 +1313,6 @@ project "test_arena_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -1543,9 +1540,6 @@ project "test_mime_detect_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -1648,9 +1642,6 @@ project "test_mark_builder_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -1753,9 +1744,6 @@ project "test_mark_builder_deepcopy_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -1858,9 +1846,6 @@ project "test_mark_editor_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -1963,9 +1948,6 @@ project "test_name_pool_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2068,9 +2050,6 @@ project "test_mark_reader_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2173,9 +2152,6 @@ project "test_error_tracking"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2278,9 +2254,6 @@ project "test_math_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2383,9 +2356,6 @@ project "test_math_ascii_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2488,9 +2458,6 @@ project "test_markup_roundtrip_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2593,9 +2560,6 @@ project "test_entity_emoji_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2698,9 +2662,6 @@ project "test_input_roundtrip_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2803,9 +2764,6 @@ project "test_wpt_html_parser_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -2909,9 +2867,6 @@ project "test_latex_ts_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3014,9 +2969,6 @@ project "test_html_roundtrip_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3119,9 +3071,6 @@ project "test_html_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3224,9 +3173,6 @@ project "test_html_negative_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3335,9 +3281,6 @@ project "test_lambda_domnode_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3438,9 +3381,6 @@ project "test_dir_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3543,9 +3483,6 @@ project "test_graph_parser_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3648,9 +3585,6 @@ project "test_validator_input_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3753,9 +3687,6 @@ project "test_validator_features_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3858,9 +3789,6 @@ project "test_null_vs_missing_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -3963,9 +3891,6 @@ project "test_enhanced_errors"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4068,9 +3993,6 @@ project "test_validation_options"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4173,9 +4095,6 @@ project "test_format_validation"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4278,9 +4197,6 @@ project "test_validator_integration"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4383,9 +4299,6 @@ project "test_type_references_simple"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4488,9 +4401,6 @@ project "test_graph_formatter_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4593,9 +4503,6 @@ project "test_sysinfo_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4698,9 +4605,6 @@ project "test_jsx_roundtrip_new_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -4801,9 +4705,6 @@ project "test_mdx_roundtrip_new_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5061,9 +4962,6 @@ project "test_css_dom_integration"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5178,9 +5076,6 @@ project "test_css_dom_crud"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5295,9 +5190,6 @@ project "test_css_style_application_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5405,9 +5297,6 @@ project "test_html_css_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5510,9 +5399,6 @@ project "test_css_tokenizer_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5615,9 +5501,6 @@ project "test_css_tokenizer_unit"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5720,9 +5603,6 @@ project "test_css_parser_unit"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5825,9 +5705,6 @@ project "test_css_engine_unit"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -5930,9 +5807,6 @@ project "test_css_engine_negative"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6035,9 +5909,6 @@ project "test_css_formatter_unit"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6140,9 +6011,6 @@ project "test_css_roundtrip_unit"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6245,9 +6113,6 @@ project "test_compound_descendant_selectors"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6350,9 +6215,6 @@ project "test_selector_groups"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6455,9 +6317,6 @@ project "test_css_parser_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6560,9 +6419,6 @@ project "test_css_integration_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6665,9 +6521,6 @@ project "test_css_files_safe_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6770,9 +6623,6 @@ project "test_css_frameworks_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6875,9 +6725,6 @@ project "test_css_to_mark_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -6978,9 +6825,6 @@ project "test_mdx_roundtrip_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7081,9 +6925,6 @@ project "test_jsx_roundtrip_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7184,9 +7025,6 @@ project "test_latex_parser_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7287,9 +7125,6 @@ project "test_latex_treesitter"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7455,9 +7290,6 @@ project "test_latex_html_v2_baseline"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7560,9 +7392,6 @@ project "test_latex_html_v2_lists_envs"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7663,9 +7492,6 @@ project "test_latex_html_v2_tables"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7766,9 +7592,6 @@ project "test_latex_html_v2_floats"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7869,9 +7692,6 @@ project "test_latex_html_v2_special_chars"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -7972,9 +7792,6 @@ project "test_latex_html_v2_bibliography"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -8075,9 +7892,6 @@ project "test_latex_html_v2_graphics_color"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -8178,9 +7992,6 @@ project "test_latex_html_v2_macros"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -8281,9 +8092,6 @@ project "test_latex_html_v2_new_commands"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -8384,9 +8192,6 @@ project "test_validator_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -8489,9 +8294,6 @@ project "test_ast_validator_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -8594,9 +8396,6 @@ project "test_validator_path_reporting"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
@@ -8997,9 +8796,6 @@ project "test_http_gtest"
     
     linkoptions {
         "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "-Wl,--end-group",
     }
     
