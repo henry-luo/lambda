@@ -1,0 +1,701 @@
+{
+  "test_file": "sample4.html",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 697.8
+    },
+    "computed": {
+      "display": "block",
+      "flexWrap": "nowrap",
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 0,
+          "y": 0,
+          "width": 1200,
+          "height": 697.8
+        },
+        "computed": {
+          "display": "block",
+          "line_height": 0,
+          "text_align": "center",
+          "text_indent": 0,
+          "min_width": -1,
+          "max_width": -1,
+          "min_height": -1,
+          "max_height": -1,
+          "box_sizing": "content-box",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "padding": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "backgroundColor": "rgba(248, 249, 250, 1.00)",
+          "font": {
+            "family": "sans-serif",
+            "size": 16,
+            "style": "normal",
+            "weight": "normal"
+          },
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "header",
+            "selector": "header",
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 1200,
+              "height": 90
+            },
+            "computed": {
+              "display": "flex",
+              "line_height": 0,
+              "text_align": "center",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flex_container": {
+                "direction": "row",
+                "wrap": "nowrap",
+                "justify": "center",
+                "align_items": "center",
+                "align_content": "stretch",
+                "row_gap": 0,
+                "column_gap": 0
+              },
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "padding": {
+                "top": 20,
+                "right": 20,
+                "bottom": 20,
+                "left": 20
+              },
+              "backgroundColor": "rgba(0, 123, 255, 1.00)",
+              "font": {
+                "family": "sans-serif",
+                "size": 24,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(255, 255, 255, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "inline-block",
+                "tag": "img",
+                "selector": "img.logo",
+                "classes": [
+                  "logo"
+                ],
+                "layout": {
+                  "x": 413.9,
+                  "y": 20,
+                  "width": 50,
+                  "height": 50
+                },
+                "computed": {
+                  "display": "inline-block",
+                  "line_height": 0,
+                  "text_align": "center",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "given_width": 50,
+                  "given_height": 50,
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 10,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 24,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(255, 255, 255, 1.00)",
+                  "opacity": 0,
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": []
+              },
+              {
+                "type": "block",
+                "tag": "span",
+                "selector": "span",
+                "classes": [],
+                "layout": {
+                  "x": 473.9,
+                  "y": 31,
+                  "width": 312.1,
+                  "height": 28
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "center",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 24,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(255, 255, 255, 1.00)",
+                  "opacity": 0,
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Welcome to Future of Coding",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 27
+                    },
+                    "layout": {
+                      "x": 473.9,
+                      "y": 31,
+                      "width": 312.1,
+                      "height": 28
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div.container",
+            "classes": [
+              "container"
+            ],
+            "layout": {
+              "x": 180,
+              "y": 110,
+              "width": 840,
+              "height": 528.8
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "center",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": 800,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 20,
+                "right": 180,
+                "bottom": 20,
+                "left": 180
+              },
+              "padding": {
+                "top": 20,
+                "right": 20,
+                "bottom": 20,
+                "left": 20
+              },
+              "borderWidth": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "borderColor": {
+                "top": "rgba(0, 0, 0, 0.00)",
+                "right": "rgba(0, 0, 0, 0.00)",
+                "bottom": "rgba(0, 0, 0, 0.00)",
+                "left": "rgba(0, 0, 0, 0.00)"
+              },
+              "borderRadius": {
+                "topLeft": 10,
+                "topRight": 10,
+                "bottomRight": 10,
+                "bottomLeft": 10
+              },
+              "backgroundColor": "rgba(255, 255, 255, 1.00)",
+              "font": {
+                "family": "sans-serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "h2",
+                "selector": "h2",
+                "classes": [],
+                "layout": {
+                  "x": 200,
+                  "y": 149.9,
+                  "width": 800,
+                  "height": 28
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "center",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 19.92,
+                    "right": 0,
+                    "bottom": 19.92,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 24,
+                    "style": "normal",
+                    "weight": "bold"
+                  },
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Coding the Future with AI",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 25
+                    },
+                    "layout": {
+                      "x": 454.5,
+                      "y": 149.9,
+                      "width": 291,
+                      "height": 28
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p:nth-of-type(1)",
+                "classes": [],
+                "layout": {
+                  "x": 200,
+                  "y": 197.8,
+                  "width": 800,
+                  "height": 19
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "center",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Discover the best solution for your needs with our innovative product.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 70
+                    },
+                    "layout": {
+                      "x": 355.2,
+                      "y": 197.8,
+                      "width": 489.6,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "inline-block",
+                "tag": "img",
+                "selector": "img.product-image",
+                "classes": [
+                  "product-image"
+                ],
+                "layout": {
+                  "x": 420,
+                  "y": 252.8,
+                  "width": 360,
+                  "height": 240
+                },
+                "computed": {
+                  "display": "inline-block",
+                  "line_height": 0,
+                  "text_align": "center",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": 400,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "given_width": 360,
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 20,
+                    "right": 0,
+                    "bottom": 20,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "_cssPropertiesComplete": true
+                },
+                "children": []
+              },
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p:nth-of-type(2)",
+                "classes": [],
+                "layout": {
+                  "x": 200,
+                  "y": 532.8,
+                  "width": 800,
+                  "height": 19
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "center",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 16,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Join thousands of satisfied customers and experience the difference.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 68
+                    },
+                    "layout": {
+                      "x": 356.5,
+                      "y": 532.8,
+                      "width": 486.9,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "inline-block",
+                "tag": "a",
+                "selector": "a.cta-button",
+                "classes": [
+                  "cta-button"
+                ],
+                "layout": {
+                  "x": 520,
+                  "y": 577.8,
+                  "width": 160,
+                  "height": 41
+                },
+                "computed": {
+                  "display": "inline-block",
+                  "line_height": 0,
+                  "text_align": "center",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "given_width": 120,
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 10,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 10,
+                    "right": 20,
+                    "bottom": 10,
+                    "left": 20
+                  },
+                  "borderWidth": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "borderColor": {
+                    "top": "rgba(0, 0, 0, 0.00)",
+                    "right": "rgba(0, 0, 0, 0.00)",
+                    "bottom": "rgba(0, 0, 0, 0.00)",
+                    "left": "rgba(0, 0, 0, 0.00)"
+                  },
+                  "borderRadius": {
+                    "topLeft": 5,
+                    "topRight": 5,
+                    "bottomRight": 5,
+                    "bottomLeft": 5
+                  },
+                  "backgroundColor": "rgba(0, 123, 255, 1.00)",
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 18,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(255, 255, 255, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Get Started",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 11
+                    },
+                    "layout": {
+                      "x": 554,
+                      "y": 587.8,
+                      "width": 92.1,
+                      "height": 21
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "footer",
+            "selector": "footer",
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 658.8,
+              "width": 1200,
+              "height": 39
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "center",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "padding": {
+                "top": 10,
+                "right": 10,
+                "bottom": 10,
+                "left": 10
+              },
+              "backgroundColor": "rgba(52, 58, 64, 1.00)",
+              "font": {
+                "family": "sans-serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(255, 255, 255, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "© 2025 Simple Landing Page. All rights reserved.",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 49
+                },
+                "layout": {
+                  "x": 425.5,
+                  "y": 668.8,
+                  "width": 349.1,
+                  "height": 18
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}

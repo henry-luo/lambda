@@ -9,7 +9,7 @@ const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 
-async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
+async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false, platform = null) {
     console.log(`🔍 Checking layout extraction for: ${htmlFilePath}`);
 
     // Determine output file path first
@@ -17,8 +17,11 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
     const ext = htmlFilePath.endsWith('.htm') && !htmlFilePath.endsWith('.html') ? '.htm' : '.html';
     const baseName = path.basename(htmlFilePath, ext);
     // Write directly to flat reference directory (combined structure)
+    // If platform is specified, add platform suffix to filename (e.g., test_name.linux.json)
     const outputDir = path.join(__dirname, 'reference');
-    const outputFile = path.join(outputDir, `${baseName}.json`);
+    const outputFile = platform 
+        ? path.join(outputDir, `${baseName}.${platform}.json`)
+        : path.join(outputDir, `${baseName}.json`);
 
     // Check if output file already exists (unless force regeneration is requested)
     if (!forceRegenerate) {
@@ -581,8 +584,11 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
     }
 }
 
-async function extractAllTestFiles(category = null, forceRegenerate = false, includeCss21 = false) {
+async function extractAllTestFiles(category = null, forceRegenerate = false, includeCss21 = false, platform = null) {
     console.log('🔍 Scanning for test HTML files...');
+    if (platform) {
+        console.log(`📦 Platform-specific reference: ${platform}`);
+    }
 
     const dataDir = path.join(__dirname, 'data');
 
@@ -657,7 +663,7 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
         console.log(`\n📄 Processing: ${fileInfo.category}/${fileInfo.file}`);
 
         try {
-            const result = await extractLayoutFromFile(fileInfo.path, forceRegenerate);
+            const result = await extractLayoutFromFile(fileInfo.path, forceRegenerate, platform);
             const wasSkipped = result._wasSkipped || false;
             delete result._wasSkipped; // Clean up the flag
 
@@ -751,6 +757,7 @@ async function main() {
     let showHelp = false;
     let forceRegenerate = false;
     let includeCss21 = false;
+    let platform = null;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -763,6 +770,14 @@ async function main() {
             forceRegenerate = true;
         } else if (arg === '--include-css21') {
             includeCss21 = true;
+        } else if (arg === '--platform' || arg === '-p') {
+            platform = args[++i];
+            // Validate platform value
+            const validPlatforms = ['linux', 'darwin', 'win32'];
+            if (!validPlatforms.includes(platform)) {
+                console.error(`❌ Invalid platform: ${platform}. Valid values: ${validPlatforms.join(', ')}`);
+                process.exit(1);
+            }
         } else if (arg.endsWith('.html') || arg.endsWith('.htm')) {
             singleFile = arg;
         } else {
@@ -777,6 +792,8 @@ Usage: node extract_browser_references.js [options] [html_file]
 
 Options:
   --category, -c <name>   Extract only from specific category (auto-discovered from data/ directory)
+  --platform, -p <name>   Generate platform-specific reference (linux, darwin, win32)
+                          Output: <test_name>.<platform>.json (e.g., test_name.linux.json)
   --force, -f             Force regeneration of existing reference files
   --include-css21         Include css2.1 test suite (excluded by default)
   --help, -h              Show this help message
@@ -787,13 +804,16 @@ Arguments:
 Examples:
   node extract_browser_references.js                                    # Extract all test files (excludes css2.1)
   node extract_browser_references.js --category baseline                # Extract only baseline tests
+  node extract_browser_references.js --platform linux --category baseline  # Extract baseline as Linux-specific
   node extract_browser_references.js --include-css21                    # Extract all including css2.1 suite
   node extract_browser_references.js --force                           # Force regenerate all references
   node extract_browser_references.js data/basic/flex_001.html           # Extract single .html file
   node extract_browser_references.js data/css2.1/blocks-001.htm         # Extract single .htm file
+  node extract_browser_references.js --platform linux data/baseline/test.html  # Single file, Linux-specific
 
 Generated files:
-  reference/<test_name>.json                                # Individual reference files (flat structure)
+  reference/<test_name>.json                                # Generic reference files
+  reference/<test_name>.<platform>.json                     # Platform-specific reference files
 
 Note: By default, existing reference files are skipped. Use --force to regenerate them.
       The css2.1 test suite is excluded by default due to its size. Use --include-css21 to include it.
@@ -817,8 +837,11 @@ Note: By default, existing reference files are skipped. Use --force to regenerat
             }
 
             console.log(`📍 Resolved path: ${resolvedPath}`);
+            if (platform) {
+                console.log(`📦 Platform-specific reference: ${platform}`);
+            }
             await fs.access(resolvedPath);
-            const result = await extractLayoutFromFile(resolvedPath, forceRegenerate);
+            const result = await extractLayoutFromFile(resolvedPath, forceRegenerate, platform);
 
             // Count all nodes in tree structure (elements and text nodes)
             const countTreeNodes = (node) => {
@@ -837,7 +860,7 @@ Note: By default, existing reference files are skipped. Use --force to regenerat
             console.log(`✅ Reference JSON created with ${nodeCount} nodes in tree structure`);
         } else {
             // Batch mode
-            await extractAllTestFiles(category, forceRegenerate, includeCss21);
+            await extractAllTestFiles(category, forceRegenerate, includeCss21, platform);
             console.log('\n🎉 Batch extraction completed!');
         }
 
