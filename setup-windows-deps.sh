@@ -1055,6 +1055,16 @@ if command_exists ccache; then
     else
         echo "✅ ccache already configured in ~/.bashrc"
     fi
+
+    # Add /mingw64/bin to PATH if not already present (needed for runtime DLLs)
+    if ! grep -q "export PATH=\"/mingw64/bin:\$PATH\"" ~/.bashrc 2>/dev/null; then
+        echo "" >> ~/.bashrc
+        echo "# Add MINGW64 binaries to PATH for lambda.exe runtime DLLs" >> ~/.bashrc
+        echo "export PATH=\"/mingw64/bin:\$PATH\"" >> ~/.bashrc
+        echo "✅ Added /mingw64/bin to PATH in ~/.bashrc"
+    else
+        echo "✅ /mingw64/bin already in PATH"
+    fi
 else
     echo "⚠️  ccache: not found"
 fi
