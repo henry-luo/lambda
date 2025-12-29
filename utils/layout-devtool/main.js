@@ -100,6 +100,11 @@ class LayoutDevTool {
       return await this.readHtmlTreeFile();
     });
 
+    // Get project root path
+    ipcMain.handle('get-project-root', async () => {
+      return this.projectRoot;
+    });
+
     // Get recent tests
     ipcMain.handle('get-recent-tests', async () => {
       return this.recentTests;

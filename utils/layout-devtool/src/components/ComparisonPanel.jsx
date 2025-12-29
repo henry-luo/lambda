@@ -115,9 +115,9 @@ const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRender
   }
 
   async function getAbsolutePath(relativePath) {
-    // In a real implementation, this would come from the main process
-    // For now, construct it based on the known project structure
-    return `/Users/henryluo/Projects/Jubily/${relativePath}`;
+    // Get the project root from the main process
+    const projectRoot = await window.electronAPI.getProjectRoot();
+    return `${projectRoot}/${relativePath}`;
   }
 
   function handleMouseDown(e) {
