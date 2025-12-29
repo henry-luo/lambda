@@ -332,7 +332,7 @@ clean-tree-sitter-minimal:
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
 	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal \
-	    capture-layout test-layout layout count-loc tidy-printf
+	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile
 
 # Help target - shows available commands
 help:
@@ -414,6 +414,8 @@ help:
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo "  count-loc     - Count lines of code in the repository"
+	@echo "  bench-compile - Run C/C++ compilation performance benchmark"
+	@echo "                  Tests single-file, template, multi-file, and full Lambda builds"
 	@echo "  test-layout              - Run Lambda CSS layout integration tests (all suites)"
 	@echo "                             Uses Lambda CSS engine (custom CSS cascade and layout)"
 	@echo "                             Usage: make test-layout suite=baseline (run specific suite)"
@@ -1727,6 +1729,11 @@ download:
 # Catch-all target to allow filenames as targets for download
 %:
 	@:
+
+# Run compilation performance benchmark
+bench-compile:
+	@echo "Running C/C++ compilation benchmark..."
+	@bash utils/benchmark_compile.sh
 
 # Count lines of code in the repository
 count-loc:

@@ -1,0 +1,43 @@
+=======================================================
+  Lambda C/C++ Compilation Benchmark - Quick Reference
+=======================================================
+
+YOUR DEVICE SCORE: 12,401ms
+Celeron N5095 @ 2.0GHz, 4 cores, 8GB RAM, SATA SSD
+
+COMPARISON TO OTHER HARDWARE:
+┌─────────────────────┬────────────┬──────────────┐
+│ Hardware            │ Score (ms) │ vs Yours     │
+├─────────────────────┼────────────┼──────────────┤
+│ Mac Mini M2         │    ~300    │  41x faster  │
+│ Mac Mini M1         │    ~400    │  31x faster  │
+│ Desktop i7-12700K   │    ~550    │  23x faster  │
+│ Laptop i5-1135G7    │    ~800    │  15x faster  │
+│ Your Celeron N5095  │  12,401    │  (baseline)  │
+└─────────────────────┴────────────┴──────────────┘
+
+LAMBDA BUILD TIMES:
+  Clean build:       2m47s  (167s)
+  Incremental:       6-11s  (with ccache)
+  Full test suite:   5-7 min
+
+OPTIMIZATIONS APPLIED:
+  ✅ Removed -v verbose flag  (54% faster)
+  ✅ Added ccache             (31-58x faster incrementals)
+  ✅ Parallel builds (-j4)
+  ✅ /mingw64/bin in PATH
+
+TO RUN BENCHMARK:
+  make bench-compile
+  (or ./utils/benchmark_compile.sh)
+
+TO SHARE WITH OTHERS:
+  Send them utils/benchmark_compile.sh to run on their machine
+  Compare "Total Score" numbers
+
+BENCHMARK BREAKDOWN:
+  Simple C++:         1,547ms
+  Template C++:       1,601ms
+  Multi-file:         9,253ms
+  
+Full results: BENCHMARK_RESULTS.md
