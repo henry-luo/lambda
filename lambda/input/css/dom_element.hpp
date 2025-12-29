@@ -91,6 +91,13 @@ typedef struct TableProp TableProp;
 typedef struct FormControlProp FormControlProp;
 typedef struct ViewBlock ViewBlock;
 
+// CSS Custom Property (CSS Variable) storage
+struct CssCustomProp {
+    const char* name;       // Variable name (e.g., "--primary-color")
+    const CssValue* value;  // Variable value
+    CssCustomProp* next;    // Linked list for simple storage
+};
+
 /**
  * DomElement - DOM element with integrated CSS styling
  *
@@ -129,6 +136,9 @@ struct DomElement : DomNode {
 
     // document reference (provides Arena and Input*)
     DomDocument* doc;            // Parent document (provides arena and input)
+
+    // CSS custom properties (CSS variables)
+    struct CssCustomProp* css_variables;  // Hashmap of --var-name: value
 
     // view related fields
     DisplayValue display;
@@ -173,7 +183,7 @@ struct DomElement : DomNode {
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
-        pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
+        pseudo_state(0), doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
         item_prop_type(ITEM_PROP_NONE), fi(nullptr) {}
 };
 
