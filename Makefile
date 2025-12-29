@@ -1509,11 +1509,13 @@ build-test: build-lambda-input
 #   make capture-layout suite=baseline           # captures only baseline category
 #   make capture-layout test=test-name force=1   # force regenerate a specific test
 #   make capture-layout suite=basic force=1      # force regenerate specific category
+#   make capture-layout suite=baseline platform=linux  # capture Linux-specific references
 # Note: Either test= or suite= is REQUIRED (no longer allows capturing all tests)
 capture-layout:
 	@echo "🧭 Capturing browser layout references..."
 	@TEST_VAR="$(or $(test),$(TEST))"; \
 	SUITE_VAR="$(or $(suite),$(SUITE))"; \
+	PLATFORM_VAR="$(or $(platform),$(PLATFORM))"; \
 	if [ -z "$$TEST_VAR" ] && [ -z "$$SUITE_VAR" ]; then \
 		echo ""; \
 		echo "❌ Error: Either test= or suite= parameter is required"; \
@@ -1521,13 +1523,16 @@ capture-layout:
 		echo "Usage:"; \
 		echo "  make capture-layout test=<test-name>     # Capture a specific test"; \
 		echo "  make capture-layout suite=<suite-name>   # Capture entire suite"; \
+		echo "  make capture-layout suite=baseline platform=linux  # Linux-specific refs"; \
 		echo ""; \
 		echo "Examples:"; \
 		echo "  make capture-layout test=basic-text-align"; \
 		echo "  make capture-layout suite=baseline"; \
 		echo "  make capture-layout test=table_007 force=1"; \
+		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
 		echo "Available suites: basic, baseline, css2.1, flex, grid, yoga"; \
+		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
 	fi; \
@@ -1542,6 +1547,11 @@ capture-layout:
 	    if [ -n "$$FORCE_VAR" ] && [ "$$FORCE_VAR" != "0" ]; then \
 	        FORCE_FLAG="--force"; \
 	        echo "🔄 Force regeneration enabled"; \
+	    fi; \
+	    PLATFORM_FLAG=""; \
+	    if [ -n "$$PLATFORM_VAR" ]; then \
+	        PLATFORM_FLAG="--platform $$PLATFORM_VAR"; \
+	        echo "📦 Platform-specific reference: $$PLATFORM_VAR"; \
 	    fi; \
 	    if [ -n "$$TEST_VAR" ]; then \
 	        case "$$TEST_VAR" in \
@@ -1569,10 +1579,10 @@ capture-layout:
 	            ;; \
 	        esac; \
 	        echo "📄 Capturing single test: $$TEST_FILE"; \
-	        node extract_browser_references.js $$FORCE_FLAG $$TEST_FILE; \
+	        node extract_browser_references.js $$FORCE_FLAG $$PLATFORM_FLAG $$TEST_FILE; \
 	    else \
 	        echo "📂 Capturing suite: $$SUITE_VAR"; \
-	        node extract_browser_references.js $$FORCE_FLAG --category $$SUITE_VAR; \
+	        node extract_browser_references.js $$FORCE_FLAG $$PLATFORM_FLAG --category $$SUITE_VAR; \
 	    fi; \
 	else \
 	    echo "❌ Error: Layout directory not found at test/layout"; \

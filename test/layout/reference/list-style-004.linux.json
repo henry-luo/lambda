@@ -1,0 +1,208 @@
+{
+  "test_file": "list-style-004.htm",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 173
+    },
+    "computed": {
+      "display": "block",
+      "flexWrap": "nowrap",
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 50,
+          "y": 50,
+          "width": 1100,
+          "height": 73
+        },
+        "computed": {
+          "display": "block",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 50,
+            "right": 50,
+            "bottom": 50,
+            "left": 50
+          },
+          "padding": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "font": {
+            "family": "Times",
+            "size": 16,
+            "style": "normal",
+            "weight": "400"
+          },
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "p",
+            "selector": "p",
+            "classes": [],
+            "layout": {
+              "x": 50,
+              "y": 50,
+              "width": 1100,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 16,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Test passes if the first line of text has a square bullet and the second line of text flows below that square bullet.",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 117
+                },
+                "layout": {
+                  "x": 50,
+                  "y": 50,
+                  "width": 708.2,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "list-item",
+            "tag": "div",
+            "selector": "div",
+            "classes": [],
+            "layout": {
+              "x": 50,
+              "y": 85,
+              "width": 1100,
+              "height": 38
+            },
+            "computed": {
+              "display": "list-item",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "This is the first line of text.",
+                "text_info": {
+                  "start_index": 13,
+                  "length": 31
+                },
+                "layout": {
+                  "x": 59.7,
+                  "y": 85,
+                  "width": 173.9,
+                  "height": 18
+                }
+              },
+              {
+                "type": "br",
+                "tag": "br",
+                "selector": "br",
+                "layout": {
+                  "x": 233.5,
+                  "y": 85,
+                  "width": 0,
+                  "height": 19
+                }
+              },
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "This is the second line of text.\n        ",
+                "text_info": {
+                  "start_index": 13,
+                  "length": 41
+                },
+                "layout": {
+                  "x": 50,
+                  "y": 104,
+                  "width": 196.5,
+                  "height": 18
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}

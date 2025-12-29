@@ -11,6 +11,10 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { spawn } = require('child_process');
+const os = require('os');
+
+// Get current platform for loading platform-specific references
+const CURRENT_PLATFORM = os.platform(); // 'linux', 'darwin', or 'win32'
 
 class RadiantLayoutTester {
     constructor(options = {}) {
@@ -154,9 +158,26 @@ class RadiantLayoutTester {
 
     /**
      * Load browser reference data
+     * First tries platform-specific reference (e.g., test_name.linux.json),
+     * then falls back to generic reference (test_name.json)
      */
     async loadBrowserReference(testName, category) {
-        // First try flat directory structure (merged references)
+        // Try platform-specific reference first (e.g., test_name.linux.json)
+        const platformRefFile = path.join(this.referenceDir, `${testName}.${CURRENT_PLATFORM}.json`);
+        try {
+            const content = await fs.readFile(platformRefFile, 'utf8');
+            if (this.verbose) {
+                console.log(`   📦 Using platform-specific reference: ${testName}.${CURRENT_PLATFORM}.json`);
+            }
+            return JSON.parse(content);
+        } catch (error) {
+            if (error.code !== 'ENOENT') {
+                throw new Error(`Failed to load platform reference: ${error.message}`);
+            }
+            // Platform-specific reference not found, try generic reference
+        }
+
+        // Try flat directory structure (merged references)
         const flatRefFile = path.join(this.referenceDir, `${testName}.json`);
         try {
             const content = await fs.readFile(flatRefFile, 'utf8');

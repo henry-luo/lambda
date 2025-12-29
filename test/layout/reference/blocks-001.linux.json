@@ -1,0 +1,339 @@
+{
+  "test_file": "blocks-001.htm",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 154
+    },
+    "computed": {
+      "display": "block",
+      "flexWrap": "nowrap",
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 8,
+          "y": 16,
+          "width": 1184,
+          "height": 130
+        },
+        "computed": {
+          "display": "block",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 16,
+            "right": 8,
+            "bottom": 8,
+            "left": 8
+          },
+          "padding": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "font": {
+            "family": "Times",
+            "size": 16,
+            "style": "normal",
+            "weight": "400"
+          },
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "p",
+            "selector": "p",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 16,
+              "width": 1184,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 16,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Test passes if there is no red visible on the page.",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 51
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 16,
+                  "width": 308.9,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div:nth-of-type(1)",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 51,
+              "width": 1184,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Filler Text",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 11
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 51,
+                  "width": 67,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div:nth-of-type(2)",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 70,
+              "width": 1184,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Filler Text",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 11
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 70,
+                  "width": 67,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div:nth-of-type(3)",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 89,
+              "width": 1184,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Filler Text",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 11
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 89,
+                  "width": 67,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div:nth-of-type(4)",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 108,
+              "width": 1184,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Filler Text",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 11
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 108,
+                  "width": 67,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div:nth-of-type(5)",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 127,
+              "width": 1184,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "color": "rgba(255, 0, 0, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Filler Text",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 11
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 127,
+                  "width": 67,
+                  "height": 18
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}

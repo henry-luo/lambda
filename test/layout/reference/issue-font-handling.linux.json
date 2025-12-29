@@ -1,0 +1,1878 @@
+{
+  "test_file": "issue-font-handling.html",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 1321.4
+    },
+    "computed": {
+      "display": "block",
+      "flexWrap": "nowrap",
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 180,
+          "y": 40,
+          "width": 840,
+          "height": 1241.4
+        },
+        "computed": {
+          "display": "block",
+          "line_height": 0,
+          "text_align": "left",
+          "text_indent": 0,
+          "min_width": -1,
+          "max_width": 800,
+          "min_height": -1,
+          "max_height": -1,
+          "box_sizing": "content-box",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 40,
+            "right": 180,
+            "bottom": 40,
+            "left": 180
+          },
+          "padding": {
+            "top": 20,
+            "right": 20,
+            "bottom": 20,
+            "left": 20
+          },
+          "font": {
+            "family": "serif",
+            "size": 16,
+            "style": "normal",
+            "weight": "normal"
+          },
+          "color": "rgba(51, 51, 51, 1.00)",
+          "opacity": 0,
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "h1",
+            "selector": "h1",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 81.4,
+              "width": 800,
+              "height": 44.8
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 21.44,
+                "right": 0,
+                "bottom": 30,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 28,
+                "style": "normal",
+                "weight": "bold"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Font Handling Issues Test Page",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 30
+                },
+                "layout": {
+                  "x": 200,
+                  "y": 87.8,
+                  "width": 421.3,
+                  "height": 32
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "p",
+            "selector": "p",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 156.2,
+              "width": 800,
+              "height": 25.6
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 16,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "font": {
+                "family": "serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "This page tests three font-related issues that were fixed in the Radiant layout engine.",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 87
+                },
+                "layout": {
+                  "x": 200,
+                  "y": 159.5,
+                  "width": 540.6,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "h2",
+            "selector": "h2:nth-of-type(1)",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 211.8,
+              "width": 800,
+              "height": 38
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 14,
+                "right": 0,
+                "bottom": 19.92,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 5,
+                "left": 0
+              },
+              "borderWidth": {
+                "top": 0,
+                "right": 0,
+                "bottom": 1,
+                "left": 0
+              },
+              "borderColor": {
+                "top": "rgba(0, 0, 0, 0.00)",
+                "right": "rgba(0, 0, 0, 0.00)",
+                "bottom": "rgba(204, 204, 204, 1.00)",
+                "left": "rgba(0, 0, 0, 0.00)"
+              },
+              "borderRadius": {
+                "topLeft": 0,
+                "topRight": 0,
+                "bottomRight": 0,
+                "bottomLeft": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 20,
+                "style": "normal",
+                "weight": "bold"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Issue 1: TTC (TrueType Collection) Bold Font",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 44
+                },
+                "layout": {
+                  "x": 200,
+                  "y": 215.8,
+                  "width": 427,
+                  "height": 23
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div.test-box:nth-of-type(1)",
+            "classes": [
+              "test-box"
+            ],
+            "layout": {
+              "x": 200,
+              "y": 269.8,
+              "width": 800,
+              "height": 131.2
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 10,
+                "left": 0
+              },
+              "padding": {
+                "top": 15,
+                "right": 15,
+                "bottom": 15,
+                "left": 15
+              },
+              "borderWidth": {
+                "top": 1,
+                "right": 1,
+                "bottom": 1,
+                "left": 1
+              },
+              "borderColor": {
+                "top": "rgba(221, 221, 221, 1.00)",
+                "right": "rgba(221, 221, 221, 1.00)",
+                "bottom": "rgba(221, 221, 221, 1.00)",
+                "left": "rgba(221, 221, 221, 1.00)"
+              },
+              "borderRadius": {
+                "topLeft": 4,
+                "topRight": 4,
+                "bottomRight": 4,
+                "bottomLeft": 4
+              },
+              "backgroundColor": "rgba(245, 245, 245, 1.00)",
+              "font": {
+                "family": "serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p.ttc-bold-test:nth-of-type(1)",
+                "classes": [
+                  "ttc-bold-test"
+                ],
+                "layout": {
+                  "x": 216,
+                  "y": 301.8,
+                  "width": 768,
+                  "height": 28.8
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 16,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 18,
+                    "style": "normal",
+                    "weight": "bold"
+                  },
+                  "color": "rgba(0, 0, 0, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "This text should be rendered in Helvetica Bold (weight 700).",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 60
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 305.7,
+                      "width": 510.3,
+                      "height": 21
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p.label:nth-of-type(2)",
+                "classes": [
+                  "label"
+                ],
+                "layout": {
+                  "x": 216,
+                  "y": 346.6,
+                  "width": 768,
+                  "height": 22.4
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "serif",
+                    "size": 14,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(102, 102, 102, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Tests: TTC font parsing - table offsets should be absolute, not relative.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 73
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 349.3,
+                      "width": 394.5,
+                      "height": 16
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "h2",
+            "selector": "h2:nth-of-type(2)",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 431,
+              "width": 800,
+              "height": 38
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 20,
+                "right": 0,
+                "bottom": 19.92,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 5,
+                "left": 0
+              },
+              "borderWidth": {
+                "top": 0,
+                "right": 0,
+                "bottom": 1,
+                "left": 0
+              },
+              "borderColor": {
+                "top": "rgba(0, 0, 0, 0.00)",
+                "right": "rgba(0, 0, 0, 0.00)",
+                "bottom": "rgba(204, 204, 204, 1.00)",
+                "left": "rgba(0, 0, 0, 0.00)"
+              },
+              "borderRadius": {
+                "topLeft": 0,
+                "topRight": 0,
+                "bottomRight": 0,
+                "bottomLeft": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 20,
+                "style": "normal",
+                "weight": "bold"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Issue 2: Multi-Word Font Family Names",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 37
+                },
+                "layout": {
+                  "x": 200,
+                  "y": 435,
+                  "width": 373.4,
+                  "height": 23
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div.test-box:nth-of-type(2)",
+            "classes": [
+              "test-box"
+            ],
+            "layout": {
+              "x": 200,
+              "y": 488.9,
+              "width": 800,
+              "height": 131.2
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 10,
+                "left": 0
+              },
+              "padding": {
+                "top": 15,
+                "right": 15,
+                "bottom": 15,
+                "left": 15
+              },
+              "borderWidth": {
+                "top": 1,
+                "right": 1,
+                "bottom": 1,
+                "left": 1
+              },
+              "borderColor": {
+                "top": "rgba(221, 221, 221, 1.00)",
+                "right": "rgba(221, 221, 221, 1.00)",
+                "bottom": "rgba(221, 221, 221, 1.00)",
+                "left": "rgba(221, 221, 221, 1.00)"
+              },
+              "borderRadius": {
+                "topLeft": 4,
+                "topRight": 4,
+                "bottomRight": 4,
+                "bottomLeft": 4
+              },
+              "backgroundColor": "rgba(245, 245, 245, 1.00)",
+              "font": {
+                "family": "serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p.multiword-font-test:nth-of-type(1)",
+                "classes": [
+                  "multiword-font-test"
+                ],
+                "layout": {
+                  "x": 216,
+                  "y": 520.9,
+                  "width": 768,
+                  "height": 28.8
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 16,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "serif",
+                    "size": 18,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(51, 51, 51, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "This text uses \"Linux Libertine\" or \"Times New Roman\" font family.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 66
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 524.8,
+                      "width": 498.8,
+                      "height": 21
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p.label:nth-of-type(2)",
+                "classes": [
+                  "label"
+                ],
+                "layout": {
+                  "x": 216,
+                  "y": 565.7,
+                  "width": 768,
+                  "height": 22.4
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "serif",
+                    "size": 14,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(102, 102, 102, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Tests: CSS parser should combine IDENT tokens for unquoted multi-word font names.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 81
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 568.4,
+                      "width": 487.4,
+                      "height": 16
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "h2",
+            "selector": "h2:nth-of-type(3)",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 650.1,
+              "width": 800,
+              "height": 38
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 20,
+                "right": 0,
+                "bottom": 19.92,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 5,
+                "left": 0
+              },
+              "borderWidth": {
+                "top": 0,
+                "right": 0,
+                "bottom": 1,
+                "left": 0
+              },
+              "borderColor": {
+                "top": "rgba(0, 0, 0, 0.00)",
+                "right": "rgba(0, 0, 0, 0.00)",
+                "bottom": "rgba(204, 204, 204, 1.00)",
+                "left": "rgba(0, 0, 0, 0.00)"
+              },
+              "borderRadius": {
+                "topLeft": 0,
+                "topRight": 0,
+                "bottomRight": 0,
+                "bottomLeft": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 20,
+                "style": "normal",
+                "weight": "bold"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Issue 3: Font Family Fallback Resolution",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 40
+                },
+                "layout": {
+                  "x": 200,
+                  "y": 654.1,
+                  "width": 386.8,
+                  "height": 23
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div.test-box:nth-of-type(3)",
+            "classes": [
+              "test-box"
+            ],
+            "layout": {
+              "x": 200,
+              "y": 708,
+              "width": 800,
+              "height": 131.2
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 10,
+                "left": 0
+              },
+              "padding": {
+                "top": 15,
+                "right": 15,
+                "bottom": 15,
+                "left": 15
+              },
+              "borderWidth": {
+                "top": 1,
+                "right": 1,
+                "bottom": 1,
+                "left": 1
+              },
+              "borderColor": {
+                "top": "rgba(221, 221, 221, 1.00)",
+                "right": "rgba(221, 221, 221, 1.00)",
+                "bottom": "rgba(221, 221, 221, 1.00)",
+                "left": "rgba(221, 221, 221, 1.00)"
+              },
+              "borderRadius": {
+                "topLeft": 4,
+                "topRight": 4,
+                "bottomRight": 4,
+                "bottomLeft": 4
+              },
+              "backgroundColor": "rgba(245, 245, 245, 1.00)",
+              "font": {
+                "family": "serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p.fallback-test:nth-of-type(1)",
+                "classes": [
+                  "fallback-test"
+                ],
+                "layout": {
+                  "x": 216,
+                  "y": 740,
+                  "width": 768,
+                  "height": 28.8
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 16,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 18,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(51, 51, 51, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "This text should use Georgia (third in the fallback list), not the first unavailable font.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 90
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 743.9,
+                      "width": 658.5,
+                      "height": 21
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p.label:nth-of-type(2)",
+                "classes": [
+                  "label"
+                ],
+                "layout": {
+                  "x": 216,
+                  "y": 784.8,
+                  "width": 768,
+                  "height": 22.4
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "serif",
+                    "size": 14,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(102, 102, 102, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Tests: Font resolver should check availability and use first available font from the list.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 90
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 787.5,
+                      "width": 481.2,
+                      "height": 16
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "h2",
+            "selector": "h2:nth-of-type(4)",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 869.2,
+              "width": 800,
+              "height": 38
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 20,
+                "right": 0,
+                "bottom": 19.92,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 5,
+                "left": 0
+              },
+              "borderWidth": {
+                "top": 0,
+                "right": 0,
+                "bottom": 1,
+                "left": 0
+              },
+              "borderColor": {
+                "top": "rgba(0, 0, 0, 0.00)",
+                "right": "rgba(0, 0, 0, 0.00)",
+                "bottom": "rgba(204, 204, 204, 1.00)",
+                "left": "rgba(0, 0, 0, 0.00)"
+              },
+              "borderRadius": {
+                "topLeft": 0,
+                "topRight": 0,
+                "bottomRight": 0,
+                "bottomLeft": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 20,
+                "style": "normal",
+                "weight": "bold"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Bonus: Modern RGB Color Syntax",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 30
+                },
+                "layout": {
+                  "x": 200,
+                  "y": 873.2,
+                  "width": 325.6,
+                  "height": 23
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div.test-box:nth-of-type(4)",
+            "classes": [
+              "test-box"
+            ],
+            "layout": {
+              "x": 200,
+              "y": 927.1,
+              "width": 800,
+              "height": 128
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 10,
+                "left": 0
+              },
+              "padding": {
+                "top": 15,
+                "right": 15,
+                "bottom": 15,
+                "left": 15
+              },
+              "borderWidth": {
+                "top": 1,
+                "right": 1,
+                "bottom": 1,
+                "left": 1
+              },
+              "borderColor": {
+                "top": "rgba(221, 221, 221, 1.00)",
+                "right": "rgba(221, 221, 221, 1.00)",
+                "bottom": "rgba(221, 221, 221, 1.00)",
+                "left": "rgba(221, 221, 221, 1.00)"
+              },
+              "borderRadius": {
+                "topLeft": 4,
+                "topRight": 4,
+                "bottomRight": 4,
+                "bottomLeft": 4
+              },
+              "backgroundColor": "rgba(245, 245, 245, 1.00)",
+              "font": {
+                "family": "serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p:nth-of-type(1)",
+                "classes": [],
+                "layout": {
+                  "x": 216,
+                  "y": 959.1,
+                  "width": 768,
+                  "height": 25.6
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 16,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(51, 51, 51, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "This paragraph contains a ",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 26
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 962.4,
+                      "width": 168.9,
+                      "height": 18
+                    }
+                  },
+                  {
+                    "type": "inline",
+                    "tag": "a",
+                    "selector": "a",
+                    "layout": {
+                      "x": 384,
+                      "y": 962.1,
+                      "width": 229,
+                      "height": 18
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "cursor": "pointer",
+                      "color": "#ffb29108",
+                      "font": {
+                        "family": "serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "normal",
+                        "decoration": "underline"
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "link with modern rgb() color syntax",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 35
+                        },
+                        "layout": {
+                          "x": 384.9,
+                          "y": 962.4,
+                          "width": 228.9,
+                          "height": 18
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": " using space-separated values.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 30
+                    },
+                    "layout": {
+                      "x": 613.9,
+                      "y": 962.4,
+                      "width": 192.9,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "p",
+                "selector": "p.label:nth-of-type(2)",
+                "classes": [
+                  "label"
+                ],
+                "layout": {
+                  "x": 216,
+                  "y": 1000.7,
+                  "width": 768,
+                  "height": 22.4
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 16,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "serif",
+                    "size": 14,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(102, 102, 102, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Tests: color: rgb(8 145 178) should render as cyan/teal, not black.",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 67
+                    },
+                    "layout": {
+                      "x": 216,
+                      "y": 1003.4,
+                      "width": 367.6,
+                      "height": 16
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "h2",
+            "selector": "h2:nth-of-type(5)",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 1085.1,
+              "width": 800,
+              "height": 38
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 20,
+                "right": 0,
+                "bottom": 19.92,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 5,
+                "left": 0
+              },
+              "borderWidth": {
+                "top": 0,
+                "right": 0,
+                "bottom": 1,
+                "left": 0
+              },
+              "borderColor": {
+                "top": "rgba(0, 0, 0, 0.00)",
+                "right": "rgba(0, 0, 0, 0.00)",
+                "bottom": "rgba(204, 204, 204, 1.00)",
+                "left": "rgba(0, 0, 0, 0.00)"
+              },
+              "borderRadius": {
+                "topLeft": 0,
+                "topRight": 0,
+                "bottomRight": 0,
+                "bottomLeft": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 20,
+                "style": "normal",
+                "weight": "bold"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Expected Results",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 16
+                },
+                "layout": {
+                  "x": 200,
+                  "y": 1089.1,
+                  "width": 166.8,
+                  "height": 23
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "ul",
+            "selector": "ul",
+            "classes": [],
+            "layout": {
+              "x": 200,
+              "y": 1143,
+              "width": 800,
+              "height": 102.4
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 16,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 40
+              },
+              "font": {
+                "family": "serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "color": "rgba(51, 51, 51, 1.00)",
+              "opacity": 0,
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "list-item",
+                "tag": "li",
+                "selector": "li:nth-of-type(1)",
+                "classes": [],
+                "layout": {
+                  "x": 240,
+                  "y": 1143,
+                  "width": 760,
+                  "height": 25.6
+                },
+                "computed": {
+                  "display": "list-item",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "font": {
+                    "family": "serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(51, 51, 51, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "inline",
+                    "tag": "strong",
+                    "selector": "strong",
+                    "layout": {
+                      "x": 240,
+                      "y": 1146,
+                      "width": 52,
+                      "height": 18
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "color": "#ff333333",
+                      "font": {
+                        "family": "serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "bold",
+                        "decoration": "none"
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "Issue 1:",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 8
+                        },
+                        "layout": {
+                          "x": 240,
+                          "y": 1146.3,
+                          "width": 52,
+                          "height": 18
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": " Bold text should appear noticeably heavier than regular text",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 61
+                    },
+                    "layout": {
+                      "x": 292,
+                      "y": 1146.3,
+                      "width": 387.2,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "list-item",
+                "tag": "li",
+                "selector": "li:nth-of-type(2)",
+                "classes": [],
+                "layout": {
+                  "x": 240,
+                  "y": 1168.6,
+                  "width": 760,
+                  "height": 25.6
+                },
+                "computed": {
+                  "display": "list-item",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "font": {
+                    "family": "serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(51, 51, 51, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "inline",
+                    "tag": "strong",
+                    "selector": "strong",
+                    "layout": {
+                      "x": 240,
+                      "y": 1171.6,
+                      "width": 52,
+                      "height": 18
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "color": "#ff333333",
+                      "font": {
+                        "family": "serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "bold",
+                        "decoration": "none"
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "Issue 2:",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 8
+                        },
+                        "layout": {
+                          "x": 240,
+                          "y": 1171.9,
+                          "width": 52,
+                          "height": 18
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": " Text should render in a serif font (Times New Roman or similar)",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 64
+                    },
+                    "layout": {
+                      "x": 292,
+                      "y": 1171.9,
+                      "width": 418.7,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "list-item",
+                "tag": "li",
+                "selector": "li:nth-of-type(3)",
+                "classes": [],
+                "layout": {
+                  "x": 240,
+                  "y": 1194.2,
+                  "width": 760,
+                  "height": 25.6
+                },
+                "computed": {
+                  "display": "list-item",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "font": {
+                    "family": "serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(51, 51, 51, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "inline",
+                    "tag": "strong",
+                    "selector": "strong",
+                    "layout": {
+                      "x": 240,
+                      "y": 1197.2,
+                      "width": 52,
+                      "height": 18
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "color": "#ff333333",
+                      "font": {
+                        "family": "serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "bold",
+                        "decoration": "none"
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "Issue 3:",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 8
+                        },
+                        "layout": {
+                          "x": 240,
+                          "y": 1197.5,
+                          "width": 52,
+                          "height": 18
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": " Text should render in Georgia, not Arial",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 41
+                    },
+                    "layout": {
+                      "x": 292,
+                      "y": 1197.5,
+                      "width": 260.3,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "list-item",
+                "tag": "li",
+                "selector": "li:nth-of-type(4)",
+                "classes": [],
+                "layout": {
+                  "x": 240,
+                  "y": 1219.8,
+                  "width": 760,
+                  "height": 25.6
+                },
+                "computed": {
+                  "display": "list-item",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "font": {
+                    "family": "serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "color": "rgba(51, 51, 51, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "inline",
+                    "tag": "strong",
+                    "selector": "strong",
+                    "layout": {
+                      "x": 240,
+                      "y": 1222.8,
+                      "width": 48,
+                      "height": 18
+                    },
+                    "computed": {
+                      "display": "inline",
+                      "color": "#ff333333",
+                      "font": {
+                        "family": "serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "bold",
+                        "decoration": "none"
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "Bonus:",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 6
+                        },
+                        "layout": {
+                          "x": 240,
+                          "y": 1223.1,
+                          "width": 48,
+                          "height": 18
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": " Links should appear in cyan/teal color (#0891b2)",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 49
+                    },
+                    "layout": {
+                      "x": 288,
+                      "y": 1223.1,
+                      "width": 319.6,
+                      "height": 18
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}

@@ -1,0 +1,318 @@
+{
+  "test_file": "white-space-collapsing-breaks-001.htm",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 91
+    },
+    "computed": {
+      "display": "block",
+      "flexWrap": "nowrap",
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 8,
+          "y": 16,
+          "width": 1184,
+          "height": 67
+        },
+        "computed": {
+          "display": "block",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 16,
+            "right": 8,
+            "bottom": 8,
+            "left": 8
+          },
+          "padding": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "font": {
+            "family": "Times",
+            "size": 16,
+            "style": "normal",
+            "weight": "400"
+          },
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "p",
+            "selector": "p",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 16,
+              "width": 1184,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 16,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "There must be a green box below and no red.",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 43
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 16,
+                  "width": 288.9,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div.control",
+            "classes": [
+              "control"
+            ],
+            "layout": {
+              "x": 8,
+              "y": 51,
+              "width": 1184,
+              "height": 32
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "given_height": 32,
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "backgroundColor": "rgba(255, 0, 0, 1.00)",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "div",
+                "selector": "div.cover",
+                "classes": [
+                  "cover"
+                ],
+                "layout": {
+                  "x": 8,
+                  "y": 51,
+                  "width": 1184,
+                  "height": 38
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "content-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "backgroundColor": "rgba(0, 128, 0, 1.00)",
+                  "font": {
+                    "family": "Times",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "400"
+                  },
+                  "color": "rgba(0, 128, 0, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "block",
+                    "tag": "div",
+                    "selector": "div.constraint",
+                    "classes": [
+                      "constraint"
+                    ],
+                    "layout": {
+                      "x": 8,
+                      "y": 51,
+                      "width": 0,
+                      "height": 38
+                    },
+                    "computed": {
+                      "display": "block",
+                      "line_height": 0,
+                      "text_align": "left",
+                      "text_indent": 0,
+                      "min_width": -1,
+                      "max_width": -1,
+                      "min_height": -1,
+                      "max_height": -1,
+                      "box_sizing": "content-box",
+                      "given_width": 0,
+                      "flexWrap": "nowrap",
+                      "font": {
+                        "family": "Times",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "400"
+                      },
+                      "color": "rgba(0, 128, 0, 1.00)",
+                      "opacity": 0,
+                      "_cssPropertiesComplete": true
+                    },
+                    "children": [
+                      {
+                        "type": "inline",
+                        "tag": "span",
+                        "selector": "span.nobr",
+                        "layout": {
+                          "x": 8,
+                          "y": 51,
+                          "width": 26,
+                          "height": 18
+                        },
+                        "computed": {
+                          "display": "inline",
+                          "color": "#ff008000"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "AA ",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 3
+                            },
+                            "layout": {
+                              "x": 8,
+                              "y": 51,
+                              "width": 26.1,
+                              "height": 18
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "BB\n      ",
+                        "text_info": {
+                          "start_index": 1,
+                          "length": 9
+                        },
+                        "layout": {
+                          "x": 8,
+                          "y": 70,
+                          "width": 21.3,
+                          "height": 18
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}

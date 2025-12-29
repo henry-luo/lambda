@@ -1,0 +1,249 @@
+{
+  "test_file": "inline-block-width-001-ref.htm",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 130
+    },
+    "computed": {
+      "display": "block",
+      "flexWrap": "nowrap",
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 8,
+          "y": 8,
+          "width": 1184,
+          "height": 114
+        },
+        "computed": {
+          "display": "block",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 8,
+            "right": 8,
+            "bottom": 8,
+            "left": 8
+          },
+          "padding": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "font": {
+            "family": "Times",
+            "size": 16,
+            "style": "normal",
+            "weight": "400"
+          },
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div",
+            "classes": [],
+            "layout": {
+              "x": 8,
+              "y": 8,
+              "width": 160,
+              "height": 114
+            },
+            "computed": {
+              "display": "block",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "content-box",
+              "given_width": 160,
+              "flexWrap": "nowrap",
+              "font": {
+                "family": "Times",
+                "size": 16,
+                "style": "normal",
+                "weight": "400"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "x",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 1
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 8,
+                  "width": 8,
+                  "height": 18
+                }
+              },
+              {
+                "type": "block",
+                "tag": "div",
+                "selector": "div",
+                "classes": [],
+                "layout": {
+                  "x": 8,
+                  "y": 27,
+                  "width": 160,
+                  "height": 76
+                },
+                "computed": {
+                  "display": "block",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "backgroundColor": "rgba(0, 128, 0, 1.00)",
+                  "font": {
+                    "family": "Times",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "400"
+                  },
+                  "color": "rgba(255, 255, 255, 1.00)",
+                  "opacity": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "This is some text that is ",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 26
+                    },
+                    "layout": {
+                      "x": 8,
+                      "y": 27,
+                      "width": 155.7,
+                      "height": 18
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "wider than 10em but has ",
+                    "text_info": {
+                      "start_index": 26,
+                      "length": 24
+                    },
+                    "layout": {
+                      "x": 8,
+                      "y": 46,
+                      "width": 157.4,
+                      "height": 18
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "no words wider than ",
+                    "text_info": {
+                      "start_index": 50,
+                      "length": 20
+                    },
+                    "layout": {
+                      "x": 8,
+                      "y": 65,
+                      "width": 135.1,
+                      "height": 18
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "10em.",
+                    "text_info": {
+                      "start_index": 70,
+                      "length": 5
+                    },
+                    "layout": {
+                      "x": 8,
+                      "y": 84,
+                      "width": 39.6,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "z",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 1
+                },
+                "layout": {
+                  "x": 8,
+                  "y": 103,
+                  "width": 7.1,
+                  "height": 18
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}

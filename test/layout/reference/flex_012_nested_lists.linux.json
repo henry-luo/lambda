@@ -1,0 +1,1885 @@
+{
+  "test_file": "flex_012_nested_lists.html",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 300
+    },
+    "computed": {
+      "display": "block",
+      "line_height": 0,
+      "text_align": "left",
+      "text_indent": 0,
+      "min_width": -1,
+      "max_width": -1,
+      "min_height": -1,
+      "max_height": -1,
+      "box_sizing": "border-box",
+      "flexWrap": "nowrap",
+      "margin": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "padding": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 0,
+          "y": 0,
+          "width": 1200,
+          "height": 300
+        },
+        "computed": {
+          "display": "block",
+          "line_height": 0,
+          "text_align": "left",
+          "text_indent": 0,
+          "min_width": -1,
+          "max_width": -1,
+          "min_height": -1,
+          "max_height": -1,
+          "box_sizing": "border-box",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "padding": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "font": {
+            "family": "sans-serif",
+            "size": 16,
+            "style": "normal",
+            "weight": "normal"
+          },
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div.container",
+            "classes": [
+              "container"
+            ],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 700,
+              "height": 300
+            },
+            "computed": {
+              "display": "flex",
+              "line_height": 0,
+              "text_align": "left",
+              "text_indent": 0,
+              "min_width": -1,
+              "max_width": -1,
+              "min_height": -1,
+              "max_height": -1,
+              "box_sizing": "border-box",
+              "given_width": 700,
+              "given_height": 300,
+              "flex_container": {
+                "direction": "row",
+                "wrap": "nowrap",
+                "justify": "flex-start",
+                "align_items": "stretch",
+                "align_content": "stretch",
+                "row_gap": 20,
+                "column_gap": 20
+              },
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "padding": {
+                "top": 15,
+                "right": 15,
+                "bottom": 15,
+                "left": 15
+              },
+              "borderWidth": {
+                "top": 2,
+                "right": 2,
+                "bottom": 2,
+                "left": 2
+              },
+              "borderColor": {
+                "top": "rgba(51, 51, 51, 1.00)",
+                "right": "rgba(51, 51, 51, 1.00)",
+                "bottom": "rgba(51, 51, 51, 1.00)",
+                "left": "rgba(51, 51, 51, 1.00)"
+              },
+              "borderRadius": {
+                "topLeft": 0,
+                "topRight": 0,
+                "bottomRight": 0,
+                "bottomLeft": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "div",
+                "selector": "div.item:nth-of-type(1)",
+                "classes": [
+                  "item"
+                ],
+                "layout": {
+                  "x": 17,
+                  "y": 17,
+                  "width": 208.7,
+                  "height": 266
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "border-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 15,
+                    "right": 15,
+                    "bottom": 15,
+                    "left": 15
+                  },
+                  "borderWidth": {
+                    "top": 1,
+                    "right": 1,
+                    "bottom": 1,
+                    "left": 1
+                  },
+                  "borderColor": {
+                    "top": "rgba(222, 226, 230, 1.00)",
+                    "right": "rgba(222, 226, 230, 1.00)",
+                    "bottom": "rgba(222, 226, 230, 1.00)",
+                    "left": "rgba(222, 226, 230, 1.00)"
+                  },
+                  "borderRadius": {
+                    "topLeft": 0,
+                    "topRight": 0,
+                    "bottomRight": 0,
+                    "bottomLeft": 0
+                  },
+                  "backgroundColor": "rgba(248, 249, 250, 1.00)",
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "flexGrow": 1,
+                  "flexShrink": 1,
+                  "flexBasis": "0px",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "block",
+                    "tag": "h4",
+                    "selector": "h4",
+                    "classes": [],
+                    "layout": {
+                      "x": 33,
+                      "y": 33,
+                      "width": 176.7,
+                      "height": 16
+                    },
+                    "computed": {
+                      "display": "block",
+                      "line_height": 0,
+                      "text_align": "left",
+                      "text_indent": 0,
+                      "min_width": -1,
+                      "max_width": -1,
+                      "min_height": -1,
+                      "max_height": -1,
+                      "box_sizing": "border-box",
+                      "flexWrap": "nowrap",
+                      "margin": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 10,
+                        "left": 0
+                      },
+                      "padding": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 0
+                      },
+                      "font": {
+                        "family": "sans-serif",
+                        "size": 14,
+                        "style": "normal",
+                        "weight": "bold"
+                      },
+                      "color": "rgba(73, 80, 87, 1.00)",
+                      "opacity": 0,
+                      "_cssPropertiesComplete": true
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "Unordered Lists",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 15
+                        },
+                        "layout": {
+                          "x": 33,
+                          "y": 33,
+                          "width": 107.3,
+                          "height": 16
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "block",
+                    "tag": "ul",
+                    "selector": "ul",
+                    "classes": [],
+                    "layout": {
+                      "x": 33,
+                      "y": 59,
+                      "width": 176.7,
+                      "height": 139.6
+                    },
+                    "computed": {
+                      "display": "block",
+                      "line_height": 0,
+                      "text_align": "left",
+                      "text_indent": 0,
+                      "min_width": -1,
+                      "max_width": -1,
+                      "min_height": -1,
+                      "max_height": -1,
+                      "box_sizing": "border-box",
+                      "flexWrap": "nowrap",
+                      "margin": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 8,
+                        "left": 0
+                      },
+                      "padding": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 20
+                      },
+                      "font": {
+                        "family": "sans-serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "normal"
+                      },
+                      "_cssPropertiesComplete": true
+                    },
+                    "children": [
+                      {
+                        "type": "list-item",
+                        "tag": "li",
+                        "selector": "li:nth-of-type(1)",
+                        "classes": [],
+                        "layout": {
+                          "x": 53,
+                          "y": 59,
+                          "width": 156.7,
+                          "height": 16.8
+                        },
+                        "computed": {
+                          "display": "list-item",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 3,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 12,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "First item",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 10
+                            },
+                            "layout": {
+                              "x": 53,
+                              "y": 60.4,
+                              "width": 49.3,
+                              "height": 14
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "list-item",
+                        "tag": "li",
+                        "selector": "li:nth-of-type(2)",
+                        "classes": [],
+                        "layout": {
+                          "x": 53,
+                          "y": 78.8,
+                          "width": 156.7,
+                          "height": 33.6
+                        },
+                        "computed": {
+                          "display": "list-item",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 3,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 12,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Second item with longer text ",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 29
+                            },
+                            "layout": {
+                              "x": 53,
+                              "y": 80.2,
+                              "width": 154,
+                              "height": 14
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "content",
+                            "text_info": {
+                              "start_index": 29,
+                              "length": 7
+                            },
+                            "layout": {
+                              "x": 53,
+                              "y": 97,
+                              "width": 39.3,
+                              "height": 14
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "list-item",
+                        "tag": "li",
+                        "selector": "li:nth-of-type(3)",
+                        "classes": [],
+                        "layout": {
+                          "x": 53,
+                          "y": 115.4,
+                          "width": 156.7,
+                          "height": 58.4
+                        },
+                        "computed": {
+                          "display": "list-item",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 8,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 12,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Third item\n                    ",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 31
+                            },
+                            "layout": {
+                              "x": 53,
+                              "y": 116.8,
+                              "width": 56.7,
+                              "height": 14
+                            }
+                          },
+                          {
+                            "type": "block",
+                            "tag": "ul",
+                            "selector": "ul.nested-list",
+                            "classes": [
+                              "nested-list"
+                            ],
+                            "layout": {
+                              "x": 53,
+                              "y": 137.2,
+                              "width": 156.7,
+                              "height": 36.6
+                            },
+                            "computed": {
+                              "display": "block",
+                              "line_height": 0,
+                              "text_align": "left",
+                              "text_indent": 0,
+                              "min_width": -1,
+                              "max_width": -1,
+                              "min_height": -1,
+                              "max_height": -1,
+                              "box_sizing": "border-box",
+                              "flexWrap": "nowrap",
+                              "margin": {
+                                "top": 5,
+                                "right": 0,
+                                "bottom": 0,
+                                "left": 0
+                              },
+                              "padding": {
+                                "top": 0,
+                                "right": 0,
+                                "bottom": 0,
+                                "left": 20
+                              },
+                              "font": {
+                                "family": "sans-serif",
+                                "size": 12,
+                                "style": "normal",
+                                "weight": "normal"
+                              },
+                              "_cssPropertiesComplete": true
+                            },
+                            "children": [
+                              {
+                                "type": "list-item",
+                                "tag": "li",
+                                "selector": "li:nth-of-type(1)",
+                                "classes": [],
+                                "layout": {
+                                  "x": 73,
+                                  "y": 137.2,
+                                  "width": 136.7,
+                                  "height": 16.8
+                                },
+                                "computed": {
+                                  "display": "list-item",
+                                  "line_height": 0,
+                                  "text_align": "left",
+                                  "text_indent": 0,
+                                  "min_width": -1,
+                                  "max_width": -1,
+                                  "min_height": -1,
+                                  "max_height": -1,
+                                  "box_sizing": "border-box",
+                                  "flexWrap": "nowrap",
+                                  "margin": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 3,
+                                    "left": 0
+                                  },
+                                  "padding": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                  },
+                                  "font": {
+                                    "family": "sans-serif",
+                                    "size": 12,
+                                    "style": "normal",
+                                    "weight": "normal"
+                                  },
+                                  "_cssPropertiesComplete": true
+                                },
+                                "children": [
+                                  {
+                                    "type": "text",
+                                    "tag": "text",
+                                    "selector": "text",
+                                    "content": "Nested item 1",
+                                    "text_info": {
+                                      "start_index": 0,
+                                      "length": 13
+                                    },
+                                    "layout": {
+                                      "x": 73,
+                                      "y": 138.6,
+                                      "width": 74,
+                                      "height": 14
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "list-item",
+                                "tag": "li",
+                                "selector": "li:nth-of-type(2)",
+                                "classes": [],
+                                "layout": {
+                                  "x": 73,
+                                  "y": 157,
+                                  "width": 136.7,
+                                  "height": 16.8
+                                },
+                                "computed": {
+                                  "display": "list-item",
+                                  "line_height": 0,
+                                  "text_align": "left",
+                                  "text_indent": 0,
+                                  "min_width": -1,
+                                  "max_width": -1,
+                                  "min_height": -1,
+                                  "max_height": -1,
+                                  "box_sizing": "border-box",
+                                  "flexWrap": "nowrap",
+                                  "margin": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                  },
+                                  "padding": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                  },
+                                  "font": {
+                                    "family": "sans-serif",
+                                    "size": 12,
+                                    "style": "normal",
+                                    "weight": "normal"
+                                  },
+                                  "_cssPropertiesComplete": true
+                                },
+                                "children": [
+                                  {
+                                    "type": "text",
+                                    "tag": "text",
+                                    "selector": "text",
+                                    "content": "Nested item 2",
+                                    "text_info": {
+                                      "start_index": 0,
+                                      "length": 13
+                                    },
+                                    "layout": {
+                                      "x": 73,
+                                      "y": 158.4,
+                                      "width": 74,
+                                      "height": 14
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "list-item",
+                        "tag": "li",
+                        "selector": "li:nth-of-type(4)",
+                        "classes": [],
+                        "layout": {
+                          "x": 53,
+                          "y": 181.8,
+                          "width": 156.7,
+                          "height": 16.8
+                        },
+                        "computed": {
+                          "display": "list-item",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 12,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Fourth item",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 11
+                            },
+                            "layout": {
+                              "x": 53,
+                              "y": 183.2,
+                              "width": 60.7,
+                              "height": 14
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "div",
+                "selector": "div.item:nth-of-type(2)",
+                "classes": [
+                  "item"
+                ],
+                "layout": {
+                  "x": 245,
+                  "y": 17,
+                  "width": 208.7,
+                  "height": 266
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "border-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 15,
+                    "right": 15,
+                    "bottom": 15,
+                    "left": 15
+                  },
+                  "borderWidth": {
+                    "top": 1,
+                    "right": 1,
+                    "bottom": 1,
+                    "left": 1
+                  },
+                  "borderColor": {
+                    "top": "rgba(222, 226, 230, 1.00)",
+                    "right": "rgba(222, 226, 230, 1.00)",
+                    "bottom": "rgba(222, 226, 230, 1.00)",
+                    "left": "rgba(222, 226, 230, 1.00)"
+                  },
+                  "borderRadius": {
+                    "topLeft": 0,
+                    "topRight": 0,
+                    "bottomRight": 0,
+                    "bottomLeft": 0
+                  },
+                  "backgroundColor": "rgba(248, 249, 250, 1.00)",
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "flexGrow": 1,
+                  "flexShrink": 1,
+                  "flexBasis": "0px",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "block",
+                    "tag": "h4",
+                    "selector": "h4",
+                    "classes": [],
+                    "layout": {
+                      "x": 261,
+                      "y": 33,
+                      "width": 176.7,
+                      "height": 16
+                    },
+                    "computed": {
+                      "display": "block",
+                      "line_height": 0,
+                      "text_align": "left",
+                      "text_indent": 0,
+                      "min_width": -1,
+                      "max_width": -1,
+                      "min_height": -1,
+                      "max_height": -1,
+                      "box_sizing": "border-box",
+                      "flexWrap": "nowrap",
+                      "margin": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 10,
+                        "left": 0
+                      },
+                      "padding": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 0
+                      },
+                      "font": {
+                        "family": "sans-serif",
+                        "size": 14,
+                        "style": "normal",
+                        "weight": "bold"
+                      },
+                      "color": "rgba(73, 80, 87, 1.00)",
+                      "opacity": 0,
+                      "_cssPropertiesComplete": true
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "Ordered Lists",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 13
+                        },
+                        "layout": {
+                          "x": 261,
+                          "y": 33,
+                          "width": 91,
+                          "height": 16
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "block",
+                    "tag": "ol",
+                    "selector": "ol",
+                    "classes": [],
+                    "layout": {
+                      "x": 261,
+                      "y": 59,
+                      "width": 176.7,
+                      "height": 98
+                    },
+                    "computed": {
+                      "display": "block",
+                      "line_height": 0,
+                      "text_align": "left",
+                      "text_indent": 0,
+                      "min_width": -1,
+                      "max_width": -1,
+                      "min_height": -1,
+                      "max_height": -1,
+                      "box_sizing": "border-box",
+                      "flexWrap": "nowrap",
+                      "margin": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 8,
+                        "left": 0
+                      },
+                      "padding": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 20
+                      },
+                      "font": {
+                        "family": "sans-serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "normal"
+                      },
+                      "_cssPropertiesComplete": true
+                    },
+                    "children": [
+                      {
+                        "type": "list-item",
+                        "tag": "li",
+                        "selector": "li:nth-of-type(1)",
+                        "classes": [],
+                        "layout": {
+                          "x": 281,
+                          "y": 59,
+                          "width": 156.7,
+                          "height": 16.8
+                        },
+                        "computed": {
+                          "display": "list-item",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 3,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 12,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "First numbered item",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 19
+                            },
+                            "layout": {
+                              "x": 281,
+                              "y": 60.4,
+                              "width": 106.7,
+                              "height": 14
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "list-item",
+                        "tag": "li",
+                        "selector": "li:nth-of-type(2)",
+                        "classes": [],
+                        "layout": {
+                          "x": 281,
+                          "y": 78.8,
+                          "width": 156.7,
+                          "height": 16.8
+                        },
+                        "computed": {
+                          "display": "list-item",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 3,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 12,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Second numbered item",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 20
+                            },
+                            "layout": {
+                              "x": 281,
+                              "y": 80.2,
+                              "width": 124,
+                              "height": 14
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "list-item",
+                        "tag": "li",
+                        "selector": "li:nth-of-type(3)",
+                        "classes": [],
+                        "layout": {
+                          "x": 281,
+                          "y": 98.6,
+                          "width": 156.7,
+                          "height": 58.4
+                        },
+                        "computed": {
+                          "display": "list-item",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 12,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Third with nested list\n                    ",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 43
+                            },
+                            "layout": {
+                              "x": 281,
+                              "y": 100,
+                              "width": 112.7,
+                              "height": 14
+                            }
+                          },
+                          {
+                            "type": "block",
+                            "tag": "ol",
+                            "selector": "ol.nested-list",
+                            "classes": [
+                              "nested-list"
+                            ],
+                            "layout": {
+                              "x": 281,
+                              "y": 120.4,
+                              "width": 156.7,
+                              "height": 36.6
+                            },
+                            "computed": {
+                              "display": "block",
+                              "line_height": 0,
+                              "text_align": "left",
+                              "text_indent": 0,
+                              "min_width": -1,
+                              "max_width": -1,
+                              "min_height": -1,
+                              "max_height": -1,
+                              "box_sizing": "border-box",
+                              "flexWrap": "nowrap",
+                              "margin": {
+                                "top": 5,
+                                "right": 0,
+                                "bottom": 0,
+                                "left": 0
+                              },
+                              "padding": {
+                                "top": 0,
+                                "right": 0,
+                                "bottom": 0,
+                                "left": 20
+                              },
+                              "font": {
+                                "family": "sans-serif",
+                                "size": 12,
+                                "style": "normal",
+                                "weight": "normal"
+                              },
+                              "_cssPropertiesComplete": true
+                            },
+                            "children": [
+                              {
+                                "type": "list-item",
+                                "tag": "li",
+                                "selector": "li:nth-of-type(1)",
+                                "classes": [],
+                                "layout": {
+                                  "x": 301,
+                                  "y": 120.4,
+                                  "width": 136.7,
+                                  "height": 16.8
+                                },
+                                "computed": {
+                                  "display": "list-item",
+                                  "line_height": 0,
+                                  "text_align": "left",
+                                  "text_indent": 0,
+                                  "min_width": -1,
+                                  "max_width": -1,
+                                  "min_height": -1,
+                                  "max_height": -1,
+                                  "box_sizing": "border-box",
+                                  "flexWrap": "nowrap",
+                                  "margin": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 3,
+                                    "left": 0
+                                  },
+                                  "padding": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                  },
+                                  "font": {
+                                    "family": "sans-serif",
+                                    "size": 12,
+                                    "style": "normal",
+                                    "weight": "normal"
+                                  },
+                                  "_cssPropertiesComplete": true
+                                },
+                                "children": [
+                                  {
+                                    "type": "text",
+                                    "tag": "text",
+                                    "selector": "text",
+                                    "content": "Nested numbered 1",
+                                    "text_info": {
+                                      "start_index": 0,
+                                      "length": 17
+                                    },
+                                    "layout": {
+                                      "x": 301,
+                                      "y": 121.8,
+                                      "width": 105.4,
+                                      "height": 14
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "list-item",
+                                "tag": "li",
+                                "selector": "li:nth-of-type(2)",
+                                "classes": [],
+                                "layout": {
+                                  "x": 301,
+                                  "y": 140.2,
+                                  "width": 136.7,
+                                  "height": 16.8
+                                },
+                                "computed": {
+                                  "display": "list-item",
+                                  "line_height": 0,
+                                  "text_align": "left",
+                                  "text_indent": 0,
+                                  "min_width": -1,
+                                  "max_width": -1,
+                                  "min_height": -1,
+                                  "max_height": -1,
+                                  "box_sizing": "border-box",
+                                  "flexWrap": "nowrap",
+                                  "margin": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                  },
+                                  "padding": {
+                                    "top": 0,
+                                    "right": 0,
+                                    "bottom": 0,
+                                    "left": 0
+                                  },
+                                  "font": {
+                                    "family": "sans-serif",
+                                    "size": 12,
+                                    "style": "normal",
+                                    "weight": "normal"
+                                  },
+                                  "_cssPropertiesComplete": true
+                                },
+                                "children": [
+                                  {
+                                    "type": "text",
+                                    "tag": "text",
+                                    "selector": "text",
+                                    "content": "Nested numbered 2",
+                                    "text_info": {
+                                      "start_index": 0,
+                                      "length": 17
+                                    },
+                                    "layout": {
+                                      "x": 301,
+                                      "y": 141.6,
+                                      "width": 105.4,
+                                      "height": 14
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "div",
+                "selector": "div.item:nth-of-type(3)",
+                "classes": [
+                  "item"
+                ],
+                "layout": {
+                  "x": 473,
+                  "y": 17,
+                  "width": 208.7,
+                  "height": 266
+                },
+                "computed": {
+                  "display": "block",
+                  "line_height": 0,
+                  "text_align": "left",
+                  "text_indent": 0,
+                  "min_width": -1,
+                  "max_width": -1,
+                  "min_height": -1,
+                  "max_height": -1,
+                  "box_sizing": "border-box",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 15,
+                    "right": 15,
+                    "bottom": 15,
+                    "left": 15
+                  },
+                  "borderWidth": {
+                    "top": 1,
+                    "right": 1,
+                    "bottom": 1,
+                    "left": 1
+                  },
+                  "borderColor": {
+                    "top": "rgba(222, 226, 230, 1.00)",
+                    "right": "rgba(222, 226, 230, 1.00)",
+                    "bottom": "rgba(222, 226, 230, 1.00)",
+                    "left": "rgba(222, 226, 230, 1.00)"
+                  },
+                  "borderRadius": {
+                    "topLeft": 0,
+                    "topRight": 0,
+                    "bottomRight": 0,
+                    "bottomLeft": 0
+                  },
+                  "backgroundColor": "rgba(248, 249, 250, 1.00)",
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "flexGrow": 1,
+                  "flexShrink": 1,
+                  "flexBasis": "0px",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "block",
+                    "tag": "h4",
+                    "selector": "h4",
+                    "classes": [],
+                    "layout": {
+                      "x": 489,
+                      "y": 33,
+                      "width": 176.7,
+                      "height": 16
+                    },
+                    "computed": {
+                      "display": "block",
+                      "line_height": 0,
+                      "text_align": "left",
+                      "text_indent": 0,
+                      "min_width": -1,
+                      "max_width": -1,
+                      "min_height": -1,
+                      "max_height": -1,
+                      "box_sizing": "border-box",
+                      "flexWrap": "nowrap",
+                      "margin": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 10,
+                        "left": 0
+                      },
+                      "padding": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 0
+                      },
+                      "font": {
+                        "family": "sans-serif",
+                        "size": 14,
+                        "style": "normal",
+                        "weight": "bold"
+                      },
+                      "color": "rgba(73, 80, 87, 1.00)",
+                      "opacity": 0,
+                      "_cssPropertiesComplete": true
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "tag": "text",
+                        "selector": "text",
+                        "content": "Description List",
+                        "text_info": {
+                          "start_index": 0,
+                          "length": 16
+                        },
+                        "layout": {
+                          "x": 489,
+                          "y": 33,
+                          "width": 105.8,
+                          "height": 16
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "block",
+                    "tag": "dl",
+                    "selector": "dl.description-list",
+                    "classes": [
+                      "description-list"
+                    ],
+                    "layout": {
+                      "x": 489,
+                      "y": 59,
+                      "width": 176.7,
+                      "height": 107
+                    },
+                    "computed": {
+                      "display": "block",
+                      "line_height": 0,
+                      "text_align": "left",
+                      "text_indent": 0,
+                      "min_width": -1,
+                      "max_width": -1,
+                      "min_height": -1,
+                      "max_height": -1,
+                      "box_sizing": "border-box",
+                      "flexWrap": "nowrap",
+                      "margin": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 5,
+                        "left": 0
+                      },
+                      "padding": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 0
+                      },
+                      "font": {
+                        "family": "sans-serif",
+                        "size": 16,
+                        "style": "normal",
+                        "weight": "normal"
+                      },
+                      "_cssPropertiesComplete": true
+                    },
+                    "children": [
+                      {
+                        "type": "block",
+                        "tag": "dt",
+                        "selector": "dt:nth-of-type(1)",
+                        "classes": [],
+                        "layout": {
+                          "x": 489,
+                          "y": 59,
+                          "width": 176.7,
+                          "height": 13
+                        },
+                        "computed": {
+                          "display": "block",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 11,
+                            "style": "normal",
+                            "weight": "bold"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Term 1",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 6
+                            },
+                            "layout": {
+                              "x": 489,
+                              "y": 59,
+                              "width": 36.1,
+                              "height": 13
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "block",
+                        "tag": "dd",
+                        "selector": "dd:nth-of-type(1)",
+                        "classes": [],
+                        "layout": {
+                          "x": 504,
+                          "y": 72,
+                          "width": 161.7,
+                          "height": 13
+                        },
+                        "computed": {
+                          "display": "block",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 5,
+                            "left": 15
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 11,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Definition for term 1",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 21
+                            },
+                            "layout": {
+                              "x": 504,
+                              "y": 72,
+                              "width": 96,
+                              "height": 13
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "block",
+                        "tag": "dt",
+                        "selector": "dt:nth-of-type(2)",
+                        "classes": [],
+                        "layout": {
+                          "x": 489,
+                          "y": 93,
+                          "width": 176.7,
+                          "height": 13
+                        },
+                        "computed": {
+                          "display": "block",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 3,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 11,
+                            "style": "normal",
+                            "weight": "bold"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Term 2",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 6
+                            },
+                            "layout": {
+                              "x": 489,
+                              "y": 93,
+                              "width": 36.1,
+                              "height": 13
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "block",
+                        "tag": "dd",
+                        "selector": "dd:nth-of-type(2)",
+                        "classes": [],
+                        "layout": {
+                          "x": 504,
+                          "y": 106,
+                          "width": 161.7,
+                          "height": 26
+                        },
+                        "computed": {
+                          "display": "block",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 5,
+                            "left": 15
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 11,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Definition for term 2 with longer ",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 34
+                            },
+                            "layout": {
+                              "x": 504,
+                              "y": 106,
+                              "width": 155.4,
+                              "height": 13
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "text",
+                            "text_info": {
+                              "start_index": 34,
+                              "length": 4
+                            },
+                            "layout": {
+                              "x": 504,
+                              "y": 119,
+                              "width": 17.8,
+                              "height": 13
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "block",
+                        "tag": "dt",
+                        "selector": "dt:nth-of-type(3)",
+                        "classes": [],
+                        "layout": {
+                          "x": 489,
+                          "y": 140,
+                          "width": 176.7,
+                          "height": 13
+                        },
+                        "computed": {
+                          "display": "block",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 3,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 11,
+                            "style": "normal",
+                            "weight": "bold"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Term 3",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 6
+                            },
+                            "layout": {
+                              "x": 489,
+                              "y": 140,
+                              "width": 36.1,
+                              "height": 13
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "block",
+                        "tag": "dd",
+                        "selector": "dd:nth-of-type(3)",
+                        "classes": [],
+                        "layout": {
+                          "x": 504,
+                          "y": 153,
+                          "width": 161.7,
+                          "height": 13
+                        },
+                        "computed": {
+                          "display": "block",
+                          "line_height": 0,
+                          "text_align": "left",
+                          "text_indent": 0,
+                          "min_width": -1,
+                          "max_width": -1,
+                          "min_height": -1,
+                          "max_height": -1,
+                          "box_sizing": "border-box",
+                          "flexWrap": "nowrap",
+                          "margin": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 15
+                          },
+                          "padding": {
+                            "top": 0,
+                            "right": 0,
+                            "bottom": 0,
+                            "left": 0
+                          },
+                          "font": {
+                            "family": "sans-serif",
+                            "size": 11,
+                            "style": "normal",
+                            "weight": "normal"
+                          },
+                          "_cssPropertiesComplete": true
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "tag": "text",
+                            "selector": "text",
+                            "content": "Another definition",
+                            "text_info": {
+                              "start_index": 0,
+                              "length": 18
+                            },
+                            "layout": {
+                              "x": 504,
+                              "y": 153,
+                              "width": 85.7,
+                              "height": 13
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}

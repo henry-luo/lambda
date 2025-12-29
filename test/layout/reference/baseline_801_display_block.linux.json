@@ -1,0 +1,287 @@
+{
+  "test_file": "baseline_801_display_block.html",
+  "browser_info": {
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "layout_tree": {
+    "type": "block",
+    "tag": "html",
+    "selector": "html",
+    "classes": [],
+    "layout": {
+      "x": 0,
+      "y": 0,
+      "width": 1200,
+      "height": 57
+    },
+    "computed": {
+      "display": "block",
+      "flexWrap": "nowrap",
+      "margin": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "padding": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "position": {
+        "type": "static",
+        "zIndex": 0,
+        "float": "none",
+        "clear": "none"
+      },
+      "font": {
+        "family": "Times",
+        "size": 16,
+        "style": "normal",
+        "weight": "400"
+      },
+      "_cssPropertiesComplete": true
+    },
+    "children": [
+      {
+        "type": "block",
+        "tag": "body",
+        "selector": "body",
+        "classes": [],
+        "layout": {
+          "x": 0,
+          "y": 0,
+          "width": 1200,
+          "height": 57
+        },
+        "computed": {
+          "display": "block",
+          "flexWrap": "nowrap",
+          "margin": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "padding": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "font": {
+            "family": "sans-serif",
+            "size": 16,
+            "style": "normal",
+            "weight": "normal"
+          },
+          "_cssPropertiesComplete": true
+        },
+        "children": [
+          {
+            "type": "block",
+            "tag": "p",
+            "selector": "p",
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 1200,
+              "height": 19
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "text",
+                "tag": "text",
+                "selector": "text",
+                "content": "Test passes if there are two lines of \"Filler Text\" below.",
+                "text_info": {
+                  "start_index": 0,
+                  "length": 58
+                },
+                "layout": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 385.8,
+                  "height": 18
+                }
+              }
+            ]
+          },
+          {
+            "type": "block",
+            "tag": "div",
+            "selector": "div",
+            "classes": [],
+            "layout": {
+              "x": 0,
+              "y": 19,
+              "width": 1200,
+              "height": 38
+            },
+            "computed": {
+              "display": "block",
+              "flexWrap": "nowrap",
+              "margin": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "padding": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              },
+              "font": {
+                "family": "sans-serif",
+                "size": 16,
+                "style": "normal",
+                "weight": "normal"
+              },
+              "_cssPropertiesComplete": true
+            },
+            "children": [
+              {
+                "type": "block",
+                "tag": "span",
+                "selector": "span:nth-of-type(1)",
+                "classes": [],
+                "layout": {
+                  "x": 0,
+                  "y": 19,
+                  "width": 1200,
+                  "height": 19
+                },
+                "computed": {
+                  "display": "block",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Filler Text",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 11
+                    },
+                    "layout": {
+                      "x": 0,
+                      "y": 19,
+                      "width": 69.3,
+                      "height": 18
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "tag": "span",
+                "selector": "span:nth-of-type(2)",
+                "classes": [],
+                "layout": {
+                  "x": 0,
+                  "y": 38,
+                  "width": 1200,
+                  "height": 19
+                },
+                "computed": {
+                  "display": "block",
+                  "flexWrap": "nowrap",
+                  "margin": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "padding": {
+                    "top": 0,
+                    "right": 0,
+                    "bottom": 0,
+                    "left": 0
+                  },
+                  "font": {
+                    "family": "sans-serif",
+                    "size": 16,
+                    "style": "normal",
+                    "weight": "normal"
+                  },
+                  "_cssPropertiesComplete": true
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "tag": "text",
+                    "selector": "text",
+                    "content": "Filler Text",
+                    "text_info": {
+                      "start_index": 0,
+                      "length": 11
+                    },
+                    "layout": {
+                      "x": 0,
+                      "y": 38,
+                      "width": 69.3,
+                      "height": 18
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "_source": "radiant",
+  "_platform": "linux"
+}
