@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // HTML tree file
   readHtmlTreeFile: () => ipcRenderer.invoke('read-html-tree-file'),
 
+  // Get project root path
+  getProjectRoot: () => ipcRenderer.invoke('get-project-root'),
+
   // Recent tests
   getRecentTests: () => ipcRenderer.invoke('get-recent-tests'),
   addRecentTest: (testInfo) => ipcRenderer.invoke('add-recent-test', testInfo),
