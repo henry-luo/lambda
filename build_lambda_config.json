@@ -454,8 +454,8 @@
                     "name": "curl",
                     "description": "libcurl HTTP client library",
                     "include": "/mingw64/include",
-                    "lib": "-lcurl",
-                    "link": "dynamic"
+                    "lib": "/mingw64/lib/libcurl.a",
+                    "link": "static"
                 },
                 {
                     "name": "tree-sitter",
@@ -647,19 +647,19 @@
                 {
                     "name": "zlib",
                     "description": "Compression library",
-                    "lib": "-lz",
-                    "link": "dynamic"
+                    "lib": "/mingw64/lib/libz.a",
+                    "link": "static"
                 },
                 {
                     "name": "bzip2",
-                    "lib": "-lbz2",
-                    "link": "dynamic"
+                    "lib": "/mingw64/lib/libbz2.a",
+                    "link": "static"
                 },
                 {
                     "name": "freetype",
                     "include": "/mingw64/include/freetype2",
-                    "lib": "-lfreetype",
-                    "link": "dynamic"
+                    "lib": "/mingw64/lib/libfreetype.a",
+                    "link": "static"
                 },
                 {
                     "name": "ThorVG",
@@ -675,8 +675,8 @@
                 },
                 {
                     "name": "png",
-                    "lib": "-lpng",
-                    "link": "dynamic"
+                    "lib": "/mingw64/lib/libpng.a",
+                    "link": "static"
                 },
                 {
                     "name": "turbojpeg",
@@ -696,8 +696,8 @@
                 {
                     "name": "gomp",
                     "description": "GNU OpenMP library (required by ThorVG)",
-                    "lib": "-lgomp",
-                    "link": "dynamic"
+                    "lib": "/mingw64/lib/libgomp.a",
+                    "link": "static"
                 },
                 {
                     "name": "harfbuzz",
@@ -756,7 +756,13 @@
                 "DTVG_STATIC"
             ],
             "linker_flags": [
-                "Wl,--subsystem,console"
+                "Wl,--subsystem,console",
+                "static-libgcc",
+                "static-libstdc++",
+                "Wl,-Bstatic",
+                "Wl,-Bdynamic",
+                "lopengl32",
+                "lmoldname"
             ],
             "build_dir": "build_windows",
             "cross_compile": true,
