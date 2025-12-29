@@ -72,6 +72,8 @@ IS_WINDOWS=false
 if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ -n "$MSYSTEM" ]]; then
     IS_WINDOWS=true
     echo "🪟 Windows/MSYS2 environment detected - will only run gtest tests"
+    # Add DLL directories to PATH for Windows test execution
+    export PATH="$(pwd)/build/lib:$(pwd)/test:/mingw64/bin:$PATH"
 fi
 
 echo "🚀 Enhanced Lambda Test Suite Runner - Test Results Breakdown"
@@ -96,6 +98,14 @@ echo "=============================================================="
 TIMEOUT_DURATION="60s"
 # Use absolute path to ensure it works in background processes
 TEST_OUTPUT_DIR="$(pwd)/test_output"
+
+# On Windows, convert to Windows-style path for GTest JSON output
+if [ "$IS_WINDOWS" = true ]; then
+    # Convert /d/path to D:/path format for Windows executables
+    TEST_OUTPUT_DIR_WIN=$(cygpath -m "$TEST_OUTPUT_DIR" 2>/dev/null || echo "$TEST_OUTPUT_DIR" | sed 's|^/\([a-zA-Z]\)/|\1:/|')
+else
+    TEST_OUTPUT_DIR_WIN="$TEST_OUTPUT_DIR"
+fi
 
 # Create output directory
 mkdir -p "$TEST_OUTPUT_DIR"
@@ -357,6 +367,8 @@ run_test_with_timeout() {
     local base_name="$(basename "$test_exe" .exe)"
     # TEST_OUTPUT_DIR is already an absolute path
     local json_file="$TEST_OUTPUT_DIR/${base_name}_results.json"
+    # Use Windows-compatible path for GTest JSON output
+    local json_file_win="$TEST_OUTPUT_DIR_WIN/${base_name}_results.json"
 
     echo "📋 Running $base_name..." >&2
 
@@ -389,17 +401,17 @@ run_test_with_timeout() {
             if [ "$RAW_OUTPUT" = true ]; then
                 # Raw mode: show output directly and redirect JSON to file
                 if [ -n "$gtest_filter" ]; then
-                    timeout "$TIMEOUT_DURATION" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file"
+                    timeout "$TIMEOUT_DURATION" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file_win"
                 else
-                    timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file"
+                    timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file_win"
                 fi
                 local exit_code=$?
             else
                 # Normal mode: capture console output and redirect JSON to file
                 if [ -n "$gtest_filter" ]; then
-                    timeout "$TIMEOUT_DURATION" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file" >/dev/null 2>&1
+                    timeout "$TIMEOUT_DURATION" "./$test_exe" "$gtest_filter" --gtest_output=json:"$json_file_win" >/dev/null 2>&1
                 else
-                    timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file" >/dev/null 2>&1
+                    timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file_win" >/dev/null 2>&1
                 fi
                 local exit_code=$?
             fi

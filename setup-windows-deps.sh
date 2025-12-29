@@ -30,13 +30,13 @@ command_exists() {
 install_msys2_package() {
     local package="$1"
     local description="$2"
-    
+
     # Check if package is already installed
     if pacman -Qq "$package" &>/dev/null; then
         echo "✅ $description ($package) already installed"
         return 0
     fi
-    
+
     echo "Installing $description ($package)..."
     if ! pacman -S --noconfirm "$package" 2>/dev/null; then
         echo "Warning: Failed to install $package"
@@ -60,20 +60,20 @@ check_pacman() {
 # Check for cleanup option
 if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
-    
+
     # Clean tree-sitter build files
     if [ -d "lambda/tree-sitter" ]; then
         cd lambda/tree-sitter
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
-    
+
     # Clean build directories
     rm -rf build_win_native/ build/ build_debug/ 2>/dev/null || true
-    
+
     # Clean object files
     find . -name "*.o" -type f -delete 2>/dev/null || true
-    
+
     # Clean dependency build files but keep the built libraries
     if [ -d "$DEPS_DIR/src" ]; then
         find "$DEPS_DIR/src" -name "*.o" -type f -delete 2>/dev/null || true
@@ -81,11 +81,11 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
         find "$DEPS_DIR/src" -name "config.status" -type f -delete 2>/dev/null || true
         find "$DEPS_DIR/src" -name "config.log" -type f -delete 2>/dev/null || true
         find "$DEPS_DIR/src" -name "*.la" -type f -delete 2>/dev/null || true
-        
+
         # Clean up build directories in dependencies
         find "$DEPS_DIR/src" -type d -name "build-*" -exec rm -rf {} + 2>/dev/null || true
     fi
-    
+
     echo "Cleanup completed."
     exit 0
 fi
@@ -127,7 +127,17 @@ install_msys2_package "base-devel" "Base development tools (make, autotools, etc
 install_msys2_package "$COMPILER_PACKAGE" "C/C++ compiler"
 install_msys2_package "${TOOLCHAIN_PREFIX}-cmake" "CMake build system"
 install_msys2_package "${TOOLCHAIN_PREFIX}-ninja" "Ninja build system"
-install_msys2_package "${TOOLCHAIN_PREFIX}-premake" "Premake5 build system generator (required for Lambda)"
+
+# Premake5 - try toolchain-specific first, fall back to base if not available
+if ! install_msys2_package "${TOOLCHAIN_PREFIX}-premake" "Premake5 build system generator (required for Lambda)"; then
+    # Try base premake5 package
+    if ! install_msys2_package "premake" "Premake5 build system generator (base package)"; then
+        echo "⚠️  Warning: Could not install premake5 via pacman"
+        echo "   Will attempt manual installation..."
+        NEED_MANUAL_PREMAKE=true
+    fi
+fi
+
 # Note: pkgconf is already installed as a dependency of cmake, no need for separate pkg-config
 
 # Essential libraries for Lambda
@@ -140,6 +150,17 @@ install_msys2_package "${TOOLCHAIN_PREFIX}-gdb" "GDB debugger"
 install_msys2_package "jq" "JSON processor for build script configuration parsing"
 install_msys2_package "vim" "Vim editor (provides xxd binary data tool)"
 
+# Core mathematical and text processing libraries
+install_msys2_package "${TOOLCHAIN_PREFIX}-mpdecimal" "Multi-precision decimal library"
+install_msys2_package "${TOOLCHAIN_PREFIX}-mbedtls" "mbedTLS - SSL/TLS library"
+
+# Graphics and rendering libraries (for Radiant engine)
+install_msys2_package "${TOOLCHAIN_PREFIX}-freetype" "FreeType font rendering"
+install_msys2_package "${TOOLCHAIN_PREFIX}-glfw" "GLFW window management"
+install_msys2_package "${TOOLCHAIN_PREFIX}-libpng" "PNG image library"
+install_msys2_package "${TOOLCHAIN_PREFIX}-libjpeg-turbo" "JPEG image library"
+install_msys2_package "${TOOLCHAIN_PREFIX}-giflib" "GIF image library"
+
 # HTTP/networking libraries - minimal setup for libcurl only
 # Note: nghttp2 removed - building minimal libcurl without HTTP/2 support
 
@@ -148,14 +169,9 @@ install_msys2_package "unzip" "Unzip utility"
 install_msys2_package "curl" "curl for downloading"
 install_msys2_package "wget" "wget for downloading"
 
-echo ""
-echo "Installing optional dependencies..."
-
-# Optional: Criterion for testing (if available)
-install_msys2_package "${TOOLCHAIN_PREFIX}-criterion" "Criterion testing framework" || echo "⚠️  Criterion not available, tests may not work"
-
-# Optional: libedit for interactive features (cross-platform alternative to readline)
-install_msys2_package "${TOOLCHAIN_PREFIX}-libedit" "libedit library" || echo "⚠️  libedit not available"
+# ThorVG build dependencies
+install_msys2_package "${TOOLCHAIN_PREFIX}-meson" "Meson build system (for ThorVG)"
+install_msys2_package "${TOOLCHAIN_PREFIX}-pkgconf" "pkg-config tool"
 
 echo ""
 echo "Setting up project-specific dependencies..."
@@ -168,16 +184,16 @@ build_dependency() {
     local name="$1"
     local src_dir="$2"
     local build_cmd="$3"
-    
+
     echo "Building $name for Windows native..."
-    
+
     if [ ! -d "$DEPS_DIR/src/$src_dir" ]; then
         echo "Warning: Source directory $DEPS_DIR/src/$src_dir not found"
         return 1
     fi
-    
+
     cd "$DEPS_DIR/src/$src_dir"
-    
+
     # Set up native Windows compilation environment
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
         export CC="clang"
@@ -192,31 +208,110 @@ build_dependency() {
         export RANLIB="ranlib"
         export STRIP="strip"
     fi
-    
+
     # Windows-specific flags for native compilation
     export CFLAGS="-O2 -D_WIN32 -DWINDOWS -D_GNU_SOURCE"
     export CXXFLAGS="-O2 -std=c++17 -D_WIN32 -DWINDOWS -D_GNU_SOURCE"
     export LDFLAGS=""
-    
+
     # Run the build command
     (eval "$build_cmd") || {
         echo "Warning: $name build failed"
         cd - > /dev/null
         return 1
     }
-    
+
     cd - > /dev/null
     return 0
+}
+
+# Function to manually install premake5 if not available via pacman
+install_premake5_manually() {
+    echo "Installing premake5 manually..."
+
+    # Check if already installed
+    if command_exists premake5; then
+        echo "✅ premake5 already available"
+        return 0
+    fi
+
+    # Determine download URL based on system
+    PREMAKE_VERSION="5.0.0-beta2"
+    PREMAKE_ARCHIVE="premake-${PREMAKE_VERSION}-windows.zip"
+    PREMAKE_URL="https://github.com/premake/premake-core/releases/download/v${PREMAKE_VERSION}/${PREMAKE_ARCHIVE}"
+
+    echo "Downloading premake5 from GitHub..."
+    mkdir -p "$DEPS_DIR/bin"
+    cd "$DEPS_DIR/bin"
+
+    # Download premake5
+    if command_exists curl; then
+        if ! curl -L -f "$PREMAKE_URL" -o "$PREMAKE_ARCHIVE"; then
+            echo "Error: Failed to download premake5"
+            cd - > /dev/null
+            return 1
+        fi
+    elif command_exists wget; then
+        if ! wget --no-check-certificate "$PREMAKE_URL" -O "$PREMAKE_ARCHIVE"; then
+            echo "Error: Failed to download premake5"
+            cd - > /dev/null
+            return 1
+        fi
+    else
+        echo "Error: Neither curl nor wget available"
+        cd - > /dev/null
+        return 1
+    fi
+
+    # Extract premake5
+    echo "Extracting premake5..."
+    if ! unzip -o "$PREMAKE_ARCHIVE"; then
+        echo "Error: Failed to extract premake5"
+        rm -f "$PREMAKE_ARCHIVE"
+        cd - > /dev/null
+        return 1
+    fi
+
+    rm "$PREMAKE_ARCHIVE"
+
+    # Make it executable
+    chmod +x premake5.exe
+
+    # Add to PATH for current session
+    export PATH="$SCRIPT_DIR/$DEPS_DIR/bin:$PATH"
+
+    # Verify installation
+    if [ -f "premake5.exe" ]; then
+        echo "✅ premake5 installed manually to $DEPS_DIR/bin/"
+        echo "   Note: You may need to add this to your PATH permanently:"
+        echo "   export PATH=\"\$PWD/$DEPS_DIR/bin:\$PATH\""
+        cd - > /dev/null
+        return 0
+    else
+        echo "Error: premake5.exe not found after extraction"
+        cd - > /dev/null
+        return 1
+    fi
 }
 
 echo ""
 echo "🔧 Building dependencies from source..."
 echo "Note: This script will check for parallel directories first:"
-echo "  • ../mir (for MIR JIT compiler)"  
+echo "  • ../mir (for MIR JIT compiler)"
 echo "  • ../utf8proc (for Unicode normalization)"
 echo "If parallel directories are not found, dependencies will be downloaded."
 echo "Note: Tree-sitter libraries are managed directly under lambda/ directory."
+echo "Note: ThorVG must be installed separately (see above)."
 echo ""
+
+# Install premake5 manually if not available
+if [ "$NEED_MANUAL_PREMAKE" = "true" ]; then
+    if ! install_premake5_manually; then
+        echo "Error: Failed to install premake5"
+        echo "Please install premake5 manually and add it to PATH"
+        exit 1
+    fi
+fi
 
 # Build tree-sitter libraries for Windows
 echo "Building tree-sitter libraries for Windows..."
@@ -225,17 +320,17 @@ echo "Building tree-sitter libraries for Windows..."
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
     echo "Building tree-sitter library for Windows..."
     cd lambda/tree-sitter
-    
+
     # Clean previous builds
     make clean || true
-    
+
     # Build static library for Windows
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
         CC="clang" AR="llvm-ar" make libtree-sitter.a
     else
         CC="gcc" AR="ar" make libtree-sitter.a
     fi
-    
+
     if [ -f "libtree-sitter.a" ]; then
         echo "✅ Tree-sitter library built successfully"
     else
@@ -243,7 +338,7 @@ if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
         cd - > /dev/null
         exit 1
     fi
-    
+
     cd - > /dev/null
 else
     echo "✅ Tree-sitter library already built for Windows"
@@ -253,17 +348,17 @@ fi
 if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     echo "Building tree-sitter-lambda for Windows..."
     cd lambda/tree-sitter-lambda
-    
+
     # Clean previous builds
     make clean || true
-    
+
     # Build static library for Windows (creates libtree-sitter-lambda.a)
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
         CC="clang" AR="llvm-ar" make libtree-sitter-lambda.a
     else
         CC="gcc" AR="ar" make libtree-sitter-lambda.a
     fi
-    
+
     if [ -f "libtree-sitter-lambda.a" ]; then
         echo "✅ Tree-sitter-lambda built successfully"
     else
@@ -271,10 +366,66 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
         cd - > /dev/null
         exit 1
     fi
-    
+
     cd - > /dev/null
 else
     echo "✅ Tree-sitter-lambda already built for Windows"
+fi
+
+# Build tree-sitter-javascript
+if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
+    echo "Building tree-sitter-javascript for Windows..."
+    cd lambda/tree-sitter-javascript
+
+    # Clean previous builds
+    make clean || true
+
+    # Build static library for Windows
+    if [[ "$MSYSTEM" == "CLANG64" ]]; then
+        CC="clang" AR="llvm-ar" make libtree-sitter-javascript.a
+    else
+        CC="gcc" AR="ar" make libtree-sitter-javascript.a
+    fi
+
+    if [ -f "libtree-sitter-javascript.a" ]; then
+        echo "✅ Tree-sitter-javascript built successfully"
+    else
+        echo "❌ Tree-sitter-javascript build failed"
+        cd - > /dev/null
+        exit 1
+    fi
+
+    cd - > /dev/null
+else
+    echo "✅ Tree-sitter-javascript already built for Windows"
+fi
+
+# Build tree-sitter-latex
+if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
+    echo "Building tree-sitter-latex for Windows..."
+    cd lambda/tree-sitter-latex
+
+    # Clean previous builds
+    make clean || true
+
+    # Build static library for Windows
+    if [[ "$MSYSTEM" == "CLANG64" ]]; then
+        CC="clang" AR="llvm-ar" make libtree-sitter-latex.a
+    else
+        CC="gcc" AR="ar" make libtree-sitter-latex.a
+    fi
+
+    if [ -f "libtree-sitter-latex.a" ]; then
+        echo "✅ Tree-sitter-latex built successfully"
+    else
+        echo "❌ Tree-sitter-latex build failed"
+        cd - > /dev/null
+        exit 1
+    fi
+
+    cd - > /dev/null
+else
+    echo "✅ Tree-sitter-latex already built for Windows"
 fi
 
 # Function to download and extract if not exists
@@ -282,11 +433,11 @@ download_extract() {
     local name="$1"
     local url="$2"
     local archive="$3"
-    
+
     if [ ! -d "$DEPS_DIR/src/$name" ]; then
         echo "Downloading $name..."
         cd "$DEPS_DIR/src"
-        
+
         if command_exists curl; then
             curl -L "$url" -o "$archive"
         elif command_exists wget; then
@@ -296,14 +447,14 @@ download_extract() {
             cd - > /dev/null
             return 1
         fi
-        
+
         case "$archive" in
             *.tar.gz) tar -xzf "$archive" ;;
             *.tar.bz2) tar -xjf "$archive" ;;
             *.tar.xz) tar -xJf "$archive" ;;
             *.zip) unzip "$archive" ;;
         esac
-        
+
         rm "$archive"
         cd - > /dev/null
     else
@@ -314,35 +465,35 @@ download_extract() {
 # Function to build minimal static libcurl for Windows (HTTP/HTTPS only)
 build_minimal_static_libcurl() {
     echo "Building minimal static libcurl for Windows native (HTTP/HTTPS only)..."
-    
+
     # Check if already built
     if [ -f "$DEPS_DIR/lib/libcurl.a" ]; then
         echo "Minimal static libcurl already built"
         return 0
     fi
-    
+
     # Try multiple curl versions if the primary one fails
     CURL_VERSIONS=("8.10.1" "8.9.1" "8.8.0")
     CURL_SUCCESS=false
-    
+
     for CURL_VERSION in "${CURL_VERSIONS[@]}"; do
         CURL_DIR="curl-$CURL_VERSION"
-        
+
         if [ -d "$DEPS_DIR/src/$CURL_DIR" ]; then
             echo "Found existing curl directory: $CURL_DIR"
             CURL_SUCCESS=true
             break
         fi
-        
+
         echo "Attempting to download curl $CURL_VERSION..."
         cd "$DEPS_DIR/src"
-        
+
         CURL_URL="https://curl.se/download/$CURL_DIR.tar.gz"
         CURL_ARCHIVE="$CURL_DIR.tar.gz"
-        
+
         # Try downloading with curl first (more reliable in MSYS), then wget as fallback
         DOWNLOAD_SUCCESS=false
-        
+
         if command_exists curl; then
             echo "Downloading with curl from: $CURL_URL"
             if curl -L -f --connect-timeout 30 --max-time 300 "$CURL_URL" -o "$CURL_ARCHIVE"; then
@@ -351,7 +502,7 @@ build_minimal_static_libcurl() {
                 echo "curl download failed for version $CURL_VERSION"
             fi
         fi
-        
+
         if [ "$DOWNLOAD_SUCCESS" = "false" ] && command_exists wget; then
             echo "Downloading with wget from: $CURL_URL (fallback)"
             if wget --timeout=30 --tries=3 --no-check-certificate "$CURL_URL" -O "$CURL_ARCHIVE"; then
@@ -360,21 +511,21 @@ build_minimal_static_libcurl() {
                 echo "wget download failed for version $CURL_VERSION"
             fi
         fi
-        
+
         if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
             echo "⚠️  Failed to download curl $CURL_VERSION, trying next version..."
             rm -f "$CURL_ARCHIVE"
             cd - > /dev/null
             continue
         fi
-        
+
         # Verify the downloaded file exists and has reasonable size
         if [ ! -f "$CURL_ARCHIVE" ]; then
             echo "⚠️  Downloaded file $CURL_ARCHIVE not found for version $CURL_VERSION"
             cd - > /dev/null
             continue
         fi
-        
+
         ARCHIVE_SIZE=$(stat -c%s "$CURL_ARCHIVE" 2>/dev/null || wc -c < "$CURL_ARCHIVE" 2>/dev/null || echo "0")
         if [ "$ARCHIVE_SIZE" -lt 1000000 ]; then  # Less than 1MB is suspicious
             echo "⚠️  Downloaded file $CURL_ARCHIVE is too small ($ARCHIVE_SIZE bytes) for version $CURL_VERSION"
@@ -383,10 +534,10 @@ build_minimal_static_libcurl() {
             cd - > /dev/null
             continue
         fi
-        
+
         echo "✅ Downloaded curl $CURL_VERSION successfully ($ARCHIVE_SIZE bytes)"
         echo "Extracting $CURL_ARCHIVE..."
-        
+
         if tar -xzf "$CURL_ARCHIVE"; then
             rm "$CURL_ARCHIVE"
             echo "✅ Extraction successful for curl $CURL_VERSION"
@@ -400,14 +551,14 @@ build_minimal_static_libcurl() {
             continue
         fi
     done
-    
+
     if [ "$CURL_SUCCESS" = "false" ]; then
         echo "❌ Error: Failed to download any curl version"
         echo "Tried versions: ${CURL_VERSIONS[*]}"
         echo "Please check your internet connection and try again"
         return 1
     fi
-    
+
     # Find the successfully downloaded curl directory
     for CURL_VERSION in "${CURL_VERSIONS[@]}"; do
         if [ -d "$DEPS_DIR/src/curl-$CURL_VERSION" ]; then
@@ -415,14 +566,14 @@ build_minimal_static_libcurl() {
             break
         fi
     done
-    
+
     echo "Using curl directory: $CURL_DIR"
     cd "$DEPS_DIR/src/$CURL_DIR"
-    
+
     # Clean any previous builds
     echo "Cleaning previous builds..."
     make distclean 2>/dev/null || true
-    
+
     # Set up environment for Windows compilation
     if [[ "$MSYSTEM" == "CLANG64" ]]; then
         export CC="clang"
@@ -437,11 +588,11 @@ build_minimal_static_libcurl() {
         export RANLIB="ranlib"
         export STRIP="strip"
     fi
-    
+
     export CFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS -DCURL_STATICLIB"
     export CXXFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS -DCURL_STATICLIB"
     export LDFLAGS=""
-    
+
     # Configure with bare minimum features - absolutely no SSH, IDN, HTTP2, or advanced protocols
     echo "Configuring libcurl with minimal options (HTTP/HTTPS only)..."
     if ./configure \
@@ -493,43 +644,43 @@ build_minimal_static_libcurl() {
         --disable-progress-meter \
         --disable-dnsshuffle \
         --disable-alt-svc; then
-        
+
         echo "Configuration complete. Building..."
         if make -j4; then
             echo "Installing to win-native-deps..."
             if make install; then
                 echo "✅ Minimal static libcurl built successfully"
-                
+
                 # Verify the build doesn't contain problematic dependencies
                 echo "Verifying minimal build..."
-                
+
                 # Check for SSH objects
                 if ar -t "$SCRIPT_DIR/$DEPS_DIR/lib/libcurl.a" | grep -i ssh; then
                     echo "WARNING: SSH objects found in libcurl.a"
                 else
                     echo "✓ No SSH objects found"
                 fi
-                
+
                 # Check for IDN objects
                 if ar -t "$SCRIPT_DIR/$DEPS_DIR/lib/libcurl.a" | grep -i idn; then
                     echo "WARNING: IDN objects found in libcurl.a"
                 else
                     echo "✓ No IDN objects found"
                 fi
-                
+
                 # Check for HTTP2 objects
                 if ar -t "$SCRIPT_DIR/$DEPS_DIR/lib/libcurl.a" | grep -i http2; then
                     echo "INFO: HTTP2 objects found (but should not cause linking issues)"
                 else
                     echo "✓ No HTTP2 objects found"
                 fi
-                
+
                 cd - > /dev/null
                 return 0
             fi
         fi
     fi
-    
+
     echo "❌ Minimal libcurl build failed"
     cd - > /dev/null
     return 1
@@ -538,7 +689,7 @@ build_minimal_static_libcurl() {
 # Build MIR (JIT compiler)
 if [ ! -f "$DEPS_DIR/lib/libmir.a" ]; then
     echo "Building MIR for Windows native..."
-    
+
     # Check for parallel directory first (preferred)
     MIR_SRC=""
     if [ -d "../mir" ]; then
@@ -561,23 +712,23 @@ if [ ! -f "$DEPS_DIR/lib/libmir.a" ]; then
             MIR_SRC="$DEPS_DIR/src/mir"
         fi
     fi
-    
+
     if [ -n "$MIR_SRC" ] && [ -d "$MIR_SRC" ]; then
         echo "Building MIR from: $MIR_SRC"
         cd "$MIR_SRC"
-        
+
         # Clean previous builds
         make clean 2>/dev/null || true
-        
+
         # Build MIR for native Windows
         echo "Building MIR..."
-        
+
         # Always use CLANG64 tools since we installed them
         CC="/clang64/bin/clang.exe" \
         AR="/clang64/bin/llvm-ar.exe" \
         CFLAGS="-O2 -DNDEBUG -fPIC" \
         make
-        
+
         # Copy built libraries and headers
         if [ -f "libmir.a" ]; then
             if [[ "$MIR_SRC" == "../mir" ]]; then
@@ -589,7 +740,7 @@ if [ ! -f "$DEPS_DIR/lib/libmir.a" ]; then
         else
             echo "⚠️  MIR build may have issues"
         fi
-        
+
         # Copy headers
         if [[ "$MIR_SRC" == "../mir" ]]; then
             mkdir -p "../Lambda/$DEPS_DIR/include"
@@ -598,13 +749,13 @@ if [ ! -f "$DEPS_DIR/lib/libmir.a" ]; then
             mkdir -p "../../$DEPS_DIR/include"
             HEADER_DIR="../../$DEPS_DIR/include"
         fi
-        
+
         for header in mir.h mir-gen.h mir-varr.h mir-dlist.h mir-hash.h mir-htab.h mir-alloc.h mir-bitmap.h mir-code-alloc.h; do
             if [ -f "$header" ]; then
                 cp "$header" "$HEADER_DIR/"
             fi
         done
-        
+
         cd - > /dev/null
     fi
 else
@@ -614,7 +765,7 @@ fi
 # Build utf8proc (Unicode normalization library)
 if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
     echo "Building utf8proc for Windows native..."
-    
+
     # Check for parallel directory first (preferred)
     UTF8PROC_SRC=""
     if [ -d "../utf8proc" ]; then
@@ -637,17 +788,17 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
             UTF8PROC_SRC="$DEPS_DIR/src/utf8proc"
         fi
     fi
-    
+
     if [ -n "$UTF8PROC_SRC" ] && [ -d "$UTF8PROC_SRC" ]; then
         echo "Building utf8proc from: $UTF8PROC_SRC"
         cd "$UTF8PROC_SRC"
-        
+
         # Clean previous builds
         make clean 2>/dev/null || true
-        
+
         # Build utf8proc for native Windows
         echo "Building utf8proc..."
-        
+
         # Use proper compiler based on MSYS2 environment
         if [[ "$MSYSTEM" == "CLANG64" ]]; then
             CC_BIN="clang"
@@ -656,7 +807,7 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
             CC_BIN="gcc"
             AR_BIN="ar"
         fi
-        
+
         # Build only static library with UTF8PROC_STATIC define
         CC="$CC_BIN" \
         AR="$AR_BIN" \
@@ -666,7 +817,7 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
             cd - > /dev/null
             exit 1
         }
-        
+
         # Copy library and headers
         if [[ "$UTF8PROC_SRC" == "../utf8proc" ]]; then
             mkdir -p "../Lambda/$DEPS_DIR/lib"
@@ -679,7 +830,7 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
             LIB_DIR="../../$DEPS_DIR/lib"
             HEADER_DIR="../../$DEPS_DIR/include"
         fi
-        
+
         # Copy the static library
         if [ -f "libutf8proc.a" ]; then
             cp "libutf8proc.a" "$LIB_DIR/"
@@ -687,7 +838,7 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
         else
             echo "⚠️  utf8proc library not found after build"
         fi
-        
+
         # Copy headers
         if [ -f "utf8proc.h" ]; then
             cp "utf8proc.h" "$HEADER_DIR/"
@@ -695,7 +846,7 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
         else
             echo "⚠️  utf8proc headers not found"
         fi
-        
+
         cd - > /dev/null
     fi
 else
@@ -704,6 +855,105 @@ fi
 
 # Build zlog (logging library) - REMOVED: No longer a dependency
 # zlog has been removed as a dependency from Lambda
+
+# Build ThorVG (vector graphics library for SVG rendering)
+build_thorvg() {
+    echo "Building ThorVG for Windows native..."
+
+    # Check if already built
+    if [ -f "$DEPS_DIR/lib/libthorvg.a" ]; then
+        echo "ThorVG already built"
+        return 0
+    fi
+
+    # Check for existing ThorVG source
+    THORVG_SRC=""
+    if [ -d "../thorvg" ]; then
+        echo "Using parallel thorvg directory..."
+        THORVG_SRC="../thorvg"
+    elif [ -d "$DEPS_DIR/src/thorvg" ]; then
+        echo "Using previously downloaded thorvg..."
+        THORVG_SRC="$DEPS_DIR/src/thorvg"
+    else
+        # Clone ThorVG repository
+        mkdir -p "$DEPS_DIR/src"
+        cd "$DEPS_DIR/src"
+        echo "Cloning ThorVG repository..."
+        if ! git clone --depth 1 --branch v0.15.16 https://github.com/thorvg/thorvg.git; then
+            echo "Warning: Could not clone ThorVG repository"
+            cd - > /dev/null
+            return 1
+        fi
+        cd - > /dev/null
+        THORVG_SRC="$DEPS_DIR/src/thorvg"
+    fi
+
+    if [ -n "$THORVG_SRC" ] && [ -d "$THORVG_SRC" ]; then
+        echo "Building ThorVG from: $THORVG_SRC"
+        cd "$THORVG_SRC"
+
+        # Set up environment for Windows compilation
+        if [[ "$MSYSTEM" == "CLANG64" ]]; then
+            export CC="clang"
+            export CXX="clang++"
+            export AR="llvm-ar"
+            export RANLIB="llvm-ranlib"
+        else
+            export CC="gcc"
+            export CXX="g++"
+            export AR="ar"
+            export RANLIB="ranlib"
+        fi
+
+        export CFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS"
+        export CXXFLAGS="-O2 -std=c++17 -DNDEBUG -D_WIN32 -DWINDOWS"
+
+        # Clean previous builds
+        rm -rf builddir 2>/dev/null || true
+
+        # Configure ThorVG with Meson
+        # Build as static library with minimal features for Lambda's needs
+        echo "Configuring ThorVG with Meson..."
+        if ! meson setup builddir \
+            --prefix="$SCRIPT_DIR/$DEPS_DIR" \
+            --buildtype=release \
+            --default-library=static \
+            -Dengines=sw \
+            -Dloaders=all \
+            -Dsavers=tvg \
+            -Dbindings=capi \
+            -Dtools="" \
+            -Dexamples=false \
+            -Dtests=false; then
+            echo "Error: ThorVG meson configuration failed"
+            cd - > /dev/null
+            return 1
+        fi
+
+        # Build ThorVG
+        echo "Building ThorVG (this may take a few minutes)..."
+        if ! ninja -C builddir; then
+            echo "Error: ThorVG build failed"
+            cd - > /dev/null
+            return 1
+        fi
+
+        # Install ThorVG
+        echo "Installing ThorVG to win-native-deps..."
+        if ! ninja -C builddir install; then
+            echo "Error: ThorVG installation failed"
+            cd - > /dev/null
+            return 1
+        fi
+
+        echo "✅ ThorVG built and installed successfully"
+        cd - > /dev/null
+        return 0
+    else
+        echo "Error: ThorVG source directory not found"
+        return 1
+    fi
+}
 
 # Build libcurl with minimal static build for Windows
 echo "Setting up minimal static libcurl..."
@@ -718,6 +968,21 @@ else
     fi
 fi
 
+# Build ThorVG for vector graphics rendering
+echo ""
+echo "Setting up ThorVG (vector graphics library)..."
+if [ -f "$DEPS_DIR/lib/libthorvg.a" ]; then
+    echo "ThorVG already available"
+else
+    if ! build_thorvg; then
+        echo "⚠️  Warning: ThorVG build failed"
+        echo "   ThorVG is required for SVG rendering in Radiant engine"
+        echo "   You can manually build it later from: https://github.com/thorvg/thorvg"
+    else
+        echo "✅ ThorVG built successfully"
+    fi
+fi
+
 # Verify compiler setup
 echo ""
 echo "Verifying compiler setup..."
@@ -725,7 +990,7 @@ echo "Verifying compiler setup..."
 if [[ "$MSYSTEM" == "CLANG64" ]]; then
     COMPILER_VERSION=$(clang --version 2>/dev/null | head -1 || echo "Clang not found")
     echo "Clang version: $COMPILER_VERSION"
-    
+
     # Check if clang++ is available
     if command_exists clang++; then
         echo "✅ clang++ is available"
@@ -735,7 +1000,7 @@ if [[ "$MSYSTEM" == "CLANG64" ]]; then
 else
     GCC_VERSION=$(gcc --version 2>/dev/null | head -1 || echo "GCC not found")
     echo "GCC version: $GCC_VERSION"
-    
+
     # Check if g++ is available
     if command_exists g++; then
         echo "✅ g++ is available"
@@ -747,7 +1012,7 @@ fi
 # Check other tools
 echo ""
 echo "Verifying build tools..."
-tools=("make" "cmake" "ninja" "git" "pkg-config" "premake5")
+tools=("make" "cmake" "ninja" "git" "pkg-config" "premake5" "meson")
 for tool in "${tools[@]}"; do
     if command_exists "$tool"; then
         version=$($tool --version 2>/dev/null | head -1 || echo "version unknown")
@@ -775,28 +1040,35 @@ echo "🎉 Windows native compilation setup completed!"
 echo ""
 echo "Summary:"
 echo "  • Dependencies directory: $DEPS_DIR"
-echo "  • Build configuration: build_lambda_win_native_config.json"
-echo "  • Convenience script: compile-win-native.sh"
+echo "  • Build system: Premake5 (generates Makefiles from build_lambda_config.json)"
 echo "  • Target environment: $MSYSTEM ($COMPILER_NAME)"
 echo ""
 echo "To build Lambda for Windows natively:"
 echo "  1. Ensure you're in MSYS2 terminal (CLANG64 or MINGW64)"
-echo "  2. Run: ./compile-win-native.sh"
-echo "  3. Or run: ./compile.sh build_lambda_win_native_config.json"
+echo "  2. Run: make build"
 echo ""
 echo "For debug build:"
-echo "  ./compile-win-native.sh --debug"
+echo "  make build-debug"
+echo ""
+echo "For release build:"
+echo "  make build-release"
 echo ""
 echo "Dependencies installed:"
-echo "  ✅ Build tools (make, cmake, ninja, premake5)"
+echo "  ✅ Build tools (make, cmake, ninja, premake5, meson)"
 echo "  ✅ Compiler toolchain ($COMPILER_NAME)"
-echo "  ✅ GMP (system package)"
-echo "  ✅ ICU (Unicode support)"
+echo "  ✅ mpdecimal (multi-precision decimal arithmetic)"
+echo "  ✅ mbedTLS (SSL/TLS library)"
+echo "  ✅ FreeType (font rendering)"
+echo "  ✅ GLFW (window management)"
+echo "  ✅ Image libraries (PNG, JPEG, GIF)"
 echo "  📦 Tree-sitter library (building from source - see verification below)"
 echo "  📦 Tree-sitter-lambda (building from source - see verification below)"
+echo "  📦 Tree-sitter-javascript (building from source - see verification below)"
+echo "  📦 Tree-sitter-latex (building from source - see verification below)"
 echo "  📦 MIR (building from source - see verification below)"
 echo "  📦 utf8proc (building from source - see verification below)"
 echo "  📦 libcurl minimal static (building from source - HTTP/HTTPS only, no HTTP/2)"
+echo "  📦 ThorVG (building from source - vector graphics for SVG rendering)"
 echo ""
 
 # Final verification
@@ -813,6 +1085,18 @@ if [ -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     echo "✅ Tree-sitter-lambda library available"
 else
     echo "⚠️  Tree-sitter-lambda library missing"
+fi
+
+if [ -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
+    echo "✅ Tree-sitter-javascript library available"
+else
+    echo "⚠️  Tree-sitter-javascript library missing"
+fi
+
+if [ -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
+    echo "✅ Tree-sitter-latex library available"
+else
+    echo "⚠️  Tree-sitter-latex library missing"
 fi
 
 # Check MIR
@@ -834,6 +1118,60 @@ if [ -f "$DEPS_DIR/lib/libcurl.a" ]; then
     echo "✅ libcurl library available (minimal static build)"
 else
     echo "⚠️  libcurl library missing"
+fi
+
+# Check ThorVG
+if [ -f "$DEPS_DIR/lib/libthorvg.a" ]; then
+    echo "✅ ThorVG library available"
+else
+    echo "⚠️  ThorVG library missing (required for SVG rendering)"
+fi
+
+# Check mpdec (from MSYS2 package)
+if pacman -Qq "${TOOLCHAIN_PREFIX}-mpdecimal" &>/dev/null; then
+    echo "✅ mpdecimal library installed (from MSYS2)"
+else
+    echo "⚠️  mpdecimal library not installed"
+fi
+
+# Check mbedTLS (from MSYS2 package)
+if pacman -Qq "${TOOLCHAIN_PREFIX}-mbedtls" &>/dev/null; then
+    echo "✅ mbedTLS library installed (from MSYS2)"
+else
+    echo "⚠️  mbedTLS library not installed"
+fi
+
+# Check FreeType (from MSYS2 package)
+if pacman -Qq "${TOOLCHAIN_PREFIX}-freetype" &>/dev/null; then
+    echo "✅ FreeType library installed (from MSYS2)"
+else
+    echo "⚠️  FreeType library not installed"
+fi
+
+# Check GLFW (from MSYS2 package)
+if pacman -Qq "${TOOLCHAIN_PREFIX}-glfw" &>/dev/null; then
+    echo "✅ GLFW library installed (from MSYS2)"
+else
+    echo "⚠️  GLFW library not installed"
+fi
+
+# Check image libraries
+if pacman -Qq "${TOOLCHAIN_PREFIX}-libpng" &>/dev/null; then
+    echo "✅ libpng library installed (from MSYS2)"
+else
+    echo "⚠️  libpng library not installed"
+fi
+
+if pacman -Qq "${TOOLCHAIN_PREFIX}-libjpeg-turbo" &>/dev/null; then
+    echo "✅ libjpeg-turbo library installed (from MSYS2)"
+else
+    echo "⚠️  libjpeg-turbo library not installed"
+fi
+
+if pacman -Qq "${TOOLCHAIN_PREFIX}-giflib" &>/dev/null; then
+    echo "✅ giflib library installed (from MSYS2)"
+else
+    echo "⚠️  giflib library not installed"
 fi
 
 # Check compilers
