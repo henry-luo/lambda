@@ -129,12 +129,8 @@ $(LAMBDA_EMBED_H_FILE): $(LAMBDA_H_FILE)
 	fi
 
 # Tree-sitter library targets
-# Use system-installed libtree-sitter on Windows/MSYS2, build from source otherwise
-ifeq ($(IS_MSYS2),yes)
-TREE_SITTER_LIB = /mingw64/lib/libtree-sitter.dll.a
-else
+# Build from source on all platforms
 TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
-endif
 TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
 TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javascript.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
@@ -147,22 +143,12 @@ LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
 
 # Build or verify tree-sitter library
 $(TREE_SITTER_LIB):
-ifeq ($(IS_MSYS2),yes)
-	@echo "Using system libtree-sitter library..."
-	@if [ ! -f "$(TREE_SITTER_LIB)" ]; then \
-		echo "❌ System libtree-sitter not found. Install with: pacman -S mingw-w64-x86_64-libtree-sitter"; \
-		exit 1; \
-	else \
-		echo "✅ Found system libtree-sitter: $(TREE_SITTER_LIB)"; \
-	fi
-else
 	@echo "Building tree-sitter library from source..."
 	@echo "🔧 Compiler: $(CC)"
 	@echo "🔧 CXX: $(CXX)"
 	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter libtree-sitter.a CC="$(CC)" CXX="$(CXX)" V=1
-endif
 
 # Build tree-sitter-lambda library (depends on parser generation)
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
