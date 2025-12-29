@@ -452,15 +452,15 @@
                 },
                 {
                     "name": "curl",
-                    "description": "libcurl HTTP client library (minimal static build)",
-                    "include": "win-native-deps/include",
-                    "lib": "win-native-deps/lib/libcurl.a",
-                    "link": "static"
+                    "description": "libcurl HTTP client library",
+                    "include": "/mingw64/include",
+                    "lib": "-lcurl",
+                    "link": "dynamic"
                 },
                 {
                     "name": "tree-sitter",
                     "include": "lambda/tree-sitter/lib/include",
-                    "lib": "lambda/tree-sitter/libtree-sitter-minimal.a",
+                    "lib": "lambda/tree-sitter/libtree-sitter.a",
                     "link": "static"
                 },
                 {
@@ -479,6 +479,12 @@
                     "name": "utf8proc",
                     "include": "win-native-deps/include",
                     "lib": "win-native-deps/lib/libutf8proc.a",
+                    "link": "static"
+                },
+                {
+                    "name": "rpmalloc",
+                    "include": "win-native-deps/include/rpmalloc",
+                    "lib": "win-native-deps/lib/librpmalloc.a",
                     "link": "static"
                 },
                 {
@@ -514,10 +520,8 @@
                 },
                 {
                     "name": "nghttp2",
-                    "description": "HTTP/2 library required by curl",
-                    "include": "win-native-deps/include",
-                    "lib": "win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-                    "link": "static"
+                    "description": "HTTP/2 library (curl will use its own dynamically linked copy)",
+                    "link": "none"
                 },
                 {
                     "name": "mingw32",
@@ -639,6 +643,88 @@
                 {
                     "name": "posix-compat",
                     "link": "none"
+                },
+                {
+                    "name": "zlib",
+                    "description": "Compression library",
+                    "lib": "-lz",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "bzip2",
+                    "lib": "-lbz2",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "freetype",
+                    "include": "/mingw64/include/freetype2",
+                    "lib": "-lfreetype",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "ThorVG",
+                    "include": "win-native-deps/include",
+                    "lib": "win-native-deps/lib/libthorvg.a",
+                    "link": "static"
+                },
+                {
+                    "name": "glfw",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libglfw3.a",
+                    "link": "static"
+                },
+                {
+                    "name": "png",
+                    "lib": "-lpng",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "turbojpeg",
+                    "lib": "/mingw64/lib/libturbojpeg.a",
+                    "link": "static"
+                },
+                {
+                    "name": "gif",
+                    "lib": "/mingw64/lib/libgif.a",
+                    "link": "static"
+                },
+                {
+                    "name": "opengl32",
+                    "lib": "-lopengl32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "gomp",
+                    "description": "GNU OpenMP library (required by ThorVG)",
+                    "lib": "-lgomp",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "harfbuzz",
+                    "description": "HarfBuzz text shaping - not needed",
+                    "link": "none"
+                },
+                {
+                    "name": "graphite2",
+                    "description": "Graphite2 - not needed",
+                    "link": "none"
+                },
+                {
+                    "name": "brotlidec",
+                    "description": "Brotli decompression (FreeType dependency)",
+                    "lib": "/mingw64/lib/libbrotlidec.a",
+                    "link": "static"
+                },
+                {
+                    "name": "brotlicommon",
+                    "description": "Brotli common (FreeType dependency)",
+                    "lib": "/mingw64/lib/libbrotlicommon.a",
+                    "link": "static"
+                },
+                {
+                    "name": "rpcrt4",
+                    "lib": "-lrpcrt4",
+                    "link": "dynamic"
                 }
             ],
             "dev_libraries": [
@@ -667,6 +753,7 @@
                 "D_TIMESPEC_DEFINED",
                 "DUTF8PROC_STATIC",
                 "DCURL_STATICLIB",
+                "DTVG_STATIC",
                 "v"
             ],
             "linker_flags": [
@@ -674,7 +761,8 @@
             ],
             "build_dir": "build_windows",
             "cross_compile": true,
-            "target_triplet": "x86_64-w64-mingw32"
+            "target_triplet": "x86_64-w64-mingw32",
+            "disable_sanitizer": true
         },
         "linux": {
             "output": "lambda.exe",

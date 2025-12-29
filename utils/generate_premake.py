@@ -296,6 +296,30 @@ class PremakeGenerator:
             elif flag not in ['pedantic', 'fdiagnostics-color=auto', 'fms-extensions']:  # Avoid duplicates
                 build_opts.append(f'-{flag}')
 
+        # Add platform-specific flags
+        platforms_config = self.config.get('platforms', {})
+        if self.use_windows_config:
+            windows_config = platforms_config.get('windows', {})
+            platform_flags = windows_config.get('flags', [])
+            for flag in platform_flags:
+                opt = f'-{flag}' if not flag.startswith('-') else flag
+                if opt not in build_opts:
+                    build_opts.append(opt)
+        elif self.use_linux_config:
+            linux_config = platforms_config.get('linux', {})
+            platform_flags = linux_config.get('flags', [])
+            for flag in platform_flags:
+                opt = f'-{flag}' if not flag.startswith('-') else flag
+                if opt not in build_opts:
+                    build_opts.append(opt)
+        elif self.use_macos_config:
+            macos_config = platforms_config.get('macos', {})
+            platform_flags = macos_config.get('flags', [])
+            for flag in platform_flags:
+                opt = f'-{flag}' if not flag.startswith('-') else flag
+                if opt not in build_opts:
+                    build_opts.append(opt)
+
         return build_opts
 
     def _get_consolidated_includes(self) -> List[str]:
@@ -1046,6 +1070,8 @@ class PremakeGenerator:
                 static_libs = []
                 frameworks = []
                 dynamic_libs = []
+                # Libraries that need to come after internal deps
+                late_binding_lib_names = ['rpmalloc']
 
                 for dep in external_deps:
                     if dep in self.external_libraries:
@@ -1053,6 +1079,10 @@ class PremakeGenerator:
 
                         # Skip libraries with link type "none"
                         if lib_info.get('link') == 'none':
+                            continue
+
+                        # Skip late-binding libraries here - they're added after links block
+                        if self.use_windows_config and dep in late_binding_lib_names:
                             continue
 
                         lib_path = lib_info['lib']
@@ -1112,6 +1142,13 @@ class PremakeGenerator:
                         self.premake_content.append(f'        "{lib}",')
                     for dep in internal_deps:
                         self.premake_content.append(f'        "{dep}",')
+                    # Add late-binding static libraries (must come after internal deps)
+                    if self.use_windows_config:
+                        late_binding_lib_names = ['rpmalloc']
+                        for dep_name in late_binding_lib_names:
+                            if dep_name in external_deps and dep_name in self.external_libraries:
+                                # Use :static modifier to link static library by name
+                                self.premake_content.append(f'        "{dep_name}:static",')
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -2228,9 +2265,9 @@ class PremakeGenerator:
                         # Special handling for tree-sitter libraries - add them to links instead of linkoptions
                         if lib_name in ['tree-sitter', 'tree-sitter-lambda']:
                             tree_sitter_libs.append(lib_path)
-                        # On Linux, static libs need to come AFTER lambda-lib in link order
+                        # On Linux/Windows, static libs need to come AFTER lambda-lib in link order
                         # because lambda-lib has unresolved symbols that these libs provide
-                        elif self.use_linux_config and lib_name in ['rpmalloc', 'utf8proc']:
+                        elif (self.use_linux_config or self.use_windows_config) and lib_name in ['rpmalloc', 'utf8proc']:
                             late_static_libs.append((lib_name, lib_path))
                         else:
                             external_static_libs.append(lib_path)
@@ -2297,19 +2334,26 @@ class PremakeGenerator:
             if self.use_windows_config:
                 # Windows: use the same explicit paths as the main lambda program
                 windows_lib_paths = [
-                    "../../win-native-deps/lib/libcurl.a",
-                    "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+                    "../../lambda/tree-sitter/libtree-sitter.a",
                     "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
                     "../../win-native-deps/lib/libmir.a",
                     "/mingw64/lib/libmpdec.a",
                     "../../win-native-deps/lib/libutf8proc.a",
-                    "/mingw64/lib/libssl.a",
-                    "/mingw64/lib/libcrypto.a",
-                    "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
+                    "/mingw64/lib/libmbedtls.a",
+                    "/mingw64/lib/libmbedx509.a",
+                    "/mingw64/lib/libmbedcrypto.a",
                 ]
                 for lib_path in windows_lib_paths:
                     self.premake_content.append(f'        "{lib_path}",')
-            else:
+                # Add dynamic libraries
+                self.premake_content.extend([
+                    '        "-lcurl",',
+                    '        "-lnghttp2",',
+                    '        "-lz",',
+                    '        "-lbz2",',
+                    '        "-lfreetype",',
+                    '        "-lpng",',
+                ])
                 # Non-Windows: use the original approach with external library definitions
                 # If lambda-input-full is a dependency, we need to include curl/ssl/crypto for proper linking
                 # since static libraries don't propagate their dependencies in Premake
@@ -2491,9 +2535,15 @@ class PremakeGenerator:
             ])
 
         # Add AddressSanitizer for test projects only (not for main lambda.exe)
+        # Disable on Windows since ASAN is not readily available in MINGW64
         platforms_config = self.config.get('platforms', {})
-        linux_config = platforms_config.get('linux', {})
-        disable_sanitizer = linux_config.get('disable_sanitizer', False)
+        disable_sanitizer = False
+        if self.use_windows_config:
+            windows_config = platforms_config.get('windows', {})
+            disable_sanitizer = windows_config.get('disable_sanitizer', True)  # Default to True for Windows
+        else:
+            linux_config = platforms_config.get('linux', {})
+            disable_sanitizer = linux_config.get('disable_sanitizer', False)
 
         if not disable_sanitizer:
             self.premake_content.extend([
@@ -2934,14 +2984,14 @@ class PremakeGenerator:
                 import shutil
                 print(f"DEBUG: Windows detected, copying {relative_target} to {symlink_path}")
                 shutil.copy2(platform_specific_file, symlink_path)
-                print(f"✅ Created copy: {symlink_path} -> {relative_target}")
+                print(f"Created copy: {symlink_path} -> {relative_target}")
             else:  # Unix-like (macOS, Linux)
                 print(f"DEBUG: Creating symbolic link: {symlink_path} -> {relative_target}")
                 os.symlink(relative_target, symlink_path)
-                print(f"✅ Created symbolic link: {symlink_path} -> {relative_target}")
+                print(f"Created symbolic link: {symlink_path} -> {relative_target}")
 
         except OSError as e:
-            print(f"⚠️  Warning: Could not create {symlink_path}: {e}")
+            print(f"Warning: Could not create {symlink_path}: {e}")
             print(f"   You may need to manually create the link:")
             if os.name == 'nt':
                 print(f"   copy {platform_specific_file} {symlink_path}")
