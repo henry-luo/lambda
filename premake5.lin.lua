@@ -219,15 +219,15 @@ project "lambda-input-full-cpp"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
         "/usr/local/lib/aarch64-linux-gnu/librpmalloc.a",
     }
     
     links {
         "mpdec",
         "curl",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "lambda-lib",
     }
@@ -512,6 +512,9 @@ project "lambda"
         "../../lambda/tree-sitter-latex/libtree-sitter-latex.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "/usr/local/lib/aarch64-linux-gnu/libthorvg.a",
         "/usr/lib/aarch64-linux-gnu/libpng.a",
@@ -532,9 +535,6 @@ project "lambda"
         links {
             "curl",
             "mpdec",
-            "mbedtls",
-            "mbedx509",
-            "mbedcrypto",
             "z",
             "bz2",
             "freetype",
@@ -1320,9 +1320,6 @@ project "test_arena_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -1550,9 +1547,6 @@ project "test_mime_detect_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -1655,9 +1649,6 @@ project "test_mark_builder_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -1760,9 +1751,6 @@ project "test_mark_builder_deepcopy_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -1865,9 +1853,6 @@ project "test_mark_editor_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -1970,9 +1955,6 @@ project "test_name_pool_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2075,9 +2057,6 @@ project "test_mark_reader_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2180,9 +2159,6 @@ project "test_error_tracking"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2285,9 +2261,6 @@ project "test_math_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2390,9 +2363,6 @@ project "test_math_ascii_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2495,9 +2465,6 @@ project "test_markup_roundtrip_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2600,9 +2567,6 @@ project "test_entity_emoji_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2705,9 +2669,6 @@ project "test_input_roundtrip_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2810,9 +2771,6 @@ project "test_wpt_html_parser_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -2916,9 +2874,6 @@ project "test_latex_ts_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3021,9 +2976,6 @@ project "test_html_roundtrip_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3126,9 +3078,6 @@ project "test_html_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3231,9 +3180,6 @@ project "test_html_negative_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3342,9 +3288,6 @@ project "test_lambda_domnode_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3445,9 +3388,6 @@ project "test_dir_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3550,9 +3490,6 @@ project "test_graph_parser_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3655,9 +3592,6 @@ project "test_validator_input_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3760,9 +3694,6 @@ project "test_validator_features_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3865,9 +3796,6 @@ project "test_null_vs_missing_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -3970,9 +3898,6 @@ project "test_enhanced_errors"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4075,9 +4000,6 @@ project "test_validation_options"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4180,9 +4102,6 @@ project "test_format_validation"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4285,9 +4204,6 @@ project "test_validator_integration"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4390,9 +4306,6 @@ project "test_type_references_simple"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4495,9 +4408,6 @@ project "test_graph_formatter_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4600,9 +4510,6 @@ project "test_sysinfo_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4705,9 +4612,6 @@ project "test_jsx_roundtrip_new_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -4808,9 +4712,6 @@ project "test_mdx_roundtrip_new_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5068,9 +4969,6 @@ project "test_css_dom_integration"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5185,9 +5083,6 @@ project "test_css_dom_crud"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5302,9 +5197,6 @@ project "test_css_style_application_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5412,9 +5304,6 @@ project "test_html_css_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5517,9 +5406,6 @@ project "test_css_tokenizer_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5622,9 +5508,6 @@ project "test_css_tokenizer_unit"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5727,9 +5610,6 @@ project "test_css_parser_unit"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5832,9 +5712,6 @@ project "test_css_engine_unit"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -5937,9 +5814,6 @@ project "test_css_engine_negative"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6042,9 +5916,6 @@ project "test_css_formatter_unit"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6147,9 +6018,6 @@ project "test_css_roundtrip_unit"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6252,9 +6120,6 @@ project "test_compound_descendant_selectors"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6357,9 +6222,6 @@ project "test_selector_groups"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6462,9 +6324,6 @@ project "test_css_parser_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6567,9 +6426,6 @@ project "test_css_integration_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6672,9 +6528,6 @@ project "test_css_files_safe_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6777,9 +6630,6 @@ project "test_css_frameworks_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6882,9 +6732,6 @@ project "test_css_to_mark_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -6985,9 +6832,6 @@ project "test_mdx_roundtrip_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7088,9 +6932,6 @@ project "test_jsx_roundtrip_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7191,9 +7032,6 @@ project "test_latex_parser_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7294,9 +7132,6 @@ project "test_latex_treesitter"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7462,9 +7297,6 @@ project "test_latex_html_v2_baseline"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7567,9 +7399,6 @@ project "test_latex_html_v2_lists_envs"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7670,9 +7499,6 @@ project "test_latex_html_v2_tables"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7773,9 +7599,6 @@ project "test_latex_html_v2_floats"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7876,9 +7699,6 @@ project "test_latex_html_v2_special_chars"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -7979,9 +7799,6 @@ project "test_latex_html_v2_bibliography"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -8082,9 +7899,6 @@ project "test_latex_html_v2_graphics_color"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -8185,9 +7999,6 @@ project "test_latex_html_v2_macros"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -8288,9 +8099,6 @@ project "test_latex_html_v2_new_commands"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -8391,9 +8199,6 @@ project "test_validator_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -8496,9 +8301,6 @@ project "test_ast_validator_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -8601,9 +8403,6 @@ project "test_validator_path_reporting"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
@@ -9004,9 +8803,6 @@ project "test_http_gtest"
     links {
         "curl",
         "mpdec",
-        "mbedtls",
-        "mbedx509",
-        "mbedcrypto",
         "z",
         "bz2",
         "freetype",
