@@ -71,7 +71,7 @@ DomDocument* load_html_doc(Url* base, const char* doc_url, int viewport_width, i
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
-void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 
@@ -482,7 +482,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                     log_error("[RENDER] background-image: invalid local URL '%s'", image_url);
                 } else {
                     // Try loading the image
-                    Tvg_Paint pic = tvg_picture_new();
+                    Tvg_Paint* pic = tvg_picture_new();
                     Tvg_Result result = tvg_picture_load(pic, file_path);
 
                     // If loading failed and URL starts with "./", try prepending "res/"
@@ -510,9 +510,9 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                         tvg_paint_translate(pic, rect.x, rect.y);
 
                         // Apply clipping
-                        Tvg_Paint clip_rect = tvg_shape_new();
+                        Tvg_Paint* clip_rect = tvg_shape_new();
                         Bound* clip = &rdcon->block.clip;
-                        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
+                        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
                         tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
                         tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
 
@@ -521,7 +521,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                         tvg_canvas_sync(rdcon->canvas);
                     } else {
                         log_error("[RENDER] background-image: failed to load '%s'", file_path);
-                        tvg_paint_rel(pic);
+                        tvg_paint_del(pic);
                     }
                 }
                 url_destroy(abs_url);
@@ -582,9 +582,9 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
 }
 
-void draw_debug_rect(Tvg_Canvas canvas, Rect rect, Bound* clip) {
+void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
     tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
-    Tvg_Paint shape = tvg_shape_new();
+    Tvg_Paint* shape = tvg_shape_new();
     tvg_shape_move_to(shape, rect.x, rect.y);
     tvg_shape_line_to(shape, rect.x + rect.width, rect.y);
     tvg_shape_line_to(shape, rect.x + rect.width, rect.y + rect.height);
@@ -597,8 +597,8 @@ void draw_debug_rect(Tvg_Canvas canvas, Rect rect, Bound* clip) {
     tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
 
     // set clipping
-    Tvg_Paint clip_rect = tvg_shape_new();
-    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
+    Tvg_Paint* clip_rect = tvg_shape_new();
+    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
     tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
     tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
 
@@ -744,7 +744,7 @@ void render_svg(ImageSurface* surface) {
         log_debug("no picture to render");  return;
     }
     // Step 1: Create an offscreen canvas to render the original Picture
-    Tvg_Canvas canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
+    Tvg_Canvas* canvas = tvg_swcanvas_create();
     if (!canvas) return;
 
     uint32_t width = surface->max_render_width;
@@ -781,15 +781,15 @@ void render_svg(ImageSurface* surface) {
 }
 
 // load surface pixels to a picture
-Tvg_Paint load_picture(ImageSurface* surface) {
-    Tvg_Paint pic = tvg_picture_new();
+Tvg_Paint* load_picture(ImageSurface* surface) {
+    Tvg_Paint* pic = tvg_picture_new();
     if (!pic) { return NULL; }
 
     // Load the raw pixel data into the new Picture
     if (tvg_picture_load_raw(pic, (uint32_t*)surface->pixels, surface->width, surface->height,
         TVG_COLORSPACE_ABGR8888, false) != TVG_RESULT_SUCCESS) {
         log_debug("Failed to load raw pixel data");
-        tvg_paint_rel(pic);
+        tvg_paint_del(pic);
         return NULL;
     }
     return pic;
@@ -819,14 +819,14 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
             if (!img->pixels) {
                 render_svg(img);
             }
-            Tvg_Paint pic = load_picture(img);
+            Tvg_Paint* pic = load_picture(img);
             if (pic) {
                 tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
                 tvg_picture_set_size(pic, rect.width, rect.height);
                 tvg_paint_translate(pic, rect.x, rect.y);
                 // clip the svg picture
-                Tvg_Paint clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
-                tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
+                Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
+                tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
                 tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
                 tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
                 tvg_canvas_push(rdcon->canvas, pic);
@@ -974,7 +974,7 @@ void render_children(RenderContext* rdcon, View* view) {
 void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
-    rdcon->canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
+    rdcon->canvas = tvg_swcanvas_create();
     Tvg_Result result = tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)uicon->surface->pixels, uicon->surface->width,
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888);
     if (result != TVG_RESULT_SUCCESS) {

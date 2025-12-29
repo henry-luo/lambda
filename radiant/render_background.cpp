@@ -23,8 +23,8 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 /**
  * Create a rounded clip shape for ThorVG based on the render context's clip region
  */
-static Tvg_Paint create_clip_shape(RenderContext* rdcon) {
-    Tvg_Paint clip_rect = tvg_shape_new();
+static Tvg_Paint* create_clip_shape(RenderContext* rdcon) {
+    Tvg_Paint* clip_rect = tvg_shape_new();
     
     if (rdcon->block.has_clip_radius) {
         // Use rounded clipping
@@ -40,7 +40,7 @@ static Tvg_Paint create_clip_shape(RenderContext* rdcon) {
         if (rdcon->block.clip_radius.bottom_left > 0) r = max(r, rdcon->block.clip_radius.bottom_left);
         if (rdcon->block.clip_radius.bottom_right > 0) r = max(r, rdcon->block.clip_radius.bottom_right);
         
-        tvg_shape_append_rect(clip_rect, clip_x, clip_y, clip_w, clip_h, r, r, true);
+        tvg_shape_append_rect(clip_rect, clip_x, clip_y, clip_w, clip_h, r, r);
         log_debug("[CLIP] Using rounded clip: (%.0f,%.0f) %.0fx%.0f r=%.0f", 
                   clip_x, clip_y, clip_w, clip_h, r);
     } else {
@@ -48,7 +48,7 @@ static Tvg_Paint create_clip_shape(RenderContext* rdcon) {
         tvg_shape_append_rect(clip_rect, 
             rdcon->block.clip.left, rdcon->block.clip.top,
             rdcon->block.clip.right - rdcon->block.clip.left,
-            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0, true);
+            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
     }
     
     tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
@@ -74,8 +74,8 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
     
     if (has_radius || needs_rounded_clip) {
         // Use ThorVG for rounded background or rounded clipping
-        Tvg_Canvas canvas = rdcon->canvas;
-        Tvg_Paint shape = tvg_shape_new();
+        Tvg_Canvas* canvas = rdcon->canvas;
+        Tvg_Paint* shape = tvg_shape_new();
         
         float x = rect.x;
         float y = rect.y;
@@ -91,11 +91,11 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
         }
         
         // Build rounded rect path (same as border path)
-        tvg_shape_append_rect(shape, x, y, w, h, r_tl, r_tr, true);
+        tvg_shape_append_rect(shape, x, y, w, h, r_tl, r_tr);
         tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
         
         // Set clipping (may be rounded if parent has border-radius with overflow:hidden)
-        Tvg_Paint clip_rect = create_clip_shape(rdcon);
+        Tvg_Paint* clip_rect = create_clip_shape(rdcon);
         tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
         
         tvg_canvas_remove(canvas, NULL);  // clear previous shapes
@@ -155,8 +155,8 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
         return;
     }
     
-    Tvg_Canvas canvas = rdcon->canvas;
-    Tvg_Paint shape = tvg_shape_new();
+    Tvg_Canvas* canvas = rdcon->canvas;
+    Tvg_Paint* shape = tvg_shape_new();
     
     // Create rectangle shape for gradient fill
     bool has_radius = false;
@@ -172,14 +172,14 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
         float r_tl = border->radius.top_left;
         float r_tr = border->radius.top_right;
         constrain_border_radii(border, rect.width, rect.height);
-        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, true);
+        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr);
     } else {
         // Simple rectangle
-        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, 0, 0, true);
+        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, 0, 0);
     }
     
     // Create linear gradient
-    Tvg_Gradient grad = tvg_linear_gradient_new();
+    Tvg_Gradient* grad = tvg_linear_gradient_new();
     
     // Calculate gradient line
     float x1, y1, x2, y2;
@@ -208,7 +208,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     tvg_shape_set_gradient(shape, grad);
     
     // Set clipping (may be rounded if parent has border-radius with overflow:hidden)
-    Tvg_Paint clip_rect = create_clip_shape(rdcon);
+    Tvg_Paint* clip_rect = create_clip_shape(rdcon);
     tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
     
     tvg_canvas_remove(canvas, NULL);  // clear previous shapes

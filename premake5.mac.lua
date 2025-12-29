@@ -1346,11 +1346,6 @@ project "test_arena_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -1574,11 +1569,6 @@ project "test_mime_detect_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -1676,11 +1666,6 @@ project "test_mark_builder_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -1778,11 +1763,6 @@ project "test_mark_builder_deepcopy_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -1880,11 +1860,6 @@ project "test_mark_editor_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -1982,11 +1957,6 @@ project "test_name_pool_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2084,11 +2054,6 @@ project "test_mark_reader_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2186,11 +2151,6 @@ project "test_error_tracking"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2288,11 +2248,6 @@ project "test_math_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2390,11 +2345,6 @@ project "test_math_ascii_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2492,11 +2442,6 @@ project "test_markup_roundtrip_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2594,11 +2539,6 @@ project "test_entity_emoji_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2696,11 +2636,6 @@ project "test_input_roundtrip_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2798,11 +2733,6 @@ project "test_wpt_html_parser_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -2901,11 +2831,6 @@ project "test_latex_ts_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3003,11 +2928,6 @@ project "test_html_roundtrip_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3105,11 +3025,6 @@ project "test_html_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3207,11 +3122,6 @@ project "test_html_negative_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3315,11 +3225,6 @@ project "test_lambda_domnode_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3416,11 +3321,6 @@ project "test_dir_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3518,11 +3418,6 @@ project "test_graph_parser_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3620,11 +3515,6 @@ project "test_validator_input_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3722,11 +3612,6 @@ project "test_validator_features_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3824,11 +3709,6 @@ project "test_null_vs_missing_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -3926,11 +3806,6 @@ project "test_enhanced_errors"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4028,11 +3903,6 @@ project "test_validation_options"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4130,11 +4000,6 @@ project "test_format_validation"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4232,11 +4097,6 @@ project "test_validator_integration"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4334,11 +4194,6 @@ project "test_type_references_simple"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4436,11 +4291,6 @@ project "test_graph_formatter_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4538,11 +4388,6 @@ project "test_sysinfo_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4640,11 +4485,6 @@ project "test_jsx_roundtrip_new_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4741,11 +4581,6 @@ project "test_mdx_roundtrip_new_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -4998,11 +4833,6 @@ project "test_css_dom_integration"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5112,11 +4942,6 @@ project "test_css_dom_crud"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5226,11 +5051,6 @@ project "test_css_style_application_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5333,11 +5153,6 @@ project "test_html_css_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5435,11 +5250,6 @@ project "test_css_tokenizer_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5537,11 +5347,6 @@ project "test_css_tokenizer_unit"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5639,11 +5444,6 @@ project "test_css_parser_unit"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5741,11 +5541,6 @@ project "test_css_engine_unit"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5843,11 +5638,6 @@ project "test_css_engine_negative"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -5945,11 +5735,6 @@ project "test_css_formatter_unit"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6047,11 +5832,6 @@ project "test_css_roundtrip_unit"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6149,11 +5929,6 @@ project "test_compound_descendant_selectors"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6251,11 +6026,6 @@ project "test_selector_groups"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6353,11 +6123,6 @@ project "test_css_parser_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6455,11 +6220,6 @@ project "test_css_integration_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6557,11 +6317,6 @@ project "test_css_files_safe_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6659,11 +6414,6 @@ project "test_css_frameworks_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6761,11 +6511,6 @@ project "test_css_to_mark_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6862,11 +6607,6 @@ project "test_mdx_roundtrip_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -6963,11 +6703,6 @@ project "test_jsx_roundtrip_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7064,11 +6799,6 @@ project "test_latex_parser_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7165,11 +6895,6 @@ project "test_latex_treesitter"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7331,11 +7056,6 @@ project "test_latex_html_v2_baseline"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7434,11 +7154,6 @@ project "test_latex_html_v2_lists_envs"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7535,11 +7250,6 @@ project "test_latex_html_v2_tables"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7636,11 +7346,6 @@ project "test_latex_html_v2_floats"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7737,11 +7442,6 @@ project "test_latex_html_v2_special_chars"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7838,11 +7538,6 @@ project "test_latex_html_v2_bibliography"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -7939,11 +7634,6 @@ project "test_latex_html_v2_graphics_color"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -8040,11 +7730,6 @@ project "test_latex_html_v2_macros"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -8141,11 +7826,6 @@ project "test_latex_html_v2_new_commands"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -8242,11 +7922,6 @@ project "test_validator_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -8344,11 +8019,6 @@ project "test_ast_validator_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -8446,11 +8116,6 @@ project "test_validator_path_reporting"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
@@ -8852,11 +8517,6 @@ project "test_http_gtest"
     }
     
     linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
