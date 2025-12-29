@@ -683,6 +683,32 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
 
     g_apply_decl_count++;
 
+    // Check if this is a custom property (CSS variable)
+    if (declaration->property_name && 
+        declaration->property_name[0] == '-' && 
+        declaration->property_name[1] == '-') {
+        
+        // Custom property - store in linked list
+        log_info("[CSS] Storing custom property: %s", declaration->property_name);
+        
+        CssCustomProp* prop = (CssCustomProp*)pool_calloc(element->doc->pool, sizeof(CssCustomProp));
+        if (!prop) {
+            log_error("[CSS] Failed to allocate CssCustomProp");
+            return false;
+        }
+        
+        prop->name = declaration->property_name;
+        prop->value = declaration->value;
+        prop->next = element->css_variables;
+        element->css_variables = prop;
+        
+        // Increment style version to invalidate caches
+        element->style_version++;
+        element->needs_style_recompute = true;
+        
+        return true;
+    }
+
     // Validate the property value before applying
     if (!css_property_validate_value(declaration->property_id, declaration->value)) {
         return false;
