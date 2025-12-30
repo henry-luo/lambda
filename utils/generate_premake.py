@@ -2578,20 +2578,28 @@ class PremakeGenerator:
                     dependencies.append(lib_name)
 
         # Add platform-specific libraries for Windows
+        # Platform-specific libraries may override global ones for correct ordering
         platforms_config = self.config.get('platforms', {})
         if self.use_windows_config:
             windows_config = platforms_config.get('windows', {})
             for lib in windows_config.get('libraries', []):
                 lib_name = lib.get('name', '')
-                if lib_name and lib_name not in dependencies and lib_name not in ['criterion']:
+                if lib_name and lib_name not in ['criterion']:
+                    # Remove from current position if it exists (to respect platform ordering)
+                    if lib_name in dependencies:
+                        dependencies.remove(lib_name)
                     dependencies.append(lib_name)
 
         # Add platform-specific libraries for Linux
+        # Platform-specific libraries may override global ones for correct ordering
         if self.use_linux_config:
             linux_config = platforms_config.get('linux', {})
             for lib in linux_config.get('libraries', []):
                 lib_name = lib.get('name', '')
-                if lib_name and lib_name not in dependencies and lib_name not in ['criterion']:
+                if lib_name and lib_name not in ['criterion']:
+                    # Remove from current position if it exists (to respect platform ordering)
+                    if lib_name in dependencies:
+                        dependencies.remove(lib_name)
                     dependencies.append(lib_name)
 
         # Add platform-specific libraries for macOS

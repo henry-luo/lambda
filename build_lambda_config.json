@@ -452,9 +452,9 @@
                 },
                 {
                     "name": "curl",
-                    "description": "libcurl HTTP client library",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libcurl.a",
+                    "description": "libcurl HTTP client library (minimal build with Schannel)",
+                    "include": "win-native-deps/include",
+                    "lib": "win-native-deps/lib/libcurl.a",
                     "link": "static"
                 },
                 {
@@ -526,16 +526,6 @@
                 {
                     "name": "mingw32",
                     "lib": "-lmingw32",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "gcc",
-                    "lib": "-lgcc",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "gcc_s",
-                    "lib": "-lgcc_s",
                     "link": "dynamic"
                 },
                 {
@@ -645,17 +635,6 @@
                     "link": "none"
                 },
                 {
-                    "name": "zlib",
-                    "description": "Compression library",
-                    "lib": "/mingw64/lib/libz.a",
-                    "link": "static"
-                },
-                {
-                    "name": "bzip2",
-                    "lib": "/mingw64/lib/libbz2.a",
-                    "link": "static"
-                },
-                {
                     "name": "freetype",
                     "include": "/mingw64/include/freetype2",
                     "lib": "/mingw64/lib/libfreetype.a",
@@ -665,7 +644,8 @@
                     "name": "ThorVG",
                     "include": "win-native-deps/include",
                     "lib": "win-native-deps/lib/libthorvg.a",
-                    "link": "static"
+                    "link": "static",
+                    "version": "v1.0-pre11"
                 },
                 {
                     "name": "glfw",
@@ -701,13 +681,21 @@
                 },
                 {
                     "name": "harfbuzz",
-                    "description": "HarfBuzz text shaping - not needed",
-                    "link": "none"
+                    "description": "HarfBuzz text shaping (required by FreeType)",
+                    "lib": "/mingw64/lib/libharfbuzz.a",
+                    "link": "static"
                 },
                 {
                     "name": "graphite2",
-                    "description": "Graphite2 - not needed",
-                    "link": "none"
+                    "description": "Graphite2 (required by HarfBuzz)",
+                    "lib": "/mingw64/lib/libgraphite2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "webp",
+                    "description": "WebP image library (required by ThorVG)",
+                    "lib": "/mingw64/lib/libwebp.a",
+                    "link": "static"
                 },
                 {
                     "name": "brotlidec",
@@ -720,6 +708,24 @@
                     "description": "Brotli common (FreeType dependency)",
                     "lib": "/mingw64/lib/libbrotlicommon.a",
                     "link": "static"
+                },
+                {
+                    "name": "zlib",
+                    "description": "Compression library (must come after freetype, libpng)",
+                    "lib": "/mingw64/lib/libz.a",
+                    "link": "static"
+                },
+                {
+                    "name": "bzip2",
+                    "description": "BZip2 compression (must come after freetype)",
+                    "lib": "/mingw64/lib/libbz2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "dwrite",
+                    "description": "DirectWrite (required by HarfBuzz)",
+                    "lib": "-ldwrite",
+                    "link": "dynamic"
                 },
                 {
                     "name": "rpcrt4",
