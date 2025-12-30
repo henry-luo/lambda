@@ -10379,7 +10379,7 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
         return "";
     }
 
-    String* body_str = (String*)body_content.item;
+    String* body_str = body_content.get_string();
     std::string body_html(body_str->chars, body_str->len);
 
     // Extract document title from the body content
