@@ -1310,6 +1310,9 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
     log_info("=== UNIFIED FLEX ITEM COLLECTION: container=%p (%s) ===",
              container, container->node_name());
 
+    // Save container's font context - all flex items should inherit from this
+    FontBox container_font = lycon->font;
+
     int item_count = 0;
     DomNode* child = container->first_child;
 
@@ -1324,6 +1327,10 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             child = child->next_sibling;
             continue;
         }
+
+        // CRITICAL: Restore container's font context before processing each flex item
+        // This ensures each flex item inherits from the container, not from siblings
+        lycon->font = container_font;
 
         // Step 1: Create/verify View structure FIRST (resolves CSS styles)
         // This must happen before measurement so font-size etc. are available
