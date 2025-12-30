@@ -376,17 +376,42 @@ fn format_number(num, decimals) {
 }
 
 fn status_badge(status) {
-    if (status == "deteriorating" or status == "high_congestion_citywide" or status == "concerning") 
-        "<span class='badge badge-danger'>" ++ status ++ "</span>"
+    let badge_class = if (status == "deteriorating" or status == "high_congestion_citywide" or status == "concerning") 
+        "badge badge-danger"
     else if (status == "improving" or status == "good" or status == "flowing")
-        "<span class='badge badge-success'>" ++ status ++ "</span>"
+        "badge badge-success"
     else
-        "<span class='badge badge-warning'>" ++ status ++ "</span>"
+        "badge badge-warning"
+    <span class:badge_class; status>
 }
 
 fn progress_bar(value, max_val, color) {
     let percentage = (value / max_val) * 100.0
-    "<div class='progress'><div class='progress-bar bg-" ++ color ++ "' style='width: " ++ format_number(percentage, 1) ++ "%'>" ++ format_number(percentage, 1) ++ "%</div></div>"
+    let bar_class = "progress-bar bg-" ++ color
+    let bar_style = "width: " ++ format_number(percentage, 1) ++ "%"
+    let bar_text = format_number(percentage, 1) ++ "%"
+    <div class:"progress"
+        <div class:bar_class, style:bar_style; bar_text>
+    >
+}
+
+fn info_item(label_text, value_content) {
+    <div class:"info-item"
+        <div class:"label"; label_text>
+        <div class:"value"; value_content>
+    >
+}
+
+fn metric_card(label_text, value_text, description_text) {
+    <div class:"metric-card"
+        <div class:"label"; label_text>
+        <div class:"value"; value_text>
+        <div class:"description"; description_text>
+    >
+}
+
+fn alert_box(alert_class, content) {
+    <div class:("alert-box " ++ alert_class), style:"margin-top: 15px;"; content>
 }
 
 // Sample IoT sensor data
@@ -487,15 +512,15 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                                (traffic_analysis.traffic_summary.citywide_avg_speed / 30.0) + 
                                (energy_analysis.energy_overview.avg_renewable_integration / 100.0)) / 3.0;
 
+
 // Generate HTML report
-"<!DOCTYPE html>
-<html lang='en'>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>Smart City IoT Analytics Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+<html lang:"en"
+<head
+    <meta charset:"UTF-8">
+    <meta name:"viewport", content:"width=device-width, initial-scale=1.0">
+    <title "Smart City IoT Analytics Dashboard">
+    <style
+        "* { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
@@ -737,337 +762,306 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             color: #666;
             font-size: 0.9em;
             background: #f8f9fa;
-        }
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <div class='header'>
-            <h1>🌆 Smart City IoT Analytics Dashboard</h1>
-            <p>Real-time Urban Intelligence & Environmental Monitoring</p>
-            <p style='margin-top: 10px; font-size: 0.9em;'>Generated: September 5, 2024 | Data Quality: " ++ format_number(environmental_analysis.data_quality.data_quality_score * 100.0, 1) ++ "%</p>
-        </div>
-        
-        <div class='content'>
-            <!-- Key Metrics Overview -->
-            <div class='overview-grid'>
-                <div class='metric-card'>
-                    <div class='label'>Overall Livability Score</div>
-                    <div class='value'>" ++ format_number(overall_livability_score * 100.0, 1) ++ "%</div>
-                    <div class='description'>City health composite index</div>
-                </div>
-                <div class='metric-card'>
-                    <div class='label'>Environmental Sensors</div>
-                    <div class='value'>" ++ string(environmental_analysis.data_quality.total_readings) ++ "</div>
-                    <div class='description'>Active monitoring stations</div>
-                </div>
-                <div class='metric-card'>
-                    <div class='label'>Traffic Intersections</div>
-                    <div class='value'>" ++ string(traffic_analysis.traffic_summary.monitoring_coverage) ++ "</div>
-                    <div class='description'>Real-time flow monitoring</div>
-                </div>
-                <div class='metric-card'>
-                    <div class='label'>Energy Meters</div>
-                    <div class='value'>" ++ string(energy_analysis.energy_overview.monitored_meters) ++ "</div>
-                    <div class='description'>Smart grid integration</div>
-                </div>
-            </div>
+        }"
+    >
+>
+<body
+    <div class:"container"
+        <div class:"header"
+            <h1 "🌆 Smart City IoT Analytics Dashboard">
+            <p "Real-time Urban Intelligence & Environmental Monitoring">
+            <p style:"margin-top: 10px; font-size: 0.9em;" 
+                ("Generated: September 5, 2024 | Data Quality: " ++ format_number(environmental_analysis.data_quality.data_quality_score * 100.0, 1) ++ "%")
+            >
+        >
+        <div class:"content"
+            // Key Metrics Overview
+            <div class:"overview-grid"
+                metric_card("Overall Livability Score", 
+                    format_number(overall_livability_score * 100.0, 1) ++ "%",
+                    "City health composite index")
+                metric_card("Environmental Sensors",
+                    string(environmental_analysis.data_quality.total_readings),
+                    "Active monitoring stations")
+                metric_card("Traffic Intersections",
+                    string(traffic_analysis.traffic_summary.monitoring_coverage),
+                    "Real-time flow monitoring")
+                metric_card("Energy Meters",
+                    string(energy_analysis.energy_overview.monitored_meters),
+                    "Smart grid integration")
+            >
 
-            <!-- Environmental Intelligence -->
-            <div class='section'>
-                <h2 class='section-title'>🌿 Environmental Intelligence</h2>
+            // Environmental Intelligence
+            <div class:"section"
+                <h2 class:"section-title"; "🌿 Environmental Intelligence">
                 
-                <div class='card'>
-                    <h3 class='card-title'>Air Quality Status</h3>
-                    <div class='info-grid'>
-                        <div class='info-item'>
-                            <div class='label'>PM2.5 Average</div>
-                            <div class='value'>" ++ format_number(environmental_analysis.environmental_analysis.air_quality_trends.avg_pm25, 1) ++ " µg/m³</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>PM10 Average</div>
-                            <div class='value'>" ++ format_number(environmental_analysis.environmental_analysis.air_quality_trends.avg_pm10, 1) ++ " µg/m³</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Trend</div>
-                            <div class='value'>" ++ status_badge(environmental_analysis.environmental_analysis.air_quality_trends.pm25_trend) ++ "</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Active Alerts</div>
-                            <div class='value'>" ++ string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)) ++ "</div>
-                        </div>
-                    </div>
-                    " ++ (if (len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts) > 0) 
-                        ("<div class='alert-box alert-warning' style='margin-top: 15px;'>
-                            <strong>⚠️ Air Quality Alerts Active</strong><br>
-                            " ++ string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)) ++ " location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities.
-                        </div>") else " ") ++ "
-                </div>
-                <div class='card'>
-                    <h3 class='card-title'>Climate Comfort Analysis</h3>
-                    <div class='info-grid'>
-                        <div class='info-item'>
-                            <div class='label'>Average Temperature</div>
-                            <div class='value'>" ++ format_number(environmental_analysis.environmental_analysis.climate_analysis.avg_temperature, 1) ++ "°C</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Average Humidity</div>
-                            <div class='value'>" ++ format_number(environmental_analysis.environmental_analysis.climate_analysis.avg_humidity, 1) ++ "%</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Comfort Score</div>
-                            <div class='value'>" ++ format_number(environmental_analysis.environmental_analysis.climate_analysis.comfort_score * 100.0, 1) ++ "%</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Heat Warnings</div>
-                            <div class='value'>" ++ string(len(environmental_analysis.environmental_analysis.climate_analysis.heat_index_alerts)) ++ "</div>
-                        </div>
-                    </div>
-                    " ++ progress_bar(environmental_analysis.environmental_analysis.climate_analysis.comfort_score, 1.0, "success") ++ "
-                </div>
+                <div class:"card"
+                    <h3 class:"card-title"; "Air Quality Status">
+                    <div class:"info-grid"
+                        info_item("PM2.5 Average", format_number(environmental_analysis.environmental_analysis.air_quality_trends.avg_pm25, 1) ++ " µg/m³")
+                        info_item("PM10 Average", format_number(environmental_analysis.environmental_analysis.air_quality_trends.avg_pm10, 1) ++ " µg/m³")
+                        info_item("Trend", status_badge(environmental_analysis.environmental_analysis.air_quality_trends.pm25_trend))
+                        info_item("Active Alerts", string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)))
+                    >
+                    if (len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts) > 0) {
+                        alert_box("alert-warning", (
+                            <strong "⚠️ Air Quality Alerts Active">,
+                            <br>,
+                            (string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)) ++ " location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities.")
+                        ))
+                    }
+                >
+                <div class:"card"
+                    <h3 class:"card-title"; "Climate Comfort Analysis">
+                    <div class:"info-grid"
+                        info_item("Average Temperature", format_number(environmental_analysis.environmental_analysis.climate_analysis.avg_temperature, 1) ++ "°C")
+                        info_item("Average Humidity", format_number(environmental_analysis.environmental_analysis.climate_analysis.avg_humidity, 1) ++ "%")
+                        info_item("Comfort Score", format_number(environmental_analysis.environmental_analysis.climate_analysis.comfort_score * 100.0, 1) ++ "%")
+                        info_item("Heat Warnings", string(len(environmental_analysis.environmental_analysis.climate_analysis.heat_index_alerts)))
+                    >
+                    progress_bar(environmental_analysis.environmental_analysis.climate_analysis.comfort_score, 1.0, "success")
+                >
 
-                <div class='card'>
-                    <h3 class='card-title'>Noise Pollution Monitoring</h3>
-                    <div class='info-grid'>
-                        <div class='info-item'>
-                            <div class='label'>Citywide Average</div>
-                            <div class='value'>" ++ format_number(environmental_analysis.environmental_analysis.noise_analysis.avg_noise_level, 1) ++ " dB</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Violations</div>
-                            <div class='value'>" ++ string(len(environmental_analysis.environmental_analysis.noise_analysis.noise_violations)) ++ "</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Quiet Hours Compliance</div>
-                            <div class='value'>" ++ format_number(environmental_analysis.environmental_analysis.noise_analysis.quiet_hours_compliance, 1) ++ "%</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                <div class:"card"
+                    <h3 class:"card-title"; "Noise Pollution Monitoring">
+                    <div class:"info-grid"
+                        info_item("Citywide Average", format_number(environmental_analysis.environmental_analysis.noise_analysis.avg_noise_level, 1) ++ " dB")
+                        info_item("Violations", string(len(environmental_analysis.environmental_analysis.noise_analysis.noise_violations)))
+                        info_item("Quiet Hours Compliance", format_number(environmental_analysis.environmental_analysis.noise_analysis.quiet_hours_compliance, 1) ++ "%")
+                    >
+                >
+            >
 
-            <!-- Traffic & Mobility Intelligence -->
-            <div class='section'>
-                <h2 class='section-title'>🚗 Traffic & Mobility Intelligence</h2>
+            // Traffic & Mobility Intelligence
+            <div class:"section"
+                <h2 class:"section-title"; "🚗 Traffic & Mobility Intelligence">
                 
-                <div class='card'>
-                    <h3 class='card-title'>Traffic Flow Performance</h3>
-                    <div class='info-grid'>
-                        <div class='info-item'>
-                            <div class='label'>Citywide Avg Speed</div>
-                            <div class='value'>" ++ format_number(traffic_analysis.traffic_summary.citywide_avg_speed, 1) ++ " km/h</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Total Vehicle Count</div>
-                            <div class='value'>" ++ string(traffic_analysis.traffic_summary.overall_flow_rate) ++ "</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Congestion Status</div>
-                            <div class='value'>" ++ status_badge(traffic_analysis.traffic_summary.congestion_status) ++ "</div>
-                        </div>
-                    </div>
+                <div class:"card"
+                    <h3 class:"card-title"; "Traffic Flow Performance">
+                    <div class:"info-grid"
+                        info_item("Citywide Avg Speed", format_number(traffic_analysis.traffic_summary.citywide_avg_speed, 1) ++ " km/h")
+                        info_item("Total Vehicle Count", string(traffic_analysis.traffic_summary.overall_flow_rate))
+                        info_item("Congestion Status", status_badge(traffic_analysis.traffic_summary.congestion_status))
+                    >
                     
-                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #4299e1;'>Congestion Distribution</h4>
-                    <div style='margin: 10px 0;'>
-                        <div style='margin-bottom: 10px;'>
-                            <span style='display: inline-block; width: 150px;'>Low Congestion:</span>
-                            " ++ progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.low_congestion), 
-                                            float_val(len(sample_traffic_data)), "success") ++ "
-                        </div>
-                        <div style='margin-bottom: 10px;'>
-                            <span style='display: inline-block; width: 150px;'>Moderate:</span>
-                            " ++ progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.moderate_congestion), 
-                                            float_val(len(sample_traffic_data)), "warning") ++ "
-                        </div>
-                        <div style='margin-bottom: 10px;'>
-                            <span style='display: inline-block; width: 150px;'>High Congestion:</span>
-                            " ++ progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.high_congestion), 
-                                            float_val(len(sample_traffic_data)), "danger") ++ "
-                        </div>
-                    </div>
-                </div>
+                    <h4 style:"margin-top: 20px; margin-bottom: 10px; color: #4299e1;"; "Congestion Distribution">
+                    <div style:"margin: 10px 0;"
+                        <div style:"margin-bottom: 10px;"
+                            <span style:"display: inline-block; width: 150px;"; "Low Congestion:">
+                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.low_congestion), 
+                                        float_val(len(sample_traffic_data)), "success")
+                        >
+                        <div style:"margin-bottom: 10px;"
+                            <span style:"display: inline-block; width: 150px;"; "Moderate:">
+                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.moderate_congestion), 
+                                        float_val(len(sample_traffic_data)), "warning")
+                        >
+                        <div style:"margin-bottom: 10px;"
+                            <span style:"display: inline-block; width: 150px;"; "High Congestion:">
+                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.high_congestion), 
+                                        float_val(len(sample_traffic_data)), "danger")
+                        >
+                    >
+                >
 
-                <div class='card'>
-                    <h3 class='card-title'>Speed Analysis by Zone</h3>
-                    <table>
-                        <tr>
-                            <th>Zone</th>
-                            <th>Average Speed</th>
-                            <th>Status</th>
-                        </tr>
-                        <tr>
-                            <td>Downtown</td>
-                            <td>" ++ format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.downtown_avg, 1) ++ " km/h</td>
-                            <td>" ++ (if (traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.downtown_avg < 15.0) 
-                                    "<span class='badge badge-danger'>Congested</span>" 
-                                    else "<span class='badge badge-success'>Normal</span>") ++ "</td>
-                        </tr>
-                        <tr>
-                            <td>Residential</td>
-                            <td>" ++ format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.residential_avg, 1) ++ " km/h</td>
-                            <td><span class='badge badge-success'>Normal</span></td>
-                        </tr>
-                        <tr>
-                            <td>Industrial</td>
-                            <td>" ++ format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.industrial_avg, 1) ++ " km/h</td>
-                            <td>" ++ (if (traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.industrial_avg < 20.0) 
-                                    "<span class='badge badge-warning'>Moderate</span>" 
-                                    else "<span class='badge badge-success'>Normal</span>") ++ "
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-                " ++ (if (len(traffic_analysis.optimization_strategies.signal_timing_adjustments) > 0)
-                    "<div class='alert-box alert-info'>
-                        <strong>🚦 Optimization Opportunity</strong><br>
-                        " ++ string(len(traffic_analysis.optimization_strategies.signal_timing_adjustments)) ++ " intersection(s) identified for signal timing optimization to reduce congestion.
-                    </div>" else " ") ++ "
-            </div>
-            <!-- Energy Intelligence -->
-            <div class='section'>
-                <h2 class='section-title'>⚡ Energy & Grid Intelligence</h2>
-                <div class='card'>
-                    <h3 class='card-title'>Consumption Overview</h3>
-                    <div class='info-grid'>
-                        <div class='info-item'>
-                            <div class='label'>Total Consumption</div>
-                            <div class='value'>" ++ format_number(energy_analysis.energy_overview.total_consumption_kwh, 1) ++ " kWh</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Renewable Integration</div>
-                            <div class='value'>" ++ format_number(energy_analysis.energy_overview.avg_renewable_integration, 1) ++ "%</div>
-                        </div>
-                        <div class='info-item'>
-                            <div class='label'>Grid Stability</div>
-                            <div class='value'>" ++ format_number(energy_analysis.energy_overview.grid_reliability_score * 100.0, 1) ++ "%</div>
-                        </div>
-                    </div>
+                <div class:"card"
+                    <h3 class:"card-title"; "Speed Analysis by Zone">
+                    <table
+                        <tr
+                            <th "Zone">
+                            <th "Average Speed">
+                            <th "Status">
+                        >
+                        <tr
+                            <td "Downtown">
+                            <td (format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.downtown_avg, 1) ++ " km/h")>
+                            <td 
+                                if (traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.downtown_avg < 15.0) {
+                                    <span class:"badge badge-danger"; "Congested">
+                                } else {
+                                    <span class:"badge badge-success"; "Normal">
+                                }
+                            >
+                        >
+                        <tr
+                            <td "Residential">
+                            <td (format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.residential_avg, 1) ++ " km/h")>
+                            <td <span class:"badge badge-success"; "Normal">>
+                        >
+                        <tr
+                            <td "Industrial">
+                            <td (format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.industrial_avg, 1) ++ " km/h")>
+                            <td 
+                                if (traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.industrial_avg < 20.0) {
+                                    <span class:"badge badge-warning"; "Moderate">
+                                } else {
+                                    <span class:"badge badge-success"; "Normal">
+                                }
+                            >
+                        >
+                    >
+                >
+                if (len(traffic_analysis.optimization_strategies.signal_timing_adjustments) > 0) {
+                    alert_box("alert-info", (
+                        <strong "🚦 Optimization Opportunity">,
+                        <br>,
+                        (string(len(traffic_analysis.optimization_strategies.signal_timing_adjustments)) ++ " intersection(s) identified for signal timing optimization to reduce congestion.")
+                    ))
+                }
+            >
+            // Energy Intelligence
+            <div class:"section"
+                <h2 class:"section-title"; "⚡ Energy & Grid Intelligence">
+                <div class:"card"
+                    <h3 class:"card-title"; "Consumption Overview">
+                    <div class:"info-grid"
+                        info_item("Total Consumption", format_number(energy_analysis.energy_overview.total_consumption_kwh, 1) ++ " kWh")
+                        info_item("Renewable Integration", format_number(energy_analysis.energy_overview.avg_renewable_integration, 1) ++ "%")
+                        info_item("Grid Stability", format_number(energy_analysis.energy_overview.grid_reliability_score * 100.0, 1) ++ "%")
+                    >
                     
-                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #4299e1;'>Renewable Energy Progress</h4>
-                    " ++ progress_bar(energy_analysis.energy_overview.avg_renewable_integration, 100.0, "info") ++ "
-                </div>
+                    <h4 style:"margin-top: 20px; margin-bottom: 10px; color: #4299e1;"; "Renewable Energy Progress">
+                    progress_bar(energy_analysis.energy_overview.avg_renewable_integration, 100.0, "info")
+                >
 
-                <div class='card'>
-                    <h3 class='card-title'>Consumption by Building Type</h3>
-                    <table>
-                        <tr>
-                            <th>Building Type</th>
-                            <th>Consumption (kWh)</th>
-                            <th>Percentage</th>
-                        </tr>
-                        <tr>
-                            <td>Residential</td>
-                            <td>" ++ format_number(energy_analysis.consumption_insights.consumption_by_type.residential_total, 1) ++ "</td>
-                            <td>" ++ format_number((energy_analysis.consumption_insights.consumption_by_type.residential_total / 
-                                                   energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%</td>
-                        </tr>
-                        <tr>
-                            <td>Commercial</td>
-                            <td>" ++ format_number(energy_analysis.consumption_insights.consumption_by_type.commercial_total, 1) ++ "</td>
-                            <td>" ++ format_number((energy_analysis.consumption_insights.consumption_by_type.commercial_total / 
-                                                   energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%</td>
-                        </tr>
-                        <tr>
-                            <td>Industrial</td>
-                            <td>" ++ format_number(energy_analysis.consumption_insights.consumption_by_type.industrial_total, 1) ++ "</td>
-                            <td>" ++ format_number((energy_analysis.consumption_insights.consumption_by_type.industrial_total / 
-                                                   energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%</td>
-                        </tr>
-                    </table>
-                </div>
+                <div class:"card"
+                    <h3 class:"card-title"; "Consumption by Building Type">
+                    <table
+                        <tr
+                            <th "Building Type">
+                            <th "Consumption (kWh)">
+                            <th "Percentage">
+                        >
+                        <tr
+                            <td "Residential">
+                            <td format_number(energy_analysis.consumption_insights.consumption_by_type.residential_total, 1)>
+                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.residential_total / 
+                                               energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%")>
+                        >
+                        <tr
+                            <td "Commercial">
+                            <td format_number(energy_analysis.consumption_insights.consumption_by_type.commercial_total, 1)>
+                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.commercial_total / 
+                                               energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%")>
+                        >
+                        <tr
+                            <td "Industrial">
+                            <td format_number(energy_analysis.consumption_insights.consumption_by_type.industrial_total, 1)>
+                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.industrial_total / 
+                                               energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%")>
+                        >
+                    >
+                >
 
-                <div class='card'>
-                    <h3 class='card-title'>Grid Dependency Distribution</h3>
-                    <div style='margin: 15px 0;'>
-                        <div style='margin-bottom: 10px;'>
-                            <span style='display: inline-block; width: 150px;'>High Dependency:</span>
-                            " ++ progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.high_dependency), 
-                                            float_val(len(sample_energy_data)), "danger") ++ "
-                        </div>
-                        <div style='margin-bottom: 10px;'>
-                            <span style='display: inline-block; width: 150px;'>Medium:</span>
-                            " ++ progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.medium_dependency), 
-                                            float_val(len(sample_energy_data)), "warning") ++ "
-                        </div>
-                        <div style='margin-bottom: 10px;'>
-                            <span style='display: inline-block; width: 150px;'>Low Dependency:</span>
-                            " ++ progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.low_dependency), 
-                                            float_val(len(sample_energy_data)), "success") ++ "
-                        </div>
-                    </div>
-                </div>
-            </div>
+                <div class:"card"
+                    <h3 class:"card-title"; "Grid Dependency Distribution">
+                    <div style:"margin: 15px 0;"
+                        <div style:"margin-bottom: 10px;"
+                            <span style:"display: inline-block; width: 150px;"; "High Dependency:">
+                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.high_dependency), 
+                                        float_val(len(sample_energy_data)), "danger")
+                        >
+                        <div style:"margin-bottom: 10px;"
+                            <span style:"display: inline-block; width: 150px;"; "Medium:">
+                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.medium_dependency), 
+                                        float_val(len(sample_energy_data)), "warning")
+                        >
+                        <div style:"margin-bottom: 10px;"
+                            <span style:"display: inline-block; width: 150px;"; "Low Dependency:">
+                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.low_dependency), 
+                                        float_val(len(sample_energy_data)), "success")
+                        >
+                    >
+                >
+            >
 
-            <!-- Strategic Recommendations -->
-            <div class='recommendations'>
-                <h3>🎯 Strategic Recommendations</h3>
-                <h4 style='margin-top: 20px; margin-bottom: 10px;'>Immediate Priorities</h4>
-                <ul>
-                    " ++ (if (len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts) > 0) 
-                        "<li>⚠️ Air quality alerts active - implement traffic restrictions in affected zones<span class='priority-badge priority-high'>High Priority</span></li>"
-                        else " ") ++
-                    (if (traffic_analysis.traffic_summary.congestion_status == "high_congestion_citywide") 
-                        "<li>🚦 Activate dynamic traffic management protocols citywide<span class='priority-badge priority-high'>High Priority</span></li>" 
-                        else " ") ++
-                    (if (len(energy_analysis.grid_performance.stability_issues) > 0) 
-                        "<li>⚡ Grid stability issues detected - deploy maintenance teams<span class='priority-badge priority-high'>High Priority</span></li>" 
-                        else " ") ++ "
-                </ul>
+            // Strategic Recommendations
+            <div class:"recommendations"
+                <h3 "🎯 Strategic Recommendations">
+                <h4 style:"margin-top: 20px; margin-bottom: 10px;"; "Immediate Priorities">
+                <ul
+                    if (len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts) > 0) {
+                        <li "⚠️ Air quality alerts active - implement traffic restrictions in affected zones"
+                            <span class:"priority-badge priority-high"; "High Priority">
+                        >
+                    }
+                    if (traffic_analysis.traffic_summary.congestion_status == "high_congestion_citywide") {
+                        <li "🚦 Activate dynamic traffic management protocols citywide"
+                            <span class:"priority-badge priority-high"; "High Priority">
+                        >
+                    }
+                    if (len(energy_analysis.grid_performance.stability_issues) > 0) {
+                        <li "⚡ Grid stability issues detected - deploy maintenance teams"
+                            <span class:"priority-badge priority-high"; "High Priority">
+                        >
+                    }
+                >
                 
-                <h4 style='margin-top: 25px; margin-bottom: 10px;'>Strategic Initiatives</h4>
-                <ul>
-                    <li>📡 Expand environmental sensor network in industrial zones for better coverage<span class='priority-badge priority-strategic'>Strategic</span></li>
-                    <li>🤖 Implement AI-powered traffic signal optimization to reduce congestion by 20-30%<span class='priority-badge priority-strategic'>Strategic</span></li>
-                    <li>♻️ Accelerate renewable energy adoption programs - target 60% renewable by 2025<span class='priority-badge priority-strategic'>Strategic</span></li>
-                    <li>📱 Deploy citizen engagement platform for real-time feedback and community insights<span class='priority-badge priority-medium'>Medium Priority</span></li>
-                    <li>🔋 Establish microgrid pilots in high renewable energy areas<span class='priority-badge priority-strategic'>Strategic</span></li>
-                </ul>
+                <h4 style:"margin-top: 25px; margin-bottom: 10px;"; "Strategic Initiatives">
+                <ul
+                    <li "📡 Expand environmental sensor network in industrial zones for better coverage"
+                        <span class:"priority-badge priority-strategic"; "Strategic">
+                    >
+                    <li "🤖 Implement AI-powered traffic signal optimization to reduce congestion by 20-30%"
+                        <span class:"priority-badge priority-strategic"; "Strategic">
+                    >
+                    <li "♻️ Accelerate renewable energy adoption programs - target 60% renewable by 2025"
+                        <span class:"priority-badge priority-strategic"; "Strategic">
+                    >
+                    <li "📱 Deploy citizen engagement platform for real-time feedback and community insights"
+                        <span class:"priority-badge priority-medium"; "Medium Priority">
+                    >
+                    <li "🔋 Establish microgrid pilots in high renewable energy areas"
+                        <span class:"priority-badge priority-strategic"; "Strategic">
+                    >
+                >
                 
-                <h4 style='margin-top: 25px; margin-bottom: 10px;'>Investment Priorities</h4>
-                <div style='background: #f7fafc; padding: 20px; border-radius: 8px; margin-top: 15px;'>
-                    <table style='margin: 0;'>
-                        <tr>
-                            <th style='background: #4a5568;'>Category</th>
-                            <th style='background: #4a5568;'>Initiative</th>
-                            <th style='background: #4a5568;'>Investment</th>
-                            <th style='background: #4a5568;'>ROI Timeline</th>
-                        </tr>
-                        <tr>
-                            <td><strong>🌿 Environmental</strong></td>
-                            <td>Air quality monitoring expansion</td>
-                            <td>$2.5M</td>
-                            <td>18-24 months</td>
-                        </tr>
-                        <tr>
-                            <td><strong>🚗 Mobility</strong></td>
-                            <td>Smart intersection upgrades (15 locations)</td>
-                            <td>$8.0M</td>
-                            <td>18-24 months</td>
-                        </tr>
-                        <tr>
-                            <td><strong>⚡ Energy</strong></td>
-                            <td>Grid modernization & battery storage</td>
-                            <td>$12.0M</td>
-                            <td>24-36 months</td>
-                        </tr>
-                        <tr style='background: #e6fffa; font-weight: 600;'>
-                            <td colspan='2'><strong>Total Investment Required</strong></td>
-                            <td><strong>$22.5M</strong></td>
-                            <td><strong>2-3 years</strong></td>
-                        </tr>
-                    </table>
-                </div>
-            </div>
-        </div>
+                <h4 style:"margin-top: 25px; margin-bottom: 10px;"; "Investment Priorities">
+                <div style:"background: #f7fafc; padding: 20px; border-radius: 8px; margin-top: 15px;"
+                    <table style:"margin: 0;"
+                        <tr
+                            <th style:"background: #4a5568;"; "Category">
+                            <th style:"background: #4a5568;"; "Initiative">
+                            <th style:"background: #4a5568;"; "Investment">
+                            <th style:"background: #4a5568;"; "ROI Timeline">
+                        >
+                        <tr
+                            <td <strong "🌿 Environmental">>
+                            <td "Air quality monitoring expansion">
+                            <td "$2.5M">
+                            <td "18-24 months">
+                        >
+                        <tr
+                            <td <strong "🚗 Mobility">>
+                            <td "Smart intersection upgrades (15 locations)">
+                            <td "$8.0M">
+                            <td "18-24 months">
+                        >
+                        <tr
+                            <td <strong "⚡ Energy">>
+                            <td "Grid modernization & battery storage">
+                            <td "$12.0M">
+                            <td "24-36 months">
+                        >
+                        <tr style:"background: #e6fffa; font-weight: 600;"
+                            <td colspan:"2"; <strong "Total Investment Required">>
+                            <td <strong "$22.5M">>
+                            <td <strong "2-3 years">>
+                        >
+                    >
+                >
+            >
+        >
         
-        <div class='footer'>
-            <p><strong>Smart City IoT Analytics Platform</strong></p>
-            <p>Powered by Lambda Script Engine | Real-time Data Processing & Urban Intelligence</p>
-            <p style='margin-top: 10px; font-size: 0.85em;'>
-                Data sources: " ++ string(environmental_analysis.data_quality.total_readings or 0) ++ " environmental sensors, " ++ 
+        <div class:"footer"
+            <p <strong "Smart City IoT Analytics Platform">>
+            <p "Powered by Lambda Script Engine | Real-time Data Processing & Urban Intelligence">
+            <p style:"margin-top: 10px; font-size: 0.85em;"
+                ("Data sources: " ++ string(environmental_analysis.data_quality.total_readings or 0) ++ " environmental sensors, " ++ 
                 string(traffic_analysis.traffic_summary.monitoring_coverage or 0) ++ " traffic intersections, " ++
-                string(energy_analysis.energy_overview.monitored_meters or 0) ++ " energy meters
-            </p>
-        </div>
-    </div>
-</body>
-</html>"
+                string(energy_analysis.energy_overview.monitored_meters or 0) ++ " energy meters")
+            >
+        >
+    >
+>
+>
