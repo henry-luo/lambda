@@ -699,7 +699,8 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
                 const CssToken* next = &tokens[*pos];
                 if (next->type == CSS_TOKEN_IDENT ||
                     (next->type == CSS_TOKEN_DELIM && (next->data.delimiter == '.' || next->data.delimiter == '*')) ||
-                    next->type == CSS_TOKEN_HASH) {
+                    next->type == CSS_TOKEN_HASH ||
+                    next->type == CSS_TOKEN_COLON) {  // pseudo-classes like :where(), :not(), :is(), :has()
                     combinator = CSS_COMBINATOR_DESCENDANT;
                     log_debug("[CSS Parser] Detected descendant combinator (whitespace)");
                 }
