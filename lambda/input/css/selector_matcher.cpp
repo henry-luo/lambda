@@ -766,8 +766,12 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
     }
 
     switch (pseudo_type) {
-        case CSS_SELECTOR_PSEUDO_ROOT:
-            return element->parent == NULL;
+        case CSS_SELECTOR_PSEUDO_ROOT: {
+            bool is_root = element->parent == NULL;
+            log_debug("[SELECTOR] :root check for <%s>: parent=%p, is_root=%d",
+                      element->tag_name, element->parent, is_root);
+            return is_root;
+        }
 
         case CSS_SELECTOR_PSEUDO_EMPTY:
             return element->first_child == NULL;
