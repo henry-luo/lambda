@@ -464,10 +464,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             block->content_width = 0;  block->content_height = 0;
                         }
                         // load the new document
+                        // CSS media queries should use CSS pixels (logical pixels), not physical pixels
+                        int css_vw = (int)(evcon.ui_context->window_width / evcon.ui_context->pixel_ratio);
+                        int css_vh = (int)(evcon.ui_context->window_height / evcon.ui_context->pixel_ratio);
                         DomDocument* old_doc = block->embed->doc;
                         DomDocument* new_doc = block->embed->doc =
-                            load_html_doc(evcon.ui_context->document->url, evcon.new_url,
-                                evcon.ui_context->window_width, evcon.ui_context->window_height);
+                            load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh);
                         if (new_doc && new_doc->html_root) {
                             layout_html_doc(evcon.ui_context, new_doc, false);
                             if (new_doc->view_tree && new_doc->view_tree->root) {
@@ -490,8 +492,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             else {
                 DomDocument* old_doc = evcon.ui_context->document;
                 // load the new document
+                // CSS media queries should use CSS pixels (logical pixels), not physical pixels
+                int css_vw = (int)(evcon.ui_context->window_width / evcon.ui_context->pixel_ratio);
+                int css_vh = (int)(evcon.ui_context->window_height / evcon.ui_context->pixel_ratio);
                 evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url,
-                    evcon.ui_context->window_width, evcon.ui_context->window_height);
+                    css_vw, css_vh);
                 free_document(old_doc);
             }
             to_repaint();

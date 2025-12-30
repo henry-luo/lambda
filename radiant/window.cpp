@@ -371,8 +371,11 @@ int run_layout(const char* html_file) {
     }
 
     // Load HTML document
+    // CSS media queries should use CSS pixels (logical pixels), not physical pixels
+    int css_viewport_width = (int)(ui_context.window_width / ui_context.pixel_ratio);
+    int css_viewport_height = (int)(ui_context.window_height / ui_context.pixel_ratio);
     log_debug("Loading HTML document...");
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, ui_context.window_width, ui_context.window_height);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, css_viewport_width, css_viewport_height);
     if (!doc) {
         log_error("Error: Could not load HTML file: %s", html_file);
         url_destroy(cwd);
@@ -439,8 +442,12 @@ int view_doc_in_window(const char* doc_file) {
             return -1;
         }
 
+        // CSS media queries should use CSS pixels (logical pixels), not physical pixels
+        int css_width = (int)(width / ui_context.pixel_ratio);
+        int css_height = (int)(height / ui_context.pixel_ratio);
+
         // Load document based on file extension
-        DomDocument* doc = load_doc_by_format(file_to_load, cwd, width, height, pool);
+        DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
             pool_destroy(pool);
