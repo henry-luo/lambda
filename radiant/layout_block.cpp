@@ -73,26 +73,18 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->next_sibling = nullptr;
     pseudo_elem->prev_sibling = nullptr;
 
-    // Copy inherited styles from parent ViewBlock (has fully resolved font-family)
-    // Use parent_font param which comes from ViewBlock, not from DomElement
-    pseudo_elem->font = parent_font ? parent_font : parent->font;
+    // IMPORTANT: Do NOT share parent's FontProp pointer with pseudo-element!
+    // If we set pseudo_elem->font = parent->font, then when the pseudo-element's
+    // font-size (e.g., 1.2em) is resolved, it would modify the shared FontProp,
+    // incorrectly changing the parent's font-size as well.
+    // Instead, leave pseudo_elem->font = nullptr so that style resolution will
+    // allocate a new FontProp via alloc_font_prop(), which properly copies from
+    // lycon->font.style (the parent's computed font values).
+    pseudo_elem->font = nullptr;
 
-    // Log font inheritance for debugging Font Awesome
-    if (content && strstr(content, "\\f1")) {
-        if (parent->font) {
-            if (parent->font->family) {
-                log_debug("[PSEUDO FONT] ::before inherits font '%s' (size %.1f) from parent <%s>",
-                          parent->font->family, parent->font->font_size,
-                          parent->tag_name ? parent->tag_name : "?");
-            } else {
-                log_debug("[PSEUDO FONT] Parent <%s> has font but NULL family",
-                          parent->tag_name ? parent->tag_name : "?");
-            }
-        } else {
-            log_debug("[PSEUDO FONT] Parent <%s> has NULL font pointer - need to resolve styles first!",
-                      parent->tag_name ? parent->tag_name : "?");
-        }
-    }
+    // Log that font will be allocated during style resolution
+    log_debug("[PSEUDO FONT] %s font=nullptr (will be allocated during style resolution)",
+              is_before ? "::before" : "::after");
 
     // DON'T copy bound - pseudo-element should have its own BoundaryProp
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
@@ -621,19 +613,19 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
     // Set pseudo-element properties - tag_name already set by dom_element_create
     pseudo_elem->parent = parent_elem;
 
-    // Copy inherited properties from parent (CSS inheritance)
-    // Font properties are inherited by pseudo-elements
-    pseudo_elem->font = parent_elem->font;
+    // IMPORTANT: Do NOT share parent's FontProp pointer with pseudo-element!
+    // If we set pseudo_elem->font = parent_elem->font, then when the pseudo-element's
+    // font-size (e.g., 1.2em) is resolved, it would modify the shared FontProp,
+    // incorrectly changing the parent's font-size as well.
+    // Instead, leave pseudo_elem->font = nullptr so that style resolution will
+    // allocate a new FontProp via alloc_font_prop(), which properly copies from
+    // lycon->font.style (the parent's computed font values).
+    pseudo_elem->font = nullptr;
     pseudo_elem->in_line = parent_elem->in_line;
 
     // Log font inheritance for debugging
-    if (parent_elem->font && parent_elem->font->family) {
-        log_debug("[Pseudo-Element] Inherited font-family '%s' from parent <%s>",
-                  parent_elem->font->family, parent_elem->tag_name ? parent_elem->tag_name : "?");
-    } else {
-        log_debug("[Pseudo-Element] Parent <%s> font is NULL or has no family name",
-                  parent_elem->tag_name ? parent_elem->tag_name : "?");
-    }
+    log_debug("[Pseudo-Element] font=nullptr for %s (will be allocated during style resolution)",
+              is_before ? "::before" : "::after");
 
     // Copy pseudo-element-specific styles (::before or ::after styles)
     pseudo_elem->specified_style = is_before ? parent_elem->before_styles : parent_elem->after_styles;
