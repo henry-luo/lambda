@@ -1020,6 +1020,17 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     log_enter();
     log_info("FLEX LAYOUT START: container=%p (%s)", block, block->node_name());
 
+    // CRITICAL: Update font context before processing flex items
+    // This ensures children inherit the correct computed font-size from the flex container.
+    // Without this, lycon->font.style would still point to the parent's font.
+    log_debug("Flex font context check: block=%p, block->font=%p, lycon->font.style=%p, lycon->font.style->font_size=%.1f",
+        (void*)block, block ? (void*)block->font : nullptr,
+        (void*)lycon->font.style, lycon->font.style ? lycon->font.style->font_size : -1.0f);
+    if (block && block->font) {
+        setup_font(lycon->ui_context, &lycon->font, block->font);
+        log_debug("Updated font context for flex container: font-size=%.1f", block->font->font_size);
+    }
+
     // DEBUG: Dump the DOM tree structure before flex layout
     log_debug("DOM STRUCTURE: Dumping children of container %s", block->node_name());
     int dom_child_count = 0;
