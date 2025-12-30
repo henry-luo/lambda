@@ -772,7 +772,12 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
     // prefers-color-scheme
     if (strcmp(feature, "prefers-color-scheme") == 0) {
         if (!value || !engine->context.color_scheme) return false;
-        return strcmp(engine->context.color_scheme, value) == 0;
+        // Treat "auto" as "light" (standard default for web content)
+        const char* effective_scheme = engine->context.color_scheme;
+        if (strcmp(effective_scheme, "auto") == 0) {
+            effective_scheme = "light";
+        }
+        return strcmp(effective_scheme, value) == 0;
     }
 
     // prefers-reduced-motion
