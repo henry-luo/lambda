@@ -397,7 +397,12 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // from child layouts that modify lycon->block during their CSS resolution
     float block_given_height = (block->blk && block->blk->given_height >= 0) ? block->blk->given_height : -1;
     if (block_given_height >= 0) { // got specified height
-        // no change to block->height
+        // Ensure block->height is set from given_height if it hasn't been set yet
+        // This is critical for the html element which doesn't go through normal layout_block path
+        if (block->height <= 0) {
+            block->height = block_given_height;
+            log_debug("finalize: set block->height from given_height: %.1f", block_given_height);
+        }
         if (flow_height > block->height) { // vt overflow
             if (!block->scroller) {
                 block->scroller = alloc_scroll_prop(lycon);

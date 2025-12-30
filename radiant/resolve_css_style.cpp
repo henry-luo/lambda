@@ -1080,13 +1080,28 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                    effective_property == CSS_PROPERTY_MAX_HEIGHT || effective_property == CSS_PROPERTY_TOP ||
                    effective_property == CSS_PROPERTY_BOTTOM) {
             // height-related properties: percentage relative to parent HEIGHT
-            if (lycon->block.parent) {
+            if (lycon->block.parent && lycon->block.parent->content_height > 0) {
                 log_debug("percentage height calculation: %.2f%% of parent height %.1f = %.2f",
                        percentage, lycon->block.parent->content_height,
                        percentage * lycon->block.parent->content_height / 100.0);
                 result = percentage * lycon->block.parent->content_height / 100.0;
+            } else if (lycon->block.parent && lycon->block.parent->given_height > 0) {
+                // Parent has given height but content_height not yet calculated
+                // This handles flex items with percentage heights where parent has definite height
+                log_debug("percentage height calculation: %.2f%% of parent given_height %.1f = %.2f",
+                       percentage, lycon->block.parent->given_height,
+                       percentage * lycon->block.parent->given_height / 100.0);
+                result = percentage * lycon->block.parent->given_height / 100.0;
+            } else if (!lycon->block.parent && lycon && lycon->height > 0) {
+                // No parent context (root html element) - use viewport height
+                // This handles html element with height: 100%
+                log_debug("percentage height value %.2f%% of viewport height %.1f = %.2f (no parent)",
+                       percentage, lycon->height, percentage * lycon->height / 100.0);
+                result = percentage * lycon->height / 100.0;
             } else {
-                log_debug("percentage height value %.2f%% without parent context", percentage);
+                // Parent exists but has no definite height - percentage resolves to auto (0)
+                // Per CSS spec, percentage heights compute to auto when parent height is not definite
+                log_debug("percentage height value %.2f%% resolves to 0 (parent has no definite height)", percentage);
                 result = 0.0f;
             }
         } else {
