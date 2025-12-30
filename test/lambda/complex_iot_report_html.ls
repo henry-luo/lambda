@@ -498,7 +498,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             padding: 20px;
             line-height: 1.6;
         }
@@ -511,7 +511,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             overflow: hidden;
         }
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             color: white;
             padding: 40px;
             text-align: center;
@@ -535,11 +535,11 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             margin-bottom: 40px;
         }
         .metric-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2c5282 0%, #2b6cb0 100%);
             color: white;
             padding: 25px;
             border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 10px 30px rgba(44, 82, 130, 0.3);
             transition: transform 0.3s ease;
         }
         .metric-card:hover {
@@ -567,7 +567,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             color: #333;
             margin-bottom: 20px;
             padding-bottom: 10px;
-            border-bottom: 3px solid #667eea;
+            border-bottom: 3px solid #2b6cb0;
         }
         .card {
             background: #f8f9fa;
@@ -578,7 +578,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
         }
         .card-title {
             font-size: 1.3em;
-            color: #667eea;
+            color: #2b6cb0;
             margin-bottom: 15px;
             font-weight: 600;
         }
@@ -591,7 +591,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             padding: 12px;
             background: white;
             border-radius: 8px;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid #2b6cb0;
         }
         .info-item .label {
             font-size: 0.85em;
@@ -666,7 +666,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             border-bottom: 1px solid #dee2e6;
         }
         th {
-            background: #667eea;
+            background: #2b6cb0;
             color: white;
             font-weight: 600;
         }
@@ -674,7 +674,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             background: #f1f3f5;
         }
         .recommendations {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
             color: white;
             padding: 25px;
             border-radius: 12px;
@@ -768,7 +768,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         ("<div class='alert-box alert-warning' style='margin-top: 15px;'>
                             <strong>⚠️ Air Quality Alerts Active</strong><br>
                             " ++ string(len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts)) ++ " location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities.
-                        </div>") else null) ++ "
+                        </div>") else " ") ++ "
                 </div>
                 <div class='card'>
                     <h3 class='card-title'>Climate Comfort Analysis</h3>
@@ -833,7 +833,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         </div>
                     </div>
                     
-                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #667eea;'>Congestion Distribution</h4>
+                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #2b6cb0;'>Congestion Distribution</h4>
                     <div style='margin: 10px 0;'>
                         <div style='margin-bottom: 10px;'>
                             <span style='display: inline-block; width: 150px;'>Low Congestion:</span>
@@ -887,7 +887,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     "<div class='alert-box alert-info'>
                         <strong>🚦 Optimization Opportunity</strong><br>
                         " ++ string(len(traffic_analysis.optimization_strategies.signal_timing_adjustments)) ++ " intersection(s) identified for signal timing optimization to reduce congestion.
-                    </div>" else null) ++ "
+                    </div>" else " ") ++ "
             </div>
             <!-- Energy Intelligence -->
             <div class='section'>
@@ -909,7 +909,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         </div>
                     </div>
                     
-                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #667eea;'>Renewable Energy Progress</h4>
+                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #2b6cb0;'>Renewable Energy Progress</h4>
                     " ++ progress_bar(energy_analysis.energy_overview.avg_renewable_integration, 100.0, "info") ++ "
                 </div>
 
