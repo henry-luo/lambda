@@ -498,7 +498,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
             padding: 20px;
             line-height: 1.6;
         }
@@ -511,7 +511,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             overflow: hidden;
         }
         .header {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            background: linear-gradient(135deg, #5c7cfa 0%, #748ffc 100%);
             color: white;
             padding: 40px;
             text-align: center;
@@ -535,11 +535,11 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             margin-bottom: 40px;
         }
         .metric-card {
-            background: linear-gradient(135deg, #2c5282 0%, #2b6cb0 100%);
+            background: linear-gradient(135deg, #4299e1 0%, #5a9fd4 100%);
             color: white;
             padding: 25px;
             border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(44, 82, 130, 0.3);
+            box-shadow: 0 10px 30px rgba(66, 153, 225, 0.3);
             transition: transform 0.3s ease;
         }
         .metric-card:hover {
@@ -567,7 +567,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             color: #333;
             margin-bottom: 20px;
             padding-bottom: 10px;
-            border-bottom: 3px solid #2b6cb0;
+            border-bottom: 3px solid #4299e1;
         }
         .card {
             background: #f8f9fa;
@@ -578,7 +578,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
         }
         .card-title {
             font-size: 1.3em;
-            color: #2b6cb0;
+            color: #4299e1;
             margin-bottom: 15px;
             font-weight: 600;
         }
@@ -591,7 +591,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             padding: 12px;
             background: white;
             border-radius: 8px;
-            border-left: 4px solid #2b6cb0;
+            border-left: 4px solid #4299e1;
         }
         .info-item .label {
             font-size: 0.85em;
@@ -666,7 +666,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             border-bottom: 1px solid #dee2e6;
         }
         th {
-            background: #2b6cb0;
+            background: #4299e1;
             color: white;
             font-weight: 600;
         }
@@ -674,30 +674,63 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             background: #f1f3f5;
         }
         .recommendations {
-            background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
-            color: white;
-            padding: 25px;
+            background: #ffffff;
+            color: #333;
+            padding: 30px;
             border-radius: 12px;
             margin-top: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            border-left: 5px solid #4299e1;
         }
         .recommendations h3 {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
+            color: #4299e1;
+            font-size: 1.8em;
+            font-weight: 700;
+        }
+        .recommendations h4 {
+            color: #2d3748;
+            font-weight: 600;
+            font-size: 1.2em;
         }
         .recommendations ul {
             list-style: none;
             padding-left: 0;
         }
         .recommendations li {
-            padding: 10px 0;
-            padding-left: 25px;
+            padding: 12px 0;
+            padding-left: 35px;
             position: relative;
+            border-bottom: 1px solid #e2e8f0;
+            transition: background 0.2s ease;
+        }
+        .recommendations li:last-child {
+            border-bottom: none;
+        }
+        .recommendations li:hover {
+            background: #f7fafc;
+            padding-left: 40px;
         }
         .recommendations li:before {
             content: '▸';
             position: absolute;
-            left: 0;
+            left: 10px;
             font-weight: bold;
+            color: #4299e1;
+            font-size: 1.2em;
         }
+        .priority-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 600;
+            margin-left: 10px;
+            text-transform: uppercase;
+        }
+        .priority-high { background: #feb2b2; color: #742a2a; }
+        .priority-medium { background: #fbd38d; color: #744210; }
+        .priority-strategic { background: #bee3f8; color: #2c5282; }
         .footer {
             text-align: center;
             padding: 20px;
@@ -833,7 +866,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         </div>
                     </div>
                     
-                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #2b6cb0;'>Congestion Distribution</h4>
+                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #4299e1;'>Congestion Distribution</h4>
                     <div style='margin: 10px 0;'>
                         <div style='margin-bottom: 10px;'>
                             <span style='display: inline-block; width: 150px;'>Low Congestion:</span>
@@ -909,7 +942,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         </div>
                     </div>
                     
-                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #2b6cb0;'>Renewable Energy Progress</h4>
+                    <h4 style='margin-top: 20px; margin-bottom: 10px; color: #4299e1;'>Renewable Energy Progress</h4>
                     " ++ progress_bar(energy_analysis.energy_overview.avg_renewable_integration, 100.0, "info") ++ "
                 </div>
 
@@ -970,32 +1003,59 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                 <h4 style='margin-top: 20px; margin-bottom: 10px;'>Immediate Priorities</h4>
                 <ul>
                     " ++ (if (len(environmental_analysis.environmental_analysis.air_quality_trends.air_quality_alerts) > 0) 
-                        "<li>⚠️ Air quality alerts active - implement traffic restrictions in affected zones</li>"
+                        "<li>⚠️ Air quality alerts active - implement traffic restrictions in affected zones<span class='priority-badge priority-high'>High Priority</span></li>"
                         else " ") ++
                     (if (traffic_analysis.traffic_summary.congestion_status == "high_congestion_citywide") 
-                        "<li>🚦 Activate dynamic traffic management protocols citywide</li>" 
+                        "<li>🚦 Activate dynamic traffic management protocols citywide<span class='priority-badge priority-high'>High Priority</span></li>" 
                         else " ") ++
                     (if (len(energy_analysis.grid_performance.stability_issues) > 0) 
-                        "<li>⚡ Grid stability issues detected - deploy maintenance teams</li>" 
+                        "<li>⚡ Grid stability issues detected - deploy maintenance teams<span class='priority-badge priority-high'>High Priority</span></li>" 
                         else " ") ++ "
                 </ul>
                 
-                <h4 style='margin-top: 20px; margin-bottom: 10px;'>Strategic Initiatives</h4>
+                <h4 style='margin-top: 25px; margin-bottom: 10px;'>Strategic Initiatives</h4>
                 <ul>
-                    <li>Expand environmental sensor network in industrial zones for better coverage</li>
-                    <li>Implement AI-powered traffic signal optimization to reduce congestion by 20-30%</li>
-                    <li>Accelerate renewable energy adoption programs - target 60% renewable by 2025</li>
-                    <li>Deploy citizen engagement platform for real-time feedback and community insights</li>
-                    <li>Establish microgrid pilots in high renewable energy areas</li>
+                    <li>📡 Expand environmental sensor network in industrial zones for better coverage<span class='priority-badge priority-strategic'>Strategic</span></li>
+                    <li>🤖 Implement AI-powered traffic signal optimization to reduce congestion by 20-30%<span class='priority-badge priority-strategic'>Strategic</span></li>
+                    <li>♻️ Accelerate renewable energy adoption programs - target 60% renewable by 2025<span class='priority-badge priority-strategic'>Strategic</span></li>
+                    <li>📱 Deploy citizen engagement platform for real-time feedback and community insights<span class='priority-badge priority-medium'>Medium Priority</span></li>
+                    <li>🔋 Establish microgrid pilots in high renewable energy areas<span class='priority-badge priority-strategic'>Strategic</span></li>
                 </ul>
                 
-                <h4 style='margin-top: 20px; margin-bottom: 10px;'>Investment Priorities</h4>
-                <ul>
-                    <li><strong>Environmental:</strong> Air quality monitoring expansion - $2.5M investment</li>
-                    <li><strong>Mobility:</strong> Smart intersection upgrades for 15 key locations - $8M investment</li>
-                    <li><strong>Energy:</strong> Grid modernization and battery storage deployment - $12M investment</li>
-                    <li><strong>ROI Timeline:</strong> 18-24 months for infrastructure investments</li>
-                </ul>
+                <h4 style='margin-top: 25px; margin-bottom: 10px;'>Investment Priorities</h4>
+                <div style='background: #f7fafc; padding: 20px; border-radius: 8px; margin-top: 15px;'>
+                    <table style='margin: 0;'>
+                        <tr>
+                            <th style='background: #4a5568;'>Category</th>
+                            <th style='background: #4a5568;'>Initiative</th>
+                            <th style='background: #4a5568;'>Investment</th>
+                            <th style='background: #4a5568;'>ROI Timeline</th>
+                        </tr>
+                        <tr>
+                            <td><strong>🌿 Environmental</strong></td>
+                            <td>Air quality monitoring expansion</td>
+                            <td>$2.5M</td>
+                            <td>18-24 months</td>
+                        </tr>
+                        <tr>
+                            <td><strong>🚗 Mobility</strong></td>
+                            <td>Smart intersection upgrades (15 locations)</td>
+                            <td>$8.0M</td>
+                            <td>18-24 months</td>
+                        </tr>
+                        <tr>
+                            <td><strong>⚡ Energy</strong></td>
+                            <td>Grid modernization & battery storage</td>
+                            <td>$12.0M</td>
+                            <td>24-36 months</td>
+                        </tr>
+                        <tr style='background: #e6fffa; font-weight: 600;'>
+                            <td colspan='2'><strong>Total Investment Required</strong></td>
+                            <td><strong>$22.5M</strong></td>
+                            <td><strong>2-3 years</strong></td>
+                        </tr>
+                    </table>
+                </div>
             </div>
         </div>
         
