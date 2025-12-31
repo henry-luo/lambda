@@ -74,7 +74,7 @@ void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 void parse_pdf(Input* input, const char* pdf_data);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -1320,7 +1320,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     return dom_doc;
 }
 
-DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height) {
+DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
     Pool* pool = pool_create();
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -1358,7 +1358,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
     } else if (ext && strcmp(ext, ".pdf") == 0) {
         // Load PDF document: parse PDF → convert to ViewTree directly (no CSS layout needed)
         log_info("[load_html_doc] Detected PDF file, using PDF→ViewTree pipeline");
-        doc = load_pdf_doc(full_url, viewport_width, viewport_height, pool);
+        doc = load_pdf_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
@@ -1375,9 +1375,10 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
  * @param viewport_width Viewport width for scaling (currently unused, PDF uses original dimensions)
  * @param viewport_height Viewport height for scaling (currently unused)
  * @param pool Memory pool for allocations
+ * @param pixel_ratio Display pixel ratio for high-DPI scaling (e.g., 2.0 for Retina)
  * @return DomDocument structure with view_tree pre-set, ready for rendering
  */
-DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool) {
+DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
     auto total_start = std::chrono::high_resolution_clock::now();
 
     if (!pdf_url || !pool) {
@@ -1434,7 +1435,8 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
     log_info("PDF has %d page(s)", total_pages);
 
     // Convert first page to view tree (page 0)
-    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0);
+    // Pass pixel_ratio for high-DPI display scaling
+    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0, pixel_ratio);
     if (!view_tree || !view_tree->root) {
         log_error("Failed to convert PDF page to view tree");
         return nullptr;

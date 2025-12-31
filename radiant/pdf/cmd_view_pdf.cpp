@@ -531,7 +531,9 @@ static void load_pdf_page(PdfViewerContext* pdf_ctx, int page_index) {
     log_info("Loading page %d/%d", page_index + 1, pdf_ctx->total_pages);
 
     // Generate view tree for the specific page
-    ViewTree* new_view_tree = pdf_page_to_view_tree(pdf_ctx->input, pdf_ctx->pdf_root, page_index);
+    // Pass pixel_ratio for high-DPI display scaling
+    float pixel_ratio = pdf_ctx->uicon ? pdf_ctx->uicon->pixel_ratio : 1.0f;
+    ViewTree* new_view_tree = pdf_page_to_view_tree(pdf_ctx->input, pdf_ctx->pdf_root, page_index, pixel_ratio);
 
     if (!new_view_tree || !new_view_tree->root) {
         log_error("Failed to generate view tree for page %d", page_index + 1);
@@ -771,7 +773,9 @@ int view_pdf_in_window(const char* pdf_file) {
     log_info("PDF has %d page(s)", total_pages);
 
     // Convert first page to view tree (page 0)
-    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0);
+    // Note: pixel_ratio not available yet (uicon not initialized), pass 1.0
+    // Scaling will happen when page is re-rendered via load_pdf_page after uicon is ready
+    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0, 1.0f);
     if (!view_tree || !view_tree->root) {
         log_error("Failed to convert first page to view tree");
         // Note: Input is managed by InputManager, don't destroy pool or free input

@@ -496,7 +496,8 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             strbuf_append_str_n(src, value, value_len);
             log_debug("load iframe doc src: %s", src->str);
             doc = load_html_doc(lycon->ui_context->document->url, src->str,
-                lycon->ui_context->window_width, lycon->ui_context->window_height);
+                lycon->ui_context->window_width, lycon->ui_context->window_height,
+                lycon->ui_context->pixel_ratio);
             strbuf_free(src);
             if (!doc) {
                 log_debug("failed to load iframe document");
@@ -514,6 +515,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                     lycon->ui_context->document = parent_doc;
                     log_debug("IFRAME TRACE: finished layout iframe document");
                 }
+                // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
             }
         } else {
             log_debug("iframe has no src attribute");
