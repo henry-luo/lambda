@@ -974,7 +974,7 @@ extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
-DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
+DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height, float pixel_ratio = 1.0f);
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool);
