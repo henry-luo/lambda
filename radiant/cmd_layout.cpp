@@ -1109,6 +1109,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     auto t_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
 
+    if (!input) {
+        log_error("Failed to create input for file: %s", html_filepath);
+        free(type_str);
+        return nullptr;
+    }
+
     StrBuf* htm_buf = strbuf_new();
     print_item(htm_buf, input->root, 0);
     // write html to 'html_tree.txt' for debugging
@@ -1121,11 +1127,6 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     auto t_debug = high_resolution_clock::now();
     log_info("[TIMING] load: debug output: %.1fms", duration<double, std::milli>(t_debug - t_parse).count());
-
-    if (!input) {
-        log_error("Failed to create input for file: %s", html_filepath);
-        return nullptr;
-    }
 
     Element* html_root = get_html_root_element(input);
     if (!html_root) {
