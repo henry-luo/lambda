@@ -34,7 +34,8 @@ typedef enum {
     DOC_FORMAT_LATEX,
     DOC_FORMAT_XML,
     DOC_FORMAT_RST,
-    DOC_FORMAT_WIKI
+    DOC_FORMAT_WIKI,
+    DOC_FORMAT_LAMBDA_SCRIPT
 } DocFormat;
 
 // Detect document format from file extension
@@ -58,6 +59,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_RST;
     } else if (strcasecmp(ext, "wiki") == 0) {
         return DOC_FORMAT_WIKI;
+    } else if (strcasecmp(ext, "ls") == 0) {
+        return DOC_FORMAT_LAMBDA_SCRIPT;
     }
 
     return DOC_FORMAT_UNKNOWN;
@@ -96,6 +99,11 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             log_warn("RST format not yet implemented");
             return NULL;
 
+        case DOC_FORMAT_LAMBDA_SCRIPT:
+            log_debug("Loading as Lambda script document");
+            // load_html_doc will detect .ls extension and route to load_lambda_script_doc
+            return load_html_doc(base_url, (char*)filename, width, height);
+
         case DOC_FORMAT_WIKI: {
             log_debug("Loading as Wiki document");
             Url* doc_url = url_parse_with_base(filename, base_url);
@@ -123,6 +131,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_XML: return "XML";
         case DOC_FORMAT_RST: return "RST";
         case DOC_FORMAT_WIKI: return "Wiki";
+        case DOC_FORMAT_LAMBDA_SCRIPT: return "Lambda Script";
         default: return "Document";
     }
 }
