@@ -19,6 +19,7 @@ void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
@@ -36,7 +37,8 @@ typedef enum {
     DOC_FORMAT_RST,
     DOC_FORMAT_WIKI,
     DOC_FORMAT_LAMBDA_SCRIPT,
-    DOC_FORMAT_PDF
+    DOC_FORMAT_PDF,
+    DOC_FORMAT_SVG
 } DocFormat;
 
 // Detect document format from file extension
@@ -64,6 +66,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_LAMBDA_SCRIPT;
     } else if (strcasecmp(ext, "pdf") == 0) {
         return DOC_FORMAT_PDF;
+    } else if (strcasecmp(ext, "svg") == 0) {
+        return DOC_FORMAT_SVG;
     }
 
     return DOC_FORMAT_UNKNOWN;
@@ -123,6 +127,11 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             // load_html_doc will detect .pdf extension and route to load_pdf_doc
             return load_html_doc(base_url, (char*)filename, width, height);
 
+        case DOC_FORMAT_SVG:
+            log_debug("Loading as SVG document");
+            // load_html_doc will detect .svg extension and route to load_svg_doc
+            return load_html_doc(base_url, (char*)filename, width, height);
+
         default:
             log_error("Unknown document format for file: %s", filename);
             return NULL;
@@ -141,6 +150,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_WIKI: return "Wiki";
         case DOC_FORMAT_LAMBDA_SCRIPT: return "Lambda Script";
         case DOC_FORMAT_PDF: return "PDF";
+        case DOC_FORMAT_SVG: return "SVG";
         default: return "Document";
     }
 }
