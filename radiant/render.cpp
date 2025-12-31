@@ -172,62 +172,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     unsigned char* str = text_view->text_data();
     TextRect* text_rect = text_view->rect;
 
-    // PDF text rendering fallback: when text_rect is null but text data exists
-    // (PDF ViewText nodes have absolute coordinates and don't use TextRects)
-    if (!text_rect && str && *str) {
-        log_debug("PDF text rendering: '%s' at (%.1f, %.1f)", str, text_view->x, text_view->y);
-        
-        // Get page height from parent ViewBlock for Y coordinate conversion
-        // PDF coordinates: Y increases upward (bottom=0, top=height)
-        // Screen coordinates: Y increases downward (top=0, bottom=height)
-        float page_height = 0;
-        if (text_view->parent && (text_view->parent->view_type == RDT_VIEW_BLOCK ||
-                                  text_view->parent->view_type == RDT_VIEW_INLINE_BLOCK)) {
-            ViewBlock* parent_block = (ViewBlock*)text_view->parent;
-            page_height = parent_block->height;
-        }
-        
-        // Convert coordinates: screen_y = page_height - pdf_y
-        float x = rdcon->block.x + text_view->x;
-        float y = rdcon->block.y + (page_height > 0 ? (page_height - text_view->y) : text_view->y);
-        
-        log_debug("PDF text coords: pdf_y=%.1f, page_height=%.1f, screen_y=%.1f", text_view->y, page_height, y);
-        
-        // Apply text color from text_view if set
-        Color saved_color = rdcon->color;
-        if (text_view->color.c != 0) {
-            rdcon->color = text_view->color;
-        }
-        
-        // Setup font from text_view's font property
-        FontBox saved_font = rdcon->font;
-        if (text_view->font) {
-            setup_font(rdcon->ui_context, &rdcon->font, text_view->font);
-        }
-        
-        // Get ascender for baseline adjustment
-        float ascend = rdcon->font.ft_face ? rdcon->font.ft_face->size->metrics.ascender / 64.0f : 0;
-        
-        // Render each glyph
-        unsigned char* p = str;
-        float pen_x = x;
-        while (*p) {
-            uint32_t codepoint;
-            int bytes = utf8_to_codepoint(p, &codepoint);
-            if (bytes <= 0) { p++; continue; }
-            p += bytes;
-            
-            FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face,
-                                            rdcon->font.style, codepoint, true);
-            if (glyph) {
-                draw_glyph(rdcon, &glyph->bitmap, pen_x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
-                pen_x += glyph->advance.x / 64.0f;
-            }
-        }
-        
-        rdcon->font = saved_font;
-        rdcon->color = saved_color;
+    if (!text_rect) {
+        log_debug("no text rect for text view");
         return;
+    }
+
+    // Apply text color from text_view if set (PDF text uses this for fill color)
+    Color saved_color = rdcon->color;
+    if (text_view->color.c != 0) {
+        rdcon->color = text_view->color;
+    }
+
+    // Setup font from text_view if set (PDF text has font property directly on ViewText)
+    FontBox saved_font = rdcon->font;
+    if (text_view->font) {
+        setup_font(rdcon->ui_context, &rdcon->font, text_view->font);
     }
 
     // Get the white-space property for this text node
@@ -404,6 +363,10 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         }
         text_rect = text_rect->next;
     }
+
+    // Restore color and font (in case they were changed for PDF text)
+    rdcon->font = saved_font;
+    rdcon->color = saved_color;
 }
 
 // Function to convert integer to Roman numeral

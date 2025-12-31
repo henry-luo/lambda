@@ -676,11 +676,18 @@ static void create_rect_view(Input* input, ViewBlock* parent,
         return;
     }
 
+    // Convert PDF coordinates (bottom-left origin, Y up) to screen coordinates (top-left origin, Y down)
+    // For rectangles, PDF y is the bottom edge, so screen_y = page_height - pdf_y - height
+    double screen_y = parent->height - y - height;
+
     rect_view->view_type = RDT_VIEW_BLOCK;
     rect_view->x = (float)x;
-    rect_view->y = (float)y;  // Store PDF Y as-is
+    rect_view->y = (float)screen_y;  // Screen Y (top-down)
     rect_view->width = (float)width;
     rect_view->height = (float)height;
+
+    log_debug("Created rect view at PDF(%.2f, %.2f) -> screen(%.2f, %.2f) size %.2f x %.2f",
+             x, y, (float)x, (float)screen_y, width, height);
 
     // Create empty DomElement for styling
     DomElement* dom_elem = (DomElement*)pool_calloc(input->pool, sizeof(DomElement));
@@ -789,6 +796,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
 
 /**
  * Create a ViewText node from PDF text
+ * Creates TextRect for unified rendering with HTML text
  */
 static void create_text_view(Input* input, ViewBlock* parent,
                             PDFStreamParser* parser, String* text) {
@@ -798,8 +806,10 @@ static void create_text_view(Input* input, ViewBlock* parent,
     double x = parser->state.tm[4];  // e component (x translation)
     double y = parser->state.tm[5];  // f component (y translation)
 
-    // Store PDF coordinates as-is (bottom-left origin)
-    // Conversion to screen coordinates will be done during rendering
+    // Convert PDF coordinates (bottom-left origin, Y up) to screen coordinates (top-left origin, Y down)
+    // For text, the PDF y is the baseline position from the bottom
+    // Screen y = page_height - pdf_y
+    double screen_y = parent->height - y;
 
     // Create ViewText (which extends DomText, so it inherits text fields)
     ViewText* text_view = (ViewText*)pool_calloc(input->pool, sizeof(ViewText));
@@ -809,9 +819,9 @@ static void create_text_view(Input* input, ViewBlock* parent,
     }
 
     text_view->view_type = RDT_VIEW_TEXT;
-    text_view->x = (float)x;
-    text_view->y = (float)y;  // Store PDF Y as-is
-    text_view->width = 0;  // Will be calculated during layout
+    text_view->x = 0;  // Position is now in TextRect, not on ViewText
+    text_view->y = 0;
+    text_view->width = 0;  // Will be calculated during rendering
     text_view->height = (float)parser->state.font_size;
 
     // Set DomText fields directly on ViewText (since ViewText extends DomText)
@@ -821,7 +831,22 @@ static void create_text_view(Input* input, ViewBlock* parent,
     text_view->native_string = text;  // Reference the Lambda String
     text_view->content_type = DOM_TEXT_STRING;
 
-    log_debug("Created text view at (%.2f, %.2f): '%s'", x, y, text->chars);
+    // Create TextRect for unified rendering with HTML text
+    // TextRect contains position relative to the page (parent block)
+    TextRect* rect = (TextRect*)pool_calloc(input->pool, sizeof(TextRect));
+    if (rect) {
+        rect->x = (float)x;
+        rect->y = (float)screen_y;
+        rect->width = 0;   // Width will be calculated during rendering
+        rect->height = (float)parser->state.font_size;
+        rect->start_index = 0;
+        rect->length = text->len;
+        rect->next = nullptr;
+        text_view->rect = rect;
+    }
+
+    log_debug("Created text view at PDF(%.2f, %.2f) -> screen(%.2f, %.2f): '%s'",
+             x, y, (float)x, (float)screen_y, text->chars);
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
@@ -834,11 +859,6 @@ static void create_text_view(Input* input, ViewBlock* parent,
     }
 
     // Apply text color from graphics state fill color
-    log_debug("Before color conversion: state fill_color = [%.2f, %.2f, %.2f]",
-             parser->state.fill_color[0],
-             parser->state.fill_color[1],
-             parser->state.fill_color[2]);
-
     text_view->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
     text_view->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
     text_view->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);

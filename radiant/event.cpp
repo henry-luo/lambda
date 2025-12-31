@@ -366,8 +366,20 @@ View* find_view(View* view, DomNode* node) {
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     EventContext evcon;
     log_debug("Handling event %d", event->type);
-    if (!doc || !doc->html_root) {
+    // PDF documents don't have html_root - they only have view_tree
+    // For PDFs, we can still handle basic events using the view_tree
+    if (!doc) {
         log_error("No document to handle event");
+        return;
+    }
+    if (!doc->html_root && !doc->view_tree) {
+        log_error("No document content to handle event");
+        return;
+    }
+    // For PDF documents (no html_root), skip complex event handling for now
+    // PDF is a static document format, so we only need basic scrolling/navigation
+    if (!doc->html_root) {
+        log_debug("PDF document - skipping DOM event handling");
         return;
     }
     event_context_init(&evcon, uicon, event);
