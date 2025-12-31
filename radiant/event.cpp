@@ -470,12 +470,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         DomDocument* old_doc = block->embed->doc;
                         DomDocument* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh);
-                        if (new_doc && new_doc->html_root) {
-                            layout_html_doc(evcon.ui_context, new_doc, false);
+                        if (new_doc) {
+                            if (new_doc->html_root) {
+                                // HTML/Markdown/XML documents: need CSS layout
+                                layout_html_doc(evcon.ui_context, new_doc, false);
+                            }
+                            // For PDF and other pre-laid-out documents, view_tree is already set
                             if (new_doc->view_tree && new_doc->view_tree->root) {
                                 ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;
-                                block->content_width = root->content_width;
-                                block->content_height = root->content_height;
+                                // Use width/height for PDF (content_width/height may be 0)
+                                block->content_width = root->content_width > 0 ? root->content_width : root->width;
+                                block->content_height = root->content_height > 0 ? root->content_height : root->height;
                                 update_scroller(block, block->content_width, block->content_height);
                             }
                         }
