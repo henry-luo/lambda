@@ -45,6 +45,7 @@ extern "C" {
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
+#include "../radiant/pdf/pdf_to_view.hpp"
 
 // Forward declaration of format_latex_html_v2 in lambda namespace
 namespace lambda {
@@ -73,6 +74,8 @@ void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool);
+void parse_pdf(Input* input, const char* pdf_data);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
@@ -1351,12 +1354,122 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
         log_info("[load_html_doc] Detected XML file, using XML→DOM pipeline");
         doc = load_xml_doc(full_url, viewport_width, viewport_height, pool);
+    } else if (ext && strcmp(ext, ".pdf") == 0) {
+        // Load PDF document: parse PDF → convert to ViewTree directly (no CSS layout needed)
+        log_info("[load_html_doc] Detected PDF file, using PDF→ViewTree pipeline");
+        doc = load_pdf_doc(full_url, viewport_width, viewport_height, pool);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
     }
 
     return doc;
+}
+
+/**
+ * Load PDF document with direct ViewTree conversion
+ * Parses PDF, converts to ViewTree directly (no CSS layout needed as PDF has absolute positions)
+ *
+ * @param pdf_url URL to PDF file
+ * @param viewport_width Viewport width for scaling (currently unused, PDF uses original dimensions)
+ * @param viewport_height Viewport height for scaling (currently unused)
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure with view_tree pre-set, ready for rendering
+ */
+DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!pdf_url || !pool) {
+        log_error("load_pdf_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* pdf_filepath = url_to_local_path(pdf_url);
+    log_info("[TIMING] Loading PDF document: %s", pdf_filepath);
+
+    // Step 1: Read PDF file content
+    auto step1_start = std::chrono::high_resolution_clock::now();
+    char* pdf_content = read_text_file(pdf_filepath);
+    if (!pdf_content) {
+        log_error("Failed to read PDF file: %s", pdf_filepath);
+        return nullptr;
+    }
+
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Read PDF file: %.1fms",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+
+    // Step 2: Create Input structure and parse PDF
+    auto step2_start = std::chrono::high_resolution_clock::now();
+    Input* input = InputManager::create_input(pdf_url);
+    if (!input) {
+        log_error("Failed to create Input structure");
+        free(pdf_content);
+        return nullptr;
+    }
+
+    // Parse PDF content
+    parse_pdf(input, pdf_content);
+    free(pdf_content);  // Done with raw content
+
+    // Check if parsing succeeded
+    if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {
+        log_error("Failed to parse PDF file: %s", pdf_filepath);
+        return nullptr;
+    }
+
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Parse PDF: %.1fms",
+        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+
+    // Step 3: Get page count and convert first page to ViewTree
+    auto step3_start = std::chrono::high_resolution_clock::now();
+    int total_pages = pdf_get_page_count(input->root);
+    if (total_pages <= 0) {
+        log_error("PDF has no pages or page count failed");
+        return nullptr;
+    }
+
+    log_info("PDF has %d page(s)", total_pages);
+
+    // Convert first page to view tree (page 0)
+    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0);
+    if (!view_tree || !view_tree->root) {
+        log_error("Failed to convert PDF page to view tree");
+        return nullptr;
+    }
+
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - Convert to ViewTree: %.1fms",
+        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
+    // Step 4: Create DomDocument and populate it
+    // Note: We set html_root to nullptr since PDF doesn't use HTML/CSS layout
+    // The view_tree is pre-created with absolute positions from PDF
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument");
+        return nullptr;
+    }
+
+    dom_doc->root = nullptr;           // No DomElement tree for PDF
+    dom_doc->html_root = nullptr;      // No HTML tree for PDF (skips layout_html_doc)
+    dom_doc->html_version = HTML5;     // Treat as HTML5 for compatibility
+    dom_doc->url = pdf_url;
+    dom_doc->view_tree = view_tree;    // Pre-created ViewTree from PDF
+    dom_doc->state = nullptr;
+
+    // Set content dimensions from ViewTree root
+    if (view_tree->root) {
+        ViewBlock* root = (ViewBlock*)view_tree->root;
+        log_info("PDF view tree root dimensions: %.0fx%.0f", root->width, root->height);
+    }
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_pdf_doc total: %.1fms",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
+    return dom_doc;
 }
 
 /**

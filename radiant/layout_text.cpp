@@ -203,7 +203,13 @@ CssEnum get_white_space_value(DomNode* node) {
     // Walk up parent chain starting from the text node's parent
     DomNode* current = node ? node->parent : nullptr;
     while (current) {
-        assert(current->is_element());
+        // PDF and other non-DOM view trees may have non-element parents
+        // Only process if it's a proper DomElement
+        if (!current->is_element()) {
+            // Not a DomElement - this can happen with PDF view trees
+            // Return default white-space value
+            return CSS_VALUE_NORMAL;
+        }
         DomElement* elem = static_cast<DomElement*>(current);
         // Check resolved BlockProp first (fastest path for blocks)
         if (elem->blk && elem->blk->white_space != 0) {
