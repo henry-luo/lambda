@@ -135,7 +135,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
     if (!dict) return NULL;
 
     int pair_count = 0;
-    while (**pdf && !(**pdf == '>' && *(*pdf + 1) == '>') && pair_count < 10) { // reduced limit for safety
+    while (**pdf && !(**pdf == '>' && *(*pdf + 1) == '>') && pair_count < 100) { // allow up to 100 key-value pairs
         // parse key (should be a name)
         if (**pdf != '/') {
             // skip non-name, might be malformed
@@ -303,8 +303,8 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
     static int call_count = 0;
     call_count++;
 
-    // prevent runaway recursion - much lower limit for safety
-    if (call_count > 10) {
+    // prevent runaway recursion - increased limit for complex PDFs
+    if (call_count > 50) {
         log_debug("Warning: too many parse calls, stopping recursion\n");
         call_count--;
         return {.item = ITEM_NULL};
@@ -373,13 +373,13 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
     else if ((**pdf >= '0' && **pdf <= '9') || **pdf == '-' || **pdf == '+' || **pdf == '.') {
         result = parse_pdf_number(ctx.input(), pdf);
     }
-    // check for simple arrays (limited depth)
-    else if (**pdf == '[' && call_count <= 3) {
+    // check for arrays (increased depth limit for complex PDFs)
+    else if (**pdf == '[' && call_count <= 20) {
         Array* arr = parse_pdf_array(ctx, pdf);
         result = arr ? (Item){.item = (uint64_t)arr} : (Item){.item = ITEM_ERROR};
     }
-    // check for simple dictionaries (limited depth)
-    else if (**pdf == '<' && *(*pdf + 1) == '<' && call_count <= 3) {
+    // check for dictionaries (increased depth limit for complex PDFs)
+    else if (**pdf == '<' && *(*pdf + 1) == '<' && call_count <= 20) {
         Map* dict = parse_pdf_dictionary(ctx, pdf);
         if (dict) {
             // Check if this dictionary is followed by a stream
@@ -398,7 +398,37 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
             result = {.item = ITEM_ERROR};
         }
     }
-    // skip complex structures (streams and other complex cases)
+    // skip dictionary if depth limit exceeded (but still need to skip it properly)
+    else if (**pdf == '<' && *(*pdf + 1) == '<') {
+        // Skip dictionary without parsing - count << and >> to find end
+        int depth = 1;
+        *pdf += 2; // skip <<
+        while (**pdf && depth > 0) {
+            if (**pdf == '<' && *(*pdf + 1) == '<') {
+                depth++;
+                *pdf += 2;
+            } else if (**pdf == '>' && *(*pdf + 1) == '>') {
+                depth--;
+                *pdf += 2;
+            } else {
+                (*pdf)++;
+            }
+        }
+        result = {.item = ITEM_NULL};
+    }
+    // skip array if depth limit exceeded
+    else if (**pdf == '[') {
+        // Skip array without parsing
+        int depth = 1;
+        (*pdf)++; // skip [
+        while (**pdf && depth > 0) {
+            if (**pdf == '[') depth++;
+            else if (**pdf == ']') depth--;
+            (*pdf)++;
+        }
+        result = {.item = ITEM_NULL};
+    }
+    // skip other complex structures
     else {
         advance_safely(pdf, 1);
         result = {.item = ITEM_NULL};

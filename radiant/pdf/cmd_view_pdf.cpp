@@ -52,7 +52,6 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glColor3f(r, g, b);
 
     float pen_x = x;
     float pen_y = y;
@@ -92,9 +91,16 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
         float w = glyph->bitmap.width;
         float h = glyph->bitmap.rows;
 
-        // Render textured quad
+        // Render textured quad with text color
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, texture);
+        
+        // Set texture environment to modulate color with alpha texture
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        
+        // Set color just before drawing (r, g, b will be multiplied with texture alpha)
+        glColor4f(r, g, b, 1.0f);
+        
         glBegin(GL_QUADS);
             glTexCoord2f(0.0f, 0.0f); glVertex2f(xpos, ypos);
             glTexCoord2f(1.0f, 0.0f); glVertex2f(xpos + w, ypos);
@@ -167,9 +173,13 @@ static void render_view_text(UiContext* uicon, ViewText* text_view, float offset
 
     // Get text color from ViewText (default to black if not set)
     float r = 0.0f, g = 0.0f, b = 0.0f;
-    // if (text_view->color.c) {
-    //     color_to_rgb(text_view->color, &r, &g, &b);
-    // }
+    log_debug("Text color check: c=0x%08X, r=%u, g=%u, b=%u, a=%u",
+             text_view->color.c, text_view->color.r, text_view->color.g,
+             text_view->color.b, text_view->color.a);
+    if (text_view->color.c) {
+        color_to_rgb(text_view->color, &r, &g, &b);
+        log_debug("Applied text color: r=%.2f, g=%.2f, b=%.2f", r, g, b);
+    }
 
     // Render the text with proper font properties
     char text_buffer[256];
@@ -636,8 +646,7 @@ int view_pdf_in_window(const char* pdf_file) {
     // Check if parsing succeeded
     if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {
         log_error("Failed to parse PDF file");
-        pool_destroy(input->pool);
-        free(input);
+        // Note: Input is managed by InputManager, don't destroy pool or free input
         return 1;
     }
 
@@ -647,8 +656,7 @@ int view_pdf_in_window(const char* pdf_file) {
     int total_pages = pdf_get_page_count(input->root);
     if (total_pages <= 0) {
         log_error("PDF has no pages or page count failed");
-        pool_destroy(input->pool);
-        free(input);
+        // Note: Input is managed by InputManager, don't destroy pool or free input
         return 1;
     }
 
@@ -658,8 +666,7 @@ int view_pdf_in_window(const char* pdf_file) {
     ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0);
     if (!view_tree || !view_tree->root) {
         log_error("Failed to convert first page to view tree");
-        pool_destroy(input->pool);
-        free(input);
+        // Note: Input is managed by InputManager, don't destroy pool or free input
         return 1;
     }
 
@@ -671,8 +678,7 @@ int view_pdf_in_window(const char* pdf_file) {
 
     if (ui_context_init(&uicon, false) != 0) {
         log_error("Failed to initialize UI context");
-        pool_destroy(input->pool);
-        free(input);
+        // Note: Input is managed by InputManager, don't destroy pool or free input
         return 1;
     }
 
@@ -680,8 +686,7 @@ int view_pdf_in_window(const char* pdf_file) {
     if (!window) {
         log_error("Failed to create window");
         ui_context_cleanup(&uicon);
-        pool_destroy(input->pool);
-        free(input);
+        // Note: Input is managed by InputManager, don't destroy pool or free input
         return 1;
     }    // Set up OpenGL context and callbacks (like window_main does)
     log_info("Setting up OpenGL context...");
@@ -749,13 +754,9 @@ int view_pdf_in_window(const char* pdf_file) {
     log_info("Closing PDF viewer");
     ui_context_cleanup(&uicon);
 
-    // Clean up Input and its pool (which contains the view tree)
-    if (input) {
-        if (input->pool) {
-            pool_destroy(input->pool);
-        }
-        free(input);
-    }
+    // Note: Input was created via InputManager::create_input() which uses the global
+    // pool. The InputManager owns and manages the pool and all inputs created from it.
+    // Do NOT call pool_destroy or free on the input - InputManager handles cleanup.
 
     return 0;
 }

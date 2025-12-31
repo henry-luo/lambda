@@ -597,6 +597,8 @@ typedef struct CSSColorMix {
     const char* method;         // Color space method
 } CSSColorMix;
 
+#ifndef COLOR_TYPE_DEFINED
+#define COLOR_TYPE_DEFINED
 typedef union {
     uint32_t c;  // 32-bit ABGR color format,
     struct {
@@ -606,6 +608,7 @@ typedef union {
         uint8_t a;
     };
 } Color;
+#endif
 
 // Color components structure for HSL, HWB, LAB, LCH color spaces
 typedef struct {
