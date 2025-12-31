@@ -481,12 +481,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         int css_vh = (int)(evcon.ui_context->window_height / evcon.ui_context->pixel_ratio);
                         DomDocument* old_doc = block->embed->doc;
                         DomDocument* new_doc = block->embed->doc =
-                            load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh);
+                            load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
+                                          evcon.ui_context->pixel_ratio);
                         if (new_doc) {
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout
                                 layout_html_doc(evcon.ui_context, new_doc, false);
                             }
+                            // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
                             // For PDF and other pre-laid-out documents, view_tree is already set
                             if (new_doc->view_tree && new_doc->view_tree->root) {
                                 ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;

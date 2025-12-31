@@ -52,9 +52,10 @@ extern FontProp* create_font_from_pdf(Pool* pool, const char* font_name, double 
  *
  * This is the main entry point for PDF rendering.
  * Takes parsed PDF data and generates a view tree suitable for Radiant layout.
+ * @param pixel_ratio Display scaling factor (e.g., 2.0 for Retina). Pass 1.0 if unknown.
  */
-ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
-    log_info("Starting PDF to View Tree conversion");
+ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio) {
+    log_info("Starting PDF to View Tree conversion (pixel_ratio=%.2f)", pixel_ratio);
 
     if (pdf_root.item == ITEM_NULL || pdf_root.item == ITEM_ERROR) {
         log_error("Invalid PDF data");
@@ -127,6 +128,11 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
     // Warn if no content was extracted (likely due to compression)
     if (child_count == 0) {
         log_warn("No content extracted from PDF - this may be due to compressed streams (Phase 3 feature)");
+    }
+
+    // Scale view tree for high-DPI displays
+    if (pixel_ratio > 1.0f) {
+        pdf_scale_view_tree(view_tree, pixel_ratio);
     }
 
     return view_tree;
@@ -217,9 +223,10 @@ void pdf_scale_view_tree(ViewTree* view_tree, float pixel_ratio) {
 
 /**
  * Convert a specific PDF page to view tree
+ * @param pixel_ratio Display scaling factor (e.g., 2.0 for Retina). Pass 1.0 if unknown.
  */
-ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
-    log_info("Converting PDF page %d to view tree", page_index + 1);
+ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, float pixel_ratio) {
+    log_info("Converting PDF page %d to view tree (pixel_ratio=%.2f)", page_index + 1, pixel_ratio);
 
     if (pdf_root.item == ITEM_NULL || pdf_root.item == ITEM_ERROR) {
         log_error("Invalid PDF data");
@@ -297,6 +304,11 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
         child = child->next_sibling;
     }
     log_info("Page %d has %d view elements", page_index + 1, child_count);
+
+    // Scale view tree for high-DPI displays
+    if (pixel_ratio > 1.0f) {
+        pdf_scale_view_tree(view_tree, pixel_ratio);
+    }
 
     return view_tree;
 }

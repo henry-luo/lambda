@@ -11,14 +11,13 @@
 #include "../lib/log.h"
 #include "layout.hpp"
 #include "font_face.h"
-#include "pdf/pdf_to_view.hpp"  // For pdf_scale_view_tree
 extern "C" {
 #include "../lib/url.h"
 }
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-DomDocument* load_html_doc(Url* base, char* doc_filename, int viewport_width, int viewport_height);
+// load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
@@ -484,10 +483,8 @@ int view_doc_in_window(const char* doc_file) {
         // PDF documents have pre-built view trees and skip this
         if (doc->root) {
             layout_html_doc(&ui_context, doc, false);
-        } else if (doc->view_tree) {
-            // PDF: Scale view tree by pixel_ratio for high-DPI displays
-            pdf_scale_view_tree(doc->view_tree, ui_context.pixel_ratio);
         }
+        // PDF scaling now happens inside pdf_page_to_view_tree
 
         // Render document
         if (doc && doc->view_tree) {
