@@ -78,6 +78,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
 void parse_pdf(Input* input, const char* pdf_data);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -1371,6 +1372,14 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load image document: load image → convert to ViewTree directly (no CSS layout needed)
         log_info("[load_html_doc] Detected image file, using Image→ViewTree pipeline");
         doc = load_image_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
+    } else if (ext && (strcmp(ext, ".json") == 0 || strcmp(ext, ".yaml") == 0 ||
+                       strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
+                       strcmp(ext, ".txt") == 0 || strcmp(ext, ".csv") == 0 ||
+                       strcmp(ext, ".ini") == 0 || strcmp(ext, ".conf") == 0 ||
+                       strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
+        // Load text document: read source → wrap in <pre> → render as HTML
+        log_info("[load_html_doc] Detected text file, using Text→HTML pipeline");
+        doc = load_text_doc(full_url, viewport_width, viewport_height, pool);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
@@ -1750,6 +1759,217 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
     log_info("[TIMING] load_image_doc total: %.1fms, size: %dx%d (scaled: %.0fx%.0f)",
         std::chrono::duration<double, std::milli>(total_end - total_start).count(),
         img_width, img_height, scaled_width, scaled_height);
+
+    return dom_doc;
+}
+
+/**
+ * Load text document as source view
+ * Reads text file content, wraps in HTML <pre> element, renders with monospace font
+ *
+ * @param text_url URL to text file
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure ready for layout
+ */
+DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!text_url || !pool) {
+        log_error("load_text_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* text_filepath = url_to_local_path(text_url);
+    log_info("[TIMING] Loading text document: %s", text_filepath);
+
+    // Step 1: Read text file content
+    auto step1_start = std::chrono::high_resolution_clock::now();
+    char* text_content = read_text_file(text_filepath);
+    if (!text_content) {
+        log_error("Failed to read text file: %s", text_filepath);
+        return nullptr;
+    }
+    size_t content_len = strlen(text_content);
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Read text file: %.1fms (%zu bytes)",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count(), content_len);
+
+    // Step 2: Escape HTML special characters for safe display
+    auto step2_start = std::chrono::high_resolution_clock::now();
+    
+    // count how many chars need escaping
+    size_t escaped_len = 0;
+    for (size_t i = 0; i < content_len; i++) {
+        char c = text_content[i];
+        if (c == '<') escaped_len += 4;       // &lt;
+        else if (c == '>') escaped_len += 4;  // &gt;
+        else if (c == '&') escaped_len += 5;  // &amp;
+        else escaped_len += 1;
+    }
+
+    // allocate escaped string
+    char* escaped_content = (char*)malloc(escaped_len + 1);
+    if (!escaped_content) {
+        log_error("Failed to allocate escaped content buffer");
+        free(text_content);
+        return nullptr;
+    }
+
+    // escape content
+    size_t j = 0;
+    for (size_t i = 0; i < content_len; i++) {
+        char c = text_content[i];
+        if (c == '<') {
+            memcpy(escaped_content + j, "&lt;", 4);
+            j += 4;
+        } else if (c == '>') {
+            memcpy(escaped_content + j, "&gt;", 4);
+            j += 4;
+        } else if (c == '&') {
+            memcpy(escaped_content + j, "&amp;", 5);
+            j += 5;
+        } else {
+            escaped_content[j++] = c;
+        }
+    }
+    escaped_content[j] = '\0';
+    free(text_content);
+
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Escape HTML: %.1fms",
+        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+
+    // Step 3: Build HTML document wrapping text in <pre>
+    auto step3_start = std::chrono::high_resolution_clock::now();
+
+    // Get filename for title
+    const char* filename = strrchr(text_filepath, '/');
+    filename = filename ? filename + 1 : text_filepath;
+
+    // Create HTML with minimal styling for source text view
+    const char* html_template =
+        "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head>\n"
+        "  <meta charset=\"UTF-8\">\n"
+        "  <title>%s</title>\n"
+        "  <style>\n"
+        "    body {\n"
+        "      margin: 0;\n"
+        "      padding: 16px;\n"
+        "      background: #1e1e1e;\n"
+        "      color: #d4d4d4;\n"
+        "      font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;\n"
+        "      font-size: 13px;\n"
+        "      line-height: 1.5;\n"
+        "    }\n"
+        "    pre {\n"
+        "      margin: 0;\n"
+        "      white-space: pre-wrap;\n"
+        "      word-wrap: break-word;\n"
+        "    }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        "<pre>%s</pre>\n"
+        "</body>\n"
+        "</html>\n";
+
+    // Calculate buffer size and format HTML
+    size_t html_len = strlen(html_template) + strlen(filename) + escaped_len + 1;
+    char* html_content = (char*)malloc(html_len);
+    if (!html_content) {
+        log_error("Failed to allocate HTML buffer");
+        free(escaped_content);
+        return nullptr;
+    }
+    snprintf(html_content, html_len, html_template, filename, escaped_content);
+    free(escaped_content);
+
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - Build HTML: %.1fms",
+        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
+    // Step 4: Parse HTML using Lambda parser
+    auto step4_start = std::chrono::high_resolution_clock::now();
+
+    String* type_str = (String*)malloc(sizeof(String) + 5);
+    type_str->len = 4;
+    strcpy(type_str->chars, "html");
+
+    Input* input = input_from_source(html_content, text_url, type_str, nullptr);
+    free(html_content);
+
+    if (!input || !input->root.item || input->root.item == ITEM_ERROR) {
+        log_error("Failed to parse HTML wrapper for text file");
+        return nullptr;
+    }
+
+    auto step4_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 4 - Parse HTML: %.1fms",
+        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
+
+    // Step 5: Build DOM tree and apply CSS (reuse lambda_html_doc logic)
+    auto step5_start = std::chrono::high_resolution_clock::now();
+
+    Element* html_root = get_html_root_element(input);
+    if (!html_root) {
+        log_error("Failed to get HTML root from text file wrapper");
+        return nullptr;
+    }
+
+    // Create DomDocument
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument for text file");
+        return nullptr;
+    }
+
+    // Build DomElement tree
+    DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DomElement tree from text file");
+        dom_document_destroy(dom_doc);
+        return nullptr;
+    }
+
+    // Initialize CSS engine
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("Failed to create CSS engine for text file");
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Extract and apply inline styles from the HTML
+    int stylesheet_count = 0;
+    CssStylesheet** stylesheets = extract_and_collect_css(html_root, css_engine, text_filepath, pool, &stylesheet_count);
+
+    // Create selector matcher
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+
+    // Apply stylesheets to DOM tree
+    for (int i = 0; i < stylesheet_count; i++) {
+        if (stylesheets[i]) {
+            apply_stylesheet_to_dom_tree_fast(dom_root, stylesheets[i], matcher, pool, css_engine);
+        }
+    }
+
+    auto step5_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 5 - Build DOM & apply CSS: %.1fms",
+        std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
+
+    // Set document properties
+    dom_doc->root = dom_root;
+    dom_doc->html_root = html_root;
+    dom_doc->html_version = HTML5;
+    dom_doc->url = text_url;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_text_doc total: %.1fms",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count());
 
     return dom_doc;
 }
@@ -2338,11 +2558,10 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    // Check if XML has stylesheet
+    // Check if XML has stylesheet - if not, fall back to source text view
     if (!xml_input->xml_stylesheet_href) {
-        log_error("[Lambda XML] Error: XML document must have <?xml-stylesheet?> directive");
-        log_error("[Lambda XML] Expected: <?xml-stylesheet type=\"text/css\" href=\"style.css\"?>");
-        return nullptr;
+        log_info("[Lambda XML] No <?xml-stylesheet?> directive found, showing as source text");
+        return load_text_doc(xml_url, viewport_width, viewport_height, pool);
     }
 
     log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);

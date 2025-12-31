@@ -39,7 +39,8 @@ typedef enum {
     DOC_FORMAT_LAMBDA_SCRIPT,
     DOC_FORMAT_PDF,
     DOC_FORMAT_SVG,
-    DOC_FORMAT_IMAGE  // PNG, JPG, JPEG, GIF
+    DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
+    DOC_FORMAT_TEXT    // JSON, YAML, TOML, TXT, etc.
 } DocFormat;
 
 // Detect document format from file extension
@@ -72,6 +73,12 @@ static DocFormat detect_doc_format(const char* filename) {
     } else if (strcasecmp(ext, "png") == 0 || strcasecmp(ext, "jpg") == 0 ||
                strcasecmp(ext, "jpeg") == 0 || strcasecmp(ext, "gif") == 0) {
         return DOC_FORMAT_IMAGE;
+    } else if (strcasecmp(ext, "json") == 0 || strcasecmp(ext, "yaml") == 0 ||
+               strcasecmp(ext, "yml") == 0 || strcasecmp(ext, "toml") == 0 ||
+               strcasecmp(ext, "txt") == 0 || strcasecmp(ext, "csv") == 0 ||
+               strcasecmp(ext, "ini") == 0 || strcasecmp(ext, "conf") == 0 ||
+               strcasecmp(ext, "cfg") == 0 || strcasecmp(ext, "log") == 0) {
+        return DOC_FORMAT_TEXT;
     }
 
     return DOC_FORMAT_UNKNOWN;
@@ -141,8 +148,14 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             // load_html_doc will detect image extensions and route to load_image_doc
             return load_html_doc(base_url, (char*)filename, width, height);
 
+        case DOC_FORMAT_TEXT:
+            log_debug("Loading as text document (source view)");
+            // load_html_doc will detect text extensions and route to load_text_doc
+            return load_html_doc(base_url, (char*)filename, width, height);
+
         default:
-            log_error("Unknown document format for file: %s", filename);
+            log_error("Unsupported document format for file: %s", filename);
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .ls, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
     }
 }
@@ -161,6 +174,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_PDF: return "PDF";
         case DOC_FORMAT_SVG: return "SVG";
         case DOC_FORMAT_IMAGE: return "Image";
+        case DOC_FORMAT_TEXT: return "Text";
         default: return "Document";
     }
 }
