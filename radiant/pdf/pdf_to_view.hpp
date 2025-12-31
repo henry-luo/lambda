@@ -17,9 +17,10 @@ extern "C" {
  *
  * @param input Input context with parsed PDF data
  * @param pdf_root Root item from PDF parser (should be a Map)
+ * @param pixel_ratio Display scaling factor (e.g., 2.0 for Retina). Pass 1.0 if unknown.
  * @return ViewTree* or nullptr on error
  */
-ViewTree* pdf_to_view_tree(Input* input, Item pdf_root);
+ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio = 1.0f);
 
 /**
  * Convert a specific page from PDF to View Tree
@@ -27,9 +28,10 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root);
  * @param input Input context with parsed PDF data
  * @param pdf_root Root item from PDF parser
  * @param page_index Zero-based page index
+ * @param pixel_ratio Display scaling factor (e.g., 2.0 for Retina). Pass 1.0 if unknown.
  * @return ViewTree* or nullptr on error
  */
-ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index);
+ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, float pixel_ratio = 1.0f);
 
 /**
  * Get number of pages in PDF
