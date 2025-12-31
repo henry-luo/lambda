@@ -498,6 +498,27 @@ typedef struct BoundaryProp {
     BackgroundProp* background;
 } BoundaryProp;
 
+// Vector path segment for PDF/SVG path rendering
+// Stores pre-transformed coordinates ready for ThorVG rendering
+typedef struct VectorPathSegment {
+    enum { VPATH_MOVETO, VPATH_LINETO, VPATH_CURVETO, VPATH_CLOSE } type;
+    float x, y;                     // End point
+    float x1, y1, x2, y2;           // Control points (for CURVETO)
+    struct VectorPathSegment* next;
+} VectorPathSegment;
+
+// Vector path property for complex path rendering
+typedef struct VectorPathProp {
+    VectorPathSegment* segments;    // Linked list of path segments
+    Color stroke_color;             // Stroke color
+    Color fill_color;               // Fill color (if filled)
+    float stroke_width;             // Stroke width
+    bool has_stroke;                // Whether to stroke
+    bool has_fill;                  // Whether to fill
+    float* dash_pattern;            // Dash pattern array (NULL for solid)
+    int dash_pattern_length;        // Length of dash pattern
+} VectorPathProp;
+
 typedef struct PositionProp {
     CssEnum position;     // static, relative, absolute, fixed, sticky
     float top, right, bottom, left;  // offset values in pixels
