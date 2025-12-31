@@ -2285,10 +2285,13 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
-    // Step 7: Load default stylesheet for Lambda script results (skip for complete HTML documents)
+    // Step 7: Load stylesheets
     CssStylesheet* script_stylesheet = nullptr;
+    int inline_stylesheet_count = 0;
+    CssStylesheet** inline_stylesheets = nullptr;
     
     if (!is_html_document) {
+        // For non-HTML elements, load the default script.css
         const char* css_filename = "lambda/input/script.css";
         log_debug("[Lambda Script] Loading default script stylesheet: %s", css_filename);
 
@@ -2313,7 +2316,12 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             log_debug("[Lambda Script] No script.css file found, using browser defaults");
         }
     } else {
+        // For complete HTML documents, extract inline <style> elements
         log_debug("[Lambda Script] Skipping script.css for complete HTML document");
+        log_debug("[Lambda Script] Extracting inline <style> elements...");
+        inline_stylesheets = extract_and_collect_css(
+            html_elem, css_engine, script_filepath, pool, &inline_stylesheet_count);
+        log_debug("[Lambda Script] Found %d inline stylesheet(s)", inline_stylesheet_count);
     }
 
     auto step6_end = std::chrono::high_resolution_clock::now();
@@ -2322,10 +2330,24 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     // Step 8: Apply CSS cascade to DOM tree
     auto step7_start = std::chrono::high_resolution_clock::now();
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    
+    // Apply script.css if loaded
     if (script_stylesheet && script_stylesheet->rule_count > 0) {
-        SelectorMatcher* matcher = selector_matcher_create(pool);
         apply_stylesheet_to_dom_tree_fast(dom_root, script_stylesheet, matcher, pool, css_engine);
     }
+    
+    // Apply inline stylesheets for HTML documents
+    if (inline_stylesheets && inline_stylesheet_count > 0) {
+        for (int i = 0; i < inline_stylesheet_count; i++) {
+            if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
+                log_debug("[Lambda Script] Applying inline stylesheet %d with %zu rules",
+                          i, inline_stylesheets[i]->rule_count);
+                apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+            }
+        }
+    }
+    
     auto step7_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 7 - CSS cascade: %.1fms",
         std::chrono::duration<double, std::milli>(step7_end - step7_start).count());
