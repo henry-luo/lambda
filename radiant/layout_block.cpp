@@ -526,9 +526,12 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
         ViewBlock* root = (ViewBlock*)doc->view_tree->root;
         log_debug("IFRAME TRACE: iframe embedded doc root->content_width=%.1f, root->content_height=%.1f",
             root->content_width, root->content_height);
-        lycon->block.max_width = root->content_width;
-        lycon->block.advance_y = root->content_height;
-        log_debug("IFRAME TRACE: set lycon->block.advance_y = %.1f from root->content_height", lycon->block.advance_y);
+        // For PDF and other pre-laid-out documents, use width/height if content_width/height are 0
+        float iframe_width = root->content_width > 0 ? root->content_width : root->width;
+        float iframe_height = root->content_height > 0 ? root->content_height : root->height;
+        lycon->block.max_width = iframe_width;
+        lycon->block.advance_y = iframe_height;
+        log_debug("IFRAME TRACE: set lycon->block.advance_y = %.1f from iframe_height", lycon->block.advance_y);
     }
     finalize_block_flow(lycon, block, display.outer);
     log_debug("IFRAME TRACE: after finalize_block_flow, iframe block->content_height=%.1f", block->content_height);
