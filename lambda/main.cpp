@@ -1061,13 +1061,15 @@ int main(int argc, char *argv[]) {
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".ls") == 0 ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
-                    strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0)) {
+                    strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
+                    strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
+                    strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0)) {
             // Use unified document viewer for all document types including PDF
             log_info("Opening document file: %s", filename);
             exit_code = view_doc_in_window(filename);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .tex, .latex, .ls, .xml, .rst, .wiki, .svg\n");
+            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .tex, .latex, .ls, .xml, .rst, .wiki, .svg, .png, .jpg, .jpeg, .gif\n");
             log_finish();
             return 1;
         }

@@ -31,6 +31,7 @@ extern "C" {
 #include "../lib/strbuf.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
+#include "../lib/image.h"
 }
 
 #include "../lambda/input/css/css_engine.hpp"
@@ -76,6 +77,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 void parse_pdf(Input* input, const char* pdf_data);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -1364,6 +1366,11 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load SVG document: render SVG → convert to ViewTree directly (no CSS layout needed)
         log_info("[load_html_doc] Detected SVG file, using SVG→ViewTree pipeline");
         doc = load_svg_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
+    } else if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
+                       strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0)) {
+        // Load image document: load image → convert to ViewTree directly (no CSS layout needed)
+        log_info("[load_html_doc] Detected image file, using Image→ViewTree pipeline");
+        doc = load_image_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
@@ -1607,6 +1614,142 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load_svg_doc total: %.1fms, size: %.0fx%.0f (scaled: %.0fx%.0f)",
         std::chrono::duration<double, std::milli>(total_end - total_start).count(),
         svg_width, svg_height, scaled_width, scaled_height);
+
+    return dom_doc;
+}
+
+/**
+ * Load raster image document (PNG, JPG, JPEG, GIF)
+ * Loads image, creates ViewTree directly (no CSS layout needed)
+ *
+ * @param img_url URL to image file
+ * @param viewport_width Viewport width for display
+ * @param viewport_height Viewport height for display
+ * @param pool Memory pool for allocations
+ * @param pixel_ratio Display pixel ratio for high-DPI scaling (e.g., 2.0 for Retina)
+ * @return DomDocument structure with view_tree pre-set, ready for rendering
+ */
+DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!img_url || !pool) {
+        log_error("load_image_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* img_filepath = url_to_local_path(img_url);
+    log_info("[TIMING] Loading image document: %s", img_filepath);
+
+    // Create Input structure (minimal, for DomDocument creation)
+    Input* input = InputManager::create_input(img_url);
+    if (!input) {
+        log_error("Failed to create Input structure for image");
+        return nullptr;
+    }
+
+    // Create a dedicated pool for the view tree
+    Pool* view_pool = pool_create();
+    if (!view_pool) {
+        log_error("Failed to create view pool for image");
+        return nullptr;
+    }
+
+    // Determine image format from extension
+    const char* ext = strrchr(img_filepath, '.');
+    ImageFormat format = IMAGE_FORMAT_PNG;  // default
+    if (ext) {
+        if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
+            format = IMAGE_FORMAT_JPEG;
+        } else if (strcasecmp(ext, ".gif") == 0) {
+            format = IMAGE_FORMAT_GIF;
+        } else if (strcasecmp(ext, ".png") == 0) {
+            format = IMAGE_FORMAT_PNG;
+        }
+    }
+
+    // Load image using stb_image
+    int img_width, img_height, channels;
+    unsigned char* data = image_load(img_filepath, &img_width, &img_height, &channels, 4);
+    if (!data) {
+        log_error("Failed to load image: %s", img_filepath);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    log_info("Image loaded: %dx%d, channels=%d", img_width, img_height, channels);
+
+    // Create ImageSurface from loaded data
+    ImageSurface* img_surface = image_surface_create_from(img_width, img_height, data);
+    if (!img_surface) {
+        log_error("Failed to create image surface");
+        image_free(data);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+    img_surface->format = format;
+    img_surface->url = img_url;
+
+    // Apply pixel_ratio for high-DPI displays
+    float scaled_width = (float)img_width * pixel_ratio;
+    float scaled_height = (float)img_height * pixel_ratio;
+
+    // Create ViewTree
+    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    if (!view_tree) {
+        log_error("Failed to allocate view tree for image");
+        image_surface_destroy(img_surface);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+    view_tree->pool = view_pool;
+    view_tree->html_version = HTML5;
+
+    // Create root ViewBlock to hold the image
+    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    if (!root_view) {
+        log_error("Failed to allocate root view for image");
+        image_surface_destroy(img_surface);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    root_view->view_type = RDT_VIEW_BLOCK;
+    root_view->x = 0;
+    root_view->y = 0;
+    root_view->width = scaled_width;
+    root_view->height = scaled_height;
+    root_view->content_width = scaled_width;
+    root_view->content_height = scaled_height;
+
+    // Create EmbedProp to hold the image
+    EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
+    if (embed) {
+        embed->img = img_surface;
+        root_view->embed = embed;
+    }
+
+    view_tree->root = (View*)root_view;
+
+    // Create DomDocument
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument for image");
+        image_surface_destroy(img_surface);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    dom_doc->root = nullptr;           // No DomElement tree for images
+    dom_doc->html_root = nullptr;      // No HTML tree for images (skips layout_html_doc)
+    dom_doc->html_version = HTML5;
+    dom_doc->url = img_url;
+    dom_doc->view_tree = view_tree;
+    dom_doc->state = nullptr;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_image_doc total: %.1fms, size: %dx%d (scaled: %.0fx%.0f)",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count(),
+        img_width, img_height, scaled_width, scaled_height);
 
     return dom_doc;
 }
