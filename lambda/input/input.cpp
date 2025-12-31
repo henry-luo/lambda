@@ -544,6 +544,10 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
         // Use InputManager to properly set up the Input with a pool
         input = InputManager::create_input(abs_url);
+        if (!input) {
+            log_error("input_from_source: Failed to create input for plain text");
+            return NULL;
+        }
         // Allocate string from the pool instead of malloc
         String *str = create_string(input->pool, source);
         input->root = {.item = s2it(str)};
@@ -551,6 +555,10 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
     else {
         Context context;  Context *pa_input_context = input_context;
         input = InputManager::create_input(abs_url);
+        if (!input) {
+            log_error("input_from_source: Failed to create input for type '%s'", effective_type);
+            return NULL;
+        }
         context.pool = input->pool;  context.consts = NULL;
         context.cwd = NULL;  context.run_main = false;
         context.disable_string_merging = false;  // default: allow string merging
@@ -799,7 +807,15 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
 }
 
 Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
+    if (!pool) {
+        log_error("Input::create: pool is NULL");
+        return NULL;
+    }
     Input* input = (Input*)pool_alloc(pool, sizeof(Input));
+    if (!input) {
+        log_error("Failed to allocate Input structure (pool=%p, size=%zu)", (void*)pool, sizeof(Input));
+        return NULL;
+    }
     input->pool = pool;
     input->arena = arena_create_default(pool);
     input->name_pool = name_pool_create(pool, NULL);  // Initialize name pool for string interning
@@ -817,6 +833,9 @@ static InputManager* g_input_manager = nullptr;
 
 InputManager::InputManager() {
     global_pool = pool_create();
+    if (!global_pool) {
+        log_error("InputManager: Failed to create global_pool");
+    }
     inputs = arraylist_new(16);
     decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
     // mpd_maxcontext(decimal_ctx);
@@ -837,7 +856,9 @@ InputManager::~InputManager() {
 
     // Destroy the global pool (this frees all pool-allocated memory)
     if (global_pool) {
+        log_debug("InputManager::~InputManager destroying global_pool=%p", (void*)global_pool);
         pool_destroy(global_pool);
+        global_pool = nullptr;
     }
 
     // todo: free decimal_ctx
@@ -864,11 +885,17 @@ Input* InputManager::create_input(Url* abs_url) {
 
 // Instance method to create input
 Input* InputManager::create_input_instance(Url* abs_url) {
-    if (!global_pool) return nullptr;
+    if (!global_pool) {
+        log_error("create_input_instance: global_pool is NULL");
+        return nullptr;
+    }
 
     // Use the static create method with the managed pool
     Input* input = Input::create(global_pool, abs_url);
-    if (!input) return nullptr;
+    if (!input) {
+        log_error("create_input_instance: Input::create returned NULL");
+        return nullptr;
+    }
 
     // Track this input for cleanup
     arraylist_append(inputs, input);

@@ -25,11 +25,11 @@ static inline String* input_create_string(Input* input, const char* str) {
 
 // Forward declarations
 static ViewBlock* create_document_view(Pool* pool);
-static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item);
-static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map);
-static void process_pdf_operator(Input* input, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
-static void create_text_view(Input* input, ViewBlock* parent, PDFStreamParser* parser, String* text);
-static void create_text_array_views(Input* input, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
+static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent, Item obj_item);
+static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map);
+static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
+static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, String* text);
+static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
 
 // Path paint operation types
 typedef enum {
@@ -38,8 +38,8 @@ typedef enum {
     PAINT_FILL_AND_STROKE // B, B*, b, b* operators
 } PaintOperation;
 
-static void create_rect_view(Input* input, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
-static void create_path_view_thorvg(Input* input, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
+static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
+static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
 static bool needs_thorvg_path_render(PDFStreamParser* parser);
 static void update_text_position(PDFStreamParser* parser, double tx, double ty);
 static void append_child_view(View* parent, View* child);
@@ -63,14 +63,22 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
 
     Map* pdf_data = (Map*)pdf_root.item;
 
-    // Create view tree
-    ViewTree* view_tree = (ViewTree*)pool_calloc(input->pool, sizeof(ViewTree));
-    if (!view_tree) {
-        log_error("Failed to allocate view tree");
+    // Create a dedicated pool for the view tree (separate from input->pool)
+    Pool* view_pool = pool_create();
+    if (!view_pool) {
+        log_error("Failed to create view pool for PDF");
         return nullptr;
     }
 
-    view_tree->pool = input->pool;
+    // Create view tree
+    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    if (!view_tree) {
+        log_error("Failed to allocate view tree");
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    view_tree->pool = view_pool;
     view_tree->html_version = HTML5; // Treat as HTML5 for layout purposes
 
     // Extract PDF version and statistics
@@ -94,14 +102,14 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
     log_info("Processing %d PDF objects", objects->length);
 
     // Create root view (represents the document)
-    ViewBlock* root_view = create_document_view(input->pool);
+    ViewBlock* root_view = create_document_view(view_pool);
     view_tree->root = (View*)root_view;
 
     // Process each object looking for content streams
     for (int i = 0; i < objects->length; i++) {
         Item obj_item = objects->items[i];
         log_debug("Processing object %d/%d", i+1, objects->length);
-        process_pdf_object(input, root_view, obj_item);
+        process_pdf_object(input, view_pool, root_view, obj_item);
     }
 
     log_info("PDF to View Tree conversion complete");
@@ -227,20 +235,30 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
         return nullptr;
     }
 
-    // Create view tree
-    ViewTree* view_tree = (ViewTree*)pool_calloc(input->pool, sizeof(ViewTree));
-    if (!view_tree) {
-        log_error("Failed to allocate view tree");
+    // Create a dedicated pool for the view tree (separate from input->pool)
+    // This pool will be destroyed when the view tree is freed via view_pool_destroy
+    Pool* view_pool = pool_create();
+    if (!view_pool) {
+        log_error("Failed to create view pool for PDF");
         return nullptr;
     }
 
-    view_tree->pool = input->pool;
+    // Create view tree using the dedicated view pool
+    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    if (!view_tree) {
+        log_error("Failed to allocate view tree");
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    view_tree->pool = view_pool;  // Use dedicated pool, not input->pool
     view_tree->html_version = HTML5;
 
     // Create root view with page dimensions
-    ViewBlock* root_view = (ViewBlock*)pool_calloc(input->pool, sizeof(ViewBlock));
+    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
     if (!root_view) {
         log_error("Failed to allocate root view");
+        pool_destroy(view_pool);
         return nullptr;
     }
 
@@ -264,7 +282,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
             Map* stream_map = (Map*)stream_item.item;
             log_debug("Processing content stream %d/%d for page %d",
                      i + 1, page_info->content_streams->length, page_index + 1);
-            process_pdf_stream(input, root_view, stream_map);
+            process_pdf_stream(input, view_pool, root_view, stream_map);
         }
     }
 
@@ -320,7 +338,7 @@ static ViewBlock* create_document_view(Pool* pool) {
 /**
  * Process a single PDF object
  */
-static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item) {
+static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent, Item obj_item) {
     if (obj_item.item == ITEM_NULL) {
         log_debug("Skipping null object");
         return;
@@ -357,14 +375,14 @@ static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item) {
 
     // Process stream objects
     if (strcmp(type_str->chars, "stream") == 0) {
-        process_pdf_stream(input, parent, obj_map);
+        process_pdf_stream(input, view_pool, parent, obj_map);
     }
     // Process indirect objects
     else if (strcmp(type_str->chars, "indirect_object") == 0) {
         String* content_key = input_create_string(input, "content");
         Item content_item = {.item = map_get(obj_map, {.item = s2it(content_key)}).item};
         if (content_item.item != ITEM_NULL) {
-            process_pdf_object(input, parent, content_item);
+            process_pdf_object(input, view_pool, parent, content_item);
         }
     }
 }
@@ -372,7 +390,7 @@ static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item) {
 /**
  * Process a PDF content stream
  */
-static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map) {
+static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map) {
     log_debug("Processing PDF stream");
 
     // Get stream data
@@ -470,7 +488,7 @@ static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map)
     // Process operators
     PDFOperator* op;
     while ((op = pdf_parse_next_operator(parser)) != nullptr) {
-        process_pdf_operator(input, parent, parser, op);
+        process_pdf_operator(input, view_pool, parent, parser, op);
     }
 
     pdf_stream_parser_destroy(parser);
@@ -484,7 +502,7 @@ static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map)
 /**
  * Process a single PDF operator
  */
-static void process_pdf_operator(Input* input, ViewBlock* parent,
+static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent,
                                  PDFStreamParser* parser, PDFOperator* op) {
     switch (op->type) {
         case PDF_OP_BT:
@@ -535,14 +553,14 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
         case PDF_OP_Tj:
             // Show text - create ViewText
             log_debug("Show text: %s", op->operands.show_text.text->chars);
-            create_text_view(input, parent, parser, op->operands.show_text.text);
+            create_text_view(input, view_pool, parent, parser, op->operands.show_text.text);
             break;
 
         case PDF_OP_TJ:
             // Show text array (with kerning adjustments)
             log_debug("Show text array");
             if (op->operands.text_array.array) {
-                create_text_array_views(input, parent, parser, op->operands.text_array.array);
+                create_text_array_views(input, view_pool, parent, parser, op->operands.text_array.array);
             }
             break;
 
@@ -668,9 +686,9 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             // Stroke path - uses ThorVG for curves/dashes, otherwise simple rect
             log_debug("Stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, parent, parser, PAINT_STROKE_ONLY);
+                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
             } else {
-                create_rect_view(input, parent, parser, PAINT_STROKE_ONLY);
+                create_rect_view(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
             }
             break;
 
@@ -678,9 +696,9 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             // Close and stroke path
             log_debug("Close and stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, parent, parser, PAINT_STROKE_ONLY);
+                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
             } else {
-                create_rect_view(input, parent, parser, PAINT_STROKE_ONLY);
+                create_rect_view(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
             }
             break;
 
@@ -688,13 +706,13 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
         case PDF_OP_F:
             // Fill path
             log_debug("Fill path");
-            create_rect_view(input, parent, parser, PAINT_FILL_ONLY);
+            create_rect_view(input, view_pool, parent, parser, PAINT_FILL_ONLY);
             break;
 
         case PDF_OP_f_star:
             // Fill path (even-odd)
             log_debug("Fill path (even-odd)");
-            create_rect_view(input, parent, parser, PAINT_FILL_ONLY);
+            create_rect_view(input, view_pool, parent, parser, PAINT_FILL_ONLY);
             break;
 
         case PDF_OP_B:
@@ -702,9 +720,9 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             // Fill and stroke
             log_debug("Fill and stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, parent, parser, PAINT_FILL_AND_STROKE);
+                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
             } else {
-                create_rect_view(input, parent, parser, PAINT_FILL_AND_STROKE);
+                create_rect_view(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
             }
             break;
 
@@ -713,9 +731,9 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             // Close, fill and stroke
             log_debug("Close, fill and stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, parent, parser, PAINT_FILL_AND_STROKE);
+                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
             } else {
-                create_rect_view(input, parent, parser, PAINT_FILL_AND_STROKE);
+                create_rect_view(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
             }
             break;
 
@@ -739,7 +757,7 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
  * Create a ViewBlock node for a rectangle/shape
  * This is called after path painting operators (f, F, S, B, etc.)
  */
-static void create_rect_view(Input* input, ViewBlock* parent,
+static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
                              PDFStreamParser* parser, PaintOperation paint_op) {
     // Check if we have a stored rectangle from 're' operator, or a general path
     if (!parser->state.has_current_rect && !parser->state.has_current_path) {
@@ -788,7 +806,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
              x, y, tx, ty, width, height, tw, th);
 
     // Create ViewBlock for the rectangle
-    ViewBlock* rect_view = (ViewBlock*)pool_calloc(input->pool, sizeof(ViewBlock));
+    ViewBlock* rect_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
     if (!rect_view) {
         log_error("Failed to allocate rect view");
         return;
@@ -808,7 +826,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
              tx, ty, (float)tx, (float)screen_y, tw, th);
 
     // Create empty DomElement for styling
-    DomElement* dom_elem = (DomElement*)pool_calloc(input->pool, sizeof(DomElement));
+    DomElement* dom_elem = (DomElement*)pool_calloc(view_pool, sizeof(DomElement));
     if (dom_elem) {
         dom_elem->node_type = DOM_NODE_ELEMENT;
         dom_elem->tag_name = "div";  // Treat as div for layout
@@ -829,12 +847,12 @@ static void create_rect_view(Input* input, ViewBlock* parent,
     if ((paint_op == PAINT_FILL_ONLY || paint_op == PAINT_FILL_AND_STROKE) &&
         parser->state.fill_color[0] >= 0.0) {
         if (!bound) {
-            bound = (BoundaryProp*)pool_calloc(input->pool, sizeof(BoundaryProp));
+            bound = (BoundaryProp*)pool_calloc(view_pool, sizeof(BoundaryProp));
         }
 
         if (bound) {
             // Create background property
-            BackgroundProp* bg = (BackgroundProp*)pool_calloc(input->pool, sizeof(BackgroundProp));
+            BackgroundProp* bg = (BackgroundProp*)pool_calloc(view_pool, sizeof(BackgroundProp));
             if (bg) {
                 // Convert PDF RGB (0.0-1.0) to Color (0-255)
                 bg->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
@@ -855,12 +873,12 @@ static void create_rect_view(Input* input, ViewBlock* parent,
     if ((paint_op == PAINT_STROKE_ONLY || paint_op == PAINT_FILL_AND_STROKE) &&
         parser->state.stroke_color[0] >= 0.0) {
         if (!bound) {
-            bound = (BoundaryProp*)pool_calloc(input->pool, sizeof(BoundaryProp));
+            bound = (BoundaryProp*)pool_calloc(view_pool, sizeof(BoundaryProp));
         }
 
         if (bound) {
             // Create border property
-            BorderProp* border = (BorderProp*)pool_calloc(input->pool, sizeof(BorderProp));
+            BorderProp* border = (BorderProp*)pool_calloc(view_pool, sizeof(BorderProp));
             if (border) {
                 // Convert PDF RGB (0.0-1.0) to Color (0-255)
                 Color stroke_color;
@@ -980,7 +998,7 @@ static PathLineType detect_line_type(PathSegment* segments) {
  * Create a ThorVG path view for complex paths (curves, dashed lines)
  * Uses ThorVG for rendering Bezier curves and dashed/dotted strokes
  */
-static void create_path_view_thorvg(Input* input, ViewBlock* parent,
+static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* parent,
                                     PDFStreamParser* parser, PaintOperation paint_op) {
     PathSegment* segments = parser->state.path_segments;
     if (!segments) {
@@ -1049,7 +1067,7 @@ static void create_path_view_thorvg(Input* input, ViewBlock* parent,
              min_x, min_y, max_x, max_y, width, height, line_type);
 
     // Create ViewBlock for the path (container for ThorVG rendering)
-    ViewBlock* path_view = (ViewBlock*)pool_calloc(input->pool, sizeof(ViewBlock));
+    ViewBlock* path_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
     if (!path_view) {
         log_error("Failed to allocate path view");
         return;
@@ -1080,12 +1098,12 @@ static void create_path_view_thorvg(Input* input, ViewBlock* parent,
         float view_origin_x = (float)pdf_x;
         float view_origin_y = (float)(parent->height - pdf_y - height);  // screen_y
         
-        VectorPathProp* vpath = (VectorPathProp*)pool_calloc(input->pool, sizeof(VectorPathProp));
+        VectorPathProp* vpath = (VectorPathProp*)pool_calloc(view_pool, sizeof(VectorPathProp));
         if (vpath) {
             // Copy path segments (transformed to screen coordinates RELATIVE to path_view position)
             VectorPathSegment* last_vseg = nullptr;
             for (PathSegment* seg = segments; seg; seg = seg->next) {
-                VectorPathSegment* vseg = (VectorPathSegment*)pool_calloc(input->pool, sizeof(VectorPathSegment));
+                VectorPathSegment* vseg = (VectorPathSegment*)pool_calloc(view_pool, sizeof(VectorPathSegment));
                 if (!vseg) break;
                 
                 // Transform coordinates using CTM
@@ -1146,7 +1164,7 @@ static void create_path_view_thorvg(Input* input, ViewBlock* parent,
             
             // Copy dash pattern if present
             if (parser->state.dash_pattern && parser->state.dash_pattern_length > 0) {
-                vpath->dash_pattern = (float*)pool_calloc(input->pool, 
+                vpath->dash_pattern = (float*)pool_calloc(view_pool, 
                     sizeof(float) * parser->state.dash_pattern_length);
                 if (vpath->dash_pattern) {
                     for (int i = 0; i < parser->state.dash_pattern_length; i++) {
@@ -1183,9 +1201,9 @@ static void create_path_view_thorvg(Input* input, ViewBlock* parent,
 
     // Apply stroke color for stroke operations
     if (paint_op == PAINT_STROKE_ONLY || paint_op == PAINT_FILL_AND_STROKE) {
-        BoundaryProp* bound = (BoundaryProp*)pool_calloc(input->pool, sizeof(BoundaryProp));
+        BoundaryProp* bound = (BoundaryProp*)pool_calloc(view_pool, sizeof(BoundaryProp));
         if (bound) {
-            BorderProp* border = (BorderProp*)pool_calloc(input->pool, sizeof(BorderProp));
+            BorderProp* border = (BorderProp*)pool_calloc(view_pool, sizeof(BorderProp));
             if (border) {
                 Color stroke_color;
                 stroke_color.r = (uint8_t)(parser->state.stroke_color[0] * 255.0);
@@ -1269,7 +1287,7 @@ static void create_path_view_thorvg(Input* input, ViewBlock* parent,
  * Create a ViewText node from PDF text
  * Creates TextRect for unified rendering with HTML text
  */
-static void create_text_view(Input* input, ViewBlock* parent,
+static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
                             PDFStreamParser* parser, String* text) {
     if (!text || text->len == 0) return;
 
@@ -1283,7 +1301,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
     double screen_y = parent->height - y;
 
     // Create ViewText (which extends DomText, so it inherits text fields)
-    ViewText* text_view = (ViewText*)pool_calloc(input->pool, sizeof(ViewText));
+    ViewText* text_view = (ViewText*)pool_calloc(view_pool, sizeof(ViewText));
     if (!text_view) {
         log_error("Failed to allocate text view");
         return;
@@ -1304,7 +1322,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
 
     // Create TextRect for unified rendering with HTML text
     // TextRect contains position relative to the page (parent block)
-    TextRect* rect = (TextRect*)pool_calloc(input->pool, sizeof(TextRect));
+    TextRect* rect = (TextRect*)pool_calloc(view_pool, sizeof(TextRect));
     if (rect) {
         rect->x = (float)x;
         rect->y = (float)screen_y;
@@ -1321,7 +1339,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
-        FontProp* font = create_font_from_pdf(input->pool,
+        FontProp* font = create_font_from_pdf(view_pool,
                                               parser->state.font_name->chars,
                                               parser->state.font_size);
         if (font) {
@@ -1348,7 +1366,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
  * Create ViewText nodes from TJ operator text array
  * TJ array format: [(string) num (string) num ...] where num is horizontal displacement in 1/1000 em
  */
-static void create_text_array_views(Input* input, ViewBlock* parent,
+static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent,
                                     PDFStreamParser* parser, Array* text_array) {
     if (!text_array || text_array->length == 0) return;
 
@@ -1367,7 +1385,7 @@ static void create_text_array_views(Input* input, ViewBlock* parent,
                 double saved_x = parser->state.tm[4];
                 parser->state.tm[4] += x_offset;
 
-                create_text_view(input, parent, parser, text);
+                create_text_view(input, view_pool, parent, parser, text);
 
                 // Restore x position
                 parser->state.tm[4] = saved_x;
