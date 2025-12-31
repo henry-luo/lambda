@@ -263,7 +263,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
         log_debug("%s", output->str);
         printf("\n");  // help end any output, otherwise, may see '%' at the end of the line
     } else {
-        printf("##### Script '%s' executed: #####\n", script_path);
+        // printf("##### Script '%s' executed: #####\n", script_path);
         printf("%s", output->str);
         log_debug("%s", output->str);
     }
@@ -726,46 +726,13 @@ int main(int argc, char *argv[]) {
 
             Item result = transpile_js_to_c(&runtime, js_source, js_file);
 
-            printf("##### Script '%s' executed: #####\n", js_file);
+            // printf("##### Script '%s' executed: #####\n", js_file);
             StrBuf *output = strbuf_new_cap(256);
             print_root_item(output, result);
             printf("%s\n", output->str);
             strbuf_free(output);
 
             free(js_source);
-        } else {
-            // Run built-in JavaScript tests
-            printf("Running JavaScript transpiler tests...\n");
-
-            // Test 1: Simple arithmetic
-            const char* test1 = "var a = 5; var b = 10; var result = a + b; result;";
-            printf("\nTest 1: Simple arithmetic\n");
-            printf("JavaScript: %s\n", test1);
-            Item result1 = transpile_js_to_c(&runtime, test1, "test1.js");
-            StrBuf *output1 = strbuf_new_cap(256);
-            print_root_item(output1, result1);
-            printf("Result: %s\n", output1->str);
-            strbuf_free(output1);
-
-            // Test 2: Template literal
-            const char* test2 = "var name = 'World'; var message = `Hello, ${name}!`; message;";
-            printf("\nTest 2: Template literal\n");
-            printf("JavaScript: %s\n", test2);
-            Item result2 = transpile_js_to_c(&runtime, test2, "test2.js");
-            StrBuf *output2 = strbuf_new_cap(256);
-            print_root_item(output2, result2);
-            printf("Result: %s\n", output2->str);
-            strbuf_free(output2);
-
-            // Test 3: Function
-            const char* test3 = "function add(x, y) { return x + y; } var result = add(3, 7); result;";
-            printf("\nTest 3: Function\n");
-            printf("JavaScript: %s\n", test3);
-            Item result3 = transpile_js_to_c(&runtime, test3, "test3.js");
-            StrBuf *output3 = strbuf_new_cap(256);
-            print_root_item(output3, result3);
-            printf("Result: %s\n", output3->str);
-            strbuf_free(output3);
         }
 
         runtime_cleanup(&runtime);

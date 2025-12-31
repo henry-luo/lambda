@@ -38,9 +38,9 @@ test_result run_lambda_repl(const char* input) {
     // Run lambda.exe with redirected input
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe < %s", temp_file);
+    snprintf(command, sizeof(command), "lambda.exe < %s 2>&1", temp_file);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe < %s", temp_file);
+    snprintf(command, sizeof(command), "./lambda.exe < %s 2>&1", temp_file);
 #endif
     
     FILE* pipe = popen(command, "r");
