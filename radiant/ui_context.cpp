@@ -148,8 +148,11 @@ int ui_context_init(UiContext* uicon, bool headless) {
 void free_document(DomDocument* doc) {
     if (!doc) return;
     if (doc->view_tree) {
+        // Note: view_pool_destroy destroys the pool that contains all view allocations
+        // including the ViewTree itself (if it was pool-allocated).
+        // Do NOT call free(doc->view_tree) after this - it would double-free.
         view_pool_destroy(doc->view_tree);
-        free(doc->view_tree);
+        // Don't free view_tree - it was allocated from the pool that was just destroyed
     }
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
