@@ -6,6 +6,20 @@
 #include "../../../lib/mempool.h"
 #include "../../../lib/strbuf.h"
 
+// Color type for text color (same as in css_style.hpp)
+#ifndef COLOR_TYPE_DEFINED
+#define COLOR_TYPE_DEFINED
+typedef union {
+    uint32_t c;  // 32-bit ABGR color format
+    struct {
+        uint8_t r;
+        uint8_t g;
+        uint8_t b;
+        uint8_t a;
+    };
+} Color;
+#endif
+
 /**
  * DOM Node Management Module
  * - DomNode provides common base fields and methods
@@ -191,11 +205,11 @@ struct DomText : public DomNode {
     FontProp *font;  // font for this text
 
     // PDF rendering related
-    // Color color;     // text color (for PDF text fill color) - can consider move into FontProp
+    Color color;     // text color (for PDF text fill color)
 
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-        native_string(nullptr), content_type(DOM_TEXT_STRING), rect(nullptr) {}
+        native_string(nullptr), content_type(DOM_TEXT_STRING), rect(nullptr), color({0}) {}
 
     // Check if this is a symbol node
     bool is_symbol() const { return content_type == DOM_TEXT_SYMBOL; }

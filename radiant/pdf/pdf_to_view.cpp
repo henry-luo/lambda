@@ -801,7 +801,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
     // Store PDF coordinates as-is (bottom-left origin)
     // Conversion to screen coordinates will be done during rendering
 
-    // Create ViewText
+    // Create ViewText (which extends DomText, so it inherits text fields)
     ViewText* text_view = (ViewText*)pool_calloc(input->pool, sizeof(ViewText));
     if (!text_view) {
         log_error("Failed to allocate text view");
@@ -814,23 +814,14 @@ static void create_text_view(Input* input, ViewBlock* parent,
     text_view->width = 0;  // Will be calculated during layout
     text_view->height = (float)parser->state.font_size;
 
+    // Set DomText fields directly on ViewText (since ViewText extends DomText)
+    text_view->node_type = DOM_NODE_TEXT;
+    text_view->text = text->chars;
+    text_view->length = text->len;
+    text_view->native_string = text;  // Reference the Lambda String
+    text_view->content_type = DOM_TEXT_STRING;
+
     log_debug("Created text view at (%.2f, %.2f): '%s'", x, y, text->chars);
-
-    // Create DomText for the text content
-    DomText* dom_text = (DomText*)pool_calloc(input->pool, sizeof(DomText));
-    if (dom_text) {
-        dom_text->node_type = DOM_NODE_TEXT;
-        dom_text->text = text->chars;
-        dom_text->length = text->len;
-        dom_text->parent = nullptr;
-        dom_text->next_sibling = nullptr;
-        dom_text->prev_sibling = nullptr;
-        dom_text->parent = nullptr;  // PDF views don't have backing element
-        dom_text->native_string = nullptr;
-    }
-
-    // Directly assign DomText as the node
-    // text_view = dom_text;
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
@@ -848,16 +839,15 @@ static void create_text_view(Input* input, ViewBlock* parent,
              parser->state.fill_color[1],
              parser->state.fill_color[2]);
 
-    // text_view->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
-    // text_view->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
-    // text_view->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
-    // text_view->color.a = 255; // Fully opaque
-    // // NOTE: Don't set text_view->color.c - it's a union with r,g,b,a and would overwrite them!
+    text_view->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
+    text_view->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
+    text_view->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
+    text_view->color.a = 255; // Fully opaque
 
-    // log_debug("Applied text color: r=%u, g=%u, b=%u (RGB)",
-    //          (unsigned)text_view->color.r,
-    //          (unsigned)text_view->color.g,
-    //          (unsigned)text_view->color.b);
+    log_debug("Applied text color: r=%u, g=%u, b=%u (RGB)",
+             (unsigned)text_view->color.r,
+             (unsigned)text_view->color.g,
+             (unsigned)text_view->color.b);
 
     // Add to parent
     append_child_view((View*)parent, (View*)text_view);
