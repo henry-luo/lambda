@@ -688,8 +688,16 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
                 for (int i = 0; i < parser->state.dash_pattern_length; i++) {
                     parser->state.dash_pattern[i] = numbers[i];
                 }
-                log_debug("Set dash pattern: [%d elements] phase=%.2f",
-                         parser->state.dash_pattern_length, parser->state.dash_phase);
+                // Log all dash pattern values
+                if (parser->state.dash_pattern_length == 2) {
+                    log_debug("Set dash pattern: [%.1f, %.1f] phase=%.2f",
+                             parser->state.dash_pattern[0], parser->state.dash_pattern[1],
+                             parser->state.dash_phase);
+                } else {
+                    log_debug("Set dash pattern: [%d elements, first=%.1f] phase=%.2f",
+                             parser->state.dash_pattern_length, parser->state.dash_pattern[0],
+                             parser->state.dash_phase);
+                }
             } else {
                 parser->state.dash_pattern = nullptr;
                 log_debug("Set solid line (empty dash pattern)");

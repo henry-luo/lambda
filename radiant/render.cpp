@@ -589,15 +589,14 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
         
         // Apply dash pattern if present
         if (vpath->dash_pattern && vpath->dash_pattern_length > 0) {
-            tvg_shape_set_stroke_dash(shape, vpath->dash_pattern, vpath->dash_pattern_length, 0);
-            // Use round caps for dotted lines (short dash), butt for dashed
-            if (vpath->dash_pattern[0] <= vpath->stroke_width * 2) {
-                tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_ROUND);
-            } else {
-                tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
-            }
-            log_debug("[VPATH] Applied dash pattern: length=%d, first=%.1f", 
-                     vpath->dash_pattern_length, vpath->dash_pattern[0]);
+            log_debug("[VPATH] Setting dash pattern: count=%d, values=[%.1f, %.1f]", 
+                     vpath->dash_pattern_length, 
+                     vpath->dash_pattern[0],
+                     vpath->dash_pattern_length > 1 ? vpath->dash_pattern[1] : 0.0f);
+            Tvg_Result result = tvg_shape_set_stroke_dash(shape, vpath->dash_pattern, vpath->dash_pattern_length, 0);
+            log_debug("[VPATH] tvg_shape_set_stroke_dash returned: %d", result);
+            // Set butt cap for crisp dash ends
+            tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
         }
         
         log_debug("[VPATH] Stroke: RGB(%d,%d,%d) width=%.1f", 
