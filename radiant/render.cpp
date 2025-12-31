@@ -531,6 +531,94 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     }
 }
 
+/**
+ * Render vector path (for PDF curves and complex paths)
+ * Uses ThorVG to render Bezier curves and path segments
+ */
+void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
+    VectorPathProp* vpath = block->vpath;
+    if (!vpath || !vpath->segments) return;
+    
+    log_info("[VPATH] Rendering vector path for block at (%.1f, %.1f)", block->x, block->y);
+    
+    Tvg_Canvas* canvas = rdcon->canvas;
+    Tvg_Paint* shape = tvg_shape_new();
+    if (!shape) {
+        log_error("[VPATH] Failed to create ThorVG shape");
+        return;
+    }
+    
+    // Build the path from segments
+    float offset_x = rdcon->block.x + block->x;
+    float offset_y = rdcon->block.y + block->y;
+    
+    for (VectorPathSegment* seg = vpath->segments; seg; seg = seg->next) {
+        float sx = offset_x + seg->x;
+        float sy = offset_y + seg->y;
+        
+        switch (seg->type) {
+            case VectorPathSegment::VPATH_MOVETO:
+                tvg_shape_move_to(shape, sx, sy);
+                log_debug("[VPATH] moveto (%.1f, %.1f)", sx, sy);
+                break;
+            case VectorPathSegment::VPATH_LINETO:
+                tvg_shape_line_to(shape, sx, sy);
+                log_debug("[VPATH] lineto (%.1f, %.1f)", sx, sy);
+                break;
+            case VectorPathSegment::VPATH_CURVETO: {
+                float cx1 = offset_x + seg->x1;
+                float cy1 = offset_y + seg->y1;
+                float cx2 = offset_x + seg->x2;
+                float cy2 = offset_y + seg->y2;
+                tvg_shape_cubic_to(shape, cx1, cy1, cx2, cy2, sx, sy);
+                log_debug("[VPATH] curveto (%.1f,%.1f)-(%.1f,%.1f)->(%.1f,%.1f)", cx1, cy1, cx2, cy2, sx, sy);
+                break;
+            }
+            case VectorPathSegment::VPATH_CLOSE:
+                tvg_shape_close(shape);
+                log_debug("[VPATH] close");
+                break;
+        }
+    }
+    
+    // Apply stroke if present
+    if (vpath->has_stroke) {
+        tvg_shape_set_stroke_color(shape, 
+            vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b, vpath->stroke_color.a);
+        tvg_shape_set_stroke_width(shape, vpath->stroke_width);
+        
+        // Apply dash pattern if present
+        if (vpath->dash_pattern && vpath->dash_pattern_length > 0) {
+            tvg_shape_set_stroke_dash(shape, vpath->dash_pattern, vpath->dash_pattern_length, 0);
+            // Use round caps for dotted lines (short dash), butt for dashed
+            if (vpath->dash_pattern[0] <= vpath->stroke_width * 2) {
+                tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_ROUND);
+            } else {
+                tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
+            }
+            log_debug("[VPATH] Applied dash pattern: length=%d, first=%.1f", 
+                     vpath->dash_pattern_length, vpath->dash_pattern[0]);
+        }
+        
+        log_debug("[VPATH] Stroke: RGB(%d,%d,%d) width=%.1f", 
+                 vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b, vpath->stroke_width);
+    }
+    
+    // Apply fill if present
+    if (vpath->has_fill) {
+        tvg_shape_set_fill_color(shape,
+            vpath->fill_color.r, vpath->fill_color.g, vpath->fill_color.b, vpath->fill_color.a);
+    }
+    
+    // Push to canvas and render
+    tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
+    tvg_canvas_push(canvas, shape);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas);
+    
+    log_info("[VPATH] Rendered vector path successfully");
+}
+
 void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     // bullets are aligned to the top and right side of the list item
     float ratio = rdcon->ui_context->pixel_ratio;
@@ -826,6 +914,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         if (!skip_bound) {
             render_bound(rdcon, block);
         }
+    }
+    
+    // Render vector path if present (for PDF curves and complex paths)
+    if (block->vpath && block->vpath->segments) {
+        render_vector_path(rdcon, block);
     }
 
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;

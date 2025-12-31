@@ -39,6 +39,14 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index);
  */
 int pdf_get_page_count(Item pdf_root);
 
+/**
+ * Scale PDF view tree by pixel ratio for high-DPI displays
+ *
+ * @param view_tree The view tree to scale
+ * @param pixel_ratio The display pixel ratio (e.g., 2.0 for Retina)
+ */
+void pdf_scale_view_tree(ViewTree* view_tree, float pixel_ratio);
+
 #ifdef __cplusplus
 }
 #endif

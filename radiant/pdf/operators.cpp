@@ -274,8 +274,17 @@ void pdf_graphics_state_init(PDFGraphicsState* state, Pool* pool) {
     state->fill_color[1] = 0.0;
     state->fill_color[2] = 0.0;
 
-    // Default line width
+    state->stroke_color_space = 0;  // RGB
+    state->fill_color_space = 0;    // RGB
+
+    // Default line state
     state->line_width = 1.0;
+    state->dash_pattern = nullptr;
+    state->dash_pattern_length = 0;
+    state->dash_phase = 0.0;
+    state->line_cap = 0;   // butt
+    state->line_join = 0;  // miter
+    state->miter_limit = 10.0;
 
     state->current_x = 0.0;
     state->current_y = 0.0;
@@ -296,7 +305,41 @@ void pdf_graphics_state_init(PDFGraphicsState* state, Pool* pool) {
     state->path_max_y = 0.0;
     state->has_current_path = 0;
 
+    // Initialize path segments list
+    state->path_segments = nullptr;
+    state->path_segments_tail = nullptr;
+
     state->saved_states = nullptr;
+}
+
+// Helper: Add a path segment to the current path
+static void add_path_segment(PDFGraphicsState* state, PathSegmentType type,
+                            double x, double y,
+                            double x1, double y1, double x2, double y2) {
+    PathSegment* seg = (PathSegment*)pool_calloc(state->pool, sizeof(PathSegment));
+    seg->type = type;
+    seg->x = x;
+    seg->y = y;
+    seg->x1 = x1;
+    seg->y1 = y1;
+    seg->x2 = x2;
+    seg->y2 = y2;
+    seg->next = nullptr;
+
+    // Append to list
+    if (state->path_segments_tail) {
+        state->path_segments_tail->next = seg;
+    } else {
+        state->path_segments = seg;
+    }
+    state->path_segments_tail = seg;
+}
+
+// Helper: Clear path segments
+static void clear_path_segments(PDFGraphicsState* state) {
+    // Pool handles memory - just reset pointers
+    state->path_segments = nullptr;
+    state->path_segments_tail = nullptr;
 }
 
 // Save graphics state (q operator)
@@ -318,8 +361,16 @@ void pdf_graphics_state_save(PDFGraphicsState* state) {
 
     memcpy(saved->stroke_color, state->stroke_color, sizeof(state->stroke_color));
     memcpy(saved->fill_color, state->fill_color, sizeof(state->fill_color));
+    saved->stroke_color_space = state->stroke_color_space;
+    saved->fill_color_space = state->fill_color_space;
 
     saved->line_width = state->line_width;
+    saved->dash_pattern = state->dash_pattern;
+    saved->dash_pattern_length = state->dash_pattern_length;
+    saved->dash_phase = state->dash_phase;
+    saved->line_cap = state->line_cap;
+    saved->line_join = state->line_join;
+    saved->miter_limit = state->miter_limit;
 
     saved->current_x = state->current_x;
     saved->current_y = state->current_y;
@@ -353,8 +404,16 @@ void pdf_graphics_state_restore(PDFGraphicsState* state) {
 
     memcpy(state->stroke_color, saved->stroke_color, sizeof(state->stroke_color));
     memcpy(state->fill_color, saved->fill_color, sizeof(state->fill_color));
+    state->stroke_color_space = saved->stroke_color_space;
+    state->fill_color_space = saved->fill_color_space;
 
     state->line_width = saved->line_width;
+    state->dash_pattern = saved->dash_pattern;
+    state->dash_pattern_length = saved->dash_pattern_length;
+    state->dash_phase = saved->dash_phase;
+    state->line_cap = saved->line_cap;
+    state->line_join = saved->line_join;
+    state->miter_limit = saved->miter_limit;
 
     state->current_x = saved->current_x;
     state->current_y = saved->current_y;
@@ -383,6 +442,13 @@ void pdf_apply_text_matrix(PDFGraphicsState* state, double a, double b, double c
 
     // Also update text line matrix
     memcpy(state->tlm, state->tm, sizeof(state->tm));
+}
+
+// Clear path segments
+void pdf_clear_path_segments(PDFGraphicsState* state) {
+    state->path_segments = nullptr;
+    state->path_segments_tail = nullptr;
+    // Pool handles memory - no need to free
 }
 
 // Parse next operator
@@ -513,6 +579,7 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.fill_color[0] = numbers[0];
             parser->state.fill_color[1] = numbers[1];
             parser->state.fill_color[2] = numbers[2];
+            parser->state.fill_color_space = 0;  // RGB
         }
     } else if (strcmp(op_name, "RG") == 0) {
         op->type = PDF_OP_RG;
@@ -523,6 +590,63 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.stroke_color[0] = numbers[0];
             parser->state.stroke_color[1] = numbers[1];
             parser->state.stroke_color[2] = numbers[2];
+            parser->state.stroke_color_space = 0;  // RGB
+        }
+    }
+    // CMYK color operators
+    else if (strcmp(op_name, "k") == 0) {
+        op->type = PDF_OP_k;
+        if (num_count >= 4) {
+            op->operands.cmyk_color.c = numbers[0];
+            op->operands.cmyk_color.m = numbers[1];
+            op->operands.cmyk_color.y = numbers[2];
+            op->operands.cmyk_color.k = numbers[3];
+            // Convert CMYK to RGB: R = (1-C)(1-K), G = (1-M)(1-K), B = (1-Y)(1-K)
+            double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
+            parser->state.fill_color[0] = (1.0 - c) * (1.0 - k);  // R
+            parser->state.fill_color[1] = (1.0 - m) * (1.0 - k);  // G
+            parser->state.fill_color[2] = (1.0 - y) * (1.0 - k);  // B
+            parser->state.fill_color_space = 1;  // CMYK
+            log_debug("CMYK fill: C=%.2f M=%.2f Y=%.2f K=%.2f -> RGB(%.2f, %.2f, %.2f)",
+                     c, m, y, k, parser->state.fill_color[0],
+                     parser->state.fill_color[1], parser->state.fill_color[2]);
+        }
+    } else if (strcmp(op_name, "K") == 0) {
+        op->type = PDF_OP_K;
+        if (num_count >= 4) {
+            op->operands.cmyk_color.c = numbers[0];
+            op->operands.cmyk_color.m = numbers[1];
+            op->operands.cmyk_color.y = numbers[2];
+            op->operands.cmyk_color.k = numbers[3];
+            // Convert CMYK to RGB
+            double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
+            parser->state.stroke_color[0] = (1.0 - c) * (1.0 - k);  // R
+            parser->state.stroke_color[1] = (1.0 - m) * (1.0 - k);  // G
+            parser->state.stroke_color[2] = (1.0 - y) * (1.0 - k);  // B
+            parser->state.stroke_color_space = 1;  // CMYK
+            log_debug("CMYK stroke: C=%.2f M=%.2f Y=%.2f K=%.2f -> RGB(%.2f, %.2f, %.2f)",
+                     c, m, y, k, parser->state.stroke_color[0],
+                     parser->state.stroke_color[1], parser->state.stroke_color[2]);
+        }
+    }
+    // Gray operators
+    else if (strcmp(op_name, "g") == 0) {
+        op->type = PDF_OP_g;
+        if (num_count >= 1) {
+            double gray = numbers[0];
+            parser->state.fill_color[0] = gray;
+            parser->state.fill_color[1] = gray;
+            parser->state.fill_color[2] = gray;
+            parser->state.fill_color_space = 2;  // Gray
+        }
+    } else if (strcmp(op_name, "G") == 0) {
+        op->type = PDF_OP_G;
+        if (num_count >= 1) {
+            double gray = numbers[0];
+            parser->state.stroke_color[0] = gray;
+            parser->state.stroke_color[1] = gray;
+            parser->state.stroke_color[2] = gray;
+            parser->state.stroke_color_space = 2;  // Gray
         }
     }
     // Line state operators
@@ -531,6 +655,71 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
         if (num_count >= 1) {
             op->operands.number = numbers[0];
             parser->state.line_width = numbers[0];
+        }
+    } else if (strcmp(op_name, "J") == 0) {
+        op->type = PDF_OP_J;
+        if (num_count >= 1) {
+            parser->state.line_cap = (int)numbers[0];
+            log_debug("Set line cap: %d", parser->state.line_cap);
+        }
+    } else if (strcmp(op_name, "j") == 0) {
+        op->type = PDF_OP_j;
+        if (num_count >= 1) {
+            parser->state.line_join = (int)numbers[0];
+            log_debug("Set line join: %d", parser->state.line_join);
+        }
+    } else if (strcmp(op_name, "M") == 0) {
+        op->type = PDF_OP_M;
+        if (num_count >= 1) {
+            parser->state.miter_limit = numbers[0];
+        }
+    } else if (strcmp(op_name, "d") == 0) {
+        op->type = PDF_OP_d;
+        // Dash pattern is already parsed as numbers (array elements)
+        // The format is: [dash_array] phase d
+        // Numbers array contains the dash array followed by phase
+        if (num_count >= 1) {
+            // Last number is phase, preceding are dash pattern
+            parser->state.dash_phase = numbers[num_count - 1];
+            parser->state.dash_pattern_length = num_count - 1;
+            if (parser->state.dash_pattern_length > 0) {
+                parser->state.dash_pattern = (double*)pool_alloc(parser->pool,
+                    sizeof(double) * parser->state.dash_pattern_length);
+                for (int i = 0; i < parser->state.dash_pattern_length; i++) {
+                    parser->state.dash_pattern[i] = numbers[i];
+                }
+                log_debug("Set dash pattern: [%d elements] phase=%.2f",
+                         parser->state.dash_pattern_length, parser->state.dash_phase);
+            } else {
+                parser->state.dash_pattern = nullptr;
+                log_debug("Set solid line (empty dash pattern)");
+            }
+        }
+    } else if (strcmp(op_name, "cm") == 0) {
+        op->type = PDF_OP_cm;
+        if (num_count >= 6) {
+            op->operands.matrix.a = numbers[0];
+            op->operands.matrix.b = numbers[1];
+            op->operands.matrix.c = numbers[2];
+            op->operands.matrix.d = numbers[3];
+            op->operands.matrix.e = numbers[4];
+            op->operands.matrix.f = numbers[5];
+            // Concatenate with current CTM: new_ctm = cm * old_ctm
+            double a = numbers[0], b = numbers[1], c = numbers[2];
+            double d = numbers[3], e = numbers[4], f = numbers[5];
+            double old_a = parser->state.ctm[0], old_b = parser->state.ctm[1];
+            double old_c = parser->state.ctm[2], old_d = parser->state.ctm[3];
+            double old_e = parser->state.ctm[4], old_f = parser->state.ctm[5];
+            parser->state.ctm[0] = a * old_a + b * old_c;
+            parser->state.ctm[1] = a * old_b + b * old_d;
+            parser->state.ctm[2] = c * old_a + d * old_c;
+            parser->state.ctm[3] = c * old_b + d * old_d;
+            parser->state.ctm[4] = e * old_a + f * old_c + old_e;
+            parser->state.ctm[5] = e * old_b + f * old_d + old_f;
+            log_debug("CTM: [%.2f %.2f %.2f %.2f %.2f %.2f]",
+                     parser->state.ctm[0], parser->state.ctm[1],
+                     parser->state.ctm[2], parser->state.ctm[3],
+                     parser->state.ctm[4], parser->state.ctm[5]);
         }
     }
     // Path construction operators
@@ -541,6 +730,8 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             op->operands.text_position.ty = numbers[1];
             parser->state.current_x = numbers[0];
             parser->state.current_y = numbers[1];
+            // Also record as path segment
+            add_path_segment(&parser->state, PATH_SEG_MOVETO, numbers[0], numbers[1], 0, 0, 0, 0);
         }
     } else if (strcmp(op_name, "l") == 0) {
         op->type = PDF_OP_l;
@@ -549,6 +740,8 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             op->operands.text_position.ty = numbers[1];
             parser->state.current_x = numbers[0];
             parser->state.current_y = numbers[1];
+            // Also record as path segment
+            add_path_segment(&parser->state, PATH_SEG_LINETO, numbers[0], numbers[1], 0, 0, 0, 0);
         }
     } else if (strcmp(op_name, "c") == 0) {
         op->type = PDF_OP_c;
@@ -561,7 +754,14 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             op->operands.text_matrix.f = numbers[5];  // y3
             parser->state.current_x = numbers[4];
             parser->state.current_y = numbers[5];
+            // Also record as path segment (x1,y1 = cp1, x2,y2 = cp2, x3,y3 = end point)
+            add_path_segment(&parser->state, PATH_SEG_CURVETO, numbers[4], numbers[5],
+                            numbers[0], numbers[1], numbers[2], numbers[3]);
         }
+    } else if (strcmp(op_name, "h") == 0) {
+        op->type = PDF_OP_h;
+        // Close path - record as segment
+        add_path_segment(&parser->state, PATH_SEG_CLOSE, 0, 0, 0, 0, 0, 0);
     } else if (strcmp(op_name, "re") == 0) {
         op->type = PDF_OP_re;
         if (num_count >= 4) {
@@ -594,6 +794,11 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
         op->type = PDF_OP_b_star;
     } else if (strcmp(op_name, "n") == 0) {
         op->type = PDF_OP_n;
+    }
+
+    // Debug: log operator parsing for troubleshooting
+    if (op->type == PDF_OP_UNKNOWN && strlen(op_name) > 0) {
+        log_debug("Unrecognized operator: '%s' with %d numbers, %d strings", op_name, num_count, str_count);
     }
 
     return op;
