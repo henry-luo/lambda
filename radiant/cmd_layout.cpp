@@ -40,6 +40,8 @@ extern "C" {
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/format/format.h"
+#include "../lambda/transpiler.hpp"
+#include "../lambda/mark_builder.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
@@ -55,7 +57,7 @@ void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 // print_view_tree is declared in layout.hpp
-void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
+// print_item is declared in lambda/ast.hpp
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
@@ -69,6 +71,7 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -1328,7 +1331,11 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
     const char* ext = strrchr(doc_url, '.');
     DomDocument* doc = nullptr;
 
-    if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
+    if (ext && strcmp(ext, ".ls") == 0) {
+        // Load Lambda script: evaluate script → wrap result → layout
+        log_info("[load_html_doc] Detected Lambda script file, using script evaluation pipeline");
+        doc = load_lambda_script_doc(full_url, viewport_width, viewport_height, pool);
+    } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
         // Load LaTeX document: parse LaTeX → convert to HTML → layout
         log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
         doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
@@ -2118,6 +2125,231 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 }
 
 /**
+ * Load Lambda script document with Lambda CSS system
+ * Evaluates a Lambda script, wraps the result in HTML structure, applies CSS, builds DOM tree
+ *
+ * @param script_url URL to Lambda script file (.ls)
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure with Lambda CSS DOM, ready for layout
+ */
+DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!script_url || !pool) {
+        log_error("load_lambda_script_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* script_filepath = url_to_local_path(script_url);
+    log_info("[Lambda Script] Loading Lambda script: %s", script_filepath);
+
+    // Step 1: Initialize Runtime and evaluate the Lambda script
+    auto step1_start = std::chrono::high_resolution_clock::now();
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    
+    log_debug("[Lambda Script] Evaluating script...");
+    // Use tree-walking interpreter instead of MIR for simple scripts
+    // MIR JIT requires a main() function which simple expression scripts don't have
+    Input* script_output = run_script(&runtime, nullptr, script_filepath, false);
+    
+    if (!script_output || !script_output->root.item) {
+        log_error("[Lambda Script] Failed to evaluate script or script returned null");
+        runtime_cleanup(&runtime);
+        return nullptr;
+    }
+
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Evaluate script: %.1fms",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+
+    // Step 2: Get the result from script execution
+    TypeId result_type = get_type_id(script_output->root);
+    log_debug("[Lambda Script] Script result type: %d", result_type);
+    
+    // Check if the script returned an error
+    if (result_type == LMD_TYPE_ERROR) {
+        log_error("[Lambda Script] Script evaluation returned an error");
+        runtime_cleanup(&runtime);
+        return nullptr;
+    }
+    
+    // Check if the script returned a complete HTML document
+    bool is_html_document = false;
+    Element* html_elem = nullptr;
+    
+    if (result_type == LMD_TYPE_ELEMENT) {
+        Element* result_elem = script_output->root.element;
+        TypeElmt* elem_type = (TypeElmt*)result_elem->type;
+        
+        // Check if this is an 'html' element
+        if (elem_type && strcasecmp(elem_type->name.str, "html") == 0) {
+            log_debug("[Lambda Script] Script returned complete HTML document, using as-is");
+            is_html_document = true;
+            html_elem = result_elem;
+        }
+    }
+    
+    // If not a complete HTML document, wrap the result
+    if (!is_html_document) {
+        // Wrap the result in an HTML structure for rendering
+        Element* result_elem = nullptr;
+        
+        if (result_type == LMD_TYPE_ELEMENT) {
+            // If the script returns an element (but not html), use it directly
+            result_elem = script_output->root.element;
+            log_debug("[Lambda Script] Script returned element, wrapping in html>body");
+        } else {
+            // For other types, create a wrapper element with the result as text content
+            log_debug("[Lambda Script] Script returned non-element, wrapping in div");
+            
+            // Convert result to string representation
+            StrBuf* result_str = strbuf_new();
+            print_item(result_str, script_output->root, 0);
+            
+            // Use MarkBuilder to create the div element properly
+            MarkBuilder builder(script_output);
+            ElementBuilder div = builder.element("div");
+            div.text(result_str->str);
+            Item div_item = div.final();
+            result_elem = div_item.element;
+            
+            strbuf_free(result_str);
+        }
+        
+        auto step2_start = std::chrono::high_resolution_clock::now();
+        log_info("[TIMING] Step 2 - Wrap result: %.1fms",
+            std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
+
+        // Step 3: Create HTML wrapper structure using MarkBuilder
+        log_debug("[Lambda Script] Building HTML wrapper structure");
+        
+        MarkBuilder builder(script_output);
+        
+        // Build: html > body > result_elem
+        Item result_item = {.element = result_elem};
+        
+        ElementBuilder body = builder.element("body");
+        body.child(result_item);
+        Item body_item = body.final();
+        
+        ElementBuilder html = builder.element("html");
+        html.child(body_item);
+        Item html_item = html.final();
+        
+        html_elem = html_item.element;
+        
+        auto step3_end = std::chrono::high_resolution_clock::now();
+        log_info("[TIMING] Step 3 - Build HTML structure: %.1fms",
+            std::chrono::duration<double, std::milli>(step3_end - step2_start).count());
+
+        // Step 4: Update script_output root to point to html element
+        script_output->root = html_item;
+    } else {
+        auto step2_start = std::chrono::high_resolution_clock::now();
+        log_info("[TIMING] Step 2 - HTML document detected, skipping wrap: %.1fms",
+            std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
+    }
+    
+    // Step 5: Create DomDocument and build DomElement tree
+    auto step5_start = std::chrono::high_resolution_clock::now();
+    DomDocument* dom_doc = dom_document_create(script_output);
+    if (!dom_doc) {
+        log_error("[Lambda Script] Failed to create DomDocument");
+        runtime_cleanup(&runtime);
+        return nullptr;
+    }
+
+    DomElement* dom_root = build_dom_tree_from_element(html_elem, dom_doc, nullptr);
+    if (!dom_root) {
+        log_error("[Lambda Script] Failed to build DomElement tree");
+        dom_document_destroy(dom_doc);
+        runtime_cleanup(&runtime);
+        return nullptr;
+    }
+
+    auto step5_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 5 - Build DOM tree: %.1fms",
+        std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
+
+    // Step 6: Initialize CSS engine
+    auto step6_start = std::chrono::high_resolution_clock::now();
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("[Lambda Script] Failed to create CSS engine");
+        runtime_cleanup(&runtime);
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Step 7: Load default stylesheet for Lambda script results (skip for complete HTML documents)
+    CssStylesheet* script_stylesheet = nullptr;
+    
+    if (!is_html_document) {
+        const char* css_filename = "lambda/input/script.css";
+        log_debug("[Lambda Script] Loading default script stylesheet: %s", css_filename);
+
+        char* css_content = read_text_file(css_filename);
+        if (css_content) {
+            size_t css_len = strlen(css_content);
+            char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+            if (css_pool_copy) {
+                strcpy(css_pool_copy, css_content);
+                free(css_content);
+                script_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+                if (script_stylesheet) {
+                    log_debug("[Lambda Script] Loaded script stylesheet with %zu rules",
+                            script_stylesheet->rule_count);
+                } else {
+                    log_warn("[Lambda Script] Failed to parse script.css");
+                }
+            } else {
+                free(css_content);
+            }
+        } else {
+            log_debug("[Lambda Script] No script.css file found, using browser defaults");
+        }
+    } else {
+        log_debug("[Lambda Script] Skipping script.css for complete HTML document");
+    }
+
+    auto step6_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 6 - CSS parse: %.1fms",
+        std::chrono::duration<double, std::milli>(step6_end - step6_start).count());
+
+    // Step 8: Apply CSS cascade to DOM tree
+    auto step7_start = std::chrono::high_resolution_clock::now();
+    if (script_stylesheet && script_stylesheet->rule_count > 0) {
+        SelectorMatcher* matcher = selector_matcher_create(pool);
+        apply_stylesheet_to_dom_tree_fast(dom_root, script_stylesheet, matcher, pool, css_engine);
+    }
+    auto step7_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 7 - CSS cascade: %.1fms",
+        std::chrono::duration<double, std::milli>(step7_end - step7_start).count());
+
+    // Step 9: Populate DomDocument structure
+    dom_doc->root = dom_root;
+    dom_doc->html_root = html_elem;
+    dom_doc->html_version = HTML5;
+    dom_doc->url = script_url;
+    dom_doc->view_tree = nullptr;  // Will be created during layout
+    dom_doc->state = nullptr;
+    
+    // Note: Don't cleanup runtime yet - the script_output and its pool are still in use
+    // The pool will be cleaned up when dom_doc is freed
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_lambda_script_doc total: %.1fms",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
+    log_notice("[Lambda Script] Script document loaded and styled");
+    return dom_doc;
+}
+
+/**
  * Parse command-line arguments
  */
 struct LayoutOptions {
@@ -2235,7 +2467,11 @@ int cmd_layout(int argc, char** argv) {
     DomDocument* doc = nullptr;
     const char* ext = strrchr(opts.input_file, '.');
 
-    if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
+    if (ext && strcmp(ext, ".ls") == 0) {
+        // Load Lambda script: evaluate script → wrap result → layout
+        log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
+        doc = load_lambda_script_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
+    } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
         // Load LaTeX document: parse LaTeX → convert to HTML → layout
         log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
         doc = load_latex_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
