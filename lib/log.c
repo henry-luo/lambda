@@ -711,8 +711,8 @@ static int log_output(log_category_t *category, int level, const char *format, v
         // error and warn -> stderr
         console_output = stderr;
     } else if (level == LOG_LEVEL_NOTICE) {
-        // notice -> stdout
-        console_output = stdout;
+        // notice -> stderr
+        console_output = stderr;
     }
     // info and debug -> log file only (no console output)
 
