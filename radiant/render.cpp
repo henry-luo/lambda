@@ -71,6 +71,7 @@ void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
+void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
@@ -960,6 +961,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             }
         }
     }
+    else if (block->embed && block->embed->img) {
+        // render embedded image for blocks without children (e.g., SVG document root)
+        log_debug("render embedded image in block without children");
+        render_image_content(rdcon, block);
+    }
     else {
         log_debug("view has no child");
     }
@@ -1028,54 +1034,57 @@ Tvg_Paint* load_picture(ImageSurface* surface) {
     return pic;
 }
 
+// Helper function to render just the image content (without block layout)
+// Used by both render_image_view and render_block_view for embedded images
+void render_image_content(RenderContext* rdcon, ViewBlock* view) {
+    if (!view->embed || !view->embed->img) return;
+    
+    log_debug("render image content");
+    ImageSurface* img = view->embed->img;
+    Rect rect;
+    rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
+    rect.width = view->width;  rect.height = view->height;
+    log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
+              img->url && img->url->href ? img->url->href->chars : "unknown",
+              img->format, img->width, img->height,
+              rect.width, rect.height, rect.x, rect.y,
+              rdcon->block.clip.left, rdcon->block.clip.top,
+              rdcon->block.clip.right, rdcon->block.clip.bottom);
+    if (img->format == IMAGE_FORMAT_SVG) {
+        // render the SVG image
+        log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
+        if (!img->pixels) {
+            render_svg(img);
+        }
+        Tvg_Paint* pic = load_picture(img);
+        if (pic) {
+            tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
+            tvg_picture_set_size(pic, rect.width, rect.height);
+            tvg_paint_translate(pic, rect.x, rect.y);
+            // clip the svg picture
+            Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
+            tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+            tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
+            tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
+            tvg_canvas_push(rdcon->canvas, pic);
+            tvg_canvas_draw(rdcon->canvas, false);
+            tvg_canvas_sync(rdcon->canvas);
+        } else {
+            log_debug("failed to load svg picture");
+        }
+    } else {
+        log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
+        blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
+    }
+}
+
 void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     log_debug("render image view");
     log_enter();
     // render border and background, etc.
     render_block_view(rdcon, (ViewBlock*)view);
-    // render the image
-    if (view->embed && view->embed->img) {
-        log_debug("image view has embed image");
-        ImageSurface* img = view->embed->img;
-        Rect rect;
-        rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-        rect.width = view->width;  rect.height = view->height;
-        log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
-                  img->url && img->url->href ? img->url->href->chars : "unknown",
-                  img->format, img->width, img->height,
-                  rect.width, rect.height, rect.x, rect.y,
-                  rdcon->block.clip.left, rdcon->block.clip.top,
-                  rdcon->block.clip.right, rdcon->block.clip.bottom);
-        if (img->format == IMAGE_FORMAT_SVG) {
-            // render the SVG image
-            log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
-            if (!img->pixels) {
-                render_svg(img);
-            }
-            Tvg_Paint* pic = load_picture(img);
-            if (pic) {
-                tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
-                tvg_picture_set_size(pic, rect.width, rect.height);
-                tvg_paint_translate(pic, rect.x, rect.y);
-                // clip the svg picture
-                Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
-                tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
-                tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
-                tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
-                tvg_canvas_push(rdcon->canvas, pic);
-                tvg_canvas_draw(rdcon->canvas, false);
-                tvg_canvas_sync(rdcon->canvas);
-            } else {
-                log_debug("failed to load svg picture");
-            }
-        } else {
-            log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
-            blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
-        }
-    }
-    else {
-        log_debug("image view has no embed image");
-    }
+    // render the image content
+    render_image_content(rdcon, view);
     log_debug("end of image render");
     log_leave();
 }

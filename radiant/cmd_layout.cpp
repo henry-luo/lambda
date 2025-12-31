@@ -75,6 +75,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 void parse_pdf(Input* input, const char* pdf_data);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -1359,6 +1360,10 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         // Load PDF document: parse PDF → convert to ViewTree directly (no CSS layout needed)
         log_info("[load_html_doc] Detected PDF file, using PDF→ViewTree pipeline");
         doc = load_pdf_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
+    } else if (ext && strcmp(ext, ".svg") == 0) {
+        // Load SVG document: render SVG → convert to ViewTree directly (no CSS layout needed)
+        log_info("[load_html_doc] Detected SVG file, using SVG→ViewTree pipeline");
+        doc = load_svg_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
@@ -1471,6 +1476,137 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_pdf_doc total: %.1fms",
         std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
+    return dom_doc;
+}
+
+/**
+ * Load SVG document with direct ViewTree conversion
+ * Loads SVG with ThorVG, creates ViewTree with SVG as embedded image
+ *
+ * @param svg_url URL to SVG file
+ * @param viewport_width Viewport width (used for scaling if SVG has no intrinsic size)
+ * @param viewport_height Viewport height
+ * @param pool Memory pool for allocations
+ * @param pixel_ratio Display pixel ratio for high-DPI scaling
+ * @return DomDocument structure with view_tree pre-set, ready for rendering
+ */
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!svg_url || !pool) {
+        log_error("load_svg_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* svg_filepath = url_to_local_path(svg_url);
+    log_info("[TIMING] Loading SVG document: %s", svg_filepath);
+
+    // Create Input structure (minimal, for DomDocument creation)
+    Input* input = InputManager::create_input(svg_url);
+    if (!input) {
+        log_error("Failed to create Input structure for SVG");
+        return nullptr;
+    }
+
+    // Create a dedicated pool for the view tree
+    Pool* view_pool = pool_create();
+    if (!view_pool) {
+        log_error("Failed to create view pool for SVG");
+        return nullptr;
+    }
+
+    // Load SVG using ThorVG
+    Tvg_Paint* pic = tvg_picture_new();
+    Tvg_Result ret = tvg_picture_load(pic, svg_filepath);
+    if (ret != TVG_RESULT_SUCCESS) {
+        log_error("Failed to load SVG: %s (error: %d)", svg_filepath, ret);
+        tvg_paint_del(pic);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    // Get SVG intrinsic size from viewBox
+    float svg_width, svg_height;
+    tvg_picture_get_size(pic, &svg_width, &svg_height);
+    log_info("SVG intrinsic size: %.1f x %.1f", svg_width, svg_height);
+
+    // If SVG has no intrinsic size, use viewport
+    if (svg_width <= 0) svg_width = (float)viewport_width;
+    if (svg_height <= 0) svg_height = (float)viewport_height;
+
+    // Apply pixel_ratio for high-DPI displays
+    float scaled_width = svg_width * pixel_ratio;
+    float scaled_height = svg_height * pixel_ratio;
+
+    // Create ViewTree
+    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    if (!view_tree) {
+        log_error("Failed to allocate view tree for SVG");
+        tvg_paint_del(pic);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+    view_tree->pool = view_pool;
+    view_tree->html_version = HTML5;
+
+    // Create root ViewBlock to hold the SVG
+    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    if (!root_view) {
+        log_error("Failed to allocate root view for SVG");
+        tvg_paint_del(pic);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    root_view->view_type = RDT_VIEW_BLOCK;
+    root_view->x = 0;
+    root_view->y = 0;
+    root_view->width = scaled_width;
+    root_view->height = scaled_height;
+    root_view->content_width = scaled_width;
+    root_view->content_height = scaled_height;
+
+    // Create ImageSurface to hold the SVG
+    ImageSurface* svg_surface = (ImageSurface*)pool_calloc(view_pool, sizeof(ImageSurface));
+    if (svg_surface) {
+        svg_surface->format = IMAGE_FORMAT_SVG;
+        svg_surface->pic = pic;
+        svg_surface->width = (int)svg_width;
+        svg_surface->height = (int)svg_height;
+        svg_surface->url = svg_url;
+        // Set max_render_width so render_svg knows the target size for rasterization
+        svg_surface->max_render_width = (int)scaled_width;
+
+        // Create EmbedProp to hold the image
+        EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
+        if (embed) {
+            embed->img = svg_surface;
+            root_view->embed = embed;
+        }
+    }
+
+    view_tree->root = (View*)root_view;
+
+    // Create DomDocument
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument for SVG");
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    dom_doc->root = nullptr;           // No DomElement tree for SVG
+    dom_doc->html_root = nullptr;      // No HTML tree for SVG (skips layout_html_doc)
+    dom_doc->html_version = HTML5;
+    dom_doc->url = svg_url;
+    dom_doc->view_tree = view_tree;
+    dom_doc->state = nullptr;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_svg_doc total: %.1fms, size: %.0fx%.0f (scaled: %.0fx%.0f)",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count(),
+        svg_width, svg_height, scaled_width, scaled_height);
 
     return dom_doc;
 }
