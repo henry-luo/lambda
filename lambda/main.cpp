@@ -63,9 +63,8 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 // JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800);
 
-// Document viewer functions from radiant
-extern int view_pdf_in_window(const char* pdf_file);
-extern int view_doc_in_window(const char* doc_file);  // Unified viewer for HTML, Markdown, XML, RST, etc.
+// Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
+extern int view_doc_in_window(const char* doc_file);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -1056,16 +1055,14 @@ int main(int argc, char *argv[]) {
         const char* ext = strrchr(filename, '.');
         int exit_code;
 
-        if (ext && strcmp(ext, ".pdf") == 0) {
-            log_info("Opening PDF file: %s", filename);
-            exit_code = view_pdf_in_window(filename);
-        } else if (ext && (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
-                          strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
-                          strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
-                          strcmp(ext, ".ls") == 0 ||
-                          strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
-                          strcmp(ext, ".wiki") == 0)) {
-            // Use unified document viewer for HTML, Markdown, LaTeX, Lambda scripts, XML, RST, Wiki, etc.
+        if (ext && (strcmp(ext, ".pdf") == 0 ||
+                    strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
+                    strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
+                    strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
+                    strcmp(ext, ".ls") == 0 ||
+                    strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
+                    strcmp(ext, ".wiki") == 0)) {
+            // Use unified document viewer for all document types including PDF
             log_info("Opening document file: %s", filename);
             exit_code = view_doc_in_window(filename);
         } else {

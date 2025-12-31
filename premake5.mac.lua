@@ -388,7 +388,6 @@ project "lambda"
         "radiant/pdf/fonts.cpp",
         "radiant/pdf/pages.cpp",
         "lambda/input/pdf_decompress.cpp",
-        "radiant/pdf/cmd_view_pdf.cpp",
         "radiant/event.cpp",
         "radiant/cmd_layout.cpp",
         "radiant/window.cpp",
