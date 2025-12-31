@@ -178,6 +178,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
     // Get text-transform from parent elements
     CssEnum text_transform = CSS_VALUE_NONE;
+    CssEnum text_align = CSS_VALUE_LEFT;  // default to left alignment
     DomNode* parent = text_view->parent;
     while (parent) {
         if (parent->is_element()) {
@@ -185,6 +186,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             CssEnum transform = get_text_transform_from_block(elem->blk);
             if (transform != CSS_VALUE_NONE) {
                 text_transform = transform;
+            }
+            // Get text-align property from block properties
+            if (elem->blk) {
+                BlockProp* blk_prop = (BlockProp*)elem->blk;
+                text_align = blk_prop->text_align;
+            }
+            if (transform != CSS_VALUE_NONE) {
                 break;
             }
         }
@@ -256,10 +264,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
         // Calculate adjusted space width for justified text
         float space_width = rdcon->font.style->space_width;
-        if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width) {
-            // This text is justified - distribute extra space across spaces
+        if (text_align == CSS_VALUE_JUSTIFY && space_count > 0 && natural_width > 0 && text_rect->width > natural_width) {
+            // This text is explicitly justified - distribute extra space across spaces
             float extra_space = text_rect->width - natural_width;
             space_width += (extra_space / space_count);
+            log_debug("apply justification: text_align=JUSTIFY, natural_width=%f, text_rect->width=%f, space_count=%d, space_width=%f -> %f",
+                natural_width, text_rect->width, space_count, rdcon->font.style->space_width, space_width);
         }
 
         // Render the text with adjusted spacing
