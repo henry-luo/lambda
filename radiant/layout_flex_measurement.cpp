@@ -1095,15 +1095,45 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // For row flex containers, the cached height from measure_flex_child_content might be incorrect
         // because it sums child heights instead of taking the max
         bool is_row_flex_container = false;
+        bool is_flex_container = false;
         // Check both block and inline-block view types for flex detection
         if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block_view = (ViewBlock*)item;
             if (block_view->embed && block_view->embed->flex) {
+                is_flex_container = true;
                 int dir = block_view->embed->flex->direction;
                 is_row_flex_container = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
                 log_debug("calculate_item_intrinsic_sizes: is_row_flex_container=%d (direction=%d)",
                           is_row_flex_container, dir);
             }
+        }
+
+        // CRITICAL FIX: For non-flex containers (regular block elements with inline content),
+        // use measure_element_intrinsic_widths which correctly sums inline children's widths.
+        // The manual child iteration below doesn't handle inline content properly - it takes
+        // max of children's widths instead of summing for inline elements.
+        LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
+        if (!is_flex_container && lycon) {
+            IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
+            min_width = item_sizes.min_content;
+            max_width = item_sizes.max_content;
+            log_debug("calculate_item_intrinsic_sizes: non-flex container, using measure_element_intrinsic_widths: min=%.1f, max=%.1f",
+                      min_width, max_width);
+            
+            // For height, calculate from children or use cached value
+            // Check cache for height
+            if (cached && cached->measured_height > 0) {
+                min_height = max_height = cached->measured_height;
+                log_debug("calculate_item_intrinsic_sizes: using cached height: %.1f", min_height);
+            } else {
+                // Calculate height from max-content height function
+                float available_width = 10000.0f;  // Large enough for single-line
+                min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
+                log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f", min_height);
+            }
+            
+            // Skip the manual child iteration since we've already calculated sizes
+            goto store_results;
         }
 
         // First, try to calculate intrinsic sizes from children
@@ -1117,7 +1147,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
         {
             DomNode* c = child;
-            LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
             
             // Set up parent context with item's height so children with percentage heights
             // and aspect-ratio can compute their intrinsic width
@@ -1438,6 +1467,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         }
     }
 
+store_results:
     // Store results
     item->fi->intrinsic_width.min_content = min_width;
     item->fi->intrinsic_width.max_content = max_width;
