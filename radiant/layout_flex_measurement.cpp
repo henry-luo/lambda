@@ -1209,11 +1209,26 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         } else if (lycon) {
                             // Child doesn't have fi yet - use measure_element_intrinsic_widths
                             // This handles the case where intrinsic sizing runs before fi is initialized
+                            
+                            // CRITICAL FIX: Set up child's font context before measuring
+                            // Otherwise text will be measured with parent's font (wrong width)
+                            FontBox saved_child_font = lycon->font;
+                            bool child_font_changed = false;
+                            if (child_view->font) {
+                                setup_font(lycon->ui_context, &lycon->font, child_view->font);
+                                child_font_changed = true;
+                            }
+                            
                             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)child_view);
                             child_min_width = child_sizes.min_content;
                             child_max_width = child_sizes.max_content;
                             log_debug("Used measure_element_intrinsic_widths for child: min=%.1f, max=%.1f",
                                       child_min_width, child_max_width);
+                            
+                            // Restore parent font
+                            if (child_font_changed) {
+                                lycon->font = saved_child_font;
+                            }
                         }
 
                         // Get child height - explicit (from View or DOM) or intrinsic

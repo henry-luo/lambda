@@ -202,6 +202,66 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     if (!element) return sizes;
 
+    // CRITICAL FIX: Set up font context for this element BEFORE measuring text children
+    // This ensures text measurement uses the element's own font (e.g., monospace for <code>)
+    // rather than inheriting from parent context.
+    FontBox saved_font = lycon->font;  // Save parent font context
+    bool font_changed = false;
+    ViewBlock* view_block_font = (ViewBlock*)element;
+    
+    // First check if element has resolved font
+    if (view_block_font->font && lycon->ui_context) {
+        setup_font(lycon->ui_context, &lycon->font, view_block_font->font);
+        font_changed = true;
+    } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
+        // Element has CSS styles but font not yet resolved - extract font-family from CSS
+        CssDeclaration* font_family_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_FONT_FAMILY);
+        
+        if (font_family_decl && font_family_decl->value) {
+            // Create temporary FontProp from CSS using alloc_font_prop for stable memory
+            FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
+            const char* css_family = NULL;
+            
+            // Extract font-family from CSS value
+            if (font_family_decl->value->type == CSS_VALUE_TYPE_STRING) {
+                css_family = font_family_decl->value->data.string;
+            } else if (font_family_decl->value->type == CSS_VALUE_TYPE_LIST) {
+                // Multi-font stack - use first font
+                int list_count = font_family_decl->value->data.list.count;
+                CssValue** list_values = font_family_decl->value->data.list.values;
+                if (list_count > 0 && list_values[0]) {
+                    if (list_values[0]->type == CSS_VALUE_TYPE_STRING) {
+                        css_family = list_values[0]->data.string;
+                    } else if (list_values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                        // Generic font family keyword
+                        CssEnum kw = list_values[0]->data.keyword;
+                        if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) css_family = "monospace";
+                        else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) css_family = "sans-serif";
+                        else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) css_family = "serif";
+                        else if (kw == CSS_VALUE_SYSTEM_UI) css_family = "system-ui";
+                    }
+                }
+            }
+            
+            if (css_family && css_family != lycon->font.style->family) {
+                temp_font_prop->family = (char*)css_family;
+                
+                // Also check for font-size
+                CssDeclaration* font_size_decl = style_tree_get_declaration(
+                    element->specified_style, CSS_PROPERTY_FONT_SIZE);
+                if (font_size_decl && font_size_decl->value &&
+                    font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    temp_font_prop->font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
+                                                                     font_size_decl->value);
+                }
+                
+                setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
+                font_changed = true;
+            }
+        }
+    }
+
     // Resolve CSS styles for this element if not already resolved
     // This is needed during intrinsic measurement to get correct display property
     if (!element->styles_resolved && element->specified_style) {
@@ -674,6 +734,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int horiz_border = (int)(border_left + border_right);
     sizes.min_content += horiz_padding + horiz_border;
     sizes.max_content += horiz_padding + horiz_border;
+
+    // Restore parent font context
+    if (font_changed) {
+        lycon->font = saved_font;
+    }
 
     return sizes;
 }
