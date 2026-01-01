@@ -1036,8 +1036,35 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (text_child->is_text()) {
                 const char* text = (const char*)text_child->text_data();
                 if (text && !is_only_whitespace(text)) {
+                    // Get text-transform from parent element chain
+                    CssEnum text_transform = CSS_VALUE_NONE;
+                    DomNode* tt_node = flex_container;
+                    while (tt_node) {
+                        if (tt_node->is_element()) {
+                            DomElement* tt_elem = tt_node->as_element();
+                            ViewBlock* tt_view = (ViewBlock*)tt_elem;
+                            if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                                tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
+                                text_transform = tt_view->blk->text_transform;
+                                break;
+                            }
+                            if (tt_elem->specified_style) {
+                                CssDeclaration* decl = style_tree_get_declaration(
+                                    tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                                if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                    CssEnum val = decl->value->data.keyword;
+                                    if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                                        text_transform = val;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        tt_node = tt_node->parent;
+                    }
+                    
                     // Measure this text node
-                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, strlen(text));
+                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, strlen(text), text_transform);
                     float text_width = widths.max_content;
                     float text_height = lycon->font.style ? lycon->font.style->font_size : 16.0f;
                     
@@ -1213,8 +1240,35 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     }
                     
                     if (trimmed_len > 0) {
+                        // Get text-transform from parent element chain
+                        CssEnum text_transform = CSS_VALUE_NONE;
+                        DomNode* tt_node = flex_container;
+                        while (tt_node) {
+                            if (tt_node->is_element()) {
+                                DomElement* tt_elem = tt_node->as_element();
+                                ViewBlock* tt_view = (ViewBlock*)tt_elem;
+                                if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                                    tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
+                                    text_transform = tt_view->blk->text_transform;
+                                    break;
+                                }
+                                if (tt_elem->specified_style) {
+                                    CssDeclaration* decl = style_tree_get_declaration(
+                                        tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                                    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                        CssEnum val = decl->value->data.keyword;
+                                        if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                                            text_transform = val;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            tt_node = tt_node->parent;
+                        }
+                        
                         // Measure the trimmed text width/height
-                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, trimmed, trimmed_len);
+                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, trimmed, trimmed_len, text_transform);
                         float text_size = is_row ? widths.max_content : (lycon->font.style ? lycon->font.style->font_size : 16.0f);
                         
                         // Add text size plus gap (if there's a following element)
