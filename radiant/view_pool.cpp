@@ -1264,17 +1264,19 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     // Display property
     strbuf_append_char_n(buf, ' ', indent + 4);
 
+    // Check for grid/flex container by display.inner FIRST (overrides view_type)
+    // This ensures inline-flex and inline-grid report correctly as "flex"/"grid"
     const char* display = "block";
-    if (block->view_type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
+    if (block->display.inner == CSS_VALUE_GRID) {
+        display = "grid";  // both grid and inline-grid report as "grid"
+    } else if (block->display.inner == CSS_VALUE_FLEX || (block->embed && block->embed->flex)) {
+        display = "flex";  // both flex and inline-flex report as "flex"
+    } else if (block->view_type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
     else if (block->view_type == RDT_VIEW_LIST_ITEM) display = "list-item";
     else if (block->view_type == RDT_VIEW_TABLE) display = "table";
     else if (block->view_type == RDT_VIEW_TABLE_ROW_GROUP) display = "table-row-group";
     else if (block->view_type == RDT_VIEW_TABLE_ROW) display = "table-row";
     else if (block->view_type == RDT_VIEW_TABLE_CELL) display = "table-cell";
-    // Check for grid/flex container by display.inner
-    else if (block->display.inner == CSS_VALUE_GRID) display = "grid";
-    else if (block->display.inner == CSS_VALUE_FLEX) display = "flex";
-    else if (block->embed && block->embed->flex) display = "flex";
     strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
 
     // Add block properties if available

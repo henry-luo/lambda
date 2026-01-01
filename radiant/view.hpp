@@ -363,6 +363,8 @@ struct GridItemProp {
     // Track area dimensions (computed during positioning phase, used for alignment)
     int track_area_width;        // Width of the track area this item spans
     int track_area_height;       // Height of the track area this item spans
+    int track_base_x;            // Base X position of track area (before alignment)
+    int track_base_y;            // Base Y position of track area (before alignment)
 
     // Grid item flags
     bool has_explicit_grid_row_start;
@@ -497,6 +499,27 @@ typedef struct BoundaryProp {
     BorderProp* border;
     BackgroundProp* background;
 } BoundaryProp;
+
+// Vector path segment for PDF/SVG path rendering
+// Stores pre-transformed coordinates ready for ThorVG rendering
+typedef struct VectorPathSegment {
+    enum { VPATH_MOVETO, VPATH_LINETO, VPATH_CURVETO, VPATH_CLOSE } type;
+    float x, y;                     // End point
+    float x1, y1, x2, y2;           // Control points (for CURVETO)
+    struct VectorPathSegment* next;
+} VectorPathSegment;
+
+// Vector path property for complex path rendering
+typedef struct VectorPathProp {
+    VectorPathSegment* segments;    // Linked list of path segments
+    Color stroke_color;             // Stroke color
+    Color fill_color;               // Fill color (if filled)
+    float stroke_width;             // Stroke width
+    bool has_stroke;                // Whether to stroke
+    bool has_fill;                  // Whether to fill
+    float* dash_pattern;            // Dash pattern array (NULL for solid)
+    int dash_pattern_length;        // Length of dash pattern
+} VectorPathProp;
 
 typedef struct PositionProp {
     CssEnum position;     // static, relative, absolute, fixed, sticky
@@ -953,7 +976,7 @@ extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
-DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
+DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height, float pixel_ratio = 1.0f);
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool);

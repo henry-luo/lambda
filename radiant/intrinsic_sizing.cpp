@@ -7,6 +7,7 @@
 
 #include "intrinsic_sizing.hpp"
 #include "layout_flex.hpp"  // For FlexDirection enum
+#include "grid.hpp"         // For GridTrackList
 #include "../lib/log.h"
 #include <cmath>
 #include <cstring>
@@ -488,39 +489,55 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         bool is_inline = false;
 
         if (child->is_text()) {
-            // Skip text nodes for flex containers - they become anonymous flex items
-            // but don't contribute to the container's intrinsic min-content width
-            if (is_flex_container) {
-                continue;
-            }
-
             const char* text = (const char*)child->text_data();
             if (text) {
-                // Skip whitespace-only text nodes
-                bool is_whitespace_only = true;
-                for (const char* p = text; *p; p++) {
-                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
-                        is_whitespace_only = false;
-                        break;
+                size_t text_len = strlen(text);
+                // Normalize whitespace: collapse consecutive spaces, trim leading/trailing
+                // This matches CSS white-space: normal behavior
+                char normalized_buffer[2048];
+                size_t out_pos = 0;
+                bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
+                for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
+                    unsigned char ch = (unsigned char)text[i];
+                    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+                        if (!in_whitespace) {
+                            normalized_buffer[out_pos++] = ' ';  // Collapse to single space
+                            in_whitespace = true;
+                        }
+                    } else {
+                        normalized_buffer[out_pos++] = (char)ch;
+                        in_whitespace = false;
                     }
                 }
+                // Trim trailing whitespace
+                while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
+                    out_pos--;
+                }
+                normalized_buffer[out_pos] = '\0';
 
-                if (is_whitespace_only) {
+                // Skip if all whitespace (out_pos == 0)
+                if (out_pos == 0) {
                     continue;
                 }
 
                 TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
-                    lycon, text, strlen(text));
+                    lycon, normalized_buffer, out_pos);
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
+                
+                // In flex containers, text nodes become anonymous flex items
+                if (is_flex_container) {
+                    log_debug("  flex text child: min=%.1f, max=%.1f, normalized_len=%zu, text='%.30s...'",
+                              child_sizes.min_content, child_sizes.max_content, out_pos, normalized_buffer);
+                }
             }
-            is_inline = true;  // Text nodes are always inline
+            is_inline = true;  // Text nodes are always inline (unless in flex container)
         } else if (child->is_element()) {
             DomElement* child_elem = child->as_element();
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
             is_inline = is_inline_level_element(child_elem);
 
-            log_debug("  child %s: min=%d, max=%d, is_inline=%d",
+            log_debug("  child %s: min=%.1f, max=%.1f, is_inline=%d",
                       child_elem->node_name(), child_sizes.min_content, child_sizes.max_content, is_inline);
 
             // For inline elements, also add horizontal margins
@@ -539,19 +556,31 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
-        if (is_inline) {
+        // Handle flex container children - all children become flex items
+        // In a flex container, both text and element children are flex items
+        // They should NOT go through the inline content path
+        if (is_flex_container) {
+            if (is_row_flex) {
+                // Row flex: sum widths horizontally
+                sizes.min_content += child_sizes.min_content;
+                sizes.max_content += child_sizes.max_content;
+                flex_child_count++;
+                log_debug("  row flex item: min=%.1f, max=%.1f, count=%d",
+                          child_sizes.min_content, child_sizes.max_content, flex_child_count);
+            } else {
+                // Column flex: take max of widths
+                sizes.min_content = max(sizes.min_content, child_sizes.min_content);
+                sizes.max_content = max(sizes.max_content, child_sizes.max_content);
+                flex_child_count++;
+            }
+        } else if (is_inline) {
             // For inline content, sum widths for max-content (no wrapping)
             // and take max of min-content (can wrap between items)
             has_inline_content = true;
             inline_max_sum += child_sizes.max_content;
             inline_min_sum = max(inline_min_sum, child_sizes.min_content);
-        } else if (is_row_flex) {
-            // Row flex container: children are laid out horizontally, SUM widths
-            sizes.min_content += child_sizes.min_content;
-            sizes.max_content += child_sizes.max_content;
-            flex_child_count++;
         } else {
-            // For block-level children (or column flex): take max of each
+            // For block-level children: take max of each
             sizes.min_content = max(sizes.min_content, child_sizes.min_content);
             sizes.max_content = max(sizes.max_content, child_sizes.max_content);
         }
@@ -706,13 +735,48 @@ float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float wi
 float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width) {
     if (!node) return 0;
 
-    // For text nodes, estimate based on line height
+    // For text nodes, estimate based on line height and text width
     if (node->is_text()) {
-        // Simple estimation: one line height
+        // Check if text is whitespace-only (shouldn't contribute to height in block context)
+        const char* text = (const char*)node->text_data();
+        if (!text || *text == '\0') return 0;
+        
+        bool is_whitespace_only = true;
+        for (const char* p = text; *p; p++) {
+            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                is_whitespace_only = false;
+                break;
+            }
+        }
+        if (is_whitespace_only) {
+            return 0;  // Whitespace-only text doesn't contribute to height
+        }
+        
+        // Calculate line height
         float line_height = 20.0f;  // Default
         if (lycon->font.style && lycon->font.style->font_size > 0) {
             line_height = lycon->font.style->font_size * 1.2f;  // Typical line-height
         }
+        
+        // Estimate how many lines the text will take based on available width
+        if (width > 0) {
+            size_t text_len = strlen(text);
+            // Measure text width using intrinsic sizing
+            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len);
+            float text_width = widths.max_content;
+            
+            // Calculate number of lines (rounded up)
+            int num_lines = 1;
+            if (text_width > width) {
+                num_lines = (int)ceil(text_width / width);
+            }
+            
+            log_debug("calculate_max_content_height: text len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
+                      text_len, text_width, width, num_lines);
+            
+            return line_height * num_lines;
+        }
+        
         return line_height;
     }
 
@@ -723,6 +787,148 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     float height = 0;
     ViewBlock* view = (ViewBlock*)element;
+
+    // Check for explicit height from CSS (e.g., iframe with height: 580px)
+    if (view->blk && view->blk->given_height > 0) {
+        // Element has explicit height specified in CSS
+        float explicit_height = view->blk->given_height;
+        
+        // Check box-sizing: if border-box, the height already includes padding/border
+        // Only add padding/border for content-box (default)
+        bool is_border_box = (view->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+        
+        if (!is_border_box && view->bound) {
+            // content-box: height is content only, add padding and border
+            if (view->bound->padding.top >= 0) explicit_height += view->bound->padding.top;
+            if (view->bound->padding.bottom >= 0) explicit_height += view->bound->padding.bottom;
+            if (view->bound->border) {
+                explicit_height += view->bound->border->width.top;
+                explicit_height += view->bound->border->width.bottom;
+            }
+        }
+        // For border-box, given_height already includes padding/border, return as-is
+        
+        log_debug("calculate_max_content_height: %s has explicit height=%.1f (box_sizing=%s)", 
+                  element->node_name(), explicit_height, is_border_box ? "border-box" : "content-box");
+        return explicit_height;
+    }
+    
+    // Also check specified_style for height declaration if not yet resolved
+    if (element->specified_style) {
+        CssDeclaration* height_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_HEIGHT);
+        if (height_decl && height_decl->value && 
+            height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+            if (explicit_height > 0) {
+                log_debug("calculate_max_content_height: %s has specified height=%.1f", 
+                          element->node_name(), explicit_height);
+                return explicit_height;
+            }
+        }
+    }
+
+    // Check if this is a grid container - need to detect column count
+    bool is_grid_container = false;
+    int grid_column_count = 1;  // Default: single column = vertical stacking
+    float grid_row_gap = 0;
+    
+    if (view->display.inner == CSS_VALUE_GRID) {
+        is_grid_container = true;
+    }
+    // Also check specified_style for unresolved display
+    if (!is_grid_container && element->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum dv = display_decl->value->data.keyword;
+            if (dv == CSS_VALUE_GRID || dv == CSS_VALUE_INLINE_GRID) {
+                is_grid_container = true;
+            }
+        }
+    }
+    
+    if (is_grid_container) {
+        // Get column count from grid-template-columns
+        if (view->embed && view->embed->grid && view->embed->grid->grid_template_columns) {
+            grid_column_count = view->embed->grid->grid_template_columns->track_count;
+            log_debug("calculate_max_content_height: grid %s from embed, cols=%d",
+                      element->node_name(), grid_column_count);
+        }
+        // Try specified_style for unresolved grid
+        if (grid_column_count <= 1 && element->specified_style) {
+            CssDeclaration* cols_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_GRID_TEMPLATE_COLUMNS);
+            if (cols_decl && cols_decl->value) {
+                log_debug("calculate_max_content_height: %s grid-template-columns value type=%d",
+                          element->node_name(), cols_decl->value->type);
+                // Count track values in the grid template
+                if (cols_decl->value->type == CSS_VALUE_TYPE_LIST) {
+                    // Check if list contains repeat() function
+                    int list_count = cols_decl->value->data.list.count;
+                    CssValue** list_values = cols_decl->value->data.list.values;
+                    int total_cols = 0;
+                    for (int i = 0; i < list_count; i++) {
+                        CssValue* v = list_values[i];
+                        if (!v) continue;
+                        if (v->type == CSS_VALUE_TYPE_FUNCTION && v->data.function &&
+                            v->data.function->name && strcmp(v->data.function->name, "repeat") == 0) {
+                            // repeat(n, ...) - get the count
+                            if (v->data.function->arg_count > 0 && v->data.function->args[0]) {
+                                CssValue* count_val = v->data.function->args[0];
+                                if (count_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                    int repeat_count = (int)count_val->data.number.value;
+                                    int tracks_per_repeat = v->data.function->arg_count - 1;
+                                    if (tracks_per_repeat < 1) tracks_per_repeat = 1;
+                                    total_cols += repeat_count * tracks_per_repeat;
+                                    log_debug("calculate_max_content_height: repeat(%d, %d tracks) = %d cols",
+                                              repeat_count, tracks_per_repeat, repeat_count * tracks_per_repeat);
+                                }
+                            }
+                        } else {
+                            // Regular track (length, percentage, minmax function, etc.)
+                            total_cols++;
+                        }
+                    }
+                    grid_column_count = total_cols > 0 ? total_cols : list_count;
+                } else if (cols_decl->value->type == CSS_VALUE_TYPE_FUNCTION) {
+                    // Single function like repeat(2, 1fr)
+                    CssFunction* func = cols_decl->value->data.function;
+                    if (func && func->name && strcmp(func->name, "repeat") == 0) {
+                        if (func->arg_count > 0 && func->args[0] &&
+                            func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
+                            int repeat_count = (int)func->args[0]->data.number.value;
+                            int tracks_per_repeat = func->arg_count - 1;
+                            if (tracks_per_repeat < 1) tracks_per_repeat = 1;
+                            grid_column_count = repeat_count * tracks_per_repeat;
+                            log_debug("calculate_max_content_height: single repeat(%d) = %d cols",
+                                      repeat_count, grid_column_count);
+                        }
+                    }
+                } else {
+                    // Single track definition means 1 column
+                    grid_column_count = 1;
+                }
+            }
+        }
+        // Get row gap
+        if (view->embed && view->embed->grid) {
+            grid_row_gap = view->embed->grid->row_gap;
+        }
+        if (grid_row_gap <= 0 && element->specified_style) {
+            CssDeclaration* gap_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_ROW_GAP);
+            if (!gap_decl) {
+                gap_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_GAP);
+            }
+            if (gap_decl && gap_decl->value && gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                grid_row_gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
+            }
+        }
+        log_debug("calculate_max_content_height: grid %s with %d columns, gap=%.1f",
+                  element->node_name(), grid_column_count, grid_row_gap);
+    }
 
     // Check if this is a grid container with column flow
     // In column flow, items are placed in columns (side-by-side), so height = max(child_heights)
@@ -751,16 +957,56 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
-    // Calculate children's heights
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        float child_height = calculate_max_content_height(lycon, child, width);
+    // For multi-column grids, calculate height based on rows
+    if (is_grid_container && grid_column_count > 1) {
+        // Collect child heights
+        int child_count = 0;
+        for (DomNode* c = element->first_child; c; c = c->next_sibling) {
+            if (c->is_element()) child_count++;
+        }
+        
+        if (child_count > 0) {
+            // Calculate number of rows
+            int row_count = (child_count + grid_column_count - 1) / grid_column_count;
+            
+            // Collect heights and compute row-by-row max
+            float* child_heights = (float*)alloca(child_count * sizeof(float));
+            int idx = 0;
+            for (DomNode* c = element->first_child; c; c = c->next_sibling) {
+                if (c->is_element()) {
+                    child_heights[idx++] = calculate_max_content_height(lycon, c, width / grid_column_count);
+                }
+            }
+            
+            // Sum up max height of each row
+            for (int row = 0; row < row_count; row++) {
+                float row_max_height = 0;
+                for (int col = 0; col < grid_column_count; col++) {
+                    int item_idx = row * grid_column_count + col;
+                    if (item_idx < child_count) {
+                        row_max_height = fmax(row_max_height, child_heights[item_idx]);
+                    }
+                }
+                height += row_max_height;
+                if (row > 0) {
+                    height += grid_row_gap;
+                }
+            }
+            log_debug("calculate_max_content_height: grid %s rows=%d, total_height=%.1f",
+                      element->node_name(), row_count, height);
+        }
+    } else {
+        // Calculate children's heights (original logic for non-grid or single-column)
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            float child_height = calculate_max_content_height(lycon, child, width);
 
-        if (is_grid_column_flow || is_flex_row) {
-            // Items are laid out horizontally - take max height
-            height = fmax(height, child_height);
-        } else {
-            // Items are stacked vertically - sum heights
-            height += child_height;
+            if (is_grid_column_flow || is_flex_row) {
+                // Items are laid out horizontally - take max height
+                height = fmax(height, child_height);
+            } else {
+                // Items are stacked vertically - sum heights
+                height += child_height;
+            }
         }
     }
 

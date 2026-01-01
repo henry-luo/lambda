@@ -1017,8 +1017,17 @@ int main(int argc, char *argv[]) {
             printf("  .tex       LaTeX (converted to HTML)\n");
             printf("  .latex     LaTeX (converted to HTML)\n");
             printf("  .ls        Lambda script (evaluated and rendered)\n");
-            printf("  .xml       Extensible Markup Language (treated as HTML)\n");
+            printf("  .xml       Extensible Markup Language (CSS styled or source view)\n");
             printf("  .rst       reStructuredText (planned support)\n");
+            printf("  .svg       Scalable Vector Graphics\n");
+            printf("  .png       Portable Network Graphics\n");
+            printf("  .jpg/.jpeg JPEG Image\n");
+            printf("  .gif       Graphics Interchange Format\n");
+            printf("  .json      JSON (source view)\n");
+            printf("  .yaml/.yml YAML (source view)\n");
+            printf("  .toml      TOML (source view)\n");
+            printf("  .txt       Plain text\n");
+            printf("  .csv       Comma-separated values (source view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
@@ -1027,6 +1036,7 @@ int main(int argc, char *argv[]) {
             printf("  %s view script.ls                # View Lambda script result\n", argv[0]);
             printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
             printf("  %s view config.xml               # View XML document\n", argv[0]);
+            printf("  %s view data.json                # View JSON source\n", argv[0]);
             printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
@@ -1061,13 +1071,20 @@ int main(int argc, char *argv[]) {
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".ls") == 0 ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
-                    strcmp(ext, ".wiki") == 0)) {
+                    strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
+                    strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
+                    strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0 ||
+                    strcmp(ext, ".json") == 0 || strcmp(ext, ".yaml") == 0 ||
+                    strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
+                    strcmp(ext, ".txt") == 0 || strcmp(ext, ".csv") == 0 ||
+                    strcmp(ext, ".ini") == 0 || strcmp(ext, ".conf") == 0 ||
+                    strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
             // Use unified document viewer for all document types including PDF
             log_info("Opening document file: %s", filename);
             exit_code = view_doc_in_window(filename);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .tex, .latex, .ls, .xml, .rst, .wiki\n");
+            printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             log_finish();
             return 1;
         }

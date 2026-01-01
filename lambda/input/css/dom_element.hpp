@@ -34,6 +34,7 @@ typedef struct Arena Arena;
 typedef struct ViewTree ViewTree;  // From radiant/view.hpp
 typedef struct StateStore StateStore;  // From radiant/view.hpp
 typedef struct Url Url;  // From lib/url.h
+typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 
 // ============================================================================
 // DOM Document
@@ -176,6 +177,8 @@ struct DomElement : DomNode {
     PositionProp* position;
     // pseudo-element content and layout state (::before/::after)
     PseudoContentProp* pseudo;
+    // vector path for PDF/SVG curve rendering
+    VectorPathProp* vpath;
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
@@ -184,7 +187,7 @@ struct DomElement : DomNode {
         before_styles(nullptr), after_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
         pseudo_state(0), doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
-        item_prop_type(ITEM_PROP_NONE), fi(nullptr) {}
+        item_prop_type(ITEM_PROP_NONE), fi(nullptr), vpath(nullptr) {}
 };
 
 // Pseudo-class state flags

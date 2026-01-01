@@ -17,8 +17,9 @@ extern "C" {
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-DomDocument* load_html_doc(Url* base, char* doc_filename, int viewport_width, int viewport_height);
+// load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
@@ -36,7 +37,10 @@ typedef enum {
     DOC_FORMAT_RST,
     DOC_FORMAT_WIKI,
     DOC_FORMAT_LAMBDA_SCRIPT,
-    DOC_FORMAT_PDF
+    DOC_FORMAT_PDF,
+    DOC_FORMAT_SVG,
+    DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
+    DOC_FORMAT_TEXT    // JSON, YAML, TOML, TXT, etc.
 } DocFormat;
 
 // Detect document format from file extension
@@ -64,6 +68,17 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_LAMBDA_SCRIPT;
     } else if (strcasecmp(ext, "pdf") == 0) {
         return DOC_FORMAT_PDF;
+    } else if (strcasecmp(ext, "svg") == 0) {
+        return DOC_FORMAT_SVG;
+    } else if (strcasecmp(ext, "png") == 0 || strcasecmp(ext, "jpg") == 0 ||
+               strcasecmp(ext, "jpeg") == 0 || strcasecmp(ext, "gif") == 0) {
+        return DOC_FORMAT_IMAGE;
+    } else if (strcasecmp(ext, "json") == 0 || strcasecmp(ext, "yaml") == 0 ||
+               strcasecmp(ext, "yml") == 0 || strcasecmp(ext, "toml") == 0 ||
+               strcasecmp(ext, "txt") == 0 || strcasecmp(ext, "csv") == 0 ||
+               strcasecmp(ext, "ini") == 0 || strcasecmp(ext, "conf") == 0 ||
+               strcasecmp(ext, "cfg") == 0 || strcasecmp(ext, "log") == 0) {
+        return DOC_FORMAT_TEXT;
     }
 
     return DOC_FORMAT_UNKNOWN;
@@ -123,8 +138,24 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             // load_html_doc will detect .pdf extension and route to load_pdf_doc
             return load_html_doc(base_url, (char*)filename, width, height);
 
+        case DOC_FORMAT_SVG:
+            log_debug("Loading as SVG document");
+            // load_html_doc will detect .svg extension and route to load_svg_doc
+            return load_html_doc(base_url, (char*)filename, width, height);
+
+        case DOC_FORMAT_IMAGE:
+            log_debug("Loading as image document");
+            // load_html_doc will detect image extensions and route to load_image_doc
+            return load_html_doc(base_url, (char*)filename, width, height);
+
+        case DOC_FORMAT_TEXT:
+            log_debug("Loading as text document (source view)");
+            // load_html_doc will detect text extensions and route to load_text_doc
+            return load_html_doc(base_url, (char*)filename, width, height);
+
         default:
-            log_error("Unknown document format for file: %s", filename);
+            log_error("Unsupported document format for file: %s", filename);
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .ls, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
     }
 }
@@ -141,6 +172,9 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_WIKI: return "Wiki";
         case DOC_FORMAT_LAMBDA_SCRIPT: return "Lambda Script";
         case DOC_FORMAT_PDF: return "PDF";
+        case DOC_FORMAT_SVG: return "SVG";
+        case DOC_FORMAT_IMAGE: return "Image";
+        case DOC_FORMAT_TEXT: return "Text";
         default: return "Document";
     }
 }
@@ -479,10 +513,12 @@ int view_doc_in_window(const char* doc_file) {
         // Process @font-face rules before layout
         process_document_font_faces(&ui_context, doc);
 
-        // Layout document
+        // Layout document (for HTML-based documents)
+        // PDF documents have pre-built view trees and skip this
         if (doc->root) {
             layout_html_doc(&ui_context, doc, false);
         }
+        // PDF scaling now happens inside pdf_page_to_view_tree
 
         // Render document
         if (doc && doc->view_tree) {
