@@ -792,8 +792,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     if (view->blk && view->blk->given_height > 0) {
         // Element has explicit height specified in CSS
         float explicit_height = view->blk->given_height;
-        // Add padding and border
-        if (view->bound) {
+        
+        // Check box-sizing: if border-box, the height already includes padding/border
+        // Only add padding/border for content-box (default)
+        bool is_border_box = (view->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+        
+        if (!is_border_box && view->bound) {
+            // content-box: height is content only, add padding and border
             if (view->bound->padding.top >= 0) explicit_height += view->bound->padding.top;
             if (view->bound->padding.bottom >= 0) explicit_height += view->bound->padding.bottom;
             if (view->bound->border) {
@@ -801,8 +806,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 explicit_height += view->bound->border->width.bottom;
             }
         }
-        log_debug("calculate_max_content_height: %s has explicit height=%.1f", 
-                  element->node_name(), explicit_height);
+        // For border-box, given_height already includes padding/border, return as-is
+        
+        log_debug("calculate_max_content_height: %s has explicit height=%.1f (box_sizing=%s)", 
+                  element->node_name(), explicit_height, is_border_box ? "border-box" : "content-box");
         return explicit_height;
     }
     
