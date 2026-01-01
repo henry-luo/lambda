@@ -4,6 +4,7 @@
 #include "layout_flex_measurement.hpp"
 #include "form_control.hpp"
 #include "available_space.hpp"
+#include "intrinsic_sizing.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -742,15 +743,30 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // SHRINK-TO-FIT RECALCULATION: Now that items have intrinsic sizes (calculated by
     // apply_constraints_to_flex_items), recalculate main_axis_size for indefinite containers
-    if (flex_layout->main_axis_is_indefinite && item_count > 0) {
+    if (flex_layout->main_axis_is_indefinite && container->is_element()) {
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
         if (is_horizontal) {
             // Row flex with indefinite width: use sum of item max-content widths
+            // Iterate over container's DOM children to include text nodes
+            DomElement* container_elem = (DomElement*)container;
             float total_item_width = 0.0f;
-            for (int i = 0; i < item_count; i++) {
-                ViewElement* item = (ViewElement*)items[i]->as_element();
-                if (item) {
-                    float item_width = 0.0f;
+            int flex_item_count = 0;
+            
+            for (DomNode* child = container_elem->first_child; child; child = child->next_sibling) {
+                float item_width = 0.0f;
+                
+                if (child->is_element()) {
+                    ViewElement* item = (ViewElement*)child->as_element();
+                    
+                    // Skip absolutely positioned and hidden items
+                    ViewBlock* child_block = (ViewBlock*)item;
+                    bool is_absolute = child_block && child_block->position && child_block->position->position &&
+                        (child_block->position->position == CSS_VALUE_ABSOLUTE || child_block->position->position == CSS_VALUE_FIXED);
+                    bool is_hidden = item && item->in_line && item->in_line->visibility == VIS_HIDDEN;
+                    if (is_absolute || is_hidden) {
+                        continue;
+                    }
+                    
                     // Priority: 1) explicit width, 2) fi->intrinsic_width, 3) measured width
                     if (item->blk && item->blk->given_width > 0) {
                         item_width = item->blk->given_width;
@@ -759,14 +775,56 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     } else if (item->width > 0) {
                         item_width = item->width;
                     }
-                    total_item_width += item_width;
-                    log_debug("SHRINK-TO-FIT RECALC: item %d width=%.1f (has_intrinsic=%d), total=%.1f",
-                              i, item_width, item->fi ? item->fi->has_intrinsic_width : -1, total_item_width);
+                    flex_item_count++;
+                    log_debug("SHRINK-TO-FIT RECALC: element item width=%.1f (has_intrinsic=%d)",
+                              item_width, item->fi ? item->fi->has_intrinsic_width : -1);
+                } else if (child->is_text()) {
+                    // Text nodes in flex containers become anonymous flex items
+                    // Use their measured text width from intrinsic sizing
+                    const char* text = (const char*)child->text_data();
+                    if (text) {
+                        size_t text_len = strlen(text);
+                        // Normalize whitespace: collapse consecutive spaces, trim leading/trailing
+                        // This matches CSS white-space: normal behavior
+                        char normalized_buffer[2048];
+                        size_t out_pos = 0;
+                        bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
+                        for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
+                            unsigned char ch = (unsigned char)text[i];
+                            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+                                if (!in_whitespace) {
+                                    normalized_buffer[out_pos++] = ' ';  // Collapse to single space
+                                    in_whitespace = true;
+                                }
+                            } else {
+                                normalized_buffer[out_pos++] = (char)ch;
+                                in_whitespace = false;
+                            }
+                        }
+                        // Trim trailing whitespace
+                        while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
+                            out_pos--;
+                        }
+                        normalized_buffer[out_pos] = '\0';
+                        
+                        // Only measure if there's non-whitespace content
+                        if (out_pos > 0) {
+                            // Measure normalized text width using intrinsic sizing
+                            TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
+                                lycon, normalized_buffer, out_pos);
+                            item_width = text_widths.max_content;
+                            flex_item_count++;
+                            log_debug("SHRINK-TO-FIT RECALC: text item width=%.1f, normalized_len=%zu, text='%.30s...'",
+                                      item_width, out_pos, normalized_buffer);
+                        }
+                    }
                 }
+                
+                total_item_width += item_width;
             }
-            // Add gaps
-            if (item_count > 1) {
-                total_item_width += flex_layout->column_gap * (item_count - 1);
+            // Add gaps between flex items
+            if (flex_item_count > 1) {
+                total_item_width += flex_layout->column_gap * (flex_item_count - 1);
             }
             
             if (total_item_width > 0) {
@@ -777,8 +835,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     padding_width = container->bound->padding.left + container->bound->padding.right;
                 }
                 container->width = (int)(total_item_width + padding_width);
-                log_debug("SHRINK-TO-FIT RECALC: main_axis_size=%.1f, container.width=%d",
-                          flex_layout->main_axis_size, container->width);
+                log_debug("SHRINK-TO-FIT RECALC: main_axis_size=%.1f, container.width=%d, items=%d",
+                          flex_layout->main_axis_size, container->width, flex_item_count);
             }
         }
     }
@@ -886,7 +944,17 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
         // Check if container has explicit height (given_height > 0 means explicit)
         // OR if this container is a flex item whose height was set by parent flex
+        // OR if this container is a grid item whose height was set by parent grid
         bool has_explicit_height = container->blk && container->blk->given_height > 0;
+        // Check grid item status - must verify item_prop_type to access correct union member
+        // (gi, fi, tb, td, form are all in a union, accessing wrong one gives garbage)
+        bool is_grid_item = (container->item_prop_type == DomElement::ITEM_PROP_GRID) &&
+                            container->gi && container->gi->computed_grid_row_start > 0;
+        if (!has_explicit_height && is_grid_item && container->height > 0) {
+            has_explicit_height = true;
+            log_debug("Phase 7: (Row) Container is a grid item with height=%.1f set by parent grid",
+                      container->height);
+        }
         // Only check flex item status if this container is actually a flex item
         bool is_flex_item = container->fi != nullptr ||
                             (container->item_prop_type == DomElement::ITEM_PROP_FORM && container->form);
@@ -938,7 +1006,17 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
         // Check if container has explicit height (given_height > 0 means explicit)
         // OR if this container is a flex item whose height was set by parent flex
+        // OR if this container is a grid item whose height was set by parent grid
         bool has_explicit_height = container->blk && container->blk->given_height > 0;
+        // Check grid item status - must verify item_prop_type to access correct union member
+        // (gi, fi, tb, td, form are all in a union, accessing wrong one gives garbage)
+        bool is_grid_item_col = (container->item_prop_type == DomElement::ITEM_PROP_GRID) &&
+                                container->gi && container->gi->computed_grid_row_start > 0;
+        if (!has_explicit_height && is_grid_item_col && container->height > 0) {
+            has_explicit_height = true;
+            log_debug("Phase 7: (Column) Container is a grid item with height=%.1f set by parent grid",
+                      container->height);
+        }
         // Only check flex item status if this container is actually a flex item
         bool is_flex_item_col = container->fi != nullptr ||
                                 (container->item_prop_type == DomElement::ITEM_PROP_FORM && container->form);

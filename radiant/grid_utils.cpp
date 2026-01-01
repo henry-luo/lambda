@@ -158,17 +158,17 @@ int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value,
 
 // Enhanced grid template areas parser
 void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
-    printf("DEBUG: parse_grid_template_areas called with grid_layout=%p, areas_string='%s'\n", grid, areas_string);
+    log_debug("parse_grid_template_areas called with grid_layout=%p, areas_string='%s'\n", grid, areas_string);
     if (!grid || !areas_string) {
-        printf("DEBUG: Early return - grid_layout=%p, areas_string=%p\n", grid, areas_string);
+        log_debug("Early return - grid_layout=%p, areas_string=%p\n", grid, areas_string);
         return;
     }
 
-    printf("DEBUG: grid_layout->grid_areas=%p, allocated_areas=%d\n", grid->grid_areas, grid->allocated_areas);
+    log_debug("grid_layout->grid_areas=%p, allocated_areas=%d\n", grid->grid_areas, grid->allocated_areas);
     log_debug("Parsing grid template areas: %s\n", areas_string);
 
     // TEMPORARY: Skip complex parsing to avoid stack overflow
-    printf("DEBUG: Skipping grid-template-areas parsing to avoid crash\n");
+    log_debug("Skipping grid-template-areas parsing to avoid crash\n");
     grid->area_count = 0;
     return;
 
@@ -285,28 +285,28 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
         }
 
         if (is_rectangle && min_row <= max_row && min_col <= max_col) {
-            printf("DEBUG: Creating area '%s' - bounds: row %d-%d, col %d-%d\n", area_name, min_row, max_row, min_col, max_col);
-            printf("DEBUG: area_count=%d, allocated_areas=%d\n", grid->area_count, grid->allocated_areas);
+            log_debug("Creating area '%s' - bounds: row %d-%d, col %d-%d\n", area_name, min_row, max_row, min_col, max_col);
+            log_debug("area_count=%d, allocated_areas=%d\n", grid->area_count, grid->allocated_areas);
 
             // Create the area (convert to 1-based indexing)
             GridArea area;
-            printf("DEBUG: area_name pointer=%p\n", area_name);
+            log_debug("area_name pointer=%p\n", area_name);
             if (!area_name) {
-                printf("ERROR: area_name is NULL!\n");
+                log_debug("ERROR: area_name is NULL!\n");
                 continue;
             }
-            printf("DEBUG: About to strncpy area_name='%s'\n", area_name);
+            log_debug("About to strncpy area_name='%s'\n", area_name);
             strncpy(area.name, area_name, sizeof(area.name) - 1);
             area.name[sizeof(area.name) - 1] = '\0';
-            printf("DEBUG: strncpy completed\n");
+            log_debug("strncpy completed\n");
             area.row_start = min_row + 1;
             area.row_end = max_row + 2;
             area.column_start = min_col + 1;
             area.column_end = max_col + 2;
 
-            printf("DEBUG: About to assign area to grid_areas[%d]\n", grid->area_count);
+            log_debug("About to assign area to grid_areas[%d]\n", grid->area_count);
             grid->grid_areas[grid->area_count] = area;
-            printf("DEBUG: Area assigned successfully\n");
+            log_debug("Area assigned successfully\n");
             grid->area_count++;
 
             log_debug("Created area '%s': rows %d-%d, columns %d-%d\n",
@@ -357,37 +357,168 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
 
     if (!item) return sizes;
 
-    // Use unified intrinsic sizing API if layout context is available
+    // First, check if we have pre-computed measurements from Pass 1 (layout_grid_multipass.cpp)
+    // These measurements were calculated with proper width constraints for height calculation
+    if (item->gi) {
+        if (is_row_axis) {
+            // Use pre-computed height measurements if available
+            log_debug("Checking pre-computed height for %s (gi=%p): min=%.1f, max=%.1f, has_measured=%d",
+                      item->node_name(), item->gi, 
+                      item->gi->measured_min_height, item->gi->measured_max_height,
+                      item->gi->has_measured_size);
+            if (item->gi->has_measured_size && (item->gi->measured_min_height > 0 || item->gi->measured_max_height > 0)) {
+                sizes.min_content = item->gi->measured_min_height;
+                sizes.max_content = item->gi->measured_max_height;
+                
+                // Don't force minimum height - empty items should have 0 height
+                if (sizes.max_content < sizes.min_content) {
+                    sizes.max_content = sizes.min_content;
+                }
+                
+                log_debug("Using pre-computed height for %s: min=%.1f, max=%.1f",
+                          item->node_name(), sizes.min_content, sizes.max_content);
+                
+                // Apply height constraints from BlockProp
+                if (item->blk) {
+                    if (item->blk->given_min_height > 0) {
+                        sizes.min_content = fmax(sizes.min_content, item->blk->given_min_height);
+                    }
+                    if (item->blk->given_max_height > 0) {
+                        sizes.max_content = fmin(sizes.max_content, item->blk->given_max_height);
+                    }
+                }
+                return sizes;
+            }
+        } else {
+            // Use pre-computed width measurements if available
+            if (item->gi->measured_min_width > 0 || item->gi->measured_max_width > 0) {
+                sizes.min_content = item->gi->measured_min_width;
+                sizes.max_content = item->gi->measured_max_width;
+                
+                // Don't force minimum width - empty items should have 0 width
+                if (sizes.max_content < sizes.min_content) {
+                    sizes.max_content = sizes.min_content;
+                }
+                
+                log_debug("Using pre-computed width for %s: min=%.1f, max=%.1f",
+                          item->node_name(), sizes.min_content, sizes.max_content);
+                
+                // Apply width constraints from BlockProp
+                if (item->blk) {
+                    if (item->blk->given_min_width > 0) {
+                        sizes.min_content = fmax(sizes.min_content, item->blk->given_min_width);
+                    }
+                    if (item->blk->given_max_width > 0) {
+                        sizes.max_content = fmin(sizes.max_content, item->blk->given_max_width);
+                    }
+                }
+                return sizes;
+            }
+        }
+    }
+
+    // Fallback: Use unified intrinsic sizing API if layout context is available
     // ViewBlock inherits from DomNode through the chain: ViewBlock -> ViewSpan -> ViewGroup -> DomElement -> DomNode
     DomNode* node = (DomNode*)item;
     if (lycon && node) {
         if (is_row_axis) {
             // For row axis, we're measuring height
-            // Height depends on width, so use current width or estimate
-            int width = item->width > 0 ? item->width : 200;
+            // Height depends on width, so we need to determine the correct width to use:
+            // 1. If item->width is already set, use it
+            // 2. Otherwise, try to calculate from computed column tracks (if sized)
+            // 3. For FR tracks (computed_size == 0), estimate from container width
+            // 4. Fall back to a reasonable estimate
+            int width = 200; // Default fallback
+            
+            if (item->width > 0) {
+                // Item already has a width (e.g., from previous layout pass)
+                width = (int)item->width;
+            } else if (item->gi && lycon->grid_container) {
+                // Calculate width from computed column tracks
+                GridContainerLayout* grid = lycon->grid_container;
+                int col_start = item->gi->computed_grid_column_start - 1;
+                int col_end = item->gi->computed_grid_column_end - 1;
+                
+                // Clamp to valid ranges
+                if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
+                    int span_width = 0;
+                    bool has_unsized_fr_track = false;
+                    
+                    for (int c = col_start; c < col_end; c++) {
+                        int track_size = grid->computed_columns[c].computed_size;
+                        if (track_size > 0) {
+                            span_width += track_size;
+                            if (c < col_end - 1) {
+                                span_width += (int)grid->column_gap;
+                            }
+                        } else {
+                            // Track has size 0 - might be FR track not yet sized
+                            has_unsized_fr_track = true;
+                        }
+                    }
+                    
+                    if (span_width > 0 && !has_unsized_fr_track) {
+                        // All tracks are sized, use actual span width
+                        int box_adjustment = 0;
+                        if (item->bound) {
+                            box_adjustment += item->bound->padding.left + item->bound->padding.right;
+                            if (item->bound->border) {
+                                box_adjustment += item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                        }
+                        width = span_width - box_adjustment;
+                        if (width < 10) width = 10;
+                        log_debug("Row sizing: using column span width %d for %s (cols %d-%d)",
+                                  width, item->node_name(), col_start + 1, col_end);
+                    } else if (grid->content_width > 0) {
+                        // FR tracks not sized yet - estimate from container width
+                        // For a simple estimate, divide container width by column count
+                        int col_count = grid->computed_column_count > 0 ? grid->computed_column_count : 1;
+                        int total_gaps = (col_count - 1) * (int)grid->column_gap;
+                        int span_cols = col_end - col_start;
+                        width = ((grid->content_width - total_gaps) * span_cols) / col_count;
+                        
+                        // Subtract item's own padding/border
+                        if (item->bound) {
+                            width -= item->bound->padding.left + item->bound->padding.right;
+                            if (item->bound->border) {
+                                width -= item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                        }
+                        if (width < 10) width = 10;
+                        log_debug("Row sizing: estimating width %d for %s (FR tracks, container=%d, cols=%d)",
+                                  width, item->node_name(), grid->content_width, col_count);
+                    }
+                }
+            }
+            
             sizes.min_content = calculate_min_content_height(lycon, node, width);
             sizes.max_content = calculate_max_content_height(lycon, node, width);
 
-            // Ensure reasonable minimums
-            if (sizes.min_content <= 0) sizes.min_content = 20;
-            if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+            // Don't force minimum height - empty items should have 0 height
+            // The grid algorithm will handle minimum track sizes based on content
+            if (sizes.max_content < sizes.min_content) {
+                sizes.max_content = sizes.min_content;
+            }
         } else {
             // For column axis, we're measuring width
             sizes.min_content = calculate_min_content_width(lycon, node);
             sizes.max_content = calculate_max_content_width(lycon, node);
 
-            // Ensure reasonable minimums
-            if (sizes.min_content <= 0) sizes.min_content = 50;
-            if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+            // Don't force minimum width - empty items should have 0 width
+            if (sizes.max_content < sizes.min_content) {
+                sizes.max_content = sizes.min_content;
+            }
         }
     } else {
         // Fallback: use item dimensions if no layout context
+        // Empty items should have 0 height/width - the grid algorithm handles min track sizes
         if (is_row_axis) {
-            sizes.min_content = 20;  // Minimum reasonable height
-            sizes.max_content = item->height > 0 ? item->height : 100;
+            sizes.min_content = 0;
+            sizes.max_content = item->height > 0 ? item->height : 0;
         } else {
-            sizes.min_content = 50;  // Minimum reasonable width
-            sizes.max_content = item->width > 0 ? item->width : 200;
+            sizes.min_content = 0;
+            sizes.max_content = item->width > 0 ? item->width : 0;
         }
     }
 
