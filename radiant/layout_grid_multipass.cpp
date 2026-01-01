@@ -84,9 +84,67 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_info("=== GRID PASS 3 COMPLETE ===");
 
     // ========================================================================
-    // Update container height based on grid content
+    // Update container height based on actual item positions and sizes
+    // This is needed because content layout may cause items to exceed their
+    // track-allocated sizes (e.g., when item content is larger than track)
+    // Only do this for containers with auto height (no explicit height set)
     // ========================================================================
     GridContainerLayout* grid_layout = lycon->grid_container;
+    bool has_explicit_height = grid_container->blk && grid_container->blk->given_height > 0;
+    
+    if (grid_layout && grid_layout->item_count > 0 && !has_explicit_height) {
+        // Find the maximum extent of all grid items
+        float max_item_bottom = 0;
+        for (int i = 0; i < grid_layout->item_count; i++) {
+            ViewBlock* item = grid_layout->grid_items[i];
+            if (!item) continue;
+            
+            float item_bottom = item->y + item->height;
+            if (item_bottom > max_item_bottom) {
+                max_item_bottom = item_bottom;
+            }
+        }
+        
+        // Add container's bottom padding and border
+        float required_height = max_item_bottom;
+        if (grid_container->bound) {
+            required_height += grid_container->bound->padding.bottom;
+            if (grid_container->bound->border) {
+                required_height += grid_container->bound->border->width.bottom;
+            }
+        }
+        
+        // Update container height if needed
+        if (required_height > grid_container->height) {
+            log_info("GRID: Updating container height from %.1f to %.1f (based on item extents)",
+                     grid_container->height, required_height);
+            grid_container->height = required_height;
+            
+            // Also fix any item with negative y position (pushed above due to centering)
+            // by shifting all items down
+            float min_item_y = 0;
+            for (int i = 0; i < grid_layout->item_count; i++) {
+                ViewBlock* item = grid_layout->grid_items[i];
+                if (!item) continue;
+                if (item->y < min_item_y) {
+                    min_item_y = item->y;
+                }
+            }
+            if (min_item_y < 0) {
+                // Shift all items down by the negative offset
+                float shift = -min_item_y;
+                for (int i = 0; i < grid_layout->item_count; i++) {
+                    ViewBlock* item = grid_layout->grid_items[i];
+                    if (!item) continue;
+                    item->y += shift;
+                }
+                grid_container->height += shift;
+                log_info("GRID: Shifted items down by %.1f to fix negative y positions", shift);
+            }
+        }
+    }
+    
+    // Fallback: also check row-based calculation for containers without items
     if (grid_layout && grid_layout->computed_row_count > 0) {
         // Calculate total height from row sizes plus gaps
         float total_row_height = 0;
