@@ -297,6 +297,12 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
                     item->gi->measured_max_width = max_width;
                     item->gi->measured_min_height = min_height;
                     item->gi->measured_max_height = max_height;
+                    item->gi->has_measured_size = true;
+                    log_debug("Stored measurements for %s (gi=%p): min_h=%.1f, max_h=%.1f",
+                              child->node_name(), item->gi, 
+                              item->gi->measured_min_height, item->gi->measured_max_height);
+                } else {
+                    log_debug("WARN: No gi for %s to store measurements", child->node_name());
                 }
 
                 log_debug("Grid item %s measured: min_w=%d, max_w=%d, min_h=%d, max_h=%d",
@@ -364,9 +370,21 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
 
     if (!has_explicit_height) {
         // Height depends on width for proper text wrapping
-        float width_for_height = (float)*max_width;
-        float min_h = calculate_min_content_height(lycon, (DomNode*)item, width_for_height);
-        float max_h = calculate_max_content_height(lycon, (DomNode*)item, width_for_height);
+        // Use min-content width as the constraining width for height calculation
+        // This gives a more realistic height estimate for intrinsic sizing
+        // (CSS Sizing Level 3 uses min-content for min-height, max-content for max-height)
+        float width_for_min_height = (float)*min_width;
+        float width_for_max_height = (float)*max_width;
+        
+        // For max-content height, use a reasonable width constraint
+        // Grid items will typically be constrained to their column width
+        // Use the smaller of max_width and a reasonable estimate
+        if (width_for_max_height > 600) {
+            width_for_max_height = 600;  // Reasonable column width estimate
+        }
+        
+        float min_h = calculate_min_content_height(lycon, (DomNode*)item, width_for_min_height);
+        float max_h = calculate_max_content_height(lycon, (DomNode*)item, width_for_max_height);
         *min_height = (int)(min_h + 0.5f);
         *max_height = (int)(max_h + 0.5f);
     }
@@ -405,7 +423,7 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
     // DEBUG: Print item pointers for comparison
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
-        printf("DEBUG Pass3: grid_items[%d]=%p, x=%.1f, y=%.1f, w=%.1f, h=%.1f\n",
+        log_debug("Pass3: grid_items[%d]=%p, x=%.1f, y=%.1f, w=%.1f, h=%.1f\n",
                i, (void*)item, item ? item->x : -1, item ? item->y : -1,
                item ? item->width : -1, item ? item->height : -1);
     }
