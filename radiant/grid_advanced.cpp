@@ -251,19 +251,17 @@ bool try_place_item_dense(GridContainerLayout* grid_layout, ViewBlock* item, int
 // Parse grid template tracks (enhanced implementation)
 void parse_grid_template_tracks(GridTrackList* track_list, const char* template_string) {
     if (!track_list || !template_string) {
-        printf("DEBUG: parse_grid_template_tracks early return - track_list=%p, template_string=%p\n", track_list, template_string);
+        log_debug("parse_grid_template_tracks early return - track_list=%p, template_string=%p\n", track_list, template_string);
         return;
     }
 
     // CRITICAL: Validate input length to prevent buffer overflow
     size_t input_len = strlen(template_string);
     if (input_len >= 512) {
-        printf("ERROR: Template string too long (%zu chars), truncating to 511\n", input_len);
-        log_debug("ERROR: Template string too long (%zu chars), truncating\n", input_len);
+        log_debug("ERROR: Template string too long (%zu chars), truncating to 511\n", input_len);
     }
 
-    printf("DEBUG: Parsing grid template tracks: '%s' (length: %zu)\n", template_string, input_len);
-    log_debug("Parsing grid template tracks: %s\n", template_string);
+    log_debug("Parsing grid template tracks: '%s' (length: %zu)\n", template_string, input_len);
 
     // Clear existing tracks
     track_list->track_count = 0;
@@ -282,49 +280,46 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
         safety_counter++;
         GridTrackSize* track_size = NULL;
 
-        printf("DEBUG: Parsing token: '%s'\n", token);
+        log_debug("Parsing token: '%s'\n", token);
 
         // Check for different track types
         if (strstr(token, "minmax(")) {
             // TODO: Parse minmax function
-            printf("DEBUG: Found minmax function: %s\n", token);
             log_debug("Found minmax function: %s\n", token);
             track_size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
         } else if (strstr(token, "repeat(")) {
             // TODO: Parse repeat function
-            printf("DEBUG: Found repeat function: %s\n", token);
             log_debug("Found repeat function: %s\n", token);
             track_size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
         } else if (strstr(token, "fr")) {
             // Fractional unit - enhanced parsing
             float fr_value = strtof(token, NULL);
-            printf("DEBUG: Parsed fr value: %.2f from token '%s'\n", fr_value, token);
+            log_debug("Parsed fr value: %.2f from token '%s'\n", fr_value, token);
 
             // Store as integer multiplied by 100 for precision
             int stored_value = (int)(fr_value * 100);
             track_size = create_grid_track_size(GRID_TRACK_SIZE_FR, stored_value);
 
-            printf("DEBUG: Created FR track with stored_value=%d (%.2ffr)\n", stored_value, fr_value);
-            log_debug("Created FR track: %.2ffr (stored as %d)\n", fr_value, stored_value);
+            log_debug("Created FR track with stored_value=%d (%.2ffr)\n", stored_value, fr_value);
         } else if (strstr(token, "px")) {
             // Pixel value
             int px_value = strtol(token, NULL, 10);
-            printf("DEBUG: Parsed px value: %d from token '%s'\n", px_value, token);
+            log_debug("Parsed px value: %d from token '%s'\n", px_value, token);
             track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, px_value);
         } else if (strstr(token, "%")) {
             // Percentage value
             float percent_value = strtof(token, NULL);
-            printf("DEBUG: Parsed percentage value: %.2f from token '%s'\n", percent_value, token);
+            log_debug("Parsed percentage value: %.2f from token '%s'\n", percent_value, token);
             track_size = create_grid_track_size(GRID_TRACK_SIZE_PERCENTAGE, (int)percent_value);
             track_size->is_percentage = true;
         } else if (strcmp(token, "auto") == 0) {
-            printf("DEBUG: Parsed auto track\n");
+            log_debug("Parsed auto track\n");
             track_size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
         } else if (strcmp(token, "min-content") == 0) {
-            printf("DEBUG: Parsed min-content track\n");
+            log_debug("Parsed min-content track\n");
             track_size = create_grid_track_size(GRID_TRACK_SIZE_MIN_CONTENT, 0);
         } else if (strcmp(token, "max-content") == 0) {
-            printf("DEBUG: Parsed max-content track\n");
+            log_debug("Parsed max-content track\n");
             track_size = create_grid_track_size(GRID_TRACK_SIZE_MAX_CONTENT, 0);
         } else {
             // Try to parse as a number (could be unitless)
@@ -332,10 +327,10 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
             float numeric_value = strtof(token, &endptr);
             if (endptr != token && *endptr == '\0') {
                 // Pure number, treat as pixels
-                printf("DEBUG: Parsed unitless number: %.2f, treating as pixels\n", numeric_value);
+                log_debug("Parsed unitless number: %.2f, treating as pixels\n", numeric_value);
                 track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, (int)numeric_value);
             } else {
-                printf("DEBUG: Unknown token format: '%s', treating as auto\n", token);
+                log_debug("Unknown token format: '%s', treating as auto\n", token);
                 track_size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
             }
         }
@@ -343,7 +338,7 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
         if (track_size) {
             // Ensure we have space
             if (track_list->track_count >= track_list->allocated_tracks) {
-                printf("DEBUG: Expanding track list capacity from %d to %d\n",
+                log_debug("Expanding track list capacity from %d to %d\n",
                        track_list->allocated_tracks, track_list->allocated_tracks * 2);
 
                 int new_capacity = track_list->allocated_tracks * 2;
@@ -352,7 +347,6 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
 
                 // CRITICAL: Check if realloc failed
                 if (!new_tracks) {
-                    printf("ERROR: Failed to reallocate track list memory\n");
                     log_debug("ERROR: Failed to reallocate track list memory\n");
                     // Clean up the track_size we just created
                     destroy_grid_track_size(track_size);
@@ -364,11 +358,11 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
             }
 
             track_list->tracks[track_list->track_count] = track_size;
-            printf("DEBUG: Added track %d: type=%d, value=%d\n",
+            log_debug("Added track %d: type=%d, value=%d\n",
                    track_list->track_count, track_size->type, track_size->value);
             track_list->track_count++;
         } else {
-            printf("DEBUG: Failed to create track for token '%s'\n", token);
+            log_debug("Failed to create track for token '%s'\n", token);
         }
 
         token = strtok(NULL, " \t");
@@ -376,22 +370,20 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
 
     // CRITICAL: Check if we hit safety limits
     if (safety_counter >= MAX_TOKENS) {
-        printf("WARNING: Hit safety limit parsing template string, may have truncated tracks\n");
-        log_debug("WARNING: Hit safety limit parsing template string\n");
+        log_debug("WARNING: Hit safety limit parsing template string, may have truncated tracks\n");
     }
 
-    printf("DEBUG: Finished parsing - created %d tracks (processed %d tokens)\n",
+    log_debug("Finished parsing - created %d tracks (processed %d tokens)\n",
            track_list->track_count, safety_counter);
-    log_debug("Parsed %d tracks\n", track_list->track_count);
 
     // Debug: Print all parsed tracks
     for (int i = 0; i < track_list->track_count; i++) {
         GridTrackSize* track = track_list->tracks[i];
         // CRITICAL: Check for null pointer before accessing
         if (track) {
-            printf("DEBUG: Track %d - type=%d, value=%d\n", i, track->type, track->value);
+            log_debug("Track %d - type=%d, value=%d\n", i, track->type, track->value);
         } else {
-            printf("DEBUG: Track %d - NULL POINTER!\n", i);
+            log_debug("Track %d - NULL POINTER!\n", i);
         }
     }
 }

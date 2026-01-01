@@ -184,6 +184,13 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     grid_layout->container_width = container->width;
     grid_layout->container_height = container->height;
 
+    // Determine if container has an explicit height (not auto)
+    // This affects whether auto row tracks should stretch to fill the container
+    grid_layout->has_explicit_height = (container->blk && container->blk->given_height >= 0);
+    log_debug("GRID: has_explicit_height=%d (given_height=%.1f)",
+              grid_layout->has_explicit_height,
+              container->blk ? container->blk->given_height : -1);
+
     // Calculate content dimensions (excluding borders and padding)
     grid_layout->content_width = container->width;
     grid_layout->content_height = container->height;

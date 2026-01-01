@@ -9,6 +9,47 @@
 #include <float.h>
 #include <limits.h>
 
+// Forward declaration for get_white_space_value from layout_text.cpp
+CssEnum get_white_space_value(DomNode* node);
+
+// Helper: Check if whitespace should be collapsed according to white-space property
+// Returns true for: normal, nowrap, pre-line
+static inline bool should_collapse_whitespace(CssEnum ws) {
+    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP ||
+           ws == CSS_VALUE_PRE_LINE || ws == 0;  // 0 = undefined, treat as normal
+}
+
+// Helper: Normalize whitespace to a buffer
+// Collapses consecutive whitespace to single space, trims leading/trailing
+// Returns length of normalized text (0 if all whitespace)
+static size_t normalize_whitespace_for_flex(const char* text, size_t length, char* buffer, size_t buffer_size) {
+    if (!text || length == 0 || !buffer || buffer_size == 0) return 0;
+
+    size_t out_pos = 0;
+    bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
+
+    for (size_t i = 0; i < length && out_pos < buffer_size - 1; i++) {
+        unsigned char ch = (unsigned char)text[i];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+            if (!in_whitespace) {
+                buffer[out_pos++] = ' ';  // Collapse to single space
+                in_whitespace = true;
+            }
+        } else {
+            buffer[out_pos++] = (char)ch;
+            in_whitespace = false;
+        }
+    }
+
+    // Trim trailing whitespace
+    while (out_pos > 0 && buffer[out_pos - 1] == ' ') {
+        out_pos--;
+    }
+
+    buffer[out_pos] = '\0';
+    return out_pos;
+}
+
 // Forward declaration for recursive function
 static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon);
 
@@ -911,8 +952,22 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             size_t len = strlen(text);
             LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
             if (lycon) {
+                // CRITICAL FIX: Normalize whitespace according to CSS white-space property
+                // before measuring. For normal/nowrap, trailing whitespace should be collapsed.
+                CssEnum ws = get_white_space_value(child);
+                const char* measure_text = text;
+                size_t measure_len = len;
+                static thread_local char normalized_buffer[4096];
+                
+                if (should_collapse_whitespace(ws)) {
+                    measure_len = normalize_whitespace_for_flex(text, len, normalized_buffer, sizeof(normalized_buffer));
+                    measure_text = normalized_buffer;
+                    log_debug("Normalized text for intrinsic sizing: '%s' -> '%s' (ws=%d)", 
+                              text, normalized_buffer, ws);
+                }
+                
                 // Use accurate FreeType-based measurement
-                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len);
+                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len);
                 min_width = widths.min_content;
                 max_width = widths.max_content;
                 // BUGFIX: Use line height instead of font size for text height
@@ -1025,7 +1080,19 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             int text_len = strlen(text);
                             float text_min_width, text_max_width, text_height;
                             if (lycon) {
-                                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len);
+                                // CRITICAL FIX: Normalize whitespace according to CSS white-space property
+                                CssEnum ws = get_white_space_value(c);
+                                const char* measure_text = text;
+                                size_t measure_len = text_len;
+                                static thread_local char normalized_buffer2[4096];
+                                
+                                if (should_collapse_whitespace(ws)) {
+                                    measure_len = normalize_whitespace_for_flex(text, text_len, 
+                                                                                 normalized_buffer2, sizeof(normalized_buffer2));
+                                    measure_text = normalized_buffer2;
+                                }
+                                
+                                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len);
                                 text_min_width = widths.min_content;
                                 text_max_width = widths.max_content;
                                 // BUGFIX: Use line height instead of font size for text height
