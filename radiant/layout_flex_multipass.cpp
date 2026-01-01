@@ -923,6 +923,43 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     flex_item->content_width = lycon->block.max_width;
     flex_item->content_height = lycon->block.advance_y - content_y_offset;
 
+    // CRITICAL FIX: For column flex items without explicit height,
+    // update item height based on actual content height.
+    // This fixes the issue where intrinsic height was calculated incorrectly
+    // for items containing nested flex containers with wrap.
+    FlexContainerLayout* parent_flex = saved_context.flex_container;
+    if (parent_flex && !is_main_axis_horizontal(parent_flex)) {
+        // Column flex: main axis is height
+        // Only update if no explicit height and content is larger than current height
+        bool has_explicit_height = (flex_item->blk && flex_item->blk->given_height > 0);
+        if (!has_explicit_height && flex_item->content_height > 0) {
+            // Calculate total height including padding and border
+            float padding_top = 0, padding_bottom = 0, border_top = 0, border_bottom = 0;
+            if (flex_item->bound) {
+                padding_top = flex_item->bound->padding.top;
+                padding_bottom = flex_item->bound->padding.bottom;
+                if (flex_item->bound->border) {
+                    border_top = flex_item->bound->border->width.top;
+                    border_bottom = flex_item->bound->border->width.bottom;
+                }
+            }
+            float total_height = flex_item->content_height + padding_top + padding_bottom + border_top + border_bottom;
+            
+            // If content height is larger than flex-determined height, update
+            if (total_height > flex_item->height) {
+                log_debug("COLUMN FLEX FIX: Updating item %s height from %.1f to %.1f (content=%.1f)",
+                          flex_item->node_name(), flex_item->height, total_height, flex_item->content_height);
+                flex_item->height = total_height;
+                
+                // Also update the intrinsic height for future reference
+                if (flex_item->fi) {
+                    flex_item->fi->intrinsic_height.max_content = total_height;
+                    flex_item->fi->has_intrinsic_height = 1;
+                }
+            }
+        }
+    }
+
     // Restore parent context
     *lycon = saved_context;
 
@@ -940,6 +977,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // CSS Flexbox spec: Each contiguous run of text that is directly contained in a flex container
     // becomes an anonymous flex item.
     FlexContainerLayout* flex = lycon->flex_container;
+    
+    // Check for text content and find preceding element flex items
     bool has_text_content = false;
     DomNode* text_child = flex_container->first_child;
     while (text_child && !has_text_content) {
@@ -955,9 +994,11 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     if (has_text_content && flex) {
         // Get flex direction and alignment properties
         FlexProp* flex_prop = flex_container->embed ? flex_container->embed->flex : nullptr;
-        int justify_content = flex_prop ? flex_prop->justify : CSS_VALUE_FLEX_START;
         int align_items = flex_prop ? flex_prop->align_items : CSS_VALUE_STRETCH;
         bool is_row = is_main_axis_horizontal(flex);
+        
+        // Get gap value for flex items
+        float flex_gap = is_row ? flex->column_gap : flex->row_gap;
 
         // Set up inline layout context for text
         float container_content_x = 0;
@@ -982,138 +1023,137 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         log_debug("FLEX TEXT: container content area: x=%.1f, y=%.1f, w=%.1f, h=%.1f",
                   container_content_x, container_content_y, container_content_width, container_content_height);
 
-        // Set up line context for inline layout
-        lycon->line.left = container_content_x;
-        lycon->line.right = container_content_x + container_content_width;
-        lycon->line.advance_x = container_content_x;
-        lycon->block.advance_y = container_content_y;
-        lycon->block.max_width = container_content_width;
-
         // Set up font context from flex container
         if (flex_container->font) {
             setup_font(lycon->ui_context, &lycon->font, flex_container->font);
         }
 
-        // First, measure the text content to determine its dimensions
-        float text_width = 0;
-        float text_height = 0;
+        // Process each text node, positioning it after preceding element flex items
+        // CSS Flexbox spec: Text nodes become anonymous flex items in document order
         text_child = flex_container->first_child;
         while (text_child) {
             if (text_child->is_text()) {
                 const char* text = (const char*)text_child->text_data();
                 if (text && !is_only_whitespace(text)) {
-                    // Measure the text using intrinsic width calculation
+                    // Measure this text node
                     TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, strlen(text));
-                    text_width += widths.max_content;
-                    float line_h = lycon->font.style ? lycon->font.style->font_size : 16.0f;
-                    if (line_h > text_height) text_height = line_h;
-                }
-            }
-            text_child = text_child->next_sibling;
-        }
-
-        log_debug("FLEX TEXT: measured text size: %.1f x %.1f", text_width, text_height);
-
-        // Calculate text position based on justify-content and align-items
-        float text_x = container_content_x;
-        float text_y = container_content_y;
-
-        // Main axis alignment (justify-content)
-        if (is_row) {
-            // Main axis is horizontal
-            switch (justify_content) {
-                case CSS_VALUE_CENTER:
-                    text_x = container_content_x + (container_content_width - text_width) / 2;
-                    break;
-                case CSS_VALUE_FLEX_END:
-                    text_x = container_content_x + container_content_width - text_width;
-                    break;
-                case CSS_VALUE_SPACE_AROUND:
-                case CSS_VALUE_SPACE_BETWEEN:
-                case CSS_VALUE_SPACE_EVENLY:
-                    // For single text item, center it
-                    text_x = container_content_x + (container_content_width - text_width) / 2;
-                    break;
-                case CSS_VALUE_FLEX_START:
-                default:
-                    text_x = container_content_x;
-                    break;
-            }
-        } else {
-            // Main axis is vertical
-            switch (justify_content) {
-                case CSS_VALUE_CENTER:
-                    text_y = container_content_y + (container_content_height - text_height) / 2;
-                    break;
-                case CSS_VALUE_FLEX_END:
-                    text_y = container_content_y + container_content_height - text_height;
-                    break;
-                case CSS_VALUE_FLEX_START:
-                default:
-                    text_y = container_content_y;
-                    break;
-            }
-        }
-
-        // Cross axis alignment (align-items)
-        if (is_row) {
-            // Cross axis is vertical
-            switch (align_items) {
-                case CSS_VALUE_CENTER:
-                    text_y = container_content_y + (container_content_height - text_height) / 2;
-                    break;
-                case CSS_VALUE_FLEX_END:
-                    text_y = container_content_y + container_content_height - text_height;
-                    break;
-                case CSS_VALUE_FLEX_START:
-                case CSS_VALUE_STRETCH:
-                default:
-                    text_y = container_content_y;
-                    break;
-            }
-        } else {
-            // Cross axis is horizontal
-            switch (align_items) {
-                case CSS_VALUE_CENTER:
-                    text_x = container_content_x + (container_content_width - text_width) / 2;
-                    break;
-                case CSS_VALUE_FLEX_END:
-                    text_x = container_content_x + container_content_width - text_width;
-                    break;
-                case CSS_VALUE_FLEX_START:
-                case CSS_VALUE_STRETCH:
-                default:
-                    text_x = container_content_x;
-                    break;
-            }
-        }
-
-        log_debug("FLEX TEXT: calculated position: x=%.1f, y=%.1f", text_x, text_y);
-
-        // Set the line context to the calculated position
-        lycon->line.advance_x = text_x;
-        lycon->line.left = text_x;
-        lycon->line.right = text_x + text_width;
-        lycon->block.advance_y = text_y;
-        lycon->line.is_line_start = true;
-
-        // Now lay out the text at the calculated position
-        text_child = flex_container->first_child;
-        while (text_child) {
-            if (text_child->is_text()) {
-                const char* text = (const char*)text_child->text_data();
-                if (text && !is_only_whitespace(text)) {
+                    float text_width = widths.max_content;
+                    float text_height = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                    
+                    log_debug("FLEX TEXT: measured text '%.30s' size: %.1f x %.1f", text, text_width, text_height);
+                    
+                    // Find the preceding sibling element to determine text position
+                    // The text should be positioned after all preceding element flex items
+                    float text_x = container_content_x;
+                    float text_y = container_content_y;
+                    
+                    // Look for the last preceding sibling element
+                    DomNode* prev_sib = text_child->prev_sibling;
+                    ViewElement* prev_elem = nullptr;
+                    while (prev_sib) {
+                        if (prev_sib->is_element()) {
+                            prev_elem = (ViewElement*)prev_sib->as_element();
+                            if (prev_elem && prev_elem->view_type != RDT_VIEW_NONE) {
+                                break;  // Found the preceding element
+                            }
+                        }
+                        prev_sib = prev_sib->prev_sibling;
+                    }
+                    
+                    if (prev_elem && is_row) {
+                        // Position text after the preceding element in row direction
+                        // Account for the element's margin-right if it has one
+                        float prev_margin_right = 0;
+                        if (prev_elem->bound) {
+                            prev_margin_right = prev_elem->bound->margin.right;
+                        }
+                        text_x = prev_elem->x + prev_elem->width + prev_margin_right + flex_gap;
+                        log_debug("FLEX TEXT: positioning after prev_elem at x=%.1f + w=%.1f + margin=%.1f + gap=%.1f = %.1f",
+                                  prev_elem->x, prev_elem->width, prev_margin_right, flex_gap, text_x);
+                    } else if (prev_elem && !is_row) {
+                        // Position text after the preceding element in column direction
+                        float prev_margin_bottom = 0;
+                        if (prev_elem->bound) {
+                            prev_margin_bottom = prev_elem->bound->margin.bottom;
+                        }
+                        text_y = prev_elem->y + prev_elem->height + prev_margin_bottom + flex_gap;
+                        log_debug("FLEX TEXT: positioning after prev_elem at y=%.1f + h=%.1f + margin=%.1f + gap=%.1f = %.1f",
+                                  prev_elem->y, prev_elem->height, prev_margin_bottom, flex_gap, text_y);
+                    }
+                    
+                    // Apply cross-axis alignment (align-items)
+                    if (is_row) {
+                        // Cross axis is vertical
+                        switch (align_items) {
+                            case CSS_VALUE_CENTER:
+                                text_y = container_content_y + (container_content_height - text_height) / 2;
+                                break;
+                            case CSS_VALUE_FLEX_END:
+                                text_y = container_content_y + container_content_height - text_height;
+                                break;
+                            case CSS_VALUE_FLEX_START:
+                            case CSS_VALUE_STRETCH:
+                            default:
+                                text_y = container_content_y;
+                                break;
+                        }
+                    } else {
+                        // Cross axis is horizontal
+                        switch (align_items) {
+                            case CSS_VALUE_CENTER:
+                                text_x = container_content_x + (container_content_width - text_width) / 2;
+                                break;
+                            case CSS_VALUE_FLEX_END:
+                                text_x = container_content_x + container_content_width - text_width;
+                                break;
+                            case CSS_VALUE_FLEX_START:
+                            case CSS_VALUE_STRETCH:
+                            default:
+                                text_x = container_content_x;
+                                break;
+                        }
+                    }
+                    
+                    log_debug("FLEX TEXT: final position: x=%.1f, y=%.1f", text_x, text_y);
+                    
+                    // Set up line context for this text at the calculated position
+                    lycon->line.left = text_x;
+                    lycon->line.right = text_x + text_width;
+                    lycon->line.advance_x = text_x;
+                    lycon->block.advance_y = text_y;
+                    lycon->block.max_width = text_width;
+                    lycon->line.is_line_start = true;
+                    
+                    // Layout the text at the calculated position
                     log_debug("FLEX TEXT: laying out text '%s' at (%.1f, %.1f)", 
-                              text, lycon->line.advance_x, lycon->block.advance_y);
+                              text, text_x, text_y);
                     layout_flow_node(lycon, text_child);
+                    
+                    // Finalize any pending inline content
+                    if (!lycon->line.is_line_start) {
+                        line_break(lycon);
+                    }
                 }
             }
             text_child = text_child->next_sibling;
         }
+    }
 
-        // Finalize any pending inline content
-        if (!lycon->line.is_line_start) {
-            line_break(lycon);
+    // For column flex, we need to track height changes to shift subsequent items
+    // Create a map of original heights before content layout
+    float original_heights[256] = {0};  // Max 256 flex items
+    int item_index = 0;
+    if (flex && !is_main_axis_horizontal(flex)) {
+        View* pre_item = flex_container->first_child;
+        while (pre_item && item_index < 256) {
+            if (pre_item->view_type == RDT_VIEW_BLOCK || pre_item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                pre_item->view_type == RDT_VIEW_LIST_ITEM) {
+                ViewElement* flex_item = (ViewElement*)pre_item;
+                if (flex_item->fi || (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+                    original_heights[item_index++] = flex_item->height;
+                }
+            }
+            pre_item = pre_item->next();
         }
     }
 
@@ -1131,6 +1171,62 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             layout_flex_item_content(lycon, flex_item);
         }
         child = child->next();
+    }
+
+    // CRITICAL: Adjust positions of items after content layout for column flex
+    // Some items may have had their heights updated based on actual content
+    // (e.g., items containing nested flex with wrap). We need to shift subsequent
+    // items down to prevent overlap, while preserving justify-content positioning.
+    if (flex && !is_main_axis_horizontal(flex)) {
+        log_debug("COLUMN ADJUST: Checking for height changes after content layout");
+        
+        // Track cumulative height difference from expanded items
+        float y_shift = 0;
+        int adj_index = 0;
+        
+        View* item = flex_container->first_child;
+        while (item && adj_index < 256) {
+            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                item->view_type == RDT_VIEW_LIST_ITEM) {
+                ViewElement* flex_item = (ViewElement*)item;
+                
+                // Only process flex items (has fi or form)
+                if (flex_item->fi || (flex_item->item_prop_type == DomElement::ITEM_PROP_FORM && flex_item->form)) {
+                    
+                    // Apply accumulated shift from previous expanded items
+                    if (y_shift > 0.5f) {
+                        float old_y = flex_item->y;
+                        flex_item->y += y_shift;
+                        log_debug("COLUMN ADJUST: item %s y: %.1f -> %.1f (shift=%.1f)",
+                                  flex_item->node_name(), old_y, flex_item->y, y_shift);
+                    }
+                    
+                    // Check if this item's height changed from original
+                    float original_height = original_heights[adj_index];
+                    float new_height = flex_item->height;
+                    if (new_height > original_height + 0.5f) {
+                        float height_diff = new_height - original_height;
+                        log_debug("COLUMN ADJUST: item %s height diff %.1f (%.1f -> %.1f)",
+                                  flex_item->node_name(), height_diff, original_height, new_height);
+                        y_shift += height_diff;
+                    }
+                    
+                    adj_index++;
+                }
+            }
+            item = item->next();
+        }
+        
+        // Update container height if needed (for auto-height containers)
+        if (y_shift > 0.5f) {
+            bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height > 0);
+            if (!has_explicit_height) {
+                float new_height = flex_container->height + y_shift;
+                log_debug("COLUMN ADJUST: container height: %.1f -> %.1f (shift=%.1f)",
+                          flex_container->height, new_height, y_shift);
+                flex_container->height = new_height;
+            }
+        }
     }
 
     log_info("FINAL FLEX CONTENT LAYOUT END: container=%p", flex_container);
