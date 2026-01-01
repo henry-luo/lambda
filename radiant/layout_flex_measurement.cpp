@@ -559,6 +559,33 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             // The intrinsic_width may not be set because buttons go through normal layout flow
             if (elem->form->control_type == FORM_CONTROL_BUTTON &&
                 elem->form->intrinsic_width <= 0 && elem->first_child) {
+                // Get text-transform from parent element chain
+                CssEnum btn_text_transform = CSS_VALUE_NONE;
+                DomNode* tt_node = elem;
+                while (tt_node) {
+                    if (tt_node->is_element()) {
+                        DomElement* tt_elem = tt_node->as_element();
+                        ViewBlock* tt_view = (ViewBlock*)tt_elem;
+                        if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                            tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
+                            btn_text_transform = tt_view->blk->text_transform;
+                            break;
+                        }
+                        if (tt_elem->specified_style) {
+                            CssDeclaration* decl = style_tree_get_declaration(
+                                tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                            if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum val = decl->value->data.keyword;
+                                if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                                    btn_text_transform = val;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    tt_node = tt_node->parent;
+                }
+
                 // Measure text content of button
                 DomNode* btn_child = elem->first_child;
                 float max_text_width = 0;
@@ -567,7 +594,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         const char* text = (const char*)btn_child->text_data();
                         if (text && *text) {
                             size_t len = strlen(text);
-                            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len);
+                            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len, btn_text_transform);
                             if (widths.max_content > max_text_width) {
                                 max_text_width = widths.max_content;
                             }
@@ -989,8 +1016,36 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                               text, normalized_buffer, ws);
                 }
                 
+                // Get text-transform from parent element (text inherits from parent)
+                // Look up parent chain since text-transform is inherited
+                CssEnum text_transform = CSS_VALUE_NONE;
+                DomNode* tt_node = item;
+                while (tt_node) {
+                    if (tt_node->is_element()) {
+                        DomElement* tt_elem = tt_node->as_element();
+                        ViewBlock* tt_view = (ViewBlock*)tt_elem;
+                        if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                            tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
+                            text_transform = tt_view->blk->text_transform;
+                            break;
+                        }
+                        if (tt_elem->specified_style) {
+                            CssDeclaration* decl = style_tree_get_declaration(
+                                tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                            if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum val = decl->value->data.keyword;
+                                if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                                    text_transform = val;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    tt_node = tt_node->parent;
+                }
+                
                 // Use accurate FreeType-based measurement
-                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len);
+                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                 min_width = widths.min_content;
                 max_width = widths.max_content;
                 // BUGFIX: Use line height instead of font size for text height
@@ -1116,7 +1171,34 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                     measure_text = normalized_buffer2;
                                 }
                                 
-                                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len);
+                                // Get text-transform from parent element chain
+                                CssEnum text_transform = CSS_VALUE_NONE;
+                                DomNode* tt_node = item;
+                                while (tt_node) {
+                                    if (tt_node->is_element()) {
+                                        DomElement* tt_elem = tt_node->as_element();
+                                        ViewBlock* tt_view = (ViewBlock*)tt_elem;
+                                        if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                                            tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
+                                            text_transform = tt_view->blk->text_transform;
+                                            break;
+                                        }
+                                        if (tt_elem->specified_style) {
+                                            CssDeclaration* decl = style_tree_get_declaration(
+                                                tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                                            if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                                CssEnum val = decl->value->data.keyword;
+                                                if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                                                    text_transform = val;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    tt_node = tt_node->parent;
+                                }
+                                
+                                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                                 text_min_width = widths.min_content;
                                 text_max_width = widths.max_content;
                                 // BUGFIX: Use line height instead of font size for text height
@@ -1423,7 +1505,33 @@ float layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool con
             const char* text = (const char*)child->text_data();
             if (text && lycon) {
                 size_t len = strlen(text);
-                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len);
+                // Get text-transform from parent element chain
+                CssEnum text_transform = CSS_VALUE_NONE;
+                DomNode* tt_node = block;
+                while (tt_node) {
+                    if (tt_node->is_element()) {
+                        DomElement* tt_elem = tt_node->as_element();
+                        ViewBlock* tt_view = (ViewBlock*)tt_elem;
+                        if (tt_view->blk && tt_view->blk->text_transform != 0 &&
+                            tt_view->blk->text_transform != CSS_VALUE_INHERIT) {
+                            text_transform = tt_view->blk->text_transform;
+                            break;
+                        }
+                        if (tt_elem->specified_style) {
+                            CssDeclaration* decl = style_tree_get_declaration(
+                                tt_elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                            if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum val = decl->value->data.keyword;
+                                if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                                    text_transform = val;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    tt_node = tt_node->parent;
+                }
+                TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, len, text_transform);
                 if (constrain_width) {
                     // Min-content: use longest word width
                     max_width = fmaxf(max_width, widths.min_content);
