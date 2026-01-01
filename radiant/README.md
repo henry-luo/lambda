@@ -1,159 +1,90 @@
 # Radiant
 
-Radiant is a native HTML/CSS/SVG renderer built from scratch in C, designed as a sub-project of the Lambda runtime. It provides a complete rendering engine for web content without relying on existing browser engines.
+Radiant is Lambda’s HTML/CSS/SVG layout and rendering subsystem.
+
+It is built from scratch in C/C++ and compiled into `lambda.exe` by default, providing:
+- browser-style layout (block/inline, flexbox, grid, table)
+- render targets (SVG/PDF/PNG/JPEG)
+- an interactive viewer that can open multiple document formats.
 
 ## Overview
 
-Radiant implements a full-featured rendering pipeline that can parse HTML documents, apply CSS styling, layout content using modern CSS features including Flexbox, and render the final output with hardware-accelerated graphics.
+Radiant takes a DOM-like tree with computed styles, performs layout in CSS pixels (with pixel-ratio aware rendering), and produces a view tree that can be rendered to a window or exported to files.
+
+Within this repo, Radiant is the engine behind the Lambda CLI commands:
+- `lambda.exe layout` (layout analysis)
+- `lambda.exe render` (render to SVG/PDF/PNG/JPEG)
+- `lambda.exe view` (interactive viewer).
 
 ## Key Features
 
-### HTML/CSS Support
-- **HTML Parsing**: Built on the Lexbor HTML parser for fast and compliant HTML document processing
-- **CSS Engine**: Full CSS parsing and style resolution using Lexbor CSS
-- **DOM Tree**: Complete Document Object Model implementation for HTML elements
+### Layout engine
+- **Block/inline formatting contexts** with text measurement and line breaking.
+- **Flexbox** multipass algorithm and baseline handling.
+- **CSS Grid** track sizing + item placement.
+- **Tables** with table structure building and cell layout.
 
-### Layout Engine
-- **Block Layout**: Traditional block-level element layout with margin collapsing
-- **Inline Layout**: Text flow with proper line breaking and vertical alignment
-- **Flexbox Layout**: CSS Flexbox implementation with:
-  - Flex direction (row, column, reverse variants)
-  - Flex wrapping and line distribution
-  - Justify content (start, end, center, space-between, space-around, space-evenly)
-  - Align items and align content
-  - Flex grow/shrink calculations
-  - Order property support
-  - Percentage-based flex basis
+### Styling + computed values
+- **CSS cascade and computed style resolution** (including unit resolution and inheritance).
+- **Pixel ratio support**: CSS pixels are resolved to physical pixels for accurate HiDPI output.
 
-### Text Rendering
-- **Font Management**: FontConfig integration for system font discovery
-- **Typography**: FreeType integration for high-quality text rendering
-- **Text Layout**: Advanced text positioning with baseline alignment
-- **Font Styling**: Support for font families, sizes, weights, and styles
+### Rendering + export
+- **SVG export** via `render_html_to_svg()`.
+- **PDF export** via `render_html_to_pdf()`.
+- **Raster export** via `render_html_to_png()` / `render_html_to_jpeg()`.
+- **Interactive window viewer** (scrolling, input events) via `view_doc_in_window()`.
 
-### Graphics and Media
-- **SVG Rendering**: ThorVG integration for scalable vector graphics
-- **Image Support**: STB_image for loading PNG, JPEG, and other bitmap formats
-- **Hardware Acceleration**: OpenGL-based rendering through GLFW
-- **Color Management**: Full RGBA color support with alpha blending
+### Multi-format viewing (via Lambda)
+The viewer supports a broader set of document types through Lambda’s parsing/conversion pipeline, including:
+- HTML (`.html`, `.htm`)
+- XML (`.xml`, treated as HTML)
+- Markdown (`.md`, `.markdown`)
+- Wiki (`.wiki`)
+- LaTeX (`.tex`, converted to HTML)
+- PDF (`.pdf`)
+- Lambda script output (`.ls`, evaluated and rendered).
 
-### Interactive Features
-- **Event System**: Mouse and keyboard event handling
-- **Scrolling**: Custom scrollbar implementation with overflow management
-- **UI State**: Cursor tracking, selection, and interaction state management
+## Using Radiant (recommended)
 
-## Architecture
+Build once, then use the Lambda CLI:
 
-### Core Components
+```bash
+make build
 
-#### Document Model (`dom.h`)
-- `Document`: Container for parsed HTML with DOM tree and view tree
-- URL parsing and resolution for resource loading
-- Document lifecycle management
-
-#### View System (`view.h`)
-- `View`: Base class for all renderable elements
-- `ViewText`: Text content rendering
-- `ViewSpan`: Inline element containers
-- `ViewBlock`: Block-level element containers
-- `ViewGroup`: Container for child views
-
-#### Layout Engine (`layout.c`, `layout_*.c`)
-- `LayoutContext`: Layout computation state
-- Font metrics and text measurement
-- Block flow layout algorithms
-- Flexbox layout implementation in `layout_flex.c`
-
-#### Rendering Pipeline (`render.c`)
-- `RenderContext`: Rendering state and clipping
-- Glyph rasterization and text drawing
-- Background and border rendering
-- SVG and image compositing
-
-#### Memory Management
-- Custom memory pools for efficient allocation
-- View tree recycling and cleanup
-- Image caching system
-
-### Dependencies
-
-- **Lexbor**: HTML/CSS parsing and DOM manipulation
-- **FreeType**: Font rasterization and text metrics
-- **FontConfig**: System font discovery and matching
-- **ThorVG**: SVG rendering and vector graphics
-- **GLFW**: Window management and OpenGL context
-- **STB**: Image loading (stb_image)
-- **zlog**: Logging system
-
-## File Structure
-
-```
-radiant/
-├── dom.h              # Document and DOM definitions
-├── view.h             # View system and rendering structures
-├── layout.h           # Layout engine interface
-├── render.h           # Rendering context and functions
-├── flex.h             # Flexbox layout definitions
-├── event.h            # Event system definitions
-├── handler.h          # Event handling interface
-│
-├── parse_html.c       # HTML document parsing
-├── layout.c           # Main layout algorithms
-├── layout_block.c     # Block layout implementation
-├── layout_flex.c      # Flexbox layout engine
-├── layout_flex_nodes.c # Flex node management
-├── layout_text.c      # Text layout and line breaking
-├── render.c           # Main rendering pipeline
-├── resolve_style.c    # CSS style resolution
-├── surface.c          # Image loading and caching
-├── window.c           # Window management and main loop
-├── ui_context.c       # UI state management
-├── view_pool.c        # Memory pool for views
-├── font.c             # Font loading and metrics
-├── event.c            # Event processing
-└── scroller.c         # Scrollbar implementation
+./lambda.exe view test/html/index.html
+./lambda.exe layout test/html/index.html
+./lambda.exe render test/html/index.html -o out.svg
+./lambda.exe render test/html/index.html -o out.pdf
+./lambda.exe render test/html/index.html -o out.png
 ```
 
-## Usage
+See `./lambda.exe <command> --help` for detailed options.
 
-The main entry points are:
+## Developer entry points
 
-1. **Document Loading**: `load_html_doc()` to parse HTML files
-2. **Layout**: `layout_html_doc()` to compute element positions
-3. **Rendering**: `render_html_doc()` to draw the final output
+If you’re working inside the C/C++ codebase, the key functions are:
+- `layout_html_doc()` — performs layout and builds the view tree
+- `render_html_doc()` — renders a laid-out view tree
+- `render_html_to_svg()` / `render_html_to_pdf()` / `render_html_to_png()` / `render_html_to_jpeg()` — headless exports
+- `view_doc_in_window()` — interactive viewer window
 
-The rendering pipeline follows these steps:
-1. Parse HTML document into DOM tree
-2. Resolve CSS styles for all elements
-3. Build view tree from styled DOM
-4. Perform layout calculations (block, inline, flex)
-5. Render views to graphics surface
-6. Handle user interaction events
+## File map (current)
 
-## Performance Features
+Radiant’s implementation in this repo lives under `radiant/`:
 
-- **Memory Pools**: Efficient allocation for temporary layout data
-- **View Recycling**: Reuse view objects during reflows
-- **Image Caching**: Cache decoded images to avoid repeated loading
-- **Clipping**: Optimize rendering by skipping out-of-bounds content
-- **Hardware Acceleration**: Use GPU for final compositing
+- `view.hpp` — view tree types and core rendering structs
+- `layout*.cpp`, `intrinsic_sizing*.{cpp,hpp}` — layout algorithms (block/inline/flex/grid/table)
+- `resolve_css_style.cpp` — cascade + computed style resolution
+- `render*.cpp` — rendering backends (SVG/PDF/raster)
+- `window.cpp`, `event.cpp` — interactive viewer and input handling
+- `pdf/` — PDF parsing/rendering helpers
 
-## CSS Support Status
+## Dependencies (high level)
 
-### Implemented
-- Box model (margin, padding, border)
-- Display properties (block, inline, inline-block, flex)
-- Positioning (static, absolute)
-- Flexbox (complete implementation)
-- Text styling (fonts, colors, alignment)
-- Background colors and images
-- List styling
-- Overflow and scrolling
+Radiant relies on a small set of native libraries (installed via the repo’s setup scripts):
+- **GLFW** (window + OpenGL context)
+- **FreeType** (font metrics and text measurement)
+- **FontConfig** (font discovery/matching)
+- **ThorVG** (vector drawing, including SVG-related rendering paths)
 
-### In Development
-- CSS Grid layout
-- Transforms and animations
-- Advanced selectors
-- Media queries
-
-Radiant represents a modern approach to web content rendering, built for performance and extensibility while maintaining standards compliance.
+For the broader “open many formats” story, the Lambda side provides parsing/conversion.
