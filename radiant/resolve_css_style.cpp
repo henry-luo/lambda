@@ -6371,6 +6371,51 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
        case CSS_PROPERTY_BACKGROUND: {
             // background shorthand can set background-color, background-image, etc.
+            
+            // Handle multiple background layers (comma-separated list)
+            // CSS stacks backgrounds bottom-to-top, so last item is base layer
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 1) {
+                log_debug("[Lambda CSS Background] Multiple background layers: %d", value->data.list.count);
+                CssValue** layers = value->data.list.values;
+                int count = value->data.list.count;
+                
+                // First, look for a solid color in the last layer (base background)
+                CssValue* last_layer = layers[count - 1];
+                if (last_layer) {
+                    if (last_layer->type == CSS_VALUE_TYPE_COLOR ||
+                        last_layer->type == CSS_VALUE_TYPE_KEYWORD ||
+                        (last_layer->type == CSS_VALUE_TYPE_FUNCTION && last_layer->data.function &&
+                         last_layer->data.function->name &&
+                         (strcasecmp(last_layer->data.function->name, "rgb") == 0 ||
+                          strcasecmp(last_layer->data.function->name, "rgba") == 0))) {
+                        // Set base background color
+                        if (!span->bound) {
+                            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                        }
+                        if (!span->bound->background) {
+                            span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                        }
+                        span->bound->background->color = resolve_color_value(lycon, last_layer);
+                        log_debug("[Lambda CSS Background] Base layer color: #%02x%02x%02x%02x",
+                            span->bound->background->color.r, span->bound->background->color.g,
+                            span->bound->background->color.b, span->bound->background->color.a);
+                    }
+                }
+                
+                // Then process the first gradient layer (topmost visible gradient)
+                CssValue* first_layer = layers[0];
+                if (first_layer && first_layer->type == CSS_VALUE_TYPE_FUNCTION &&
+                    first_layer->data.function && first_layer->data.function->name) {
+                    // Recursively process the first gradient
+                    CssDeclaration gradient_decl = *decl;
+                    gradient_decl.value = first_layer;
+                    log_debug("[Lambda CSS Background] Processing first layer gradient: %s",
+                        first_layer->data.function->name);
+                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                }
+                return;
+            }
+            
             // simple case: single color value (e.g., "background: green;")
             if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssDeclaration color_decl = *decl;
@@ -6581,10 +6626,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             
                             for (int i = 0; i < count; i++) {
                                 if (!items[i]) continue;
+                                log_debug("[CSS Radial] list item %d: type=%d", i, items[i]->type);
+                                
+                                // Get keyword name from keyword or custom type
+                                const char* kw_name = nullptr;
                                 if (items[i]->type == CSS_VALUE_TYPE_KEYWORD) {
                                     const CssEnumInfo* kw_info = css_enum_info(items[i]->data.keyword);
-                                    const char* kw_name = kw_info ? kw_info->name : nullptr;
-                                    if (!kw_name) continue;
+                                    kw_name = kw_info ? kw_info->name : nullptr;
+                                } else if (items[i]->type == CSS_VALUE_TYPE_CUSTOM) {
+                                    kw_name = items[i]->data.custom_property.name;
+                                }
+                                
+                                if (kw_name) {
+                                    log_debug("[CSS Radial] keyword: %s, at_idx=%d", kw_name, at_idx);
                                     
                                     if (strcmp(kw_name, "circle") == 0) {
                                         rg->shape = RADIAL_SHAPE_CIRCLE;
@@ -6769,18 +6823,26 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         CssValue* arg = func->args[i];
                         if (!arg) continue;
 
+                        log_debug("[CSS Conic] arg %d type=%d", i, arg->type);
+
                         if (arg->type == CSS_VALUE_TYPE_COLOR) {
                             cg->stops[stop_idx].color = resolve_color_value(lycon, arg);
                             cg->stops[stop_idx].position = -1;
+                            log_debug("[CSS Conic] stop %d: color #%02x%02x%02x", stop_idx,
+                                cg->stops[stop_idx].color.r, cg->stops[stop_idx].color.g, cg->stops[stop_idx].color.b);
                             stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_FUNCTION) {
                             cg->stops[stop_idx].color = resolve_color_value(lycon, arg);
                             cg->stops[stop_idx].position = -1;
+                            log_debug("[CSS Conic] stop %d (func): color #%02x%02x%02x", stop_idx,
+                                cg->stops[stop_idx].color.r, cg->stops[stop_idx].color.g, cg->stops[stop_idx].color.b);
                             stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
                             Color c = resolve_color_value(lycon, arg);
                             cg->stops[stop_idx].color = c;
                             cg->stops[stop_idx].position = -1;
+                            log_debug("[CSS Conic] stop %d (kw): color #%02x%02x%02x", stop_idx,
+                                cg->stops[stop_idx].color.r, cg->stops[stop_idx].color.g, cg->stops[stop_idx].color.b);
                             stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
                             CssValue** items = arg->data.list.values;
@@ -6796,7 +6858,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     cg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
                                 }
                             }
+                            log_debug("[CSS Conic] stop %d (list): color #%02x%02x%02x", stop_idx,
+                                cg->stops[stop_idx].color.r, cg->stops[stop_idx].color.g, cg->stops[stop_idx].color.b);
                             stop_idx++;
+                        } else {
+                            log_debug("[CSS Conic] arg %d: unhandled type %d", i, arg->type);
                         }
                     }
                     cg->stop_count = stop_idx;
