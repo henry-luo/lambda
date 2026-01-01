@@ -483,6 +483,39 @@ typedef struct {
     int stop_count;
 } LinearGradient;
 
+// Radial gradient shape
+typedef enum {
+    RADIAL_SHAPE_ELLIPSE = 0,
+    RADIAL_SHAPE_CIRCLE
+} RadialShape;
+
+// Radial gradient size keyword
+typedef enum {
+    RADIAL_SIZE_FARTHEST_CORNER = 0,  // default
+    RADIAL_SIZE_CLOSEST_SIDE,
+    RADIAL_SIZE_CLOSEST_CORNER,
+    RADIAL_SIZE_FARTHEST_SIDE
+} RadialSize;
+
+// Radial gradient data
+typedef struct {
+    RadialShape shape;     // circle or ellipse
+    RadialSize size;       // size keyword
+    float cx, cy;          // center position (0.0-1.0 relative to box, default 0.5,0.5)
+    bool cx_set, cy_set;   // whether center was explicitly set
+    GradientStop* stops;   // array of color stops
+    int stop_count;
+} RadialGradient;
+
+// Conic gradient data
+typedef struct {
+    float from_angle;      // starting angle in degrees (default 0)
+    float cx, cy;          // center position (0.0-1.0 relative to box, default 0.5,0.5)
+    bool cx_set, cy_set;   // whether center was explicitly set
+    GradientStop* stops;   // array of color stops
+    int stop_count;
+} ConicGradient;
+
 typedef struct {
     Color color; // background color
     char* image; // background image path
@@ -491,6 +524,8 @@ typedef struct {
     // Gradient support
     GradientType gradient_type;
     LinearGradient* linear_gradient;
+    RadialGradient* radial_gradient;
+    ConicGradient* conic_gradient;
 } BackgroundProp;
 
 typedef struct BoundaryProp {
