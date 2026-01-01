@@ -42,8 +42,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 current_word = 0.0f;
                 total_width += 4.0f;  // Space width estimate
             } else {
-                current_word += 8.0f;
-                total_width += 8.0f;
+                current_word += 11.0f;  // Use 11.0 to match font fallback width
+                total_width += 11.0f;
             }
         }
         longest_word = fmax(longest_word, current_word);
@@ -118,9 +118,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         uint32_t codepoint;
         int bytes = utf8_to_codepoint(&str[i], &codepoint);
         if (bytes <= 0) {
-            // Invalid UTF-8, skip byte
-            current_word += 8.0f;
-            total_width += 8.0f;
+            // Invalid UTF-8, skip byte - use 11.0 to match font fallback
+            current_word += 11.0f;
+            total_width += 11.0f;
             prev_glyph = 0;
             i++;
             is_word_start = false;
@@ -136,9 +136,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // Get glyph index for the (possibly transformed) codepoint
         FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, codepoint);
         if (!glyph_index) {
-            // Unknown character, use fallback width
-            current_word += 8.0f;
-            total_width += 8.0f;
+            // Unknown character - use fallback width that matches font fallback behavior
+            // Font fallback typically uses a different font with different metrics.
+            // Use 11.0 to match common fallback font widths (e.g., PingFang SC for CJK/symbols)
+            current_word += 11.0f;
+            total_width += 11.0f;
             prev_glyph = 0;
             i += bytes;
             continue;
@@ -169,9 +171,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             current_word += advance;
             total_width += advance;
         } else {
-            // Fallback if glyph load fails
-            current_word += 8.0f;
-            total_width += 8.0f;
+            // Fallback if glyph load fails - use 11.0 to match font fallback
+            current_word += 11.0f;
+            total_width += 11.0f;
         }
 
         prev_glyph = glyph_index;
@@ -219,6 +221,49 @@ static bool is_inline_level_element(DomElement* element) {
                 display_value == CSS_VALUE_INLINE_TABLE) {
                 return true;
             }
+            // Explicit block display
+            if (display_value == CSS_VALUE_BLOCK || 
+                display_value == CSS_VALUE_FLEX ||
+                display_value == CSS_VALUE_GRID ||
+                display_value == CSS_VALUE_TABLE) {
+                return false;
+            }
+        }
+    }
+    
+    // Fall back to HTML default display for common inline elements
+    // These elements are inline by default in HTML
+    const char* tag = element->node_name();
+    if (tag) {
+        if (strcmp(tag, "a") == 0 ||
+            strcmp(tag, "span") == 0 ||
+            strcmp(tag, "em") == 0 ||
+            strcmp(tag, "strong") == 0 ||
+            strcmp(tag, "b") == 0 ||
+            strcmp(tag, "i") == 0 ||
+            strcmp(tag, "u") == 0 ||
+            strcmp(tag, "s") == 0 ||
+            strcmp(tag, "small") == 0 ||
+            strcmp(tag, "big") == 0 ||
+            strcmp(tag, "sub") == 0 ||
+            strcmp(tag, "sup") == 0 ||
+            strcmp(tag, "code") == 0 ||
+            strcmp(tag, "kbd") == 0 ||
+            strcmp(tag, "samp") == 0 ||
+            strcmp(tag, "var") == 0 ||
+            strcmp(tag, "cite") == 0 ||
+            strcmp(tag, "abbr") == 0 ||
+            strcmp(tag, "acronym") == 0 ||
+            strcmp(tag, "dfn") == 0 ||
+            strcmp(tag, "q") == 0 ||
+            strcmp(tag, "time") == 0 ||
+            strcmp(tag, "mark") == 0 ||
+            strcmp(tag, "label") == 0 ||
+            strcmp(tag, "button") == 0 ||
+            strcmp(tag, "input") == 0 ||
+            strcmp(tag, "select") == 0 ||
+            strcmp(tag, "textarea") == 0) {
+            return true;
         }
     }
     return false;
@@ -448,8 +493,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // Track inline-level content separately
-    int inline_min_sum = 0;  // Sum of min-content widths for inline children
-    int inline_max_sum = 0;  // Sum of max-content widths for inline children
+    float inline_min_sum = 0.0f;  // Sum of min-content widths for inline children
+    float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
     bool has_inline_content = false;
 
     // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
@@ -613,7 +658,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // This matches CSS white-space: normal behavior
                 char normalized_buffer[2048];
                 size_t out_pos = 0;
-                bool in_whitespace = true;  // Start as if preceded by whitespace (trims leading)
+                // Only trim leading whitespace if this is the first child or preceded only by whitespace.
+                // If there's inline content before this text node, leading whitespace should
+                // collapse to a single space (which contributes to intrinsic width).
+                bool has_inline_before = (child->prev_sibling != nullptr && 
+                                          has_inline_content && 
+                                          inline_max_sum > 0);
+                bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
                 for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
                     unsigned char ch = (unsigned char)text[i];
                     if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
@@ -626,9 +677,36 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         in_whitespace = false;
                     }
                 }
-                // Trim trailing whitespace
-                while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
-                    out_pos--;
+                // Only trim trailing whitespace if there's no inline content after this text node.
+                // Trailing whitespace before an inline sibling (like <a>) should be preserved
+                // as it contributes to the inter-word spacing.
+                bool has_inline_after = false;
+                if (child->next_sibling) {
+                    DomNode* next = child->next_sibling;
+                    // Skip whitespace-only text nodes
+                    while (next && next->is_text()) {
+                        const char* next_text = (const char*)next->text_data();
+                        bool all_ws = true;
+                        if (next_text) {
+                            for (const char* p = next_text; *p && all_ws; p++) {
+                                unsigned char c = (unsigned char)*p;
+                                if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
+                                    all_ws = false;
+                                }
+                            }
+                        }
+                        if (!all_ws) break;
+                        next = next->next_sibling;
+                    }
+                    if (next && next->is_element()) {
+                        has_inline_after = is_inline_level_element(next->as_element());
+                    }
+                }
+                if (!has_inline_after) {
+                    // Trim trailing whitespace
+                    while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
+                        out_pos--;
+                    }
                 }
                 normalized_buffer[out_pos] = '\0';
 
@@ -724,7 +802,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     if (has_inline_content) {
         sizes.min_content = max(sizes.min_content, inline_min_sum);
         sizes.max_content = max(sizes.max_content, inline_max_sum);
-        log_debug("  inline_max_sum=%d, inline_min_sum=%d", inline_max_sum, inline_min_sum);
+        log_debug("  inline_max_sum=%.1f, inline_min_sum=%.1f", inline_max_sum, inline_min_sum);
     }
 
     // Add padding and border
