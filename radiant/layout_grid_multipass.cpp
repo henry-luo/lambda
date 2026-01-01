@@ -607,8 +607,15 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     }
 
     // Update grid item content dimensions
+    // Note: max_width and advance_y are relative to the content box
+    // We need to add padding for the full content dimensions
     grid_item->content_width = lycon->block.max_width;
-    grid_item->content_height = lycon->block.advance_y;
+    if (grid_item->bound) {
+        grid_item->content_width += grid_item->bound->padding.right;
+        grid_item->content_height = lycon->block.advance_y + grid_item->bound->padding.bottom;
+    } else {
+        grid_item->content_height = lycon->block.advance_y;
+    }
 
     // Restore parent context
     lycon->block = pa_block;
