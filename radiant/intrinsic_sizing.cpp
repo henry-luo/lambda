@@ -9,6 +9,7 @@
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
 #include "../lib/log.h"
+#include "../lib/utf.h"     // For utf8_to_codepoint
 #include <cmath>
 #include <cstring>
 
@@ -18,7 +19,8 @@
 
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
-                                                   size_t length) {
+                                                   size_t length,
+                                                   CssEnum text_transform) {
     TextIntrinsicWidths result = {0, 0};
 
     if (!text || length == 0) {
@@ -58,8 +60,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     FT_UInt prev_glyph = 0;
     bool has_kerning = FT_HAS_KERNING(lycon->font.ft_face);
     const unsigned char* str = (const unsigned char*)text;
+    bool is_word_start = true;  // for text-transform: capitalize
 
-    for (size_t i = 0; i < length; i++) {
+    for (size_t i = 0; i < length; ) {
         unsigned char ch = str[i];
 
         // Check for zero-width space (U+200B) - UTF-8 encoding: 0xE2 0x80 0x8B
@@ -69,7 +72,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
             prev_glyph = 0;
-            i += 2;  // Skip remaining bytes of zero-width space
+            i += 3;  // Skip all bytes of zero-width space
+            is_word_start = true;  // Next character starts a new word
             continue;
         }
 
@@ -105,16 +109,38 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
             // Keep tracking glyph for kerning continuity (layout_text.cpp doesn't reset)
             prev_glyph = space_glyph;
+            is_word_start = true;  // Next character starts a new word
+            i++;
             continue;
         }
 
-        // Get glyph index
-        FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, ch);
+        // Decode UTF-8 codepoint
+        uint32_t codepoint;
+        int bytes = utf8_to_codepoint(&str[i], &codepoint);
+        if (bytes <= 0) {
+            // Invalid UTF-8, skip byte
+            current_word += 8.0f;
+            total_width += 8.0f;
+            prev_glyph = 0;
+            i++;
+            is_word_start = false;
+            continue;
+        }
+
+        // Apply text-transform if specified
+        if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
+            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+        }
+        is_word_start = false;  // No longer at word start after first character
+
+        // Get glyph index for the (possibly transformed) codepoint
+        FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, codepoint);
         if (!glyph_index) {
             // Unknown character, use fallback width
             current_word += 8.0f;
             total_width += 8.0f;
             prev_glyph = 0;
+            i += bytes;
             continue;
         }
 
@@ -136,7 +162,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
             // Apply letter-spacing (CSS spec: applied between characters, not after last)
             // Check if there are more characters after this one
-            if (i + 1 < length && lycon->font.style) {
+            if (i + bytes < length && lycon->font.style) {
                 advance += lycon->font.style->letter_spacing;
             }
 
@@ -149,6 +175,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
 
         prev_glyph = glyph_index;
+        i += bytes;  // Advance by the number of bytes consumed
     }
 
     // Don't forget the last word
@@ -157,8 +184,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     result.min_content = longest_word;   // Keep float precision
     result.max_content = total_width;    // Keep float precision
 
-    log_debug("measure_text_intrinsic_widths: len=%zu, min=%.2f, max=%.2f",
-              length, result.min_content, result.max_content);
+    log_debug("measure_text_intrinsic_widths: len=%zu, min=%.2f, max=%.2f, text_transform=%d",
+              length, result.min_content, result.max_content, (int)text_transform);
 
     return result;
 }
@@ -195,6 +222,36 @@ static bool is_inline_level_element(DomElement* element) {
         }
     }
     return false;
+}
+
+// Helper to get text-transform property from an element, traversing parent chain
+// since text-transform is an inherited property
+static CssEnum get_element_text_transform(DomElement* element) {
+    DomNode* node = element;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            // First check resolved blk property
+            ViewBlock* view = (ViewBlock*)elem;
+            if (view->blk && view->blk->text_transform != 0 && 
+                view->blk->text_transform != CSS_VALUE_INHERIT) {
+                return view->blk->text_transform;
+            }
+            // Fall back to specified_style
+            if (elem->specified_style) {
+                CssDeclaration* decl = style_tree_get_declaration(
+                    elem->specified_style, CSS_PROPERTY_TEXT_TRANSFORM);
+                if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum val = decl->value->data.keyword;
+                    if (val != CSS_VALUE_INHERIT && val != CSS_VALUE_NONE) {
+                        return val;
+                    }
+                }
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NONE;
 }
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element) {
@@ -580,8 +637,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     continue;
                 }
 
+                // Get text-transform from parent element (text inherits from parent)
+                CssEnum text_transform = get_element_text_transform(element);
+                
                 TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
-                    lycon, normalized_buffer, out_pos);
+                    lycon, normalized_buffer, out_pos, text_transform);
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
                 
@@ -754,8 +814,13 @@ float calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
     if (node->is_text()) {
         const char* text = (const char*)node->text_data();
         if (text) {
+            // Get text-transform from parent element (text inherits from parent)
+            CssEnum text_transform = CSS_VALUE_NONE;
+            if (node->parent && node->parent->is_element()) {
+                text_transform = get_element_text_transform(node->parent->as_element());
+            }
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, text, strlen(text));
+                lycon, text, strlen(text), text_transform);
             return widths.min_content;
         }
         return 0;
@@ -776,8 +841,13 @@ float calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
     if (node->is_text()) {
         const char* text = (const char*)node->text_data();
         if (text) {
+            // Get text-transform from parent element (text inherits from parent)
+            CssEnum text_transform = CSS_VALUE_NONE;
+            if (node->parent && node->parent->is_element()) {
+                text_transform = get_element_text_transform(node->parent->as_element());
+            }
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, text, strlen(text));
+                lycon, text, strlen(text), text_transform);
             return widths.max_content;
         }
         return 0;
@@ -826,8 +896,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         // Estimate how many lines the text will take based on available width
         if (width > 0) {
             size_t text_len = strlen(text);
+            // Get text-transform from parent element (text inherits from parent)
+            CssEnum text_transform = CSS_VALUE_NONE;
+            if (node->parent && node->parent->is_element()) {
+                text_transform = get_element_text_transform(node->parent->as_element());
+            }
             // Measure text width using intrinsic sizing
-            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len);
+            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len, text_transform);
             float text_width = widths.max_content;
             
             // Calculate number of lines (rounded up)
