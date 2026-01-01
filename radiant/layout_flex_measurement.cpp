@@ -1040,7 +1040,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // For row flex containers, the cached height from measure_flex_child_content might be incorrect
         // because it sums child heights instead of taking the max
         bool is_row_flex_container = false;
-        if (item->view_type == RDT_VIEW_BLOCK) {
+        // Check both block and inline-block view types for flex detection
+        if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block_view = (ViewBlock*)item;
             if (block_view->embed && block_view->embed->flex) {
                 int dir = block_view->embed->flex->direction;
@@ -1132,9 +1133,25 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 text_min_width = text_max_width;  // Fallback: same as max
                                 text_height = 20.0f;
                             }
-                            min_child_width = max(min_child_width, text_min_width);
-                            max_child_width = max(max_child_width, text_max_width);
-                            total_child_height += text_height;
+                            
+                            // CRITICAL FIX: For row flex containers, text nodes should be summed
+                            // into total_child_width just like element children. Previously text
+                            // was only MAX'd which caused incorrect intrinsic width calculation
+                            // for inline-flex containers with both text and element children.
+                            if (is_row_flex_container) {
+                                total_child_width += text_max_width;  // Row flex: sum for max-content
+                                child_count++;  // Count text as a child for gap calculation
+                            } else {
+                                min_child_width = max(min_child_width, text_min_width);
+                                max_child_width = max(max_child_width, text_max_width);
+                            }
+                            
+                            // For height, row flex takes max, column flex sums
+                            if (is_row_flex_container) {
+                                total_child_height = max(total_child_height, text_height);
+                            } else {
+                                total_child_height += text_height;
+                            }
                         }
                     }
                 } else if (c->is_element()) {
@@ -1264,7 +1281,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             if (is_row_flex_container && child_count > 1) {
                 // Get gap from the flex container properties
                 float gap = 0;
-                if (item->view_type == RDT_VIEW_BLOCK) {
+                if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
                     ViewBlock* block_view = (ViewBlock*)item;
                     if (block_view->embed && block_view->embed->flex) {
                         gap = block_view->embed->flex->column_gap;

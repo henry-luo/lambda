@@ -437,9 +437,12 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     float actual_height = item->height;
     if (align != CSS_VALUE_STRETCH && !has_explicit_height) {
         // Use content height if it was computed in Pass 3
-        if (item->content_height > 0 && item->content_height < available_height) {
+        // Content height should be used regardless of whether it's smaller or larger
+        // than available height - the item should size to its content for non-stretch alignment
+        if (item->content_height > 0) {
             actual_height = item->content_height;
             item->height = actual_height;
+            log_debug("align_grid_item: using content_height=%.1f for non-stretch alignment", item->content_height);
         }
     }
 

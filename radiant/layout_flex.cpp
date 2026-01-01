@@ -363,6 +363,15 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                           (float)content_width);
             }
         }
+        
+        // CRITICAL FIX: If this container already has a width set by a parent flex algorithm,
+        // treat it as definite. This prevents nested flex containers from overriding the
+        // width that was calculated by the parent's flex item sizing.
+        if (!has_definite_width && container->width > 0) {
+            has_definite_width = true;
+            log_debug("init_flex_container: using width set by parent (%.1f)",
+                      container->width);
+        }
 
         flex->main_axis_is_indefinite = !has_definite_width;
     } else {
@@ -3694,8 +3703,12 @@ void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex
 
 
     if (is_main_axis_horizontal(flex_layout)) {
+        log_debug("set_main_axis_size: item=%p (%s), width %.1f -> %.1f", 
+                  item, item->node_name(), item->width, size);
         item->width = size;
     } else {
+        log_debug("set_main_axis_size: item=%p (%s), height %.1f -> %.1f", 
+                  item, item->node_name(), item->height, size);
         item->height = size;
     }
 }

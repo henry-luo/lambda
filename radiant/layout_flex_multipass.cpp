@@ -1137,6 +1137,87 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             }
             text_child = text_child->next_sibling;
         }
+        
+        // CRITICAL FIX: After positioning text nodes, we need to shift element flex items
+        // that come AFTER text nodes in DOM order. The flex algorithm positioned them
+        // without accounting for preceding text.
+        // 
+        // Example: <span class="pill">transform<code>./lambda.exe ...</code></span>
+        // The text "transform" is now at x=13, width=50.3
+        // The code element was positioned at x=13 by flex algorithm (wrong!)
+        // We need to shift it to x=13+50.3+gap = properly after the text
+        
+        log_debug("FLEX TEXT SHIFT: Checking for elements after text nodes in flex container %s", 
+                  flex_container->node_name());
+        
+        // Track cumulative text width/height as we go through children in DOM order
+        float cumulative_text_offset = 0;
+        DomNode* child = flex_container->first_child;
+        while (child) {
+            if (child->is_text()) {
+                const char* text = (const char*)child->text_data();
+                if (text && !is_only_whitespace(text)) {
+                    // CSS inline layout collapses whitespace: leading/trailing stripped,
+                    // internal runs collapsed to single space. We need to measure the
+                    // collapsed text, not the raw text with all whitespace.
+                    
+                    // Trim leading whitespace
+                    const char* trimmed = text;
+                    while (*trimmed && (*trimmed == ' ' || *trimmed == '\t' || 
+                           *trimmed == '\n' || *trimmed == '\r')) {
+                        trimmed++;
+                    }
+                    
+                    // Find end of trimmed text (excluding trailing whitespace)
+                    size_t trimmed_len = strlen(trimmed);
+                    while (trimmed_len > 0 && (trimmed[trimmed_len-1] == ' ' || 
+                           trimmed[trimmed_len-1] == '\t' || trimmed[trimmed_len-1] == '\n' || 
+                           trimmed[trimmed_len-1] == '\r')) {
+                        trimmed_len--;
+                    }
+                    
+                    if (trimmed_len > 0) {
+                        // Measure the trimmed text width/height
+                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, trimmed, trimmed_len);
+                        float text_size = is_row ? widths.max_content : (lycon->font.style ? lycon->font.style->font_size : 16.0f);
+                        
+                        // Add text size plus gap (if there's a following element)
+                        cumulative_text_offset += text_size;
+                        
+                        // Check if next sibling is an element - if so, add gap
+                        DomNode* next = child->next_sibling;
+                        while (next && !next->is_element()) {
+                            next = next->next_sibling;
+                        }
+                        if (next && next->is_element()) {
+                            cumulative_text_offset += flex_gap;
+                        }
+                        
+                        log_debug("FLEX TEXT SHIFT: Found trimmed text '%.30s...' size=%.1f, cumulative_offset=%.1f", 
+                                  trimmed, text_size, cumulative_text_offset);
+                    }
+                }
+            } else if (child->is_element() && cumulative_text_offset > 0) {
+                // This element comes after text - shift it
+                ViewElement* elem = (ViewElement*)child->as_element();
+                if (elem && elem->view_type != RDT_VIEW_NONE) {
+                    if (is_row) {
+                        float old_x = elem->x;
+                        elem->x += cumulative_text_offset;
+                        log_debug("FLEX TEXT SHIFT: Shifted element %s from x=%.1f to x=%.1f (offset=%.1f)", 
+                                  elem->node_name(), old_x, elem->x, cumulative_text_offset);
+                    } else {
+                        float old_y = elem->y;
+                        elem->y += cumulative_text_offset;
+                        log_debug("FLEX TEXT SHIFT: Shifted element %s from y=%.1f to y=%.1f (offset=%.1f)", 
+                                  elem->node_name(), old_y, elem->y, cumulative_text_offset);
+                    }
+                }
+                // After shifting an element, the text offset continues to affect subsequent elements
+                // but we should also add this element's size for any following text positioning
+            }
+            child = child->next_sibling;
+        }
     }
 
     // For column flex, we need to track height changes to shift subsequent items
