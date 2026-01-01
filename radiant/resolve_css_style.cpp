@@ -6469,11 +6469,28 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             log_debug("[CSS Gradient] stop %d: color #%02x%02x%02x", stop_idx,
                                 lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
                             stop_idx++;
+                        } else if (arg->type == CSS_VALUE_TYPE_FUNCTION) {
+                            // Color function like rgb(), rgba(), hsl(), etc.
+                            lg->stops[stop_idx].color = resolve_color_value(lycon, arg);
+                            lg->stops[stop_idx].position = -1;
+                            log_debug("[CSS Gradient] stop %d (func): color #%02x%02x%02x", stop_idx,
+                                lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
+                            stop_idx++;
+                        } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
+                            // Color keyword like red, blue, transparent
+                            lg->stops[stop_idx].color = resolve_color_value(lycon, arg);
+                            lg->stops[stop_idx].position = -1;
+                            log_debug("[CSS Gradient] stop %d (kw): color #%02x%02x%02x", stop_idx,
+                                lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
+                            stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
                             // Color stop with position: [color, position]
                             CssValue** items = arg->data.list.values;
-                            if (items[0] && items[0]->type == CSS_VALUE_TYPE_COLOR) {
-                                lg->stops[stop_idx].color = resolve_color_value(lycon, items[0]);
+                            CssValue* color_val = items[0];
+                            if (color_val && (color_val->type == CSS_VALUE_TYPE_COLOR ||
+                                              color_val->type == CSS_VALUE_TYPE_FUNCTION ||
+                                              color_val->type == CSS_VALUE_TYPE_KEYWORD)) {
+                                lg->stops[stop_idx].color = resolve_color_value(lycon, color_val);
                                 lg->stops[stop_idx].position = -1;  // default auto
 
                                 // Parse position if present
@@ -6508,66 +6525,293 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         lg->stop_count, lg->angle);
                     return;
                 }
-                // Handle radial-gradient and conic-gradient - extract first color as fallback
+                // Handle radial-gradient
                 else if (strcmp(func_name, "radial-gradient") == 0 ||
-                         strcmp(func_name, "repeating-radial-gradient") == 0 ||
-                         strcmp(func_name, "conic-gradient") == 0 ||
-                         strcmp(func_name, "repeating-conic-gradient") == 0) {
-                    // For now, extract first color stop as solid background color fallback
-                    // TODO: Implement proper radial/conic gradient rendering
+                         strcmp(func_name, "repeating-radial-gradient") == 0) {
+                    // Parse radial-gradient(shape size at position, color-stops...)
                     if (!span->bound) {
                         span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
                     }
                     if (!span->bound->background) {
                         span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
                     }
-                    
-                    // Find first color in arguments
+                    span->bound->background->gradient_type = GRADIENT_RADIAL;
+
+                    // Allocate RadialGradient
+                    RadialGradient* rg = (RadialGradient*)alloc_prop(lycon, sizeof(RadialGradient));
+                    span->bound->background->radial_gradient = rg;
+
+                    // Defaults
+                    rg->shape = RADIAL_SHAPE_ELLIPSE;
+                    rg->size = RADIAL_SIZE_FARTHEST_CORNER;
+                    rg->cx = 0.5f;
+                    rg->cy = 0.5f;
+                    rg->cx_set = false;
+                    rg->cy_set = false;
+
                     CssFunction* func = value->data.function;
-                    Color fallback_color = {.r = 0, .g = 0, .b = 0, .a = 255};  // default black
-                    bool found_color = false;
-                    
-                    for (int i = 0; i < func->arg_count && !found_color; i++) {
+                    int arg_idx = 0;
+
+                    // Parse shape/size/position from first argument
+                    // Format can be: "circle", "circle at top", "circle at top left", etc.
+                    if (func->arg_count > 0 && func->args[0]) {
+                        CssValue* first_arg = func->args[0];
+                        
+                        // Check for keyword indicating shape/position
+                        if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
+                            CssEnum kw = first_arg->data.keyword;
+                            const CssEnumInfo* info = css_enum_info(kw);
+                            const char* kw_name = info ? info->name : nullptr;
+                            if (kw_name) {
+                                if (strcmp(kw_name, "circle") == 0) {
+                                    rg->shape = RADIAL_SHAPE_CIRCLE;
+                                    arg_idx = 1;
+                                } else if (strcmp(kw_name, "ellipse") == 0) {
+                                    rg->shape = RADIAL_SHAPE_ELLIPSE;
+                                    arg_idx = 1;
+                                }
+                            }
+                            log_debug("[CSS Radial] First arg keyword: shape=%d", rg->shape);
+                        }
+                        // Check for list containing shape and position keywords
+                        else if (first_arg->type == CSS_VALUE_TYPE_LIST) {
+                            CssValue** items = first_arg->data.list.values;
+                            int count = first_arg->data.list.count;
+                            int at_idx = -1;
+                            
+                            for (int i = 0; i < count; i++) {
+                                if (!items[i]) continue;
+                                if (items[i]->type == CSS_VALUE_TYPE_KEYWORD) {
+                                    const CssEnumInfo* kw_info = css_enum_info(items[i]->data.keyword);
+                                    const char* kw_name = kw_info ? kw_info->name : nullptr;
+                                    if (!kw_name) continue;
+                                    
+                                    if (strcmp(kw_name, "circle") == 0) {
+                                        rg->shape = RADIAL_SHAPE_CIRCLE;
+                                    } else if (strcmp(kw_name, "ellipse") == 0) {
+                                        rg->shape = RADIAL_SHAPE_ELLIPSE;
+                                    } else if (strcmp(kw_name, "at") == 0) {
+                                        at_idx = i;
+                                    } else if (at_idx >= 0) {
+                                        // Position keyword after "at"
+                                        if (strcmp(kw_name, "top") == 0) {
+                                            rg->cy = 0.0f; rg->cy_set = true;
+                                        } else if (strcmp(kw_name, "bottom") == 0) {
+                                            rg->cy = 1.0f; rg->cy_set = true;
+                                        } else if (strcmp(kw_name, "left") == 0) {
+                                            rg->cx = 0.0f; rg->cx_set = true;
+                                        } else if (strcmp(kw_name, "right") == 0) {
+                                            rg->cx = 1.0f; rg->cx_set = true;
+                                        } else if (strcmp(kw_name, "center") == 0) {
+                                            // center is default, do nothing special
+                                        }
+                                    }
+                                }
+                            }
+                            arg_idx = 1;
+                            log_debug("[CSS Radial] Parsed list: shape=%d, center=(%.2f, %.2f)",
+                                rg->shape, rg->cx, rg->cy);
+                        }
+                    }
+
+                    // Count color stops
+                    int color_count = func->arg_count - arg_idx;
+                    rg->stop_count = color_count > 0 ? color_count : 2;
+                    rg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * rg->stop_count);
+
+                    // Parse color stops (same logic as linear gradient)
+                    int stop_idx = 0;
+                    for (int i = arg_idx; i < func->arg_count && stop_idx < rg->stop_count; i++) {
                         CssValue* arg = func->args[i];
                         if (!arg) continue;
-                        
+
                         if (arg->type == CSS_VALUE_TYPE_COLOR) {
-                            fallback_color = resolve_color_value(lycon, arg);
-                            found_color = true;
-                        } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
-                            // Try to parse as color keyword
-                            CssEnum kw = arg->data.keyword;
-                            Color potential_color = color_name_to_rgb(kw);
-                            // Only use if it resolved to a non-transparent color
-                            if (potential_color.c != 0) {
-                                fallback_color = potential_color;
-                                found_color = true;
-                            }
+                            rg->stops[stop_idx].color = resolve_color_value(lycon, arg);
+                            rg->stops[stop_idx].position = -1;
+                            stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_FUNCTION) {
-                            // Color function like rgb(), rgba()
-                            fallback_color = resolve_color_value(lycon, arg);
-                            if (fallback_color.a > 0) {
-                                found_color = true;
-                            }
+                            rg->stops[stop_idx].color = resolve_color_value(lycon, arg);
+                            rg->stops[stop_idx].position = -1;
+                            stop_idx++;
+                        } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
+                            // Color keyword like "transparent"
+                            Color c = resolve_color_value(lycon, arg);
+                            rg->stops[stop_idx].color = c;
+                            rg->stops[stop_idx].position = -1;
+                            stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
-                            // Color stop list - check first item
-                            CssValue* first = arg->data.list.values[0];
-                            if (first && (first->type == CSS_VALUE_TYPE_COLOR || 
-                                          first->type == CSS_VALUE_TYPE_FUNCTION ||
-                                          first->type == CSS_VALUE_TYPE_KEYWORD)) {
-                                fallback_color = resolve_color_value(lycon, first);
-                                found_color = true;
+                            CssValue** items = arg->data.list.values;
+                            Color c = resolve_color_value(lycon, items[0]);
+                            rg->stops[stop_idx].color = c;
+                            rg->stops[stop_idx].position = -1;
+
+                            if (arg->data.list.count >= 2 && items[1]) {
+                                CssValue* pos_val = items[1];
+                                if (pos_val->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                    rg->stops[stop_idx].position = pos_val->data.percentage.value / 100.0f;
+                                } else if (pos_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                    rg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
+                                }
+                            }
+                            stop_idx++;
+                        }
+                    }
+                    rg->stop_count = stop_idx;
+
+                    // Auto-distribute positions
+                    if (rg->stop_count > 0) {
+                        for (int i = 0; i < rg->stop_count; i++) {
+                            if (rg->stops[i].position < 0) {
+                                rg->stops[i].position = (float)i / (float)(rg->stop_count - 1);
                             }
                         }
                     }
-                    
-                    if (found_color) {
-                        span->bound->background->color = fallback_color;
-                        log_debug("[Lambda CSS Shorthand] %s fallback to solid color #%02x%02x%02x%02x",
-                            func_name, fallback_color.r, fallback_color.g, fallback_color.b, fallback_color.a);
-                    } else {
-                        log_debug("[Lambda CSS Shorthand] %s: no color found, using transparent", func_name);
+
+                    log_debug("[Lambda CSS Shorthand] Parsed radial-gradient with %d stops, shape=%d, center=(%.2f,%.2f)",
+                        rg->stop_count, rg->shape, rg->cx, rg->cy);
+                    return;
+                }
+                // Handle conic-gradient
+                else if (strcmp(func_name, "conic-gradient") == 0 ||
+                         strcmp(func_name, "repeating-conic-gradient") == 0) {
+                    // Parse conic-gradient(from angle at position, color-stops...)
+                    if (!span->bound) {
+                        span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
                     }
+                    if (!span->bound->background) {
+                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                    }
+                    span->bound->background->gradient_type = GRADIENT_CONIC;
+
+                    // Allocate ConicGradient
+                    ConicGradient* cg = (ConicGradient*)alloc_prop(lycon, sizeof(ConicGradient));
+                    span->bound->background->conic_gradient = cg;
+
+                    // Defaults
+                    cg->from_angle = 0.0f;
+                    cg->cx = 0.5f;
+                    cg->cy = 0.5f;
+                    cg->cx_set = false;
+                    cg->cy_set = false;
+
+                    CssFunction* func = value->data.function;
+                    int arg_idx = 0;
+
+                    // Parse "from Xdeg" from first argument
+                    log_debug("[CSS Conic] func has %d args", func->arg_count);
+                    if (func->arg_count > 0 && func->args[0]) {
+                        CssValue* first_arg = func->args[0];
+                        log_debug("[CSS Conic] first_arg type=%d", first_arg->type);
+                        
+                        if (first_arg->type == CSS_VALUE_TYPE_LIST) {
+                            CssValue** items = first_arg->data.list.values;
+                            int count = first_arg->data.list.count;
+                            log_debug("[CSS Conic] first_arg is list with %d items", count);
+                            
+                            for (int i = 0; i < count; i++) {
+                                if (!items[i]) continue;
+                                log_debug("[CSS Conic] list item %d: type=%d", i, items[i]->type);
+                                
+                                // Check for "from" keyword (may be keyword or custom type with name)
+                                bool is_from_keyword = false;
+                                if (items[i]->type == CSS_VALUE_TYPE_KEYWORD) {
+                                    const CssEnumInfo* kw_info = css_enum_info(items[i]->data.keyword);
+                                    const char* kw_name = kw_info ? kw_info->name : nullptr;
+                                    log_debug("[CSS Conic] keyword: %s", kw_name ? kw_name : "(null)");
+                                    is_from_keyword = (kw_name && strcmp(kw_name, "from") == 0);
+                                } else if (items[i]->type == CSS_VALUE_TYPE_CUSTOM) {
+                                    const char* custom_name = items[i]->data.custom_property.name;
+                                    log_debug("[CSS Conic] custom property: %s", custom_name ? custom_name : "(null)");
+                                    is_from_keyword = (custom_name && strcmp(custom_name, "from") == 0);
+                                }
+                                
+                                if (is_from_keyword) {
+                                    // Next item should be angle
+                                    if (i + 1 < count && items[i + 1]) {
+                                        CssValue* angle_val = items[i + 1];
+                                        log_debug("[CSS Conic] next item type=%d", angle_val->type);
+                                        if (angle_val->type == CSS_VALUE_TYPE_ANGLE) {
+                                            cg->from_angle = angle_val->data.length.value;
+                                            log_debug("[CSS Conic] from angle (ANGLE)=%.1f", cg->from_angle);
+                                        } else if (angle_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                            cg->from_angle = angle_val->data.number.value;
+                                            log_debug("[CSS Conic] from angle (NUMBER)=%.1f", cg->from_angle);
+                                        } else if (angle_val->type == CSS_VALUE_TYPE_LENGTH) {
+                                            cg->from_angle = angle_val->data.length.value;
+                                            log_debug("[CSS Conic] from angle (LENGTH)=%.1f", cg->from_angle);
+                                        }
+                                        i++; // Skip the angle value
+                                    }
+                                } else if (items[i]->type == CSS_VALUE_TYPE_ANGLE) {
+                                    cg->from_angle = items[i]->data.length.value;
+                                    log_debug("[CSS Conic] direct angle=%.1f", cg->from_angle);
+                                } else if (items[i]->type == CSS_VALUE_TYPE_LENGTH) {
+                                    // Angle stored as length with deg unit
+                                    cg->from_angle = items[i]->data.length.value;
+                                    log_debug("[CSS Conic] angle from length=%.1f", cg->from_angle);
+                                }
+                            }
+                            arg_idx = 1;
+                        } else if (first_arg->type == CSS_VALUE_TYPE_ANGLE) {
+                            cg->from_angle = first_arg->data.length.value;
+                            arg_idx = 1;
+                        }
+                        log_debug("[CSS Conic] from_angle=%.1f", cg->from_angle);
+                    }
+
+                    // Count and parse color stops
+                    int color_count = func->arg_count - arg_idx;
+                    cg->stop_count = color_count > 0 ? color_count : 2;
+                    cg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * cg->stop_count);
+
+                    int stop_idx = 0;
+                    for (int i = arg_idx; i < func->arg_count && stop_idx < cg->stop_count; i++) {
+                        CssValue* arg = func->args[i];
+                        if (!arg) continue;
+
+                        if (arg->type == CSS_VALUE_TYPE_COLOR) {
+                            cg->stops[stop_idx].color = resolve_color_value(lycon, arg);
+                            cg->stops[stop_idx].position = -1;
+                            stop_idx++;
+                        } else if (arg->type == CSS_VALUE_TYPE_FUNCTION) {
+                            cg->stops[stop_idx].color = resolve_color_value(lycon, arg);
+                            cg->stops[stop_idx].position = -1;
+                            stop_idx++;
+                        } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
+                            Color c = resolve_color_value(lycon, arg);
+                            cg->stops[stop_idx].color = c;
+                            cg->stops[stop_idx].position = -1;
+                            stop_idx++;
+                        } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
+                            CssValue** items = arg->data.list.values;
+                            Color c = resolve_color_value(lycon, items[0]);
+                            cg->stops[stop_idx].color = c;
+                            cg->stops[stop_idx].position = -1;
+
+                            if (arg->data.list.count >= 2 && items[1]) {
+                                CssValue* pos_val = items[1];
+                                if (pos_val->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                    cg->stops[stop_idx].position = pos_val->data.percentage.value / 100.0f;
+                                } else if (pos_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                    cg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
+                                }
+                            }
+                            stop_idx++;
+                        }
+                    }
+                    cg->stop_count = stop_idx;
+
+                    // Auto-distribute positions (for conic, positions are angles 0-1 mapping to 0-360deg)
+                    if (cg->stop_count > 0) {
+                        for (int i = 0; i < cg->stop_count; i++) {
+                            if (cg->stops[i].position < 0) {
+                                cg->stops[i].position = (float)i / (float)(cg->stop_count - 1);
+                            }
+                        }
+                    }
+
+                    log_debug("[Lambda CSS Shorthand] Parsed conic-gradient with %d stops, from=%.1fdeg, center=(%.2f,%.2f)",
+                        cg->stop_count, cg->from_angle, cg->cx, cg->cy);
                     return;
                 }
             }
