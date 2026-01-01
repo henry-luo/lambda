@@ -1,120 +1,130 @@
 # Lambda Script
 
-A general-purpose, cross-platform. pure functional scripting language for data processing and presentation.
+A general-purpose, cross-platform, pure functional scripting language and document processing engine.
 
-The script engine is built from scratch in C, with JIT compilation, and reference counting memory mgt.
+Built from scratch in C/C++ with a custom runtime, Tree-sitter parsing, MIR-based JIT compilation, and reference-counted memory management.
 
-*(Note: this project and the Lambda Script is still in its early stage of development. It's syntax, semantics and implementation may change substantially.  However, a stable subset of it, the literal data format, is separately formalised and released under [Mark Notation](https://github.com/henry-luo/mark).)*
+> Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
+> A stable subset of the literal data model is separately formalised and released as
+> [Mark Notation](https://github.com/henry-luo/mark).
 
 ## Overview
+Lambda is designed for two things at once:
 
-Lambda is a modern scripting language that combines:
-- **Document Processing**: Native support for parsing and transforming various document formats (JSON, XML, HTML, Markdown, PDF, CSV, YAML, TOML, LaTeX, RTF, reStructuredText, INI)
-- **JIT Compilation**: Built on MIR (Medium Internal Representation) for high-performance execution
-- **Memory Pool Management**: memory management with reference counting and custom pooled allocators.
-- **Interactive REPL**: Read-Eval-Print Loop for interactive development
-- **Tree-sitter Integration**: Fast syntax parsing and language prototyping based on Tree-sitter parser generator.
+1) a small, expressive functional language for transforming data and documents, and
+2) an end-to-end document pipeline (parse → normalize → validate/transform → layout → render/view).
+
+Internally, Lambda treats documents as structured data. Different input formats (Markdown, Wiki, HTML/XML, JSON/YAML/TOML/CSV, LaTeX, PDF, …) can be parsed into a unified Lambda/Mark node tree, transformed with Lambda scripts, validated with schemas, and then rendered via the Radiant HTML/CSS/SVG layout engine.
 
 ## Features
 
-### Document Format Support
-- **Input Formats**: JSON, XML, HTML, Markdown, PDF, CSV, YAML, TOML, LaTeX, RTF, RST, INI
-- **Output Formats**: JSON, Markdown, and more
-- **Native Parsing**: Built-in parsers for all supported formats with no external dependencies
+### 1. Lambda script (pure functional runtime)
+- **Pure-functional core** with immutable data structures (lists, maps, elements) and first-class functions.
+- **Interactive REPL** for exploration and debugging.
+- **Fast parsing** with a Tree-sitter based frontend.
+- **Optional MIR JIT** execution path for performance-sensitive workloads.
+- **Reference counting + pooled allocators** for predictable memory behavior.
 
-### Language Features
-- **Modern Syntax**: Clean, expressive syntax inspired by functional programming
-- **Type System**: Strong typing with type inference
-- **Memory Safe**: Advanced memory pool management prevents common memory issues
-- **JIT Performance**: Near-native performance through MIR JIT compilation
-- **Interactive Development**: Full REPL with history and auto-completion
+### 2. Markup input parsing & formatting
+- **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
+- **One universal representation**: parse disparate syntaxes into a common Lambda/Mark node tree.
+- **Conversion pipeline**: convert between formats using `lambda convert` (auto-detect input formats when possible).
+- **Document-centric tooling**: designed to treat “documents as data”, not just as text.
 
-### Technical Architecture
-- **Tree-sitter Parser**: Robust syntax analysis and error recovery
-- **Custom Memory Pools**: Variable-size memory pool with advanced allocation strategies
-- **Cross-platform**: Supports macOS, Linux, and Windows
-- **Comprehensive Testing**: Full test suite with Criterion framework
+### 3. Type system & schema validation
+- **Rich type system** with type inference and explicit type annotations.
+- **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
+- **Format-aware validation** helpers that unwrap/normalize documents before validation.
+- **Detailed error reporting** with paths and expected/actual diagnostics.
+
+### 4. Radiant HTML/CSS/SVG layout, rendering & viewer
+- **Browser-compatible layout engine** supporting block/inline flow, flexbox, grid, and tables.
+- **CSS cascade + computed style resolution**, with pixel-ratio aware sizing.
+- **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.
+- **Unified interactive viewer** via `lambda view`:
+   - HTML / XML (treated as HTML) with CSS styling
+   - Markdown / Wiki (rendered with styling)
+   - LaTeX (`.tex`) via conversion to HTML
+   - PDF viewing
+   - Lambda script results (`.ls`) evaluated and rendered
 
 ## Quick Start
 
 ### Prerequisites
 
-**macOS:**
+Lambda is built from source. The dependency scripts also install Node.js/npm (used by Tree-sitter generation via `npx`).
+
+**macOS (native build):**
 ```bash
 ./setup-mac-deps.sh
 ```
 
-**Linux (Ubuntu):**
+**Linux (Ubuntu/Debian):**
 ```bash
 ./setup-linux-deps.sh
 ```
 
-**Windows:**
+**Windows (native build under MSYS2):**
 ```bash
 ./setup-windows-deps.sh
 ```
 
 ### Building
 
-**Using Make (Recommended - Premake-based):**
+**Recommended (Premake-based Make targets):**
 ```bash
-make build      # Build using modern Premake system
-make debug      # Debug build with AddressSanitizer
+make build      # Incremental build (default)
+make debug      # Debug build (AddressSanitizer enabled)
 make release    # Optimized release build
 ```
 
-**Legacy shell script method:**
+**More build help:**
 ```bash
-./compile.sh    # Lambda project (direct shell script)
-```
-
-**Radiant sub-project:**
-```bash
-./compile.sh build_radiant_config.json
-```
-
-**Cross-compilation for Windows:**
-```bash
-# Lambda for Windows
-./compile.sh --platform=windows
-```
-
-**Help and options:**
-```bash
-./compile.sh --help
+make help
 ```
 
 ### Running
 
-**Show help (default):**
+The build produces a runnable executable at the repo root: `lambda.exe`.
+
+**Show help:**
 ```bash
-./lambda
+./lambda.exe --help
 ```
 
 **Interactive REPL:**
 ```bash
-./lambda --repl
+./lambda.exe
 ```
 
 **Interactive REPL with MIR JIT:**
 ```bash
-./lambda --repl --mir
+./lambda.exe --mir
 ```
 
 **Run a script:**
 ```bash
-./lambda script.ls
+./lambda.exe script.ls
 ```
 
 **Run a script with MIR JIT:**
 ```bash
-./lambda --mir script.ls
+./lambda.exe --mir script.ls
 ```
 
-**REPL Commands:**
-- `.help` - Show help
-- `.quit` - Exit REPL
-- `.clear` - Clear history
+### CLI Commands
+
+```bash
+./lambda.exe <script.ls>                       # functional script
+./lambda.exe run <script.ls>                   # procedural script
+./lambda.exe validate <file> [-s <schema.ls>]
+./lambda.exe convert <input> [-f <from>] -t <to> -o <output>
+./lambda.exe layout <file.html|file.tex|file.ls> [options]
+./lambda.exe render <input.html|input.tex|input.ls> -o <output.svg|pdf|png|jpg> [options]
+./lambda.exe view [file.pdf|file.html|file.md|file.wiki|file.xml|file.tex|file.ls]
+```
+
+Tip: `./lambda.exe <command> --help` prints detailed options and examples.
 
 ## Installation
 
@@ -130,24 +140,20 @@ make release    # Optimized release build
    ```bash
    # macOS
    ./setup-mac-deps.sh
-   
+
    # Linux
    ./setup-linux-deps.sh
-   
+
    # Windows
    ./setup-windows-deps.sh
    ```
 
 3. **Build:**
    ```bash
-   # Build lambda project
-   ./compile.sh
-   
-   # Cross-compile for Windows
-   ./compile.sh --platform=windows
+   make build
    ```
 
-## Language Examples
+## Examples
 
 ### Document Processing
 ```lambda
@@ -171,97 +177,40 @@ for (row in csv) {
 ["Alice", "Bob", "Charlie"]
 ```
 
-## Architecture
+## Testing
 
-### Core Components
-
-- **Parser**: Tree-sitter based language parser with error recovery
-- **Runtime**: MIR-based JIT compilation engine
-- **Memory Management**: Custom variable-size memory pools
-- **Document Processors**: Native parsers for 13+ document formats
-- **Standard Library**: Rich set of built-in functions for data processing
-
-### Memory Management
-
-Lambda uses advanced memory pool management:
-- **Variable Memory Pools**: Efficient allocation with best-fit algorithms
-- **Reference Counting**: Automatic memory cleanup
-- **Pool Coalescing**: Prevents memory fragmentation
-- **Safety Checks**: Protection against memory corruption
-
-### Performance
-
-- **JIT Compilation**: Near-native performance through MIR
-- **Memory Pools**: Reduced allocation overhead
-- **Optimized Parsing**: Fast document processing
-- **Lazy Evaluation**: Efficient handling of large datasets
+```bash
+make build-test
+make test
+```
 
 ## Build System
 
-Lambda now uses a modern **Premake5-based build system** alongside the legacy shell script approach:
-
-### Modern Build System (Premake)
-- **Premake5**: Cross-platform build configuration generator
-- **Auto-generated**: Makefiles generated from JSON configuration
-- **IDE Integration**: Native support for Visual Studio, Xcode, Code::Blocks
-- **Incremental Builds**: Fast incremental compilation with proper dependency tracking
-
-### Supported Projects
-- **Lambda**: Main scripting language and document processing engine  
-- **Radiant**: GUI framework and rendering engine
-
-### Supported Platforms
-- **Native**: macOS, Linux compilation using system tools
-- **Cross-compilation**: Windows binaries using MinGW-w64
-
-### Configuration
-- **JSON-based**: Single `build_lambda_config.json` configuration source
-- **Platform-specific**: Override settings for different target platforms
-- **Modular**: Automatic library and dependency management
-- **Mixed Language**: Seamless C/C++ compilation with appropriate flags
-
-### Build Commands
-```bash
-make build           # Incremental build (recommended)
-make debug           # Debug build with sanitizers
-make release         # Optimized release build
-make clean-premake   # Clean Premake build artifacts
-make generate-premake # Regenerate Premake configuration
-```
-
-## Testing
-
-Run the comprehensive test suite:
+Lambda uses a Premake5-based build system generated from `build_lambda_config.json`.
 
 ```bash
-cd test
-./test_lib.sh
+make build             # Incremental build (recommended)
+make debug             # Debug build (ASan)
+make release           # Optimized release build
+make clean             # Clean build artifacts
+make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar changes)
 ```
-
-Test coverage is still very limited at the moment.
-
-## Dependencies
-
-### Core Dependencies
-- **MIR**: JIT compilation infrastructure
-- **Tree-sitter**: Syntax parsing
-- **Lexbor**: HTML/XML processing
-- **zlog**: Logging (optional)
-- **GMP**: Arbitrary precision arithmetic
-
-## Platform Support
-
-| Platform | Status | Notes |
-|----------|--------|-------|
-| macOS    | ✅ Full | Native development platform |
-| Linux    | ✅ Full | Ubuntu 20.04+ tested |
-| Windows  | ✅ Cross-compilation | MinGW-w64 toolchain |
 
 ## Documentation
 
-- [Compilation Guide](COMPILATION.md) - Detailed build instructions
-- [Language Reference](docs/language.md) - Todo
-- [Examples](examples/) - Todo
+- Language reference: `doc/Lambda_Reference.md`
+- Validator guide: `doc/Lambda_Validator_Guide.md`
+- Radiant layout design: `doc/Radiant_Layout_Design.md`
+- Mark doc schema (unified node tree): `doc/Doc_Schema.md`
+- Build system details: `Compile.md`
+
+## Platform Support
+
+| Platform | Status | Notes                       |
+| -------- | ------ | --------------------------- |
+| macOS    | ✅ Full | Native development platform |
+| Linux    | ✅ Full | Ubuntu 20.04+ tested        |
+| Windows  | ✅ Full | Native build via MSYS2;     |
 
 ## License
 
@@ -271,11 +220,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **MIR Project**: JIT compilation infrastructure
 - **Tree-sitter**: Incremental parsing framework
-- **Lexbor**: Fast HTML/XML parsing library
-- **Criterion**: C testing framework
+- **ThorVG**: SVG vector graphics library
+- **GoogleTest**: C++ unit testing framework
 
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/henry-luo/lambda/issues)
-
-
