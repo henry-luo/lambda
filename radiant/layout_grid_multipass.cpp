@@ -77,6 +77,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // ========================================================================
     log_info("=== GRID PASS 3: Final content layout ===");
     layout_final_grid_content(lycon, lycon->grid_container);
+    
+    // Re-align items after content is laid out (now items have final heights)
+    // This is needed for align-items: center/end to work correctly
+    align_grid_items(lycon->grid_container);
     log_info("=== GRID PASS 3 COMPLETE ===");
 
     // ========================================================================
@@ -291,22 +295,27 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
                 measure_grid_item_intrinsic(lycon, item, &min_width, &max_width,
                                             &min_height, &max_height);
 
-                // Store measurements in the item for later use
+                // Store only WIDTH measurements in the item for later use
+                // HEIGHT measurements are intentionally NOT stored here because:
+                // - Heights depend on the actual column width (after column sizing)
+                // - Row sizing will calculate heights on-demand using item->width
+                // This follows CSS Grid spec §11.5 where row sizing happens after column sizing
                 if (item->gi) {
                     item->gi->measured_min_width = min_width;
                     item->gi->measured_max_width = max_width;
-                    item->gi->measured_min_height = min_height;
-                    item->gi->measured_max_height = max_height;
-                    item->gi->has_measured_size = true;
-                    log_debug("Stored measurements for %s (gi=%p): min_h=%.1f, max_h=%.1f",
+                    // Note: We don't set measured_min/max_height here.
+                    // The calculate_grid_item_intrinsic_sizes function will compute
+                    // heights on-demand using the actual column width.
+                    item->gi->has_measured_size = true;  // Indicates width measurements are valid
+                    log_debug("Stored width measurements for %s (gi=%p): min_w=%.1f, max_w=%.1f",
                               child->node_name(), item->gi, 
-                              item->gi->measured_min_height, item->gi->measured_max_height);
+                              item->gi->measured_min_width, item->gi->measured_max_width);
                 } else {
                     log_debug("WARN: No gi for %s to store measurements", child->node_name());
                 }
 
-                log_debug("Grid item %s measured: min_w=%d, max_w=%d, min_h=%d, max_h=%d",
-                          child->node_name(), min_width, max_width, min_height, max_height);
+                log_debug("Grid item %s measured: min_w=%d, max_w=%d",
+                          child->node_name(), min_width, max_width);
             }
         }
         child = child->next_sibling;
@@ -369,24 +378,28 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     }
 
     if (!has_explicit_height) {
-        // Height depends on width for proper text wrapping
-        // Use min-content width as the constraining width for height calculation
-        // This gives a more realistic height estimate for intrinsic sizing
-        // (CSS Sizing Level 3 uses min-content for min-height, max-content for max-height)
-        float width_for_min_height = (float)*min_width;
-        float width_for_max_height = (float)*max_width;
+        // Height calculation for grid items:
+        // - For min-content height: use max-content width (content flows without wrapping)
+        // - For max-content height: same as min-content for block containers
+        // 
+        // Note: Counter-intuitively, using max-content WIDTH gives MINIMUM height
+        // because text doesn't wrap. Using min-content width causes wrapping = taller.
+        //
+        // CSS Sizing Level 3 says: For block containers, min-content height == max-content height
+        // Both should be calculated at max-content width (no forced wrapping).
+        //
+        // The actual grid track sizing will use max-content height for auto rows.
+        float width_for_height = (float)*max_width;
         
-        // For max-content height, use a reasonable width constraint
-        // Grid items will typically be constrained to their column width
-        // Use the smaller of max_width and a reasonable estimate
-        if (width_for_max_height > 600) {
-            width_for_max_height = 600;  // Reasonable column width estimate
+        // Cap to a reasonable maximum to avoid extremely long single-line text
+        if (width_for_height > 2000) {
+            width_for_height = 2000;
         }
         
-        float min_h = calculate_min_content_height(lycon, (DomNode*)item, width_for_min_height);
-        float max_h = calculate_max_content_height(lycon, (DomNode*)item, width_for_max_height);
-        *min_height = (int)(min_h + 0.5f);
-        *max_height = (int)(max_h + 0.5f);
+        // For block containers, min-content height == max-content height
+        float content_height = calculate_max_content_height(lycon, (DomNode*)item, width_for_height);
+        *min_height = (int)(content_height + 0.5f);
+        *max_height = (int)(content_height + 0.5f);
     }
 
     // Ensure minimum sizes (prevent 0-sized items)

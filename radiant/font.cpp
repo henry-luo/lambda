@@ -32,6 +32,15 @@ static const char** resolve_generic_family(const char* family) {
     };
     static const char* cursive_fonts[] = {"Comic Sans MS", "Apple Chancery", NULL};
     static const char* fantasy_fonts[] = {"Impact", "Papyrus", NULL};
+    // Modern CSS generic families (CSS Fonts Level 4)
+    // ui-monospace: platform's default monospace UI font
+    static const char* ui_monospace_fonts[] = {
+        "SF Mono", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", NULL
+    };
+    // system-ui: platform's default system UI font
+    static const char* system_ui_fonts[] = {
+        "SF Pro Display", "SF Pro", ".AppleSystemUIFont", "Segoe UI", "Roboto", "Liberation Sans", "Arial", NULL
+    };
 
     if (!family) return NULL;
 
@@ -40,6 +49,12 @@ static const char** resolve_generic_family(const char* family) {
     if (strcmp(family, "monospace") == 0) return monospace_fonts;
     if (strcmp(family, "cursive") == 0) return cursive_fonts;
     if (strcmp(family, "fantasy") == 0) return fantasy_fonts;
+    // Modern CSS Fonts Level 4 generic families
+    if (strcmp(family, "ui-monospace") == 0) return ui_monospace_fonts;
+    if (strcmp(family, "system-ui") == 0) return system_ui_fonts;
+    if (strcmp(family, "ui-serif") == 0) return serif_fonts;
+    if (strcmp(family, "ui-sans-serif") == 0) return sans_serif_fonts;
+    if (strcmp(family, "ui-rounded") == 0) return sans_serif_fonts;
 
     // Cross-platform font aliases (map Windows/Mac fonts to Linux equivalents)
     // These are not generic families but common specific fonts that need cross-platform mapping
