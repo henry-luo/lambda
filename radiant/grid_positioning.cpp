@@ -263,11 +263,11 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
                i, item->x, item->y, item->width, item->height, (void*)item);
 
         log_debug(" Grid item %d positioning:\n", i);
-        printf("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
-        printf("  Track positions: x=%d, y=%d\n", item_x, item_y);
-        printf("  Track sizes: width=%d, height=%d\n", item_width, item_height);
-        printf("  Container: offset=(%d,%d)\n", container_offset_x, container_offset_y);
-        printf("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
+        log_debug("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
+        log_debug("  Track positions: x=%d, y=%d\n", item_x, item_y);
+        log_debug("  Track sizes: width=%d, height=%d\n", item_width, item_height);
+        log_debug("  Container: offset=(%d,%d)\n", container_offset_x, container_offset_y);
+        log_debug("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
                item->x, item->y, item->width, item->height);
 
         log_debug("Positioned grid item %d: pos=(%d,%d), size=%dx%d, grid_area=(%d-%d, %d-%d)\n",

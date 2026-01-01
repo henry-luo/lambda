@@ -158,17 +158,17 @@ int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value,
 
 // Enhanced grid template areas parser
 void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
-    printf("DEBUG: parse_grid_template_areas called with grid_layout=%p, areas_string='%s'\n", grid, areas_string);
+    log_debug("parse_grid_template_areas called with grid_layout=%p, areas_string='%s'\n", grid, areas_string);
     if (!grid || !areas_string) {
-        printf("DEBUG: Early return - grid_layout=%p, areas_string=%p\n", grid, areas_string);
+        log_debug("Early return - grid_layout=%p, areas_string=%p\n", grid, areas_string);
         return;
     }
 
-    printf("DEBUG: grid_layout->grid_areas=%p, allocated_areas=%d\n", grid->grid_areas, grid->allocated_areas);
+    log_debug("grid_layout->grid_areas=%p, allocated_areas=%d\n", grid->grid_areas, grid->allocated_areas);
     log_debug("Parsing grid template areas: %s\n", areas_string);
 
     // TEMPORARY: Skip complex parsing to avoid stack overflow
-    printf("DEBUG: Skipping grid-template-areas parsing to avoid crash\n");
+    log_debug("Skipping grid-template-areas parsing to avoid crash\n");
     grid->area_count = 0;
     return;
 
@@ -285,28 +285,28 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
         }
 
         if (is_rectangle && min_row <= max_row && min_col <= max_col) {
-            printf("DEBUG: Creating area '%s' - bounds: row %d-%d, col %d-%d\n", area_name, min_row, max_row, min_col, max_col);
-            printf("DEBUG: area_count=%d, allocated_areas=%d\n", grid->area_count, grid->allocated_areas);
+            log_debug("Creating area '%s' - bounds: row %d-%d, col %d-%d\n", area_name, min_row, max_row, min_col, max_col);
+            log_debug("area_count=%d, allocated_areas=%d\n", grid->area_count, grid->allocated_areas);
 
             // Create the area (convert to 1-based indexing)
             GridArea area;
-            printf("DEBUG: area_name pointer=%p\n", area_name);
+            log_debug("area_name pointer=%p\n", area_name);
             if (!area_name) {
-                printf("ERROR: area_name is NULL!\n");
+                log_debug("ERROR: area_name is NULL!\n");
                 continue;
             }
-            printf("DEBUG: About to strncpy area_name='%s'\n", area_name);
+            log_debug("About to strncpy area_name='%s'\n", area_name);
             strncpy(area.name, area_name, sizeof(area.name) - 1);
             area.name[sizeof(area.name) - 1] = '\0';
-            printf("DEBUG: strncpy completed\n");
+            log_debug("strncpy completed\n");
             area.row_start = min_row + 1;
             area.row_end = max_row + 2;
             area.column_start = min_col + 1;
             area.column_end = max_col + 2;
 
-            printf("DEBUG: About to assign area to grid_areas[%d]\n", grid->area_count);
+            log_debug("About to assign area to grid_areas[%d]\n", grid->area_count);
             grid->grid_areas[grid->area_count] = area;
-            printf("DEBUG: Area assigned successfully\n");
+            log_debug("Area assigned successfully\n");
             grid->area_count++;
 
             log_debug("Created area '%s': rows %d-%d, columns %d-%d\n",
@@ -357,7 +357,65 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
 
     if (!item) return sizes;
 
-    // Use unified intrinsic sizing API if layout context is available
+    // First, check if we have pre-computed measurements from Pass 1 (layout_grid_multipass.cpp)
+    // These measurements were calculated with proper width constraints for height calculation
+    if (item->gi) {
+        if (is_row_axis) {
+            // Use pre-computed height measurements if available
+            log_debug("Checking pre-computed height for %s (gi=%p): min=%.1f, max=%.1f, has_measured=%d",
+                      item->node_name(), item->gi, 
+                      item->gi->measured_min_height, item->gi->measured_max_height,
+                      item->gi->has_measured_size);
+            if (item->gi->has_measured_size && (item->gi->measured_min_height > 0 || item->gi->measured_max_height > 0)) {
+                sizes.min_content = item->gi->measured_min_height;
+                sizes.max_content = item->gi->measured_max_height;
+                
+                // Ensure reasonable minimums
+                if (sizes.min_content <= 0) sizes.min_content = 20;
+                if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+                
+                log_debug("Using pre-computed height for %s: min=%.1f, max=%.1f",
+                          item->node_name(), sizes.min_content, sizes.max_content);
+                
+                // Apply height constraints from BlockProp
+                if (item->blk) {
+                    if (item->blk->given_min_height > 0) {
+                        sizes.min_content = fmax(sizes.min_content, item->blk->given_min_height);
+                    }
+                    if (item->blk->given_max_height > 0) {
+                        sizes.max_content = fmin(sizes.max_content, item->blk->given_max_height);
+                    }
+                }
+                return sizes;
+            }
+        } else {
+            // Use pre-computed width measurements if available
+            if (item->gi->measured_min_width > 0 || item->gi->measured_max_width > 0) {
+                sizes.min_content = item->gi->measured_min_width;
+                sizes.max_content = item->gi->measured_max_width;
+                
+                // Ensure reasonable minimums
+                if (sizes.min_content <= 0) sizes.min_content = 50;
+                if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+                
+                log_debug("Using pre-computed width for %s: min=%.1f, max=%.1f",
+                          item->node_name(), sizes.min_content, sizes.max_content);
+                
+                // Apply width constraints from BlockProp
+                if (item->blk) {
+                    if (item->blk->given_min_width > 0) {
+                        sizes.min_content = fmax(sizes.min_content, item->blk->given_min_width);
+                    }
+                    if (item->blk->given_max_width > 0) {
+                        sizes.max_content = fmin(sizes.max_content, item->blk->given_max_width);
+                    }
+                }
+                return sizes;
+            }
+        }
+    }
+
+    // Fallback: Use unified intrinsic sizing API if layout context is available
     // ViewBlock inherits from DomNode through the chain: ViewBlock -> ViewSpan -> ViewGroup -> DomElement -> DomNode
     DomNode* node = (DomNode*)item;
     if (lycon && node) {
