@@ -181,11 +181,13 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
  * @param lycon Layout context with font information
  * @param text Text string to measure
  * @param length Length of text in bytes
+ * @param text_transform CSS text-transform value (uppercase, lowercase, capitalize, none)
  * @return TextIntrinsicWidths with min and max content widths
  */
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
-                                                   size_t length);
+                                                   size_t length,
+                                                   CssEnum text_transform = CSS_VALUE_NONE);
 
 /**
  * Measure element intrinsic widths recursively.
