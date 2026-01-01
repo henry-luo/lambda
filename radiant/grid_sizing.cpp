@@ -602,13 +602,16 @@ void distribute_space_to_auto_tracks(GridContainerLayout* grid_layout) {
                                                   available);
     }
 
-    // For rows, only distribute if container has defined height
-    if (grid_layout->content_height > 0) {
+    // For rows, only distribute if container has explicit height set (not auto height)
+    // Auto-height grid containers should size rows to content, not stretch to fill parent
+    if (grid_layout->has_explicit_height && grid_layout->content_height > 0) {
         int row_gap_total = (grid_layout->computed_row_count - 1) * grid_layout->row_gap;
         int available = grid_layout->content_height - row_gap_total;
         distribute_space_to_auto_tracks_in_axis(grid_layout->computed_rows,
                                                   grid_layout->computed_row_count,
                                                   available);
+    } else {
+        log_debug(" Skipping row space distribution - container has auto height\n");
     }
 
     log_debug(" Auto track space distribution complete\n");
@@ -630,17 +633,26 @@ void expand_flexible_tracks(GridContainerLayout* grid_layout, ViewBlock* contain
 
     log_debug(" Initial available space - rows: %d, columns: %d\n", available_row_space, available_column_space);
 
-    // Subtract space used by non-flexible tracks and gaps
-    for (int i = 0; i < grid_layout->computed_row_count; i++) {
-        GridTrack* track = &grid_layout->computed_rows[i];
-        if (!track->is_flexible) {
-            log_debug(" Subtracting non-flexible row %d size: %d\n", i, track->computed_size);
-            available_row_space -= track->computed_size;
-        }
+    // For rows, only expand fr tracks if container has explicit height
+    // CSS Grid spec: fr units in auto-height containers resolve to min-content
+    bool expand_row_fr = grid_layout->has_explicit_height;
+    if (!expand_row_fr) {
+        log_debug(" Skipping row fr expansion - container has auto height\n");
     }
-    int row_gap_total = (grid_layout->computed_row_count - 1) * grid_layout->row_gap;
-    available_row_space -= row_gap_total;
-    log_debug(" After subtracting gaps (%d), available row space: %d\n", row_gap_total, available_row_space);
+
+    // Subtract space used by non-flexible tracks and gaps
+    if (expand_row_fr) {
+        for (int i = 0; i < grid_layout->computed_row_count; i++) {
+            GridTrack* track = &grid_layout->computed_rows[i];
+            if (!track->is_flexible) {
+                log_debug(" Subtracting non-flexible row %d size: %d\n", i, track->computed_size);
+                available_row_space -= track->computed_size;
+            }
+        }
+        int row_gap_total = (grid_layout->computed_row_count - 1) * grid_layout->row_gap;
+        available_row_space -= row_gap_total;
+        log_debug(" After subtracting gaps (%d), available row space: %d\n", row_gap_total, available_row_space);
+    }
 
     for (int i = 0; i < grid_layout->computed_column_count; i++) {
         GridTrack* track = &grid_layout->computed_columns[i];
@@ -654,7 +666,9 @@ void expand_flexible_tracks(GridContainerLayout* grid_layout, ViewBlock* contain
     log_debug(" After subtracting gaps (%d), available column space: %d\n", column_gap_total, available_column_space);
 
     // Distribute available space among flexible tracks
-    expand_flexible_tracks_in_axis(grid_layout->computed_rows, grid_layout->computed_row_count, available_row_space);
+    if (expand_row_fr) {
+        expand_flexible_tracks_in_axis(grid_layout->computed_rows, grid_layout->computed_row_count, available_row_space);
+    }
     expand_flexible_tracks_in_axis(grid_layout->computed_columns, grid_layout->computed_column_count, available_column_space);
 
     log_debug("Flexible tracks expanded\n");
