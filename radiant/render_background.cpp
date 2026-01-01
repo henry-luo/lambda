@@ -473,6 +473,13 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
     log_debug("[GRADIENT] Rendering conic gradient: from=%.1fdeg center=(%.2f,%.2f) stops=%d",
               gradient->from_angle, gradient->cx, gradient->cy, gradient->stop_count);
     
+    // Debug: log all color stops
+    for (int i = 0; i < gradient->stop_count; i++) {
+        log_debug("[GRADIENT] Conic stop %d: pos=%.2f color=#%02x%02x%02x",
+                  i, gradient->stops[i].position,
+                  gradient->stops[i].color.r, gradient->stops[i].color.g, gradient->stops[i].color.b);
+    }
+    
     ImageSurface* surface = rdcon->ui_context->surface;
     
     // Calculate center position in absolute coordinates
@@ -481,6 +488,18 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
     
     // From angle in radians (CSS: 0deg = up, clockwise)
     float from_rad = (gradient->from_angle - 90.0f) * M_PI / 180.0f;
+    
+    // Get border radius for rounded corners
+    float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
+    if (view->bound && view->bound->border) {
+        BorderProp* border = view->bound->border;
+        constrain_border_radii(border, rect.width, rect.height);
+        r_tl = border->radius.top_left;
+        r_tr = border->radius.top_right;
+        r_br = border->radius.bottom_right;
+        r_bl = border->radius.bottom_left;
+    }
+    bool has_radius = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0);
     
     // Get clip bounds
     Bound* clip = &rdcon->block.clip;
@@ -497,6 +516,40 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
     
     for (int py = start_y; py < end_y; py++) {
         for (int px = start_x; px < end_x; px++) {
+            // Check if pixel is inside rounded corners
+            if (has_radius) {
+                float lx = px - rect.x;  // local x relative to rect
+                float ly = py - rect.y;  // local y relative to rect
+                float w = rect.width;
+                float h = rect.height;
+                
+                // Check each corner
+                // Top-left corner
+                if (lx < r_tl && ly < r_tl) {
+                    float dx = lx - r_tl;
+                    float dy = ly - r_tl;
+                    if (dx * dx + dy * dy > r_tl * r_tl) continue;
+                }
+                // Top-right corner
+                else if (lx > w - r_tr && ly < r_tr) {
+                    float dx = lx - (w - r_tr);
+                    float dy = ly - r_tr;
+                    if (dx * dx + dy * dy > r_tr * r_tr) continue;
+                }
+                // Bottom-right corner
+                else if (lx > w - r_br && ly > h - r_br) {
+                    float dx = lx - (w - r_br);
+                    float dy = ly - (h - r_br);
+                    if (dx * dx + dy * dy > r_br * r_br) continue;
+                }
+                // Bottom-left corner
+                else if (lx < r_bl && ly > h - r_bl) {
+                    float dx = lx - r_bl;
+                    float dy = ly - (h - r_bl);
+                    if (dx * dx + dy * dy > r_bl * r_bl) continue;
+                }
+            }
+            
             // Calculate angle from center to this pixel
             float dx = px - cx;
             float dy = py - cy;
@@ -508,24 +561,25 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
             // Get color at this angle position
             Color color = get_gradient_color_at(gradient->stops, gradient->stop_count, position);
             
-            // Set pixel
+            // Set pixel (surface uses ABGR8888 format - same as ThorVG)
             if (px >= 0 && px < surface->width && py >= 0 && py < surface->height) {
                 uint32_t* pixel = (uint32_t*)((uint8_t*)surface->pixels + py * surface->pitch) + px;
                 
                 // Alpha blend if not fully opaque
                 if (color.a == 255) {
-                    *pixel = (color.a << 24) | (color.r << 16) | (color.g << 8) | color.b;
+                    // ABGR format: A in high bits, then B, G, R in low bits
+                    *pixel = (color.a << 24) | (color.b << 16) | (color.g << 8) | color.r;
                 } else if (color.a > 0) {
                     // Simple alpha blend with existing pixel
                     uint32_t existing = *pixel;
-                    uint8_t er = (existing >> 16) & 0xFF;
-                    uint8_t eg = (existing >> 8) & 0xFF;
-                    uint8_t eb = existing & 0xFF;
+                    uint8_t er = existing & 0xFF;           // R is in lowest byte
+                    uint8_t eg = (existing >> 8) & 0xFF;    // G
+                    uint8_t eb = (existing >> 16) & 0xFF;   // B
                     float alpha = color.a / 255.0f;
                     uint8_t nr = (uint8_t)(color.r * alpha + er * (1 - alpha));
                     uint8_t ng = (uint8_t)(color.g * alpha + eg * (1 - alpha));
                     uint8_t nb = (uint8_t)(color.b * alpha + eb * (1 - alpha));
-                    *pixel = (255 << 24) | (nr << 16) | (ng << 8) | nb;
+                    *pixel = (255 << 24) | (nb << 16) | (ng << 8) | nr;
                 }
             }
         }
