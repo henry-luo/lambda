@@ -12,7 +12,8 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BackgroundProp* bg = view->bound->background;
     
     // Check if we have gradient
-    if (bg->gradient_type != GRADIENT_NONE && bg->linear_gradient) {
+    if (bg->gradient_type != GRADIENT_NONE && 
+        (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
         render_background_gradient(rdcon, view, bg, rect);
     } else if (bg->color.a > 0) {
         // Solid color background
@@ -297,6 +298,241 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
 }
 
 /**
+ * Calculate radial gradient radius based on CSS size keyword
+ */
+static float calc_radial_radius(RadialGradient* gradient, Rect rect, float cx, float cy) {
+    float w = rect.width;
+    float h = rect.height;
+    
+    // Distance to each corner
+    float d_tl = sqrtf(cx * cx + cy * cy);
+    float d_tr = sqrtf((w - cx) * (w - cx) + cy * cy);
+    float d_bl = sqrtf(cx * cx + (h - cy) * (h - cy));
+    float d_br = sqrtf((w - cx) * (w - cx) + (h - cy) * (h - cy));
+    
+    // Distance to each side
+    float d_top = cy;
+    float d_bottom = h - cy;
+    float d_left = cx;
+    float d_right = w - cx;
+    
+    float radius = 0;
+    
+    switch (gradient->size) {
+        case RADIAL_SIZE_CLOSEST_SIDE:
+            radius = fminf(fminf(d_top, d_bottom), fminf(d_left, d_right));
+            break;
+        case RADIAL_SIZE_FARTHEST_SIDE:
+            radius = fmaxf(fmaxf(d_top, d_bottom), fmaxf(d_left, d_right));
+            break;
+        case RADIAL_SIZE_CLOSEST_CORNER:
+            radius = fminf(fminf(d_tl, d_tr), fminf(d_bl, d_br));
+            break;
+        case RADIAL_SIZE_FARTHEST_CORNER:
+        default:
+            radius = fmaxf(fmaxf(d_tl, d_tr), fmaxf(d_bl, d_br));
+            break;
+    }
+    
+    return radius;
+}
+
+/**
+ * Render radial gradient using ThorVG
+ */
+void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
+    if (!gradient || gradient->stop_count < 2) {
+        log_debug("[GRADIENT] Invalid radial gradient (need at least 2 stops)");
+        return;
+    }
+    
+    Tvg_Canvas* canvas = rdcon->canvas;
+    Tvg_Paint* shape = tvg_shape_new();
+    
+    // Create rectangle shape for gradient fill
+    bool has_radius = false;
+    BorderProp* border = nullptr;
+    if (view->bound && view->bound->border) {
+        border = view->bound->border;
+        has_radius = (border->radius.top_left > 0 || border->radius.top_right > 0 ||
+                     border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
+    }
+    
+    if (has_radius) {
+        constrain_border_radii(border, rect.width, rect.height);
+        float r_tl = border->radius.top_left;
+        float r_tr = border->radius.top_right;
+        float r_br = border->radius.bottom_right;
+        float r_bl = border->radius.bottom_left;
+        build_rounded_rect_path(shape, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, r_br, r_bl);
+    } else {
+        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, 0, 0);
+    }
+    
+    // Calculate center position in absolute coordinates
+    float cx = rect.x + rect.width * gradient->cx;
+    float cy = rect.y + rect.height * gradient->cy;
+    
+    // Calculate radius based on size keyword
+    float radius = calc_radial_radius(gradient, rect, rect.width * gradient->cx, rect.height * gradient->cy);
+    
+    // For circle shape, use uniform radius
+    // For ellipse, we'd need to scale, but ThorVG only supports circular radial gradients
+    // So we approximate ellipse as circle using the larger dimension
+    if (gradient->shape == RADIAL_SHAPE_ELLIPSE) {
+        // Use average of width/height ratio
+        radius = fmaxf(rect.width, rect.height) * 0.5f;
+    }
+    
+    log_debug("[GRADIENT] Radial gradient center=(%.1f,%.1f) radius=%.1f shape=%d",
+              cx, cy, radius, gradient->shape);
+    
+    // Create radial gradient
+    Tvg_Gradient* grad = tvg_radial_gradient_new();
+    
+    // ThorVG radial gradient: (cx, cy, r, fx, fy, fr)
+    // cx, cy, r = end circle (outer), fx, fy, fr = start circle (inner focal point)
+    // For CSS radial gradients, focal point is at center with zero radius
+    tvg_radial_gradient_set(grad, cx, cy, radius, cx, cy, 0);
+    
+    // Add color stops
+    Tvg_Color_Stop* stops = (Tvg_Color_Stop*)malloc(sizeof(Tvg_Color_Stop) * gradient->stop_count);
+    for (int i = 0; i < gradient->stop_count; i++) {
+        GradientStop* gs = &gradient->stops[i];
+        stops[i].offset = gs->position;
+        stops[i].r = gs->color.r;
+        stops[i].g = gs->color.g;
+        stops[i].b = gs->color.b;
+        stops[i].a = gs->color.a;
+        
+        log_debug("[GRADIENT] Radial stop %d: pos=%.2f color=#%02x%02x%02x%02x", 
+                  i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
+    }
+    
+    tvg_gradient_set_color_stops(grad, stops, gradient->stop_count);
+    free(stops);
+    
+    // Apply gradient fill to shape
+    tvg_shape_set_gradient(shape, grad);
+    
+    // Set clipping
+    Tvg_Paint* clip_rect = create_clip_shape(rdcon);
+    tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
+    
+    tvg_canvas_remove(canvas, NULL);
+    tvg_canvas_push(canvas, shape);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas);
+}
+
+/**
+ * Interpolate between two colors
+ */
+static Color lerp_color(Color c1, Color c2, float t) {
+    Color result;
+    result.r = (uint8_t)(c1.r + (c2.r - c1.r) * t);
+    result.g = (uint8_t)(c1.g + (c2.g - c1.g) * t);
+    result.b = (uint8_t)(c1.b + (c2.b - c1.b) * t);
+    result.a = (uint8_t)(c1.a + (c2.a - c1.a) * t);
+    return result;
+}
+
+/**
+ * Get color at position in gradient stops
+ */
+static Color get_gradient_color_at(GradientStop* stops, int stop_count, float position) {
+    Color transparent;
+    transparent.r = 0; transparent.g = 0; transparent.b = 0; transparent.a = 255;
+    if (stop_count == 0) return transparent;
+    if (stop_count == 1) return stops[0].color;
+    if (position <= stops[0].position) return stops[0].color;
+    if (position >= stops[stop_count - 1].position) return stops[stop_count - 1].color;
+    
+    // Find the two stops we're between
+    for (int i = 0; i < stop_count - 1; i++) {
+        if (position >= stops[i].position && position <= stops[i + 1].position) {
+            float range = stops[i + 1].position - stops[i].position;
+            float t = (range > 0) ? (position - stops[i].position) / range : 0;
+            return lerp_color(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    
+    return stops[stop_count - 1].color;
+}
+
+/**
+ * Render conic gradient using software rendering
+ * ThorVG doesn't support conic gradients directly, so we render pixel-by-pixel
+ */
+void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
+    if (!gradient || gradient->stop_count < 2) {
+        log_debug("[GRADIENT] Invalid conic gradient (need at least 2 stops)");
+        return;
+    }
+    
+    log_debug("[GRADIENT] Rendering conic gradient: from=%.1fdeg center=(%.2f,%.2f) stops=%d",
+              gradient->from_angle, gradient->cx, gradient->cy, gradient->stop_count);
+    
+    ImageSurface* surface = rdcon->ui_context->surface;
+    
+    // Calculate center position in absolute coordinates
+    float cx = rect.x + rect.width * gradient->cx;
+    float cy = rect.y + rect.height * gradient->cy;
+    
+    // From angle in radians (CSS: 0deg = up, clockwise)
+    float from_rad = (gradient->from_angle - 90.0f) * M_PI / 180.0f;
+    
+    // Get clip bounds
+    Bound* clip = &rdcon->block.clip;
+    int clip_left = (int)clip->left;
+    int clip_top = (int)clip->top;
+    int clip_right = (int)clip->right;
+    int clip_bottom = (int)clip->bottom;
+    
+    // Iterate over each pixel in the rect
+    int start_x = (int)fmaxf(rect.x, (float)clip_left);
+    int end_x = (int)fminf(rect.x + rect.width, (float)clip_right);
+    int start_y = (int)fmaxf(rect.y, (float)clip_top);
+    int end_y = (int)fminf(rect.y + rect.height, (float)clip_bottom);
+    
+    for (int py = start_y; py < end_y; py++) {
+        for (int px = start_x; px < end_x; px++) {
+            // Calculate angle from center to this pixel
+            float dx = px - cx;
+            float dy = py - cy;
+            float angle = atan2f(dy, dx) - from_rad;
+            
+            // Normalize to 0-1 range (one full rotation)
+            float position = fmodf((angle / (2.0f * M_PI)) + 1.0f, 1.0f);
+            
+            // Get color at this angle position
+            Color color = get_gradient_color_at(gradient->stops, gradient->stop_count, position);
+            
+            // Set pixel
+            if (px >= 0 && px < surface->width && py >= 0 && py < surface->height) {
+                uint32_t* pixel = (uint32_t*)((uint8_t*)surface->pixels + py * surface->pitch) + px;
+                
+                // Alpha blend if not fully opaque
+                if (color.a == 255) {
+                    *pixel = (color.a << 24) | (color.r << 16) | (color.g << 8) | color.b;
+                } else if (color.a > 0) {
+                    // Simple alpha blend with existing pixel
+                    uint32_t existing = *pixel;
+                    uint8_t er = (existing >> 16) & 0xFF;
+                    uint8_t eg = (existing >> 8) & 0xFF;
+                    uint8_t eb = existing & 0xFF;
+                    float alpha = color.a / 255.0f;
+                    uint8_t nr = (uint8_t)(color.r * alpha + er * (1 - alpha));
+                    uint8_t ng = (uint8_t)(color.g * alpha + eg * (1 - alpha));
+                    uint8_t nb = (uint8_t)(color.b * alpha + eb * (1 - alpha));
+                    *pixel = (255 << 24) | (nr << 16) | (ng << 8) | nb;
+                }
+            }
+        }
+    }
+}
+
+/**
  * Render background gradient (dispatch to type-specific function)
  */
 void render_background_gradient(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
@@ -307,12 +543,14 @@ void render_background_gradient(RenderContext* rdcon, ViewBlock* view, Backgroun
             }
             break;
         case GRADIENT_RADIAL:
-            // TODO: Implement radial gradient rendering
-            log_debug("[GRADIENT] Radial gradients not yet implemented");
+            if (bg->radial_gradient) {
+                render_radial_gradient(rdcon, view, bg->radial_gradient, rect);
+            }
             break;
         case GRADIENT_CONIC:
-            // TODO: Implement conic gradient rendering
-            log_debug("[GRADIENT] Conic gradients not yet implemented");
+            if (bg->conic_gradient) {
+                render_conic_gradient(rdcon, view, bg->conic_gradient, rect);
+            }
             break;
         default:
             log_debug("[GRADIENT] Unknown gradient type");
