@@ -162,8 +162,31 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
     while (child) {
         if (child->is_element()) {
             float child_height = measure_content_height_recursive(child, lycon);
-            log_debug("measure_content_height_recursive: child %s height=%.1f",
-                      child->node_name(), child_height);
+            
+            // If recursive measurement returned 0, try other measurement methods
+            if (child_height == 0.0f && lycon) {
+                ViewElement* child_view = (ViewElement*)child->as_element();
+                if (child_view) {
+                    // Check for explicit height first
+                    if (child_view->blk && child_view->blk->given_height > 0) {
+                        child_height = child_view->blk->given_height;
+                        log_debug("measure_content_height_recursive: child %s explicit height=%.1f",
+                                  child->node_name(), child_height);
+                    } else if (child_view->height > 0) {
+                        child_height = (float)child_view->height;
+                        log_debug("measure_content_height_recursive: child %s view height=%.1f",
+                                  child->node_name(), child_height);
+                    } else {
+                        // Use calculate_max_content_height as fallback
+                        child_height = calculate_max_content_height(lycon, child, 10000.0f);
+                        log_debug("measure_content_height_recursive: child %s from calculate_max_content_height=%.1f",
+                                  child->node_name(), child_height);
+                    }
+                }
+            } else {
+                log_debug("measure_content_height_recursive: child %s height=%.1f",
+                          child->node_name(), child_height);
+            }
 
             if (is_row) {
                 max_child_height = fmax(max_child_height, child_height);
@@ -1193,20 +1216,25 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             }
                         }
 
-                        // CRITICAL: If child is a flex container without proper height,
-                        // recursively measure its content-based height from the DOM tree
+                        // CRITICAL: If child height is still 0 without explicit height,
+                        // try to measure content-based height from the DOM tree
                         if (child_height == 0.0f && !child_has_explicit_height) {
-                            // Check if child is a flex container by resolving display from DOM
                             DisplayValue child_display = resolve_display_value((void*)c);
-                            log_debug("Child height is 0, checking if flex container - display.inner=%d",
-                                      child_display.inner);
+                            log_debug("Child height is 0, checking display - display.inner=%d, display.outer=%d",
+                                      child_display.inner, child_display.outer);
                             if (child_display.inner == CSS_VALUE_FLEX) {
-                                // Use recursive DOM-based measurement
+                                // For flex containers, use recursive DOM-based measurement
                                 child_height = measure_content_height_recursive(c, lycon);
                                 log_debug("Nested flex child height from recursive measurement: %.1f", child_height);
+                            } else if (child_display.outer == CSS_VALUE_BLOCK && lycon) {
+                                // For regular block elements (like h2), measure content height
+                                // using intrinsic sizing module
+                                // Use a large available width for max-content calculation
+                                float available_width = 10000.0f;  // Large enough for single-line
+                                child_height = calculate_max_content_height(lycon, c, available_width);
+                                log_debug("Block child height from calculate_max_content_height: %.1f", child_height);
                             }
                         }
-                        // Note: For height, we may not have a good fallback - leave as 0
 
                         // For width: row flex sums widths, column flex takes max
                         // Track both min and max content widths separately
