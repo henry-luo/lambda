@@ -56,6 +56,78 @@ static Tvg_Paint* create_clip_shape(RenderContext* rdcon) {
 }
 
 /**
+ * Bezier control point constant for approximating circular arcs
+ */
+#define KAPPA 0.5522847498f
+
+/**
+ * Build rounded rectangle path with Bezier curves for 4 different corner radii
+ */
+static void build_rounded_rect_path(Tvg_Paint* shape, float x, float y, float w, float h,
+                                     float r_tl, float r_tr, float r_br, float r_bl) {
+    // Start from top-left corner (after the radius)
+    tvg_shape_move_to(shape, x + r_tl, y);
+    
+    // Top edge
+    tvg_shape_line_to(shape, x + w - r_tr, y);
+    
+    // Top-right corner (Bezier curve)
+    if (r_tr > 0) {
+        float cp1_x = x + w - r_tr + r_tr * KAPPA;
+        float cp1_y = y;
+        float cp2_x = x + w;
+        float cp2_y = y + r_tr - r_tr * KAPPA;
+        float end_x = x + w;
+        float end_y = y + r_tr;
+        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+    }
+    
+    // Right edge
+    tvg_shape_line_to(shape, x + w, y + h - r_br);
+    
+    // Bottom-right corner (Bezier curve)
+    if (r_br > 0) {
+        float cp1_x = x + w;
+        float cp1_y = y + h - r_br + r_br * KAPPA;
+        float cp2_x = x + w - r_br + r_br * KAPPA;
+        float cp2_y = y + h;
+        float end_x = x + w - r_br;
+        float end_y = y + h;
+        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+    }
+    
+    // Bottom edge
+    tvg_shape_line_to(shape, x + r_bl, y + h);
+    
+    // Bottom-left corner (Bezier curve)
+    if (r_bl > 0) {
+        float cp1_x = x + r_bl - r_bl * KAPPA;
+        float cp1_y = y + h;
+        float cp2_x = x;
+        float cp2_y = y + h - r_bl + r_bl * KAPPA;
+        float end_x = x;
+        float end_y = y + h - r_bl;
+        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+    }
+    
+    // Left edge
+    tvg_shape_line_to(shape, x, y + r_tl);
+    
+    // Top-left corner (Bezier curve)
+    if (r_tl > 0) {
+        float cp1_x = x;
+        float cp1_y = y + r_tl - r_tl * KAPPA;
+        float cp2_x = x + r_tl - r_tl * KAPPA;
+        float cp2_y = y;
+        float end_x = x + r_tl;
+        float end_y = y;
+        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+    }
+    
+    tvg_shape_close(shape);
+}
+
+/**
  * Render solid color background
  * Handles border-radius by using ThorVG if needed
  */
@@ -82,16 +154,19 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
         float w = rect.width;
         float h = rect.height;
         
-        float r_tl = 0, r_tr = 0;
+        float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
         if (has_radius && border) {
+            // Constrain radii FIRST
+            constrain_border_radii(border, w, h);
+            // Then read the constrained values
             r_tl = border->radius.top_left;
             r_tr = border->radius.top_right;
-            // Constrain radii
-            constrain_border_radii(border, w, h);
+            r_br = border->radius.bottom_right;
+            r_bl = border->radius.bottom_left;
         }
         
-        // Build rounded rect path (same as border path)
-        tvg_shape_append_rect(shape, x, y, w, h, r_tl, r_tr);
+        // Build rounded rect path with all 4 corner radii
+        build_rounded_rect_path(shape, x, y, w, h, r_tl, r_tr, r_br, r_bl);
         tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
         
         // Set clipping (may be rounded if parent has border-radius with overflow:hidden)
@@ -168,11 +243,15 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     }
     
     if (has_radius) {
-        // Rounded rectangle
+        // Constrain radii FIRST
+        constrain_border_radii(border, rect.width, rect.height);
+        // Then read the constrained values
         float r_tl = border->radius.top_left;
         float r_tr = border->radius.top_right;
-        constrain_border_radii(border, rect.width, rect.height);
-        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr);
+        float r_br = border->radius.bottom_right;
+        float r_bl = border->radius.bottom_left;
+        // Rounded rectangle with all 4 corner radii
+        build_rounded_rect_path(shape, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, r_br, r_bl);
     } else {
         // Simple rectangle
         tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, 0, 0);
