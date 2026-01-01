@@ -370,9 +370,10 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                 sizes.min_content = item->gi->measured_min_height;
                 sizes.max_content = item->gi->measured_max_height;
                 
-                // Ensure reasonable minimums
-                if (sizes.min_content <= 0) sizes.min_content = 20;
-                if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+                // Don't force minimum height - empty items should have 0 height
+                if (sizes.max_content < sizes.min_content) {
+                    sizes.max_content = sizes.min_content;
+                }
                 
                 log_debug("Using pre-computed height for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
@@ -394,9 +395,10 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                 sizes.min_content = item->gi->measured_min_width;
                 sizes.max_content = item->gi->measured_max_width;
                 
-                // Ensure reasonable minimums
-                if (sizes.min_content <= 0) sizes.min_content = 50;
-                if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+                // Don't force minimum width - empty items should have 0 width
+                if (sizes.max_content < sizes.min_content) {
+                    sizes.max_content = sizes.min_content;
+                }
                 
                 log_debug("Using pre-computed width for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
@@ -421,31 +423,102 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     if (lycon && node) {
         if (is_row_axis) {
             // For row axis, we're measuring height
-            // Height depends on width, so use current width or estimate
-            int width = item->width > 0 ? item->width : 200;
+            // Height depends on width, so we need to determine the correct width to use:
+            // 1. If item->width is already set, use it
+            // 2. Otherwise, try to calculate from computed column tracks (if sized)
+            // 3. For FR tracks (computed_size == 0), estimate from container width
+            // 4. Fall back to a reasonable estimate
+            int width = 200; // Default fallback
+            
+            if (item->width > 0) {
+                // Item already has a width (e.g., from previous layout pass)
+                width = (int)item->width;
+            } else if (item->gi && lycon->grid_container) {
+                // Calculate width from computed column tracks
+                GridContainerLayout* grid = lycon->grid_container;
+                int col_start = item->gi->computed_grid_column_start - 1;
+                int col_end = item->gi->computed_grid_column_end - 1;
+                
+                // Clamp to valid ranges
+                if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
+                    int span_width = 0;
+                    bool has_unsized_fr_track = false;
+                    
+                    for (int c = col_start; c < col_end; c++) {
+                        int track_size = grid->computed_columns[c].computed_size;
+                        if (track_size > 0) {
+                            span_width += track_size;
+                            if (c < col_end - 1) {
+                                span_width += (int)grid->column_gap;
+                            }
+                        } else {
+                            // Track has size 0 - might be FR track not yet sized
+                            has_unsized_fr_track = true;
+                        }
+                    }
+                    
+                    if (span_width > 0 && !has_unsized_fr_track) {
+                        // All tracks are sized, use actual span width
+                        int box_adjustment = 0;
+                        if (item->bound) {
+                            box_adjustment += item->bound->padding.left + item->bound->padding.right;
+                            if (item->bound->border) {
+                                box_adjustment += item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                        }
+                        width = span_width - box_adjustment;
+                        if (width < 10) width = 10;
+                        log_debug("Row sizing: using column span width %d for %s (cols %d-%d)",
+                                  width, item->node_name(), col_start + 1, col_end);
+                    } else if (grid->content_width > 0) {
+                        // FR tracks not sized yet - estimate from container width
+                        // For a simple estimate, divide container width by column count
+                        int col_count = grid->computed_column_count > 0 ? grid->computed_column_count : 1;
+                        int total_gaps = (col_count - 1) * (int)grid->column_gap;
+                        int span_cols = col_end - col_start;
+                        width = ((grid->content_width - total_gaps) * span_cols) / col_count;
+                        
+                        // Subtract item's own padding/border
+                        if (item->bound) {
+                            width -= item->bound->padding.left + item->bound->padding.right;
+                            if (item->bound->border) {
+                                width -= item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                        }
+                        if (width < 10) width = 10;
+                        log_debug("Row sizing: estimating width %d for %s (FR tracks, container=%d, cols=%d)",
+                                  width, item->node_name(), grid->content_width, col_count);
+                    }
+                }
+            }
+            
             sizes.min_content = calculate_min_content_height(lycon, node, width);
             sizes.max_content = calculate_max_content_height(lycon, node, width);
 
-            // Ensure reasonable minimums
-            if (sizes.min_content <= 0) sizes.min_content = 20;
-            if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+            // Don't force minimum height - empty items should have 0 height
+            // The grid algorithm will handle minimum track sizes based on content
+            if (sizes.max_content < sizes.min_content) {
+                sizes.max_content = sizes.min_content;
+            }
         } else {
             // For column axis, we're measuring width
             sizes.min_content = calculate_min_content_width(lycon, node);
             sizes.max_content = calculate_max_content_width(lycon, node);
 
-            // Ensure reasonable minimums
-            if (sizes.min_content <= 0) sizes.min_content = 50;
-            if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+            // Don't force minimum width - empty items should have 0 width
+            if (sizes.max_content < sizes.min_content) {
+                sizes.max_content = sizes.min_content;
+            }
         }
     } else {
         // Fallback: use item dimensions if no layout context
+        // Empty items should have 0 height/width - the grid algorithm handles min track sizes
         if (is_row_axis) {
-            sizes.min_content = 20;  // Minimum reasonable height
-            sizes.max_content = item->height > 0 ? item->height : 100;
+            sizes.min_content = 0;
+            sizes.max_content = item->height > 0 ? item->height : 0;
         } else {
-            sizes.min_content = 50;  // Minimum reasonable width
-            sizes.max_content = item->width > 0 ? item->width : 200;
+            sizes.min_content = 0;
+            sizes.max_content = item->width > 0 ? item->width : 0;
         }
     }
 
