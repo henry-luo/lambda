@@ -995,6 +995,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         // Get flex direction and alignment properties
         FlexProp* flex_prop = flex_container->embed ? flex_container->embed->flex : nullptr;
         int align_items = flex_prop ? flex_prop->align_items : CSS_VALUE_STRETCH;
+        int justify_content = flex_prop ? flex_prop->justify : CSS_VALUE_FLEX_START;
         bool is_row = is_main_axis_horizontal(flex);
         
         // Get gap value for flex items
@@ -1079,6 +1080,41 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         text_y = prev_elem->y + prev_elem->height + prev_margin_bottom + flex_gap;
                         log_debug("FLEX TEXT: positioning after prev_elem at y=%.1f + h=%.1f + margin=%.1f + gap=%.1f = %.1f",
                                   prev_elem->y, prev_elem->height, prev_margin_bottom, flex_gap, text_y);
+                    } else {
+                        // No preceding element - apply justify-content on main axis
+                        if (is_row) {
+                            switch (justify_content) {
+                                case CSS_VALUE_CENTER:
+                                    text_x = container_content_x + (container_content_width - text_width) / 2;
+                                    log_debug("FLEX TEXT: centering text in main axis: x=%.1f", text_x);
+                                    break;
+                                case CSS_VALUE_FLEX_END:
+                                case CSS_VALUE_END:
+                                    text_x = container_content_x + container_content_width - text_width;
+                                    break;
+                                case CSS_VALUE_FLEX_START:
+                                case CSS_VALUE_START:
+                                default:
+                                    // text_x already at container_content_x
+                                    break;
+                            }
+                        } else {
+                            switch (justify_content) {
+                                case CSS_VALUE_CENTER:
+                                    text_y = container_content_y + (container_content_height - text_height) / 2;
+                                    log_debug("FLEX TEXT: centering text in main axis: y=%.1f", text_y);
+                                    break;
+                                case CSS_VALUE_FLEX_END:
+                                case CSS_VALUE_END:
+                                    text_y = container_content_y + container_content_height - text_height;
+                                    break;
+                                case CSS_VALUE_FLEX_START:
+                                case CSS_VALUE_START:
+                                default:
+                                    // text_y already at container_content_y
+                                    break;
+                            }
+                        }
                     }
                     
                     // Apply cross-axis alignment (align-items)
