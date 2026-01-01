@@ -66,11 +66,12 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-DomDocument* load_html_doc(Url* base, const char* doc_url, int viewport_width, int viewport_height);
+// load_html_doc is declared in view.hpp (via layout.hpp)
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
+void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
@@ -531,6 +532,93 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     }
 }
 
+/**
+ * Render vector path (for PDF curves and complex paths)
+ * Uses ThorVG to render Bezier curves and path segments
+ */
+void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
+    VectorPathProp* vpath = block->vpath;
+    if (!vpath || !vpath->segments) return;
+    
+    log_info("[VPATH] Rendering vector path for block at (%.1f, %.1f)", block->x, block->y);
+    
+    Tvg_Canvas* canvas = rdcon->canvas;
+    Tvg_Paint* shape = tvg_shape_new();
+    if (!shape) {
+        log_error("[VPATH] Failed to create ThorVG shape");
+        return;
+    }
+    
+    // Build the path from segments
+    float offset_x = rdcon->block.x + block->x;
+    float offset_y = rdcon->block.y + block->y;
+    
+    for (VectorPathSegment* seg = vpath->segments; seg; seg = seg->next) {
+        float sx = offset_x + seg->x;
+        float sy = offset_y + seg->y;
+        
+        switch (seg->type) {
+            case VectorPathSegment::VPATH_MOVETO:
+                tvg_shape_move_to(shape, sx, sy);
+                log_debug("[VPATH] moveto (%.1f, %.1f)", sx, sy);
+                break;
+            case VectorPathSegment::VPATH_LINETO:
+                tvg_shape_line_to(shape, sx, sy);
+                log_debug("[VPATH] lineto (%.1f, %.1f)", sx, sy);
+                break;
+            case VectorPathSegment::VPATH_CURVETO: {
+                float cx1 = offset_x + seg->x1;
+                float cy1 = offset_y + seg->y1;
+                float cx2 = offset_x + seg->x2;
+                float cy2 = offset_y + seg->y2;
+                tvg_shape_cubic_to(shape, cx1, cy1, cx2, cy2, sx, sy);
+                log_debug("[VPATH] curveto (%.1f,%.1f)-(%.1f,%.1f)->(%.1f,%.1f)", cx1, cy1, cx2, cy2, sx, sy);
+                break;
+            }
+            case VectorPathSegment::VPATH_CLOSE:
+                tvg_shape_close(shape);
+                log_debug("[VPATH] close");
+                break;
+        }
+    }
+    
+    // Apply stroke if present
+    if (vpath->has_stroke) {
+        tvg_shape_set_stroke_color(shape, 
+            vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b, vpath->stroke_color.a);
+        tvg_shape_set_stroke_width(shape, vpath->stroke_width);
+        
+        // Apply dash pattern if present
+        if (vpath->dash_pattern && vpath->dash_pattern_length > 0) {
+            log_debug("[VPATH] Setting dash pattern: count=%d, values=[%.1f, %.1f]", 
+                     vpath->dash_pattern_length, 
+                     vpath->dash_pattern[0],
+                     vpath->dash_pattern_length > 1 ? vpath->dash_pattern[1] : 0.0f);
+            Tvg_Result result = tvg_shape_set_stroke_dash(shape, vpath->dash_pattern, vpath->dash_pattern_length, 0);
+            log_debug("[VPATH] tvg_shape_set_stroke_dash returned: %d", result);
+            // Set butt cap for crisp dash ends
+            tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
+        }
+        
+        log_debug("[VPATH] Stroke: RGB(%d,%d,%d) width=%.1f", 
+                 vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b, vpath->stroke_width);
+    }
+    
+    // Apply fill if present
+    if (vpath->has_fill) {
+        tvg_shape_set_fill_color(shape,
+            vpath->fill_color.r, vpath->fill_color.g, vpath->fill_color.b, vpath->fill_color.a);
+    }
+    
+    // Push to canvas and render
+    tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
+    tvg_canvas_push(canvas, shape);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas);
+    
+    log_info("[VPATH] Rendered vector path successfully");
+}
+
 void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     // bullets are aligned to the top and right side of the list item
     float ratio = rdcon->ui_context->pixel_ratio;
@@ -827,6 +915,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             render_bound(rdcon, block);
         }
     }
+    
+    // Render vector path if present (for PDF curves and complex paths)
+    if (block->vpath && block->vpath->segments) {
+        render_vector_path(rdcon, block);
+    }
 
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
     if (DEBUG_RENDER) {  // debugging outline around the block margin border
@@ -867,6 +960,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 child_block = child_block->position->next_abs_sibling;
             }
         }
+    }
+    else if (block->embed && block->embed->img) {
+        // render embedded image for blocks without children (e.g., SVG document root)
+        log_debug("render embedded image in block without children");
+        render_image_content(rdcon, block);
     }
     else {
         log_debug("view has no child");
@@ -936,54 +1034,57 @@ Tvg_Paint* load_picture(ImageSurface* surface) {
     return pic;
 }
 
+// Helper function to render just the image content (without block layout)
+// Used by both render_image_view and render_block_view for embedded images
+void render_image_content(RenderContext* rdcon, ViewBlock* view) {
+    if (!view->embed || !view->embed->img) return;
+    
+    log_debug("render image content");
+    ImageSurface* img = view->embed->img;
+    Rect rect;
+    rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
+    rect.width = view->width;  rect.height = view->height;
+    log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
+              img->url && img->url->href ? img->url->href->chars : "unknown",
+              img->format, img->width, img->height,
+              rect.width, rect.height, rect.x, rect.y,
+              rdcon->block.clip.left, rdcon->block.clip.top,
+              rdcon->block.clip.right, rdcon->block.clip.bottom);
+    if (img->format == IMAGE_FORMAT_SVG) {
+        // render the SVG image
+        log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
+        if (!img->pixels) {
+            render_svg(img);
+        }
+        Tvg_Paint* pic = load_picture(img);
+        if (pic) {
+            tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
+            tvg_picture_set_size(pic, rect.width, rect.height);
+            tvg_paint_translate(pic, rect.x, rect.y);
+            // clip the svg picture
+            Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
+            tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+            tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
+            tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
+            tvg_canvas_push(rdcon->canvas, pic);
+            tvg_canvas_draw(rdcon->canvas, false);
+            tvg_canvas_sync(rdcon->canvas);
+        } else {
+            log_debug("failed to load svg picture");
+        }
+    } else {
+        log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
+        blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
+    }
+}
+
 void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     log_debug("render image view");
     log_enter();
     // render border and background, etc.
     render_block_view(rdcon, (ViewBlock*)view);
-    // render the image
-    if (view->embed && view->embed->img) {
-        log_debug("image view has embed image");
-        ImageSurface* img = view->embed->img;
-        Rect rect;
-        rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-        rect.width = view->width;  rect.height = view->height;
-        log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
-                  img->url && img->url->href ? img->url->href->chars : "unknown",
-                  img->format, img->width, img->height,
-                  rect.width, rect.height, rect.x, rect.y,
-                  rdcon->block.clip.left, rdcon->block.clip.top,
-                  rdcon->block.clip.right, rdcon->block.clip.bottom);
-        if (img->format == IMAGE_FORMAT_SVG) {
-            // render the SVG image
-            log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
-            if (!img->pixels) {
-                render_svg(img);
-            }
-            Tvg_Paint* pic = load_picture(img);
-            if (pic) {
-                tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
-                tvg_picture_set_size(pic, rect.width, rect.height);
-                tvg_paint_translate(pic, rect.x, rect.y);
-                // clip the svg picture
-                Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
-                tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
-                tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
-                tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
-                tvg_canvas_push(rdcon->canvas, pic);
-                tvg_canvas_draw(rdcon->canvas, false);
-                tvg_canvas_sync(rdcon->canvas);
-            } else {
-                log_debug("failed to load svg picture");
-            }
-        } else {
-            log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
-            blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
-        }
-    }
-    else {
-        log_debug("image view has no embed image");
-    }
+    // render the image content
+    render_image_content(rdcon, view);
     log_debug("end of image render");
     log_leave();
 }

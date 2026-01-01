@@ -1,4 +1,5 @@
 #include "mempool.h"
+#include "log.h"
 #define RPMALLOC_FIRST_CLASS_HEAPS 1
 #include <rpmalloc/rpmalloc.h>
 #include <stdio.h>
@@ -76,8 +77,11 @@ Pool* pool_create(void) {
 
 void pool_destroy(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) {
+        log_debug("pool_destroy: skipping invalid pool=%p (valid=0x%x)", (void*)pool, pool ? pool->valid : 0);
         return;
     }
+
+    log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
 
     // Release the heap - this will free all allocations made from it
     // Note: rpmalloc_heap_release already frees all memory, so we don't need heap_free_all
@@ -91,14 +95,24 @@ void pool_destroy(Pool* pool) {
 }
 
 void* pool_alloc(Pool* pool, size_t size) {
-    if (!pool || pool->valid != POOL_VALID_MARKER) {
+    if (!pool) {
+        log_error("pool_alloc: pool is NULL");
+        return NULL;
+    }
+    if (pool->valid != POOL_VALID_MARKER) {
+        log_error("pool_alloc: pool invalid marker (got 0x%x, expected 0x%x)", pool->valid, POOL_VALID_MARKER);
         return NULL;
     }
     if (size > SIZE_LIMIT) {
+        log_error("pool_alloc: size %zu exceeds limit", size);
         return NULL;  // Overflow protection
     }
     // Use heap-specific allocation for better memory isolation
-    return rpmalloc_heap_alloc(pool->heap, size);
+    void* result = rpmalloc_heap_alloc(pool->heap, size);
+    if (!result) {
+        log_error("pool_alloc: rpmalloc_heap_alloc returned NULL (heap=%p, size=%zu)", pool->heap, size);
+    }
+    return result;
 }
 
 void* pool_calloc(Pool* pool, size_t size) {

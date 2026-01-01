@@ -119,18 +119,22 @@ FontProp* create_font_from_pdf(Pool* pool, const char* font_name, double font_si
     }
 
     // Handle font references (F1, F2, etc.) - common pattern in test PDFs
-    // F1 typically = Helvetica, F2 = Helvetica-Bold
+    // Standard PDF Type1 fonts mapping (based on typical ReportLab output):
+    // F1 = Helvetica, F2 = Times-Roman, F3 = Courier, F4 = Helvetica-Bold
     // TODO: Properly resolve font references from PDF Resources dictionary
     const char* resolved_font_name = font_name;
     if (font_name && font_name[0] == 'F' && font_name[1] >= '1' && font_name[1] <= '9' && font_name[2] == '\0') {
-        // Simple heuristic: F2, F4, F6, etc. are often bold variants
-        if ((font_name[1] - '0') % 2 == 0) {
-            resolved_font_name = "Helvetica-Bold";
-            log_debug("Font reference '%s' mapped to '%s'", font_name, resolved_font_name);
-        } else {
-            resolved_font_name = "Helvetica";
-            log_debug("Font reference '%s' mapped to '%s'", font_name, resolved_font_name);
+        // Map common font references based on standard PDF conventions
+        switch (font_name[1]) {
+            case '1': resolved_font_name = "Helvetica"; break;
+            case '2': resolved_font_name = "Times-Roman"; break;
+            case '3': resolved_font_name = "Courier"; break;  // Monospace font
+            case '4': resolved_font_name = "Helvetica-Bold"; break;
+            case '5': resolved_font_name = "Times-Bold"; break;
+            case '6': resolved_font_name = "Courier-Bold"; break;
+            default: resolved_font_name = "Helvetica"; break;
         }
+        log_debug("Font reference '%s' mapped to '%s'", font_name, resolved_font_name);
     }
 
     // Map PDF font to system font

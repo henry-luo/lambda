@@ -453,7 +453,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     log_debug("AUTO-HEIGHT: checking container %s - flex_layout=%p, is_horizontal=%d",
               flex_container->node_name(), flex_layout, flex_layout ? is_main_axis_horizontal(flex_layout) : -1);
 
-    // Check if container has explicit height from CSS OR was sized by a parent flex layout
+    // Check if container has explicit height from CSS OR was sized by a parent flex/grid layout
     bool has_explicit_height = false;
     if (flex_container->blk && flex_container->blk->given_height > 0) {
         has_explicit_height = true;
@@ -474,6 +474,18 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
             has_explicit_height = true;
             log_debug("AUTO-HEIGHT: container is a flex item with height set by parent flex");
         }
+    }
+    // Check if this container is a grid item whose height was set by parent grid
+    // Grid items with align-items: stretch should preserve their grid-assigned height
+    // Must check item_prop_type to ensure we're accessing the correct union member
+    // (gi, fi, tb, td, form are all in a union, accessing wrong one gives garbage)
+    bool is_actually_grid_item = (flex_container->item_prop_type == DomElement::ITEM_PROP_GRID) &&
+                                  flex_container->gi && 
+                                  flex_container->gi->computed_grid_row_start > 0;
+    if (is_actually_grid_item && flex_container->height > 0) {
+        has_explicit_height = true;
+        log_debug("AUTO-HEIGHT: container is a grid item with height=%.1f set by parent grid", 
+                  flex_container->height);
     }
 
     if (flex_layout) {

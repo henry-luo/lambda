@@ -13,6 +13,22 @@
 extern "C" {
 #endif
 
+// Path segment types for storing path commands
+typedef enum {
+    PATH_SEG_MOVETO,    // m - move to
+    PATH_SEG_LINETO,    // l - line to
+    PATH_SEG_CURVETO,   // c - cubic Bezier curve (6 coords)
+    PATH_SEG_CLOSE      // h - close path
+} PathSegmentType;
+
+// Single path segment
+typedef struct PathSegment {
+    PathSegmentType type;
+    double x, y;                    // End point (for all except CLOSE)
+    double x1, y1, x2, y2;          // Control points (for CURVETO only)
+    struct PathSegment* next;       // Linked list
+} PathSegment;
+
 // PDF Graphics State Operators
 typedef enum {
     // Text state operators
@@ -54,9 +70,15 @@ typedef enum {
     PDF_OP_g,           // Set gray level (non-stroking)
     PDF_OP_RG,          // Set RGB color (stroking)
     PDF_OP_rg,          // Set RGB color (non-stroking)
+    PDF_OP_K,           // Set CMYK color (stroking)
+    PDF_OP_k,           // Set CMYK color (non-stroking)
 
     // Line state operators
     PDF_OP_w,           // Set line width
+    PDF_OP_d,           // Set dash pattern
+    PDF_OP_J,           // Set line cap style
+    PDF_OP_j,           // Set line join style
+    PDF_OP_M,           // Set miter limit
 
     // Path construction operators
     PDF_OP_m,           // Move to
@@ -113,6 +135,16 @@ typedef struct {
             double r, g, b;
         } rgb_color;
 
+        struct {                // For k/K (CMYK color)
+            double c, m, y, k;
+        } cmyk_color;
+
+        struct {                // For d (dash pattern)
+            double* pattern;
+            int pattern_length;
+            double phase;
+        } dash;
+
         struct {                // For TJ (text array with positioning)
             Array* array;       // alternating strings and numbers
         } text_array;
@@ -152,7 +184,15 @@ typedef struct PDFSavedState {
     double text_rise;
     double stroke_color[3];
     double fill_color[3];
+    int stroke_color_space;
+    int fill_color_space;
     double line_width;
+    double* dash_pattern;
+    int dash_pattern_length;
+    double dash_phase;
+    int line_cap;
+    int line_join;
+    double miter_limit;
     double current_x;
     double current_y;
     struct PDFSavedState* next; // Stack link
@@ -180,9 +220,17 @@ typedef struct {
     // Color state
     double stroke_color[3];    // RGB
     double fill_color[3];      // RGB
+    int stroke_color_space;    // 0=RGB, 1=CMYK, 2=Gray
+    int fill_color_space;      // 0=RGB, 1=CMYK, 2=Gray
 
     // Line state
     double line_width;         // w operator (default 1.0)
+    double* dash_pattern;      // d operator dash pattern
+    int dash_pattern_length;   // length of dash pattern
+    double dash_phase;         // d operator phase
+    int line_cap;              // J operator (0=butt, 1=round, 2=square)
+    int line_join;             // j operator (0=miter, 1=round, 2=bevel)
+    double miter_limit;        // M operator
 
     // Position tracking
     double current_x;
@@ -203,6 +251,10 @@ typedef struct {
     double path_max_x;
     double path_max_y;
     int has_current_path;      // Flag indicating if path data is valid
+
+    // Path segments (linked list for ThorVG rendering)
+    PathSegment* path_segments;     // Head of path segment list
+    PathSegment* path_segments_tail; // Tail for efficient append
 
     // State stack (for q/Q operators)
     PDFSavedState* saved_states; // Stack of saved states
@@ -260,6 +312,11 @@ void pdf_update_text_position(PDFGraphicsState* state, double tx, double ty);
  * Apply text matrix transformation
  */
 void pdf_apply_text_matrix(PDFGraphicsState* state, double a, double b, double c, double d, double e, double f);
+
+/**
+ * Clear current path segments (after painting)
+ */
+void pdf_clear_path_segments(PDFGraphicsState* state);
 
 #ifdef __cplusplus
 }

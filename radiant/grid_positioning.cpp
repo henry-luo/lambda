@@ -214,7 +214,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
             }
         }
 
-        // Store track area dimensions for alignment phase
+        // Store track area dimensions and base position for alignment phase
         if (item->gi) {
             item->gi->track_area_width = track_width;
             item->gi->track_area_height = track_height;
@@ -252,6 +252,13 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
         // Set item position and size (relative to parent's border box, per Radiant coordinate system)
         float new_x = container_offset_x + item_x;
         float new_y = container_offset_y + item_y;
+        
+        // Store base track position (before alignment) for later re-alignment
+        if (item->gi) {
+            item->gi->track_base_x = new_x;
+            item->gi->track_base_y = new_y;
+        }
+        
         log_debug(" Assigning item %d: x=%.0f (%d+%d), y=%.0f, width=%d, height=%d\n",
                i, new_x, container_offset_x, item_x, new_y, item_width, item_height);
         log_debug(" Before assignment - item->x=%.0f, item->y=%.0f, item=%p\n", item->x, item->y, (void*)item);
@@ -263,11 +270,11 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
                i, item->x, item->y, item->width, item->height, (void*)item);
 
         log_debug(" Grid item %d positioning:\n", i);
-        printf("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
-        printf("  Track positions: x=%d, y=%d\n", item_x, item_y);
-        printf("  Track sizes: width=%d, height=%d\n", item_width, item_height);
-        printf("  Container: offset=(%d,%d)\n", container_offset_x, container_offset_y);
-        printf("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
+        log_debug("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
+        log_debug("  Track positions: x=%d, y=%d\n", item_x, item_y);
+        log_debug("  Track sizes: width=%d, height=%d\n", item_width, item_height);
+        log_debug("  Container: offset=(%d,%d)\n", container_offset_x, container_offset_y);
+        log_debug("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
                item->x, item->y, item->width, item->height);
 
         log_debug("Positioned grid item %d: pos=(%d,%d), size=%dx%d, grid_area=(%d-%d, %d-%d)\n",
@@ -298,6 +305,11 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     if (!item || !grid_layout || !item->gi) return;
 
+    // Reset to base track position before applying alignment
+    // This allows align_grid_item to be called multiple times (e.g., after content layout)
+    item->x = item->gi->track_base_x;
+    item->y = item->gi->track_base_y;
+
     // Use stored track area dimensions from positioning phase
     int available_width = item->gi->track_area_width;
     int available_height = item->gi->track_area_height;
@@ -309,8 +321,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     float max_width = (item->blk && item->blk->given_max_width > 0) ? item->blk->given_max_width : 0;
     float max_height = (item->blk && item->blk->given_max_height > 0) ? item->blk->given_max_height : 0;
 
-    log_debug("align_grid_item: aspect_ratio=%.3f, has_explicit_width=%d, has_explicit_height=%d, max_width=%.1f, max_height=%.1f",
-              aspect_ratio, has_explicit_width, has_explicit_height, max_width, max_height);
+    log_debug("align_grid_item: base_pos=(%d,%d), aspect_ratio=%.3f, has_explicit_width=%d, has_explicit_height=%d, max_width=%.1f, max_height=%.1f",
+              item->gi->track_base_x, item->gi->track_base_y, aspect_ratio, has_explicit_width, has_explicit_height, max_width, max_height);
 
     // If aspect-ratio is set, compute the missing dimension
     if (aspect_ratio > 0) {
@@ -377,17 +389,28 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     int justify = (item->gi->justify_self != CSS_VALUE_AUTO) ?
                   item->gi->justify_self : grid_layout->justify_items;
 
+    // For non-stretch alignment, use content width if available (set by Pass 3 content layout)
+    // This allows center/start/end to work correctly with intrinsic content size
+    float actual_width = item->width;
+    if (justify != CSS_VALUE_STRETCH && !has_explicit_width) {
+        // Use content width if it was computed in Pass 3
+        if (item->content_width > 0 && item->content_width < available_width) {
+            actual_width = item->content_width;
+            item->width = actual_width;
+        }
+    }
+
     switch (justify) {
         case CSS_VALUE_START:
             // Already positioned at start, use item's intrinsic width
             break;
 
         case CSS_VALUE_END:
-            item->x += (available_width - item->width);
+            item->x += (available_width - actual_width);
             break;
 
         case CSS_VALUE_CENTER:
-            item->x += (available_width - item->width) / 2;
+            item->x += (available_width - actual_width) / 2;
             break;
 
         case CSS_VALUE_STRETCH:
@@ -409,17 +432,28 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     int align = (item->gi->align_self_grid != CSS_VALUE_AUTO) ?
                 item->gi->align_self_grid : grid_layout->align_items;
 
+    // For non-stretch alignment, use content height if available (set by Pass 3 content layout)
+    // This allows center/start/end to work correctly with intrinsic content size
+    float actual_height = item->height;
+    if (align != CSS_VALUE_STRETCH && !has_explicit_height) {
+        // Use content height if it was computed in Pass 3
+        if (item->content_height > 0 && item->content_height < available_height) {
+            actual_height = item->content_height;
+            item->height = actual_height;
+        }
+    }
+
     switch (align) {
         case CSS_VALUE_START:
             // Already positioned at start, use item's intrinsic height
             break;
 
         case CSS_VALUE_END:
-            item->y += (available_height - item->height);
+            item->y += (available_height - actual_height);
             break;
 
         case CSS_VALUE_CENTER:
-            item->y += (available_height - item->height) / 2;
+            item->y += (available_height - actual_height) / 2;
             break;
 
         case CSS_VALUE_STRETCH:
