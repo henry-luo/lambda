@@ -6379,6 +6379,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 CssValue** layers = value->data.list.values;
                 int count = value->data.list.count;
                 
+                // Ensure background prop exists
+                if (!span->bound) {
+                    span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                }
+                if (!span->bound->background) {
+                    span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                }
+                BackgroundProp* bg = span->bound->background;
+                
                 // First, look for a solid color in the last layer (base background)
                 CssValue* last_layer = layers[count - 1];
                 if (last_layer) {
@@ -6389,29 +6398,75 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                          (strcasecmp(last_layer->data.function->name, "rgb") == 0 ||
                           strcasecmp(last_layer->data.function->name, "rgba") == 0))) {
                         // Set base background color
-                        if (!span->bound) {
-                            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-                        }
-                        if (!span->bound->background) {
-                            span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                        }
-                        span->bound->background->color = resolve_color_value(lycon, last_layer);
+                        bg->color = resolve_color_value(lycon, last_layer);
                         log_debug("[Lambda CSS Background] Base layer color: #%02x%02x%02x%02x",
-                            span->bound->background->color.r, span->bound->background->color.g,
-                            span->bound->background->color.b, span->bound->background->color.a);
+                            bg->color.r, bg->color.g, bg->color.b, bg->color.a);
                     }
                 }
                 
-                // Then process the first gradient layer (topmost visible gradient)
-                CssValue* first_layer = layers[0];
-                if (first_layer && first_layer->type == CSS_VALUE_TYPE_FUNCTION &&
-                    first_layer->data.function && first_layer->data.function->name) {
-                    // Recursively process the first gradient
-                    CssDeclaration gradient_decl = *decl;
-                    gradient_decl.value = first_layer;
-                    log_debug("[Lambda CSS Background] Processing first layer gradient: %s",
-                        first_layer->data.function->name);
-                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                // Count radial-gradient layers
+                int radial_count = 0;
+                for (int i = 0; i < count - 1; i++) {  // exclude last layer (base color)
+                    CssValue* layer = layers[i];
+                    if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
+                        layer->data.function && layer->data.function->name &&
+                        (strcasecmp(layer->data.function->name, "radial-gradient") == 0 ||
+                         strcasecmp(layer->data.function->name, "repeating-radial-gradient") == 0)) {
+                        radial_count++;
+                    }
+                }
+                
+                // Allocate array for radial gradient layers if we have multiple
+                if (radial_count > 0) {
+                    bg->radial_layers = (RadialGradient**)alloc_prop(lycon, sizeof(RadialGradient*) * radial_count);
+                    bg->radial_layer_count = 0;  // will be incremented as we parse each one
+                    
+                    // Process all gradient layers (from bottom to top visually, i.e., last-to-first in CSS)
+                    for (int i = count - 2; i >= 0; i--) {
+                        CssValue* layer = layers[i];
+                        if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
+                            layer->data.function && layer->data.function->name) {
+                            const char* func_name = layer->data.function->name;
+                            
+                            if (strcasecmp(func_name, "radial-gradient") == 0 ||
+                                strcasecmp(func_name, "repeating-radial-gradient") == 0) {
+                                // Parse this radial gradient into a new layer
+                                CssDeclaration gradient_decl = *decl;
+                                gradient_decl.value = layer;
+                                log_debug("[Lambda CSS Background] Processing radial gradient layer %d: %s", i, func_name);
+                                resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                                
+                                // After parsing, the radial_gradient is set on bg
+                                // Move it to the layers array
+                                if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
+                                    bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
+                                    bg->radial_gradient = nullptr;  // will be set again by next parse
+                                }
+                            } else if (strcasecmp(func_name, "linear-gradient") == 0 ||
+                                       strcasecmp(func_name, "conic-gradient") == 0) {
+                                // For now, only handle the first non-radial gradient
+                                if (!bg->linear_gradient && !bg->conic_gradient) {
+                                    CssDeclaration gradient_decl = *decl;
+                                    gradient_decl.value = layer;
+                                    log_debug("[Lambda CSS Background] Processing gradient layer %d: %s", i, func_name);
+                                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                                }
+                            }
+                        }
+                    }
+                    
+                    log_debug("[Lambda CSS Background] Parsed %d radial gradient layers", bg->radial_layer_count);
+                } else {
+                    // No radial gradients, process first gradient layer as before
+                    CssValue* first_layer = layers[0];
+                    if (first_layer && first_layer->type == CSS_VALUE_TYPE_FUNCTION &&
+                        first_layer->data.function && first_layer->data.function->name) {
+                        CssDeclaration gradient_decl = *decl;
+                        gradient_decl.value = first_layer;
+                        log_debug("[Lambda CSS Background] Processing first layer gradient: %s",
+                            first_layer->data.function->name);
+                        resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                    }
                 }
                 return;
             }

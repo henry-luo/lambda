@@ -526,6 +526,9 @@ typedef struct {
     LinearGradient* linear_gradient;
     RadialGradient* radial_gradient;
     ConicGradient* conic_gradient;
+    // Multiple gradient layers (for stacked gradients)
+    RadialGradient** radial_layers;  // array of additional radial gradients
+    int radial_layer_count;
 } BackgroundProp;
 
 typedef struct BoundaryProp {

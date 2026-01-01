@@ -11,13 +11,25 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     
     BackgroundProp* bg = view->bound->background;
     
-    // Check if we have gradient
+    // Render base color first (if any)
+    if (bg->color.a > 0) {
+        render_background_color(rdcon, view, bg->color, rect);
+    }
+    
+    // Render all radial gradient layers (stacked bottom-to-top)
+    if (bg->radial_layers && bg->radial_layer_count > 0) {
+        for (int i = 0; i < bg->radial_layer_count; i++) {
+            if (bg->radial_layers[i]) {
+                log_debug("[GRADIENT] Rendering radial gradient layer %d/%d", i + 1, bg->radial_layer_count);
+                render_radial_gradient(rdcon, view, bg->radial_layers[i], rect);
+            }
+        }
+    }
+    
+    // Render main gradient (if any)
     if (bg->gradient_type != GRADIENT_NONE && 
         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
         render_background_gradient(rdcon, view, bg, rect);
-    } else if (bg->color.a > 0) {
-        // Solid color background
-        render_background_color(rdcon, view, bg->color, rect);
     }
 }
 
