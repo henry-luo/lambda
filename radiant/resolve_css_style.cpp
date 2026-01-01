@@ -3478,6 +3478,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         log_debug("[CSS] Border color value type: %d", val->data.color.type);
                         border_color = resolve_color_value(lycon, val);
                     }
+                    else if (val->type == CSS_VALUE_TYPE_FUNCTION) {
+                        // Color function like rgb(), rgba(), hsl(), hsla()
+                        log_debug("[CSS] Border color from function");
+                        border_color = resolve_color_value(lycon, val);
+                    }
                     else {
                         log_debug("[CSS] Unrecognized border shorthand value type: %d", val->type);
                     }
@@ -3506,6 +3511,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         border_color = color_name_to_rgb(keyword);
                     }
                 } else if (value->type == CSS_VALUE_TYPE_COLOR) {
+                    border_color = resolve_color_value(lycon, value);
+                } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                    // Color function like rgb(), rgba(), hsl(), hsla()
                     border_color = resolve_color_value(lycon, value);
                 }
             }
@@ -6371,6 +6379,25 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
                 return;
             }
+            // Handle color functions like rgb(), rgba() as background color
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
+                const char* func_name = value->data.function->name;
+                if (strcasecmp(func_name, "rgb") == 0 || strcasecmp(func_name, "rgba") == 0 ||
+                    strcasecmp(func_name, "hsl") == 0 || strcasecmp(func_name, "hsla") == 0) {
+                    // Color function - treat as background-color
+                    if (!span->bound) {
+                        span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                    }
+                    if (!span->bound->background) {
+                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                    }
+                    span->bound->background->color = resolve_color_value(lycon, value);
+                    log_debug("[Lambda CSS Shorthand] Expanding %s to background-color #%02x%02x%02x%02x",
+                        func_name, span->bound->background->color.r, span->bound->background->color.g,
+                        span->bound->background->color.b, span->bound->background->color.a);
+                    return;
+                }
+            }
             // Handle gradient functions (linear-gradient, radial-gradient, etc.)
             if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
                 const char* func_name = value->data.function->name;
@@ -6479,6 +6506,68 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                     log_debug("[Lambda CSS Shorthand] Parsed linear-gradient with %d stops, angle=%.1f",
                         lg->stop_count, lg->angle);
+                    return;
+                }
+                // Handle radial-gradient and conic-gradient - extract first color as fallback
+                else if (strcmp(func_name, "radial-gradient") == 0 ||
+                         strcmp(func_name, "repeating-radial-gradient") == 0 ||
+                         strcmp(func_name, "conic-gradient") == 0 ||
+                         strcmp(func_name, "repeating-conic-gradient") == 0) {
+                    // For now, extract first color stop as solid background color fallback
+                    // TODO: Implement proper radial/conic gradient rendering
+                    if (!span->bound) {
+                        span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                    }
+                    if (!span->bound->background) {
+                        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                    }
+                    
+                    // Find first color in arguments
+                    CssFunction* func = value->data.function;
+                    Color fallback_color = {.r = 0, .g = 0, .b = 0, .a = 255};  // default black
+                    bool found_color = false;
+                    
+                    for (int i = 0; i < func->arg_count && !found_color; i++) {
+                        CssValue* arg = func->args[i];
+                        if (!arg) continue;
+                        
+                        if (arg->type == CSS_VALUE_TYPE_COLOR) {
+                            fallback_color = resolve_color_value(lycon, arg);
+                            found_color = true;
+                        } else if (arg->type == CSS_VALUE_TYPE_KEYWORD) {
+                            // Try to parse as color keyword
+                            CssEnum kw = arg->data.keyword;
+                            Color potential_color = color_name_to_rgb(kw);
+                            // Only use if it resolved to a non-transparent color
+                            if (potential_color.c != 0) {
+                                fallback_color = potential_color;
+                                found_color = true;
+                            }
+                        } else if (arg->type == CSS_VALUE_TYPE_FUNCTION) {
+                            // Color function like rgb(), rgba()
+                            fallback_color = resolve_color_value(lycon, arg);
+                            if (fallback_color.a > 0) {
+                                found_color = true;
+                            }
+                        } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
+                            // Color stop list - check first item
+                            CssValue* first = arg->data.list.values[0];
+                            if (first && (first->type == CSS_VALUE_TYPE_COLOR || 
+                                          first->type == CSS_VALUE_TYPE_FUNCTION ||
+                                          first->type == CSS_VALUE_TYPE_KEYWORD)) {
+                                fallback_color = resolve_color_value(lycon, first);
+                                found_color = true;
+                            }
+                        }
+                    }
+                    
+                    if (found_color) {
+                        span->bound->background->color = fallback_color;
+                        log_debug("[Lambda CSS Shorthand] %s fallback to solid color #%02x%02x%02x%02x",
+                            func_name, fallback_color.r, fallback_color.g, fallback_color.b, fallback_color.a);
+                    } else {
+                        log_debug("[Lambda CSS Shorthand] %s: no color found, using transparent", func_name);
+                    }
                     return;
                 }
             }

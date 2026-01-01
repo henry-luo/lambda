@@ -31,6 +31,7 @@ extern "C" {
 #include "../lib/strbuf.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
+#include "../lib/image.h"
 }
 
 #include "../lambda/input/css/css_engine.hpp"
@@ -74,7 +75,10 @@ void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
 void parse_pdf(Input* input, const char* pdf_data);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -1109,6 +1113,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     auto t_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
 
+    if (!input) {
+        log_error("Failed to create input for file: %s", html_filepath);
+        free(type_str);
+        return nullptr;
+    }
+
     StrBuf* htm_buf = strbuf_new();
     print_item(htm_buf, input->root, 0);
     // write html to 'html_tree.txt' for debugging
@@ -1121,11 +1131,6 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     auto t_debug = high_resolution_clock::now();
     log_info("[TIMING] load: debug output: %.1fms", duration<double, std::milli>(t_debug - t_parse).count());
-
-    if (!input) {
-        log_error("Failed to create input for file: %s", html_filepath);
-        return nullptr;
-    }
 
     Element* html_root = get_html_root_element(input);
     if (!html_root) {
@@ -1319,7 +1324,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     return dom_doc;
 }
 
-DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height) {
+DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
     Pool* pool = pool_create();
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -1357,7 +1362,24 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
     } else if (ext && strcmp(ext, ".pdf") == 0) {
         // Load PDF document: parse PDF → convert to ViewTree directly (no CSS layout needed)
         log_info("[load_html_doc] Detected PDF file, using PDF→ViewTree pipeline");
-        doc = load_pdf_doc(full_url, viewport_width, viewport_height, pool);
+        doc = load_pdf_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
+    } else if (ext && strcmp(ext, ".svg") == 0) {
+        // Load SVG document: render SVG → convert to ViewTree directly (no CSS layout needed)
+        log_info("[load_html_doc] Detected SVG file, using SVG→ViewTree pipeline");
+        doc = load_svg_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
+    } else if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
+                       strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0)) {
+        // Load image document: load image → convert to ViewTree directly (no CSS layout needed)
+        log_info("[load_html_doc] Detected image file, using Image→ViewTree pipeline");
+        doc = load_image_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
+    } else if (ext && (strcmp(ext, ".json") == 0 || strcmp(ext, ".yaml") == 0 ||
+                       strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
+                       strcmp(ext, ".txt") == 0 || strcmp(ext, ".csv") == 0 ||
+                       strcmp(ext, ".ini") == 0 || strcmp(ext, ".conf") == 0 ||
+                       strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
+        // Load text document: read source → wrap in <pre> → render as HTML
+        log_info("[load_html_doc] Detected text file, using Text→HTML pipeline");
+        doc = load_text_doc(full_url, viewport_width, viewport_height, pool);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
@@ -1374,9 +1396,10 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
  * @param viewport_width Viewport width for scaling (currently unused, PDF uses original dimensions)
  * @param viewport_height Viewport height for scaling (currently unused)
  * @param pool Memory pool for allocations
+ * @param pixel_ratio Display pixel ratio for high-DPI scaling (e.g., 2.0 for Retina)
  * @return DomDocument structure with view_tree pre-set, ready for rendering
  */
-DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool) {
+DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
     auto total_start = std::chrono::high_resolution_clock::now();
 
     if (!pdf_url || !pool) {
@@ -1433,7 +1456,8 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
     log_info("PDF has %d page(s)", total_pages);
 
     // Convert first page to view tree (page 0)
-    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0);
+    // Pass pixel_ratio for high-DPI display scaling
+    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0, pixel_ratio);
     if (!view_tree || !view_tree->root) {
         log_error("Failed to convert PDF page to view tree");
         return nullptr;
@@ -1467,6 +1491,484 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_pdf_doc total: %.1fms",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
+    return dom_doc;
+}
+
+/**
+ * Load SVG document with direct ViewTree conversion
+ * Loads SVG with ThorVG, creates ViewTree with SVG as embedded image
+ *
+ * @param svg_url URL to SVG file
+ * @param viewport_width Viewport width (used for scaling if SVG has no intrinsic size)
+ * @param viewport_height Viewport height
+ * @param pool Memory pool for allocations
+ * @param pixel_ratio Display pixel ratio for high-DPI scaling
+ * @return DomDocument structure with view_tree pre-set, ready for rendering
+ */
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!svg_url || !pool) {
+        log_error("load_svg_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* svg_filepath = url_to_local_path(svg_url);
+    log_info("[TIMING] Loading SVG document: %s", svg_filepath);
+
+    // Create Input structure (minimal, for DomDocument creation)
+    Input* input = InputManager::create_input(svg_url);
+    if (!input) {
+        log_error("Failed to create Input structure for SVG");
+        return nullptr;
+    }
+
+    // Create a dedicated pool for the view tree
+    Pool* view_pool = pool_create();
+    if (!view_pool) {
+        log_error("Failed to create view pool for SVG");
+        return nullptr;
+    }
+
+    // Load SVG using ThorVG
+    Tvg_Paint* pic = tvg_picture_new();
+    Tvg_Result ret = tvg_picture_load(pic, svg_filepath);
+    if (ret != TVG_RESULT_SUCCESS) {
+        log_error("Failed to load SVG: %s (error: %d)", svg_filepath, ret);
+        tvg_paint_del(pic);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    // Get SVG intrinsic size from viewBox
+    float svg_width, svg_height;
+    tvg_picture_get_size(pic, &svg_width, &svg_height);
+    log_info("SVG intrinsic size: %.1f x %.1f", svg_width, svg_height);
+
+    // If SVG has no intrinsic size, use viewport
+    if (svg_width <= 0) svg_width = (float)viewport_width;
+    if (svg_height <= 0) svg_height = (float)viewport_height;
+
+    // Apply pixel_ratio for high-DPI displays
+    float scaled_width = svg_width * pixel_ratio;
+    float scaled_height = svg_height * pixel_ratio;
+
+    // Create ViewTree
+    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    if (!view_tree) {
+        log_error("Failed to allocate view tree for SVG");
+        tvg_paint_del(pic);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+    view_tree->pool = view_pool;
+    view_tree->html_version = HTML5;
+
+    // Create root ViewBlock to hold the SVG
+    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    if (!root_view) {
+        log_error("Failed to allocate root view for SVG");
+        tvg_paint_del(pic);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    root_view->view_type = RDT_VIEW_BLOCK;
+    root_view->x = 0;
+    root_view->y = 0;
+    root_view->width = scaled_width;
+    root_view->height = scaled_height;
+    root_view->content_width = scaled_width;
+    root_view->content_height = scaled_height;
+
+    // Create ImageSurface to hold the SVG
+    ImageSurface* svg_surface = (ImageSurface*)pool_calloc(view_pool, sizeof(ImageSurface));
+    if (svg_surface) {
+        svg_surface->format = IMAGE_FORMAT_SVG;
+        svg_surface->pic = pic;
+        svg_surface->width = (int)svg_width;
+        svg_surface->height = (int)svg_height;
+        svg_surface->url = svg_url;
+        // Set max_render_width so render_svg knows the target size for rasterization
+        svg_surface->max_render_width = (int)scaled_width;
+
+        // Create EmbedProp to hold the image
+        EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
+        if (embed) {
+            embed->img = svg_surface;
+            root_view->embed = embed;
+        }
+    }
+
+    view_tree->root = (View*)root_view;
+
+    // Create DomDocument
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument for SVG");
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    dom_doc->root = nullptr;           // No DomElement tree for SVG
+    dom_doc->html_root = nullptr;      // No HTML tree for SVG (skips layout_html_doc)
+    dom_doc->html_version = HTML5;
+    dom_doc->url = svg_url;
+    dom_doc->view_tree = view_tree;
+    dom_doc->state = nullptr;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_svg_doc total: %.1fms, size: %.0fx%.0f (scaled: %.0fx%.0f)",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count(),
+        svg_width, svg_height, scaled_width, scaled_height);
+
+    return dom_doc;
+}
+
+/**
+ * Load raster image document (PNG, JPG, JPEG, GIF)
+ * Loads image, creates ViewTree directly (no CSS layout needed)
+ *
+ * @param img_url URL to image file
+ * @param viewport_width Viewport width for display
+ * @param viewport_height Viewport height for display
+ * @param pool Memory pool for allocations
+ * @param pixel_ratio Display pixel ratio for high-DPI scaling (e.g., 2.0 for Retina)
+ * @return DomDocument structure with view_tree pre-set, ready for rendering
+ */
+DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!img_url || !pool) {
+        log_error("load_image_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* img_filepath = url_to_local_path(img_url);
+    log_info("[TIMING] Loading image document: %s", img_filepath);
+
+    // Create Input structure (minimal, for DomDocument creation)
+    Input* input = InputManager::create_input(img_url);
+    if (!input) {
+        log_error("Failed to create Input structure for image");
+        return nullptr;
+    }
+
+    // Create a dedicated pool for the view tree
+    Pool* view_pool = pool_create();
+    if (!view_pool) {
+        log_error("Failed to create view pool for image");
+        return nullptr;
+    }
+
+    // Determine image format from extension
+    const char* ext = strrchr(img_filepath, '.');
+    ImageFormat format = IMAGE_FORMAT_PNG;  // default
+    if (ext) {
+        if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
+            format = IMAGE_FORMAT_JPEG;
+        } else if (strcasecmp(ext, ".gif") == 0) {
+            format = IMAGE_FORMAT_GIF;
+        } else if (strcasecmp(ext, ".png") == 0) {
+            format = IMAGE_FORMAT_PNG;
+        }
+    }
+
+    // Load image using stb_image
+    int img_width, img_height, channels;
+    unsigned char* data = image_load(img_filepath, &img_width, &img_height, &channels, 4);
+    if (!data) {
+        log_error("Failed to load image: %s", img_filepath);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    log_info("Image loaded: %dx%d, channels=%d", img_width, img_height, channels);
+
+    // Create ImageSurface from loaded data
+    ImageSurface* img_surface = image_surface_create_from(img_width, img_height, data);
+    if (!img_surface) {
+        log_error("Failed to create image surface");
+        image_free(data);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+    img_surface->format = format;
+    img_surface->url = img_url;
+
+    // Apply pixel_ratio for high-DPI displays
+    float scaled_width = (float)img_width * pixel_ratio;
+    float scaled_height = (float)img_height * pixel_ratio;
+
+    // Create ViewTree
+    ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
+    if (!view_tree) {
+        log_error("Failed to allocate view tree for image");
+        image_surface_destroy(img_surface);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+    view_tree->pool = view_pool;
+    view_tree->html_version = HTML5;
+
+    // Create root ViewBlock to hold the image
+    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    if (!root_view) {
+        log_error("Failed to allocate root view for image");
+        image_surface_destroy(img_surface);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    root_view->view_type = RDT_VIEW_BLOCK;
+    root_view->x = 0;
+    root_view->y = 0;
+    root_view->width = scaled_width;
+    root_view->height = scaled_height;
+    root_view->content_width = scaled_width;
+    root_view->content_height = scaled_height;
+
+    // Create EmbedProp to hold the image
+    EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
+    if (embed) {
+        embed->img = img_surface;
+        root_view->embed = embed;
+    }
+
+    view_tree->root = (View*)root_view;
+
+    // Create DomDocument
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument for image");
+        image_surface_destroy(img_surface);
+        pool_destroy(view_pool);
+        return nullptr;
+    }
+
+    dom_doc->root = nullptr;           // No DomElement tree for images
+    dom_doc->html_root = nullptr;      // No HTML tree for images (skips layout_html_doc)
+    dom_doc->html_version = HTML5;
+    dom_doc->url = img_url;
+    dom_doc->view_tree = view_tree;
+    dom_doc->state = nullptr;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_image_doc total: %.1fms, size: %dx%d (scaled: %.0fx%.0f)",
+        std::chrono::duration<double, std::milli>(total_end - total_start).count(),
+        img_width, img_height, scaled_width, scaled_height);
+
+    return dom_doc;
+}
+
+/**
+ * Load text document as source view
+ * Reads text file content, wraps in HTML <pre> element, renders with monospace font
+ *
+ * @param text_url URL to text file
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure ready for layout
+ */
+DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!text_url || !pool) {
+        log_error("load_text_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* text_filepath = url_to_local_path(text_url);
+    log_info("[TIMING] Loading text document: %s", text_filepath);
+
+    // Step 1: Read text file content
+    auto step1_start = std::chrono::high_resolution_clock::now();
+    char* text_content = read_text_file(text_filepath);
+    if (!text_content) {
+        log_error("Failed to read text file: %s", text_filepath);
+        return nullptr;
+    }
+    size_t content_len = strlen(text_content);
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Read text file: %.1fms (%zu bytes)",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count(), content_len);
+
+    // Step 2: Escape HTML special characters for safe display
+    auto step2_start = std::chrono::high_resolution_clock::now();
+    
+    // count how many chars need escaping
+    size_t escaped_len = 0;
+    for (size_t i = 0; i < content_len; i++) {
+        char c = text_content[i];
+        if (c == '<') escaped_len += 4;       // &lt;
+        else if (c == '>') escaped_len += 4;  // &gt;
+        else if (c == '&') escaped_len += 5;  // &amp;
+        else escaped_len += 1;
+    }
+
+    // allocate escaped string
+    char* escaped_content = (char*)malloc(escaped_len + 1);
+    if (!escaped_content) {
+        log_error("Failed to allocate escaped content buffer");
+        free(text_content);
+        return nullptr;
+    }
+
+    // escape content
+    size_t j = 0;
+    for (size_t i = 0; i < content_len; i++) {
+        char c = text_content[i];
+        if (c == '<') {
+            memcpy(escaped_content + j, "&lt;", 4);
+            j += 4;
+        } else if (c == '>') {
+            memcpy(escaped_content + j, "&gt;", 4);
+            j += 4;
+        } else if (c == '&') {
+            memcpy(escaped_content + j, "&amp;", 5);
+            j += 5;
+        } else {
+            escaped_content[j++] = c;
+        }
+    }
+    escaped_content[j] = '\0';
+    free(text_content);
+
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Escape HTML: %.1fms",
+        std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+
+    // Step 3: Build HTML document wrapping text in <pre>
+    auto step3_start = std::chrono::high_resolution_clock::now();
+
+    // Get filename for title
+    const char* filename = strrchr(text_filepath, '/');
+    filename = filename ? filename + 1 : text_filepath;
+
+    // Create HTML with minimal styling for source text view
+    const char* html_template =
+        "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head>\n"
+        "  <meta charset=\"UTF-8\">\n"
+        "  <title>%s</title>\n"
+        "  <style>\n"
+        "    body {\n"
+        "      margin: 0;\n"
+        "      padding: 16px;\n"
+        "      background: #1e1e1e;\n"
+        "      color: #d4d4d4;\n"
+        "      font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;\n"
+        "      font-size: 13px;\n"
+        "      line-height: 1.5;\n"
+        "    }\n"
+        "    pre {\n"
+        "      margin: 0;\n"
+        "      white-space: pre-wrap;\n"
+        "      word-wrap: break-word;\n"
+        "    }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        "<pre>%s</pre>\n"
+        "</body>\n"
+        "</html>\n";
+
+    // Calculate buffer size and format HTML
+    size_t html_len = strlen(html_template) + strlen(filename) + escaped_len + 1;
+    char* html_content = (char*)malloc(html_len);
+    if (!html_content) {
+        log_error("Failed to allocate HTML buffer");
+        free(escaped_content);
+        return nullptr;
+    }
+    snprintf(html_content, html_len, html_template, filename, escaped_content);
+    free(escaped_content);
+
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - Build HTML: %.1fms",
+        std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
+    // Step 4: Parse HTML using Lambda parser
+    auto step4_start = std::chrono::high_resolution_clock::now();
+
+    String* type_str = (String*)malloc(sizeof(String) + 5);
+    type_str->len = 4;
+    strcpy(type_str->chars, "html");
+
+    Input* input = input_from_source(html_content, text_url, type_str, nullptr);
+    free(html_content);
+
+    if (!input || !input->root.item || input->root.item == ITEM_ERROR) {
+        log_error("Failed to parse HTML wrapper for text file");
+        return nullptr;
+    }
+
+    auto step4_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 4 - Parse HTML: %.1fms",
+        std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
+
+    // Step 5: Build DOM tree and apply CSS (reuse lambda_html_doc logic)
+    auto step5_start = std::chrono::high_resolution_clock::now();
+
+    Element* html_root = get_html_root_element(input);
+    if (!html_root) {
+        log_error("Failed to get HTML root from text file wrapper");
+        return nullptr;
+    }
+
+    // Create DomDocument
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument for text file");
+        return nullptr;
+    }
+
+    // Build DomElement tree
+    DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DomElement tree from text file");
+        dom_document_destroy(dom_doc);
+        return nullptr;
+    }
+
+    // Initialize CSS engine
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("Failed to create CSS engine for text file");
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Extract and apply inline styles from the HTML
+    int stylesheet_count = 0;
+    CssStylesheet** stylesheets = extract_and_collect_css(html_root, css_engine, text_filepath, pool, &stylesheet_count);
+
+    // Create selector matcher
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+
+    // Apply stylesheets to DOM tree
+    for (int i = 0; i < stylesheet_count; i++) {
+        if (stylesheets[i]) {
+            apply_stylesheet_to_dom_tree_fast(dom_root, stylesheets[i], matcher, pool, css_engine);
+        }
+    }
+
+    auto step5_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 5 - Build DOM & apply CSS: %.1fms",
+        std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
+
+    // Set document properties
+    dom_doc->root = dom_root;
+    dom_doc->html_root = html_root;
+    dom_doc->html_version = HTML5;
+    dom_doc->url = text_url;
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_text_doc total: %.1fms",
         std::chrono::duration<double, std::milli>(total_end - total_start).count());
 
     return dom_doc;
@@ -2056,11 +2558,10 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    // Check if XML has stylesheet
+    // Check if XML has stylesheet - if not, fall back to source text view
     if (!xml_input->xml_stylesheet_href) {
-        log_error("[Lambda XML] Error: XML document must have <?xml-stylesheet?> directive");
-        log_error("[Lambda XML] Expected: <?xml-stylesheet type=\"text/css\" href=\"style.css\"?>");
-        return nullptr;
+        log_info("[Lambda XML] No <?xml-stylesheet?> directive found, showing as source text");
+        return load_text_doc(xml_url, viewport_width, viewport_height, pool);
     }
 
     log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);
