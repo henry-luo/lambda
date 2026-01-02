@@ -519,14 +519,14 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                     log_debug("IFRAME TRACE: about to layout iframe document");
                     // Save parent document and window dimensions
                     DomDocument* parent_doc = lycon->ui_context->document;
-                    int saved_window_width = lycon->ui_context->window_width;
-                    int saved_window_height = lycon->ui_context->window_height;
+                    float saved_window_width = lycon->ui_context->window_width;
+                    float saved_window_height = lycon->ui_context->window_height;
                     
                     // Temporarily set window dimensions to iframe size
                     // This ensures layout_html_doc uses iframe dimensions for layout
                     lycon->ui_context->document = doc;
-                    lycon->ui_context->window_width = iframe_width;
-                    lycon->ui_context->window_height = iframe_height;
+                    lycon->ui_context->window_width = (float)iframe_width;
+                    lycon->ui_context->window_height = (float)iframe_height;
                     
                     layout_html_doc(lycon->ui_context, doc, false);
                     

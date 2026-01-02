@@ -476,9 +476,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             block->content_width = 0;  block->content_height = 0;
                         }
                         // load the new document
-                        // CSS media queries should use CSS pixels (logical pixels), not physical pixels
-                        int css_vw = (int)(evcon.ui_context->window_width / evcon.ui_context->pixel_ratio);
-                        int css_vh = (int)(evcon.ui_context->window_height / evcon.ui_context->pixel_ratio);
+                        // Use iframe dimensions as viewport, not window dimensions
+                        float iframe_width = block->width;
+                        float iframe_height = block->height;
+                        int css_vw = (int)(iframe_width / evcon.ui_context->pixel_ratio);
+                        int css_vh = (int)(iframe_height / evcon.ui_context->pixel_ratio);
                         DomDocument* old_doc = block->embed->doc;
                         DomDocument* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
@@ -486,7 +488,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (new_doc) {
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout
+                                // Temporarily set window dimensions to iframe dimensions for layout
+                                float saved_window_width = evcon.ui_context->window_width;
+                                float saved_window_height = evcon.ui_context->window_height;
+                                evcon.ui_context->window_width = iframe_width;
+                                evcon.ui_context->window_height = iframe_height;
                                 layout_html_doc(evcon.ui_context, new_doc, false);
+                                // Restore window dimensions
+                                evcon.ui_context->window_width = saved_window_width;
+                                evcon.ui_context->window_height = saved_window_height;
                             }
                             // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
                             // For PDF and other pre-laid-out documents, view_tree is already set
