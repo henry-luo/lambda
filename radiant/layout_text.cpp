@@ -551,7 +551,8 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             return RDT_LINE_FILLED;
         }
     } while (*str);  // end of text
-    lycon->line.advance_x += text_width;
+    // Note: Do NOT update advance_x here - this is a lookahead check only.
+    // The actual advance_x update happens during real text layout.
     return RDT_NOT_SURE;
 }
 
@@ -945,23 +946,27 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     } while (*str);
     // end of text
     if (wrap_lines && lycon->line.last_space) { // need to check if line will fill up (only when wrapping)
-        float advance_x = lycon->line.advance_x;  lycon->line.advance_x += rect->width;
+        float saved_advance_x = lycon->line.advance_x;  lycon->line.advance_x += rect->width;
         if (view_has_line_filled(lycon, text_view) == RDT_LINE_FILLED) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                 str = lycon->line.last_space + 1;
+                // Restore advance_x before output_text (it will add the correct width)
+                lycon->line.advance_x = saved_advance_x;
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, lycon->line.last_space_pos);
                 line_break(lycon);
                 if (*str) goto LAYOUT_TEXT;
                 else return;  // end of text
             }
             else { // last_space outside the text, break at start of text
+                // Restore advance_x before line_break
+                lycon->line.advance_x = saved_advance_x;
                 line_break(lycon);
                 rect->x = lycon->line.advance_x;  rect->y = lycon->block.advance_y;
-                // output the entire text
+                // output the entire text (advance_x is 0 after line_break reset)
             }
         }
         else {
-            lycon->line.advance_x = advance_x;
+            lycon->line.advance_x = saved_advance_x;
             // output the entire text
         }
     }
