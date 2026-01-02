@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Lambda Script & Radiant Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: radial-gradient(circle at top, #101827 0, #020617 55%, #000 100%);
+            color: #e5e7eb;
+        }
+
+        a {
+            color: inherit;
+        }
+
+        .page {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 24px 24px 32px;
+        }
+
+        header {
+            display: grid;
+            grid-template-columns: minmax(0, 2.2fr) minmax(0, 2.5fr);
+            gap: 24px;
+            align-items: center;
+            margin-bottom: 28px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 8px;
+        }
+
+        .brand-logo {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: conic-gradient(from 210deg, #22c55e, #0ea5e9, #6366f1, #22c55e);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #020617;
+            font-weight: 700;
+            font-size: 22px;
+        }
+
+        .brand-text h1 {
+            margin: 0;
+            font-size: 26px;
+            font-weight: 550;
+            letter-spacing: 0.03em;
+        }
+
+        .brand-text p {
+            margin: 4px 0 0;
+            font-size: 13px;
+            color: #9ca3af;
+        }
+
+        .hero-tagline {
+            margin-top: 12px;
+            padding: 8px 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.5);
+            color: #cbd5f5;
+        }
+
+        .hero-tagline span.badge {
+            padding: 3px 7px 4px;
+            border-radius: 999px;
+            background: linear-gradient(120deg, #22c55e, #0ea5e9);
+            color: #020617;
+            font-weight: 600;
+        }
+
+        .hero-copy {
+            margin-top: 14px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #9ca3af;
+        }
+
+        .hero-copy strong {
+            color: #e5e7eb;
+            font-weight: 600;
+        }
+
+        .hero-actions {
+            margin-top: 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.6);
+            background: rgba(15, 23, 42, 0.9);
+            font-size: 11px;
+            color: #cbd5f5;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .pill.primary {
+            border-color: transparent;
+            background: linear-gradient(135deg, #22c55e, #0ea5e9);
+            color: #020617;
+            font-weight: 600;
+        }
+
+        .pill code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 10px;
+        }
+
+        main {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-width: 200px;
+        }
+
+        .nav-group h2 {
+            margin: 0 0 6px;
+            font-size: 11px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: #9ca3af;
+        }
+
+        .nav-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .nav-links a {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(31, 41, 55, 0.95);
+            background: rgba(15, 23, 42, 0.96);
+            font-size: 11px;
+            text-decoration: none;
+            color: #d1d5db;
+            white-space: nowrap;
+        }
+
+        .nav-links a:hover {
+            border-color: rgba(96, 165, 250, 0.9);
+            color: #e5e7eb;
+        }
+
+        .nav-links a.active {
+            border-color: rgba(59, 130, 246, 1);
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.9), rgba(15, 23, 42, 0.95));
+            color: #e5e7eb;
+        }
+
+        .viewer {
+            flex: 1;
+            border-radius: 16px;
+            overflow: hidden;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(31, 41, 55, 0.95);
+            box-shadow: 0 20px 55px rgba(0, 0, 0, 0.7);
+        }
+
+        .viewer-header {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            gap: 8px;
+            background: linear-gradient(90deg, #020617, #020617 30%, #020617 100%);
+            border-bottom: 1px solid rgba(31, 41, 55, 0.95);
+        }
+
+        .viewer-dots {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .viewer-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 999px;
+        }
+
+        .viewer-dot.red { background: #ef4444; }
+        .viewer-dot.amber { background: #f59e0b; }
+        .viewer-dot.green { background: #22c55e; }
+
+        .viewer-title {
+            flex: 1;
+            text-align: center;
+            font-size: 11px;
+            color: #9ca3af;
+        }
+
+        iframe[name="main_frame"] {
+            width: 100%;
+            height: 580px;
+            border: none;
+            background: #ffffff;
+        }
+
+        footer {
+            margin-top: 18px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(31, 41, 55, 0.8);
+            font-size: 11px;
+            color: #6b7280;
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        footer .links a {
+            text-decoration: none;
+            color: #6b7280;
+        }
+
+        footer .links a:hover {
+            color: #9ca3af;
+        }
+
+        @media (max-width: 960px) {
+            header {
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .nav-panel {
+                max-width: 100px;
+            }            
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <main id="viewer">
+            <section class="nav-panel">
+                <div class="nav-group">
+                    <h2>Document samples</h2>
+                    <div class="nav-links">
+                        <a href="../layout/data/page/combo_003_complete_article.html" target="main_frame" data-label="HTML article" class="active">
+                            HTML article
+                        </a>
+                        <a href="../input/comprehensive_test.md" target="main_frame" data-label="Markdown report">
+                            Markdown report
+                        </a>
+                        <a href="../input/latex-showcase.tex" target="main_frame" data-label="LaTeX doc">
+                            LaTeX doc
+                        </a>
+                        <a href="../input/test.xml" target="main_frame" data-label="XML styled document">
+                            XML styled
+                        </a>
+                        <a href="../input/raw_commands_test.pdf" target="main_frame" data-label="PDF sample">
+                            PDF sample
+                        </a>
+                        <a href="../layout/data/res/tiger.svg" target="main_frame" data-label="SVG vector graphics">
+                            SVG tiger
+                        </a>
+                        <a href="../layout/data/res/sample1.png" target="main_frame" data-label="PNG image">
+                            PNG image
+                        </a>
+                        <a href="../input/more_test.yaml" target="main_frame" data-label="YAML configuration">
+                            YAML config
+                        </a>
+                        <a href="../lambda/complex_iot_report_html.ls" target="main_frame" data-label="Lambda script report">
+                            Lambda script
+                        </a>
+                    </div>
+                </div>
+
+                <div class="nav-group">
+                    <h2>Layout gallery</h2>
+                    <div class="nav-links">
+                        <a href="flex.html" target="main_frame" data-label="Flexbox layout">
+                            Flexbox
+                        </a>
+                        <a href="grid.html" target="main_frame" data-label="Grid layout">
+                            Grid
+                        </a>
+                        <a href="table.html" target="main_frame" data-label="Table layout">
+                            Tables
+                        </a>
+                        <a href="table_simple.html" target="main_frame" data-label="Simple table">
+                            Table (simple)
+                        </a>
+                        <a href="box.html" target="main_frame" data-label="Box model & borders">
+                            Box model
+                        </a>
+                        <a href="position.html" target="main_frame" data-label="Positioning tests">
+                            Positioning
+                        </a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="viewer">
+                <div class="viewer-header">
+                    <div class="viewer-dots">
+                        <span class="viewer-dot red"></span>
+                        <span class="viewer-dot amber"></span>
+                        <span class="viewer-dot green"></span>
+                    </div>
+                    <div class="viewer-title" id="viewer-title">HTML article</div>
+                    <div style="width:40px"></div>
+                </div>
+                <iframe name="main_frame" src="../layout/data/page/combo_003_complete_article.html">
+                    Your browser does not support iframes.
+                </iframe>
+            </section>
+        </main>
+
+        <footer>
+            <div>Lambda Script · Data → Layout → PDF/SVG/PNG</div>
+            <div class="links">
+                <a href="../../doc/Lambda_Reference.md" target="_blank">Language reference</a>
+                &nbsp;·&nbsp;
+                <a href="../../doc/Lambda_Validator_Guide.md" target="_blank">Validator guide</a>
+                &nbsp;·&nbsp;
+                <a href="../../doc/Radiant_Layout_Design.md" target="_blank">Radiant layout design</a>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+    (function() {
+        var links = document.querySelectorAll('.nav-links a[target="main_frame"]');
+        var titleEl = document.getElementById('viewer-title');
+        if (!links.length || !titleEl) return;
+
+        function setActive(link) {
+            links.forEach(function(a) { a.classList.remove('active'); });
+            link.classList.add('active');
+            var label = link.getAttribute('data-label') || link.textContent.trim();
+            titleEl.textContent = label;
+        }
+
+        links.forEach(function(link) {
+            link.addEventListener('click', function() {
+                setActive(link);
+            });
+        });
+    })();
+    </script>
+</body>
+</html>
