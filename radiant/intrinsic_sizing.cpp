@@ -1173,16 +1173,80 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     // Also check for flex containers with row direction (items side-by-side)
     bool is_flex_row = false;
-    if (view->display.inner == CSS_VALUE_FLEX) {
-        // Default flex direction is row
+    bool is_flex_wrap = false;
+    float flex_row_gap = 0;
+    float flex_column_gap = 0;
+    bool is_flex_container = (view->display.inner == CSS_VALUE_FLEX);
+    
+    // Also check specified_style for unresolved display
+    if (!is_flex_container && element->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum dv = display_decl->value->data.keyword;
+            if (dv == CSS_VALUE_FLEX || dv == CSS_VALUE_INLINE_FLEX) {
+                is_flex_container = true;
+            }
+        }
+    }
+    
+    if (is_flex_container) {
+        // Default flex direction is row, wrap is nowrap
+        is_flex_row = true;
+        is_flex_wrap = false;
+        
         if (view->embed && view->embed->flex) {
             if (view->embed->flex->direction == DIR_ROW ||
                 view->embed->flex->direction == DIR_ROW_REVERSE) {
                 is_flex_row = true;
+            } else {
+                is_flex_row = false;
             }
-        } else {
-            // No explicit flex props - default is row
-            is_flex_row = true;
+            // Check for flex-wrap
+            if (view->embed->flex->wrap == WRAP_WRAP ||
+                view->embed->flex->wrap == WRAP_WRAP_REVERSE) {
+                is_flex_wrap = true;
+            }
+            flex_row_gap = view->embed->flex->row_gap;
+            flex_column_gap = view->embed->flex->column_gap;
+        } else if (element->specified_style) {
+            // Check specified_style for flex-direction
+            CssDeclaration* dir_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
+            if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum dir = dir_decl->value->data.keyword;
+                is_flex_row = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+            }
+            // Check for flex-wrap
+            CssDeclaration* wrap_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_FLEX_WRAP);
+            if (wrap_decl && wrap_decl->value && wrap_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum wrap = wrap_decl->value->data.keyword;
+                if (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE) {
+                    is_flex_wrap = true;
+                }
+            }
+            // Check for gap
+            CssDeclaration* gap_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_GAP);
+            if (gap_decl && gap_decl->value && gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                float gap = resolve_length_value(lycon, CSS_PROPERTY_GAP, gap_decl->value);
+                flex_row_gap = gap;
+                flex_column_gap = gap;
+            }
+            // Check for row-gap
+            CssDeclaration* row_gap_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_ROW_GAP);
+            if (row_gap_decl && row_gap_decl->value && row_gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                flex_row_gap = resolve_length_value(lycon, CSS_PROPERTY_ROW_GAP, row_gap_decl->value);
+            }
+            // Check for column-gap
+            CssDeclaration* col_gap_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_COLUMN_GAP);
+            if (col_gap_decl && col_gap_decl->value && col_gap_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                flex_column_gap = resolve_length_value(lycon, CSS_PROPERTY_COLUMN_GAP, col_gap_decl->value);
+            }
         }
     }
 
@@ -1287,6 +1351,60 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             log_debug("calculate_max_content_height: grid %s rows=%d, total_height=%.1f",
                       element->node_name(), row_count, height);
         }
+    } else if (is_flex_row && is_flex_wrap && width > 0) {
+        // Special handling for wrapping flex row containers
+        // Simulate how items wrap based on available width
+        log_debug("calculate_max_content_height: wrapping flex row %s, available_width=%.1f, row_gap=%.1f, col_gap=%.1f",
+                  element->node_name(), width, flex_row_gap, flex_column_gap);
+        
+        // Collect child widths and heights
+        float current_line_width = 0;
+        float current_line_height = 0;
+        float total_height = 0;
+        int line_count = 0;
+        bool first_on_line = true;
+        
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            if (!child->is_element()) continue;
+            
+            // Get child's intrinsic width
+            DomElement* child_elem = child->as_element();
+            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+            float child_width = child_sizes.max_content;  // Use max-content width for flex items
+            float child_height = calculate_max_content_height(lycon, child, width);
+            
+            // Check if we need to wrap to a new line
+            float width_with_gap = first_on_line ? child_width : (flex_column_gap + child_width);
+            if (!first_on_line && current_line_width + width_with_gap > width) {
+                // Wrap to new line
+                total_height += current_line_height;
+                if (line_count > 0) {
+                    total_height += flex_row_gap;
+                }
+                line_count++;
+                current_line_width = child_width;
+                current_line_height = child_height;
+                first_on_line = false;
+            } else {
+                // Add to current line
+                current_line_width += width_with_gap;
+                current_line_height = fmax(current_line_height, child_height);
+                first_on_line = false;
+            }
+        }
+        
+        // Add the last line
+        if (current_line_height > 0) {
+            total_height += current_line_height;
+            if (line_count > 0) {
+                total_height += flex_row_gap;
+            }
+            line_count++;
+        }
+        
+        height = total_height;
+        log_debug("calculate_max_content_height: wrapping flex %s, lines=%d, height=%.1f",
+                  element->node_name(), line_count, height);
     } else {
         // Calculate children's heights (original logic for non-grid or single-column)
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
