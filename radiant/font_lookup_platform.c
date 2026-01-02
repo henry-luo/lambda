@@ -53,6 +53,13 @@ char* find_font_path_platform(const char* font_name) {
     } FontMapping;
 
     const FontMapping mappings[] = {
+        // macOS San Francisco system font (used by -apple-system, BlinkMacSystemFont, system-ui)
+        {"SF Pro Display", "/System/Library/Fonts/SFNS.ttf"},
+        {"SF Pro", "/System/Library/Fonts/SFNS.ttf"},
+        {".AppleSystemUIFont", "/System/Library/Fonts/SFNS.ttf"},
+        {".SF NS", "/System/Library/Fonts/SFNS.ttf"},
+        {"SFNS", "/System/Library/Fonts/SFNS.ttf"},
+        // Chinese fonts
         {"PingFang SC", "/System/Library/Fonts/STHeiti Medium.ttc"},  // Fallback to STHeiti
         {"Heiti SC", "/System/Library/Fonts/STHeiti Medium.ttc"},
         {"STHeiti", "/System/Library/Fonts/STHeiti Medium.ttc"},

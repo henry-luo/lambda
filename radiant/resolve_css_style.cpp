@@ -1026,25 +1026,25 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             }
             break;
         case CSS_UNIT_VW:
-            // viewport width percentage
+            // viewport width percentage (result in physical pixels)
             if (lycon && lycon->width > 0) {
-                result = (num / 100.0) * lycon->width;
+                result = (num / 100.0) * lycon->width * lycon->ui_context->pixel_ratio;
             }
             break;
         case CSS_UNIT_VH:
-            // viewport height percentage
+            // viewport height percentage (result in physical pixels)
             if (lycon && lycon->height > 0) {
-                result = (num / 100.0) * lycon->height;
+                result = (num / 100.0) * lycon->height * lycon->ui_context->pixel_ratio;
             }
             break;
         case CSS_UNIT_VMIN: {
             float vmin = (lycon->width < lycon->height) ? lycon->width : lycon->height;
-            result = (num / 100.0) * vmin;
+            result = (num / 100.0) * vmin * lycon->ui_context->pixel_ratio;
             break;
         }
         case CSS_UNIT_VMAX: {
             float vmax = (lycon->width > lycon->height) ? lycon->width : lycon->height;
-            result = (num / 100.0) * vmax;
+            result = (num / 100.0) * vmax * lycon->ui_context->pixel_ratio;
             break;
         }
         case CSS_UNIT_EX: {
@@ -2443,7 +2443,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     strcmp(family, "ui-serif") == 0 ||
                     strcmp(family, "ui-sans-serif") == 0 ||
                     strcmp(family, "ui-monospace") == 0 ||
-                    strcmp(family, "ui-rounded") == 0) {
+                    strcmp(family, "ui-rounded") == 0 ||
+                    strcmp(family, "-apple-system") == 0 ||
+                    strcmp(family, "BlinkMacSystemFont") == 0) {
                     return true;
                 }
                 // Check font database

@@ -453,6 +453,8 @@ int run_layout(const char* html_file) {
 int view_doc_in_window(const char* doc_file) {
     log_init_wrapper();
     ui_context_init(&ui_context, false);
+    log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, pixel_ratio=%.2f",
+              ui_context.window_width, ui_context.window_height, ui_context.pixel_ratio);
     GLFWwindow* window = ui_context.window;
     if (!window) {
         ui_context_cleanup(&ui_context);

@@ -55,6 +55,11 @@ static const char** resolve_generic_family(const char* family) {
     if (strcmp(family, "ui-serif") == 0) return serif_fonts;
     if (strcmp(family, "ui-sans-serif") == 0) return sans_serif_fonts;
     if (strcmp(family, "ui-rounded") == 0) return sans_serif_fonts;
+    // Apple/Safari-specific system font keywords (treat same as system-ui)
+    // -apple-system: Apple's system font (San Francisco on macOS/iOS)
+    // BlinkMacSystemFont: Chrome's equivalent for macOS system font
+    if (strcmp(family, "-apple-system") == 0) return system_ui_fonts;
+    if (strcmp(family, "BlinkMacSystemFont") == 0) return system_ui_fonts;
 
     // Cross-platform font aliases (map Windows/Mac fonts to Linux equivalents)
     // These are not generic families but common specific fonts that need cross-platform mapping
