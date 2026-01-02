@@ -3279,18 +3279,33 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                                 cross_pos = 0;
                             }
                         } else {
-                            // Item can be stretched - always set to available size
-                            cross_pos = 0;
-                            // FIXED: Always stretch to available size, not just when smaller
+                            // Item can be stretched - stretch margin box to fill available space
+                            // CSS Flexbox spec: stretched item's margin box equals line cross size
+                            // So content box = available_cross_size - cross-axis margins
+                            float margin_cross_start = 0, margin_cross_end = 0;
+                            if (item->bound) {
+                                if (is_main_axis_horizontal(flex_layout)) {
+                                    margin_cross_start = item->bound->margin.top;
+                                    margin_cross_end = item->bound->margin.bottom;
+                                } else {
+                                    margin_cross_start = item->bound->margin.left;
+                                    margin_cross_end = item->bound->margin.right;
+                                }
+                            }
+                            int target_cross_size = available_cross_size - (int)(margin_cross_start + margin_cross_end);
+                            if (target_cross_size < 0) target_cross_size = 0;
+                            
+                            cross_pos = (int)margin_cross_start;
+                            // FIXED: Always stretch to target size (available - margins), not just when smaller
                             // This handles cases where content made item larger than the line
-                            if (item_cross_size != available_cross_size) {
+                            if (item_cross_size != target_cross_size) {
                                 // Apply cross-axis constraints during stretch (Task 4: consolidated)
                                 int constrained_cross_size = apply_stretch_constraint(
-                                    item, available_cross_size, flex_layout);
+                                    item, target_cross_size, flex_layout);
                                 set_cross_axis_size(item, constrained_cross_size, flex_layout);
                                 item_cross_size = constrained_cross_size;
-                                log_debug("ALIGN_STRETCH - item %d: stretched to %d (available=%d)",
-                                          i, constrained_cross_size, available_cross_size);
+                                log_debug("ALIGN_STRETCH - item %d: stretched to %d (available=%d, margins=%.1f+%.1f)",
+                                          i, constrained_cross_size, available_cross_size, margin_cross_start, margin_cross_end);
                             }
                         }
                     }
