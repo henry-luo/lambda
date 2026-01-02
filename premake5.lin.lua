@@ -505,10 +505,10 @@ project "lambda"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
-        "../../lambda/tree-sitter-latex/libtree-sitter-latex.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
+        "../../lambda/tree-sitter-latex/libtree-sitter-latex.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
@@ -1210,6 +1210,7 @@ project "test_avl_tree"
         "test/test_avl_tree.cpp",
         "lib/avl_tree.c",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {
@@ -1439,6 +1440,7 @@ project "test_avl_tree_perf"
         "test/perf/test_avl_tree_perf.cpp",
         "lib/avl_tree.c",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {
