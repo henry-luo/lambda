@@ -2332,6 +2332,10 @@ class PremakeGenerator:
 
             # Add static external libraries with explicit paths like the main lambda program
             if self.use_windows_config:
+                # Windows: allow multiple definitions to avoid duplicate _Unwind_Resume from libgcc_eh
+                # This is needed because lambda-input-full DLL includes exception handling code
+                self.premake_content.append('        "-Wl,--allow-multiple-definition",')
+
                 # Windows: use the same explicit paths as the main lambda program
                 windows_lib_paths = [
                     "../../lambda/tree-sitter/libtree-sitter.a",
