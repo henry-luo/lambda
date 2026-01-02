@@ -440,115 +440,115 @@ project "lambda"
         "radiant/window.cpp",
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
-        "lambda/input/input-jsx.cpp",
-        "lambda/input/input_file_cache.cpp",
-        "lambda/input/input-vcf.cpp",
-        "lambda/input/input-man.cpp",
-        "lambda/input/input.cpp",
-        "lambda/input/input-graph-mermaid.cpp",
-        "lambda/input/input-context.cpp",
-        "lambda/input/input-ics.cpp",
-        "lambda/input/input-json.cpp",
-        "lambda/input/input-css.cpp",
-        "lambda/input/input-pdf.cpp",
-        "lambda/input/input_cache_util.cpp",
-        "lambda/input/pdf_decompress.cpp",
-        "lambda/input/input_sysinfo.cpp",
-        "lambda/input/input-math-ascii.cpp",
         "lambda/input/html_entities.cpp",
-        "lambda/input/input-markup.cpp",
-        "lambda/input/input-graph.cpp",
-        "lambda/input/input-csv.cpp",
-        "lambda/input/input_pool.cpp",
         "lambda/input/input-adoc.cpp",
-        "lambda/input/input_http.cpp",
-        "lambda/input/input-org.cpp",
-        "lambda/input/input-mark.cpp",
-        "lambda/input/input-toml.cpp",
-        "lambda/input/input-mdx.cpp",
-        "lambda/input/source_tracker.cpp",
-        "lambda/input/input_dir.cpp",
-        "lambda/input/input-yaml.cpp",
-        "lambda/input/parse_error.cpp",
-        "lambda/input/input-eml.cpp",
-        "lambda/input/input-rtf.cpp",
-        "lambda/input/input-math.cpp",
-        "lambda/input/input-prop.cpp",
-        "lambda/input/input-ini.cpp",
-        "lambda/input/input-xml.cpp",
         "lambda/input/input-common.cpp",
+        "lambda/input/input-context.cpp",
+        "lambda/input/input-css.cpp",
+        "lambda/input/input-csv.cpp",
+        "lambda/input/input-eml.cpp",
         "lambda/input/input-graph-d2.cpp",
-        "lambda/input/input-latex-ts.cpp",
         "lambda/input/input-graph-dot.cpp",
-        "lambda/input/html5/html5_tree_builder.cpp",
-        "lambda/input/html5/html5_tokenizer.cpp",
-        "lambda/input/html5/html5_parser.cpp",
-        "lambda/input/html5/html5_token.cpp",
-        "lambda/input/css/css_style_node.cpp",
-        "lambda/input/css/css_tokenizer.cpp",
-        "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/selector_matcher.cpp",
-        "lambda/input/css/dom_element.cpp",
-        "lambda/input/css/css_font_face.cpp",
-        "lambda/input/css/css_value.cpp",
-        "lambda/input/css/dom_node.cpp",
+        "lambda/input/input-graph-mermaid.cpp",
+        "lambda/input/input-graph.cpp",
+        "lambda/input/input-ics.cpp",
+        "lambda/input/input-ini.cpp",
+        "lambda/input/input-json.cpp",
+        "lambda/input/input-jsx.cpp",
+        "lambda/input/input-latex-ts.cpp",
+        "lambda/input/input-man.cpp",
+        "lambda/input/input-mark.cpp",
+        "lambda/input/input-markup.cpp",
+        "lambda/input/input-math-ascii.cpp",
+        "lambda/input/input-math.cpp",
+        "lambda/input/input-mdx.cpp",
+        "lambda/input/input-org.cpp",
+        "lambda/input/input-pdf.cpp",
+        "lambda/input/input-prop.cpp",
+        "lambda/input/input-rtf.cpp",
+        "lambda/input/input-toml.cpp",
+        "lambda/input/input-vcf.cpp",
+        "lambda/input/input-xml.cpp",
+        "lambda/input/input-yaml.cpp",
+        "lambda/input/input.cpp",
+        "lambda/input/input_cache_util.cpp",
+        "lambda/input/input_dir.cpp",
+        "lambda/input/input_file_cache.cpp",
+        "lambda/input/input_http.cpp",
+        "lambda/input/input_pool.cpp",
+        "lambda/input/input_sysinfo.cpp",
+        "lambda/input/parse_error.cpp",
+        "lambda/input/pdf_decompress.cpp",
+        "lambda/input/source_tracker.cpp",
         "lambda/input/css/css_engine.cpp",
-        "lambda/input/css/css_value_parser.cpp",
+        "lambda/input/css/css_font_face.cpp",
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/css_parser.cpp",
+        "lambda/input/css/css_properties.cpp",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_tokenizer.cpp",
-        "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/selector_matcher.cpp",
-        "lambda/input/css/dom_element.cpp",
-        "lambda/input/css/css_font_face.cpp",
         "lambda/input/css/css_value.cpp",
-        "lambda/input/css/dom_node.cpp",
-        "lambda/input/css/css_engine.cpp",
         "lambda/input/css/css_value_parser.cpp",
-        "lambda/input/css/css_formatter.cpp",
-        "lambda/input/css/css_parser.cpp",
-        "lambda/input/html5/html5_tree_builder.cpp",
-        "lambda/input/html5/html5_tokenizer.cpp",
+        "lambda/input/css/dom_element.cpp",
+        "lambda/input/css/dom_node.cpp",
+        "lambda/input/css/selector_matcher.cpp",
         "lambda/input/html5/html5_parser.cpp",
         "lambda/input/html5/html5_token.cpp",
-        "lambda/format/latex_generator.cpp",
-        "lambda/format/latex_packages.cpp",
-        "lambda/format/format-md.cpp",
-        "lambda/format/format-toml.cpp",
-        "lambda/format/latex_assets.cpp",
-        "lambda/format/format-jsx.cpp",
-        "lambda/format/format-text.cpp",
-        "lambda/format/format.cpp",
-        "lambda/format/html_writer.cpp",
-        "lambda/format/format-prop.cpp",
-        "lambda/format/format-math.cpp",
-        "lambda/format/html_generator.cpp",
-        "lambda/format/format_latex_expr_eval.cpp",
-        "lambda/format/format-yaml.cpp",
+        "lambda/input/html5/html5_tokenizer.cpp",
+        "lambda/input/html5/html5_tree_builder.cpp",
+        "lambda/input/css/css_engine.cpp",
+        "lambda/input/css/css_font_face.cpp",
+        "lambda/input/css/css_formatter.cpp",
+        "lambda/input/css/css_parser.cpp",
+        "lambda/input/css/css_properties.cpp",
+        "lambda/input/css/css_style_node.cpp",
+        "lambda/input/css/css_tokenizer.cpp",
+        "lambda/input/css/css_value.cpp",
+        "lambda/input/css/css_value_parser.cpp",
+        "lambda/input/css/dom_element.cpp",
+        "lambda/input/css/dom_node.cpp",
+        "lambda/input/css/selector_matcher.cpp",
+        "lambda/input/html5/html5_parser.cpp",
+        "lambda/input/html5/html5_token.cpp",
+        "lambda/input/html5/html5_tokenizer.cpp",
+        "lambda/input/html5/html5_tree_builder.cpp",
         "lambda/format/format-css.cpp",
-        "lambda/format/format-math-ascii.cpp",
-        "lambda/format/format-html.cpp",
-        "lambda/format/html_encoder.cpp",
-        "lambda/format/format-mdx.cpp",
-        "lambda/format/format-rst.cpp",
         "lambda/format/format-graph.cpp",
-        "lambda/format/format-org.cpp",
-        "lambda/format/latex_hyphenation.cpp",
-        "lambda/format/latex_docclass.cpp",
+        "lambda/format/format-html.cpp",
         "lambda/format/format-ini.cpp",
-        "lambda/format/format-xml.cpp",
-        "lambda/format/format-latex.cpp",
-        "lambda/format/format_latex_html_v2.cpp",
-        "lambda/format/format-utils.cpp",
         "lambda/format/format-json.cpp",
+        "lambda/format/format-jsx.cpp",
+        "lambda/format/format-latex.cpp",
+        "lambda/format/format-math-ascii.cpp",
+        "lambda/format/format-math.cpp",
+        "lambda/format/format-md.cpp",
+        "lambda/format/format-mdx.cpp",
+        "lambda/format/format-org.cpp",
+        "lambda/format/format-prop.cpp",
+        "lambda/format/format-rst.cpp",
+        "lambda/format/format-text.cpp",
+        "lambda/format/format-toml.cpp",
+        "lambda/format/format-utils.cpp",
         "lambda/format/format-wiki.cpp",
+        "lambda/format/format-xml.cpp",
+        "lambda/format/format-yaml.cpp",
+        "lambda/format/format.cpp",
+        "lambda/format/format_latex_expr_eval.cpp",
+        "lambda/format/format_latex_html_v2.cpp",
+        "lambda/format/html_encoder.cpp",
+        "lambda/format/html_generator.cpp",
+        "lambda/format/html_writer.cpp",
+        "lambda/format/latex_assets.cpp",
+        "lambda/format/latex_docclass.cpp",
+        "lambda/format/latex_generator.cpp",
+        "lambda/format/latex_hyphenation.cpp",
+        "lambda/format/latex_packages.cpp",
         "lambda/format/latex_picture.cpp",
-        "lambda/validator/validate.cpp",
         "lambda/validator/ast_validate.cpp",
-        "lambda/validator/error_reporting.cpp",
         "lambda/validator/doc_validator.cpp",
+        "lambda/validator/error_reporting.cpp",
         "lambda/validator/suggestions.cpp",
+        "lambda/validator/validate.cpp",
     }
     
     includedirs {
@@ -1343,6 +1343,7 @@ project "test_avl_tree"
         "test/test_avl_tree.cpp",
         "lib/avl_tree.c",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {
@@ -1445,6 +1446,7 @@ project "test_arena_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -1602,6 +1604,7 @@ project "test_avl_tree_perf"
         "test/perf/test_avl_tree_perf.cpp",
         "lib/avl_tree.c",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {
@@ -1702,6 +1705,7 @@ project "test_mime_detect_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -1828,6 +1832,7 @@ project "test_mark_builder_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -1954,6 +1959,7 @@ project "test_mark_builder_deepcopy_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2080,6 +2086,7 @@ project "test_mark_editor_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2206,6 +2213,7 @@ project "test_name_pool_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2332,6 +2340,7 @@ project "test_mark_reader_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2458,6 +2467,7 @@ project "test_error_tracking"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2584,6 +2594,7 @@ project "test_math_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2710,6 +2721,7 @@ project "test_math_ascii_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2836,6 +2848,7 @@ project "test_markup_roundtrip_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -2962,6 +2975,7 @@ project "test_entity_emoji_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3088,6 +3102,7 @@ project "test_input_roundtrip_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3214,6 +3229,7 @@ project "test_wpt_html_parser_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3341,6 +3357,7 @@ project "test_latex_ts_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3467,6 +3484,7 @@ project "test_html_roundtrip_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3593,6 +3611,7 @@ project "test_html_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3719,6 +3738,7 @@ project "test_html_negative_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3851,6 +3871,7 @@ project "test_lambda_domnode_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -3975,6 +3996,7 @@ project "test_dir_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4101,6 +4123,7 @@ project "test_graph_parser_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4227,6 +4250,7 @@ project "test_validator_input_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4353,6 +4377,7 @@ project "test_validator_features_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4479,6 +4504,7 @@ project "test_null_vs_missing_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4605,6 +4631,7 @@ project "test_enhanced_errors"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4731,6 +4758,7 @@ project "test_validation_options"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4857,6 +4885,7 @@ project "test_format_validation"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -4983,6 +5012,7 @@ project "test_validator_integration"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -5109,6 +5139,7 @@ project "test_type_references_simple"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -5235,6 +5266,7 @@ project "test_graph_formatter_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -5361,6 +5393,7 @@ project "test_sysinfo_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -5487,6 +5520,7 @@ project "test_jsx_roundtrip_new_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -5611,6 +5645,7 @@ project "test_mdx_roundtrip_new_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -5898,6 +5933,7 @@ project "test_css_dom_integration"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6036,6 +6072,7 @@ project "test_css_dom_crud"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6174,6 +6211,7 @@ project "test_css_style_application_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6305,6 +6343,7 @@ project "test_html_css_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6431,6 +6470,7 @@ project "test_css_tokenizer_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6557,6 +6597,7 @@ project "test_css_tokenizer_unit"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6683,6 +6724,7 @@ project "test_css_parser_unit"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6809,6 +6851,7 @@ project "test_css_engine_unit"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -6935,6 +6978,7 @@ project "test_css_engine_negative"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7061,6 +7105,7 @@ project "test_css_formatter_unit"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7187,6 +7232,7 @@ project "test_css_roundtrip_unit"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7313,6 +7359,7 @@ project "test_compound_descendant_selectors"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7439,6 +7486,7 @@ project "test_selector_groups"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7565,6 +7613,7 @@ project "test_css_parser_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7691,6 +7740,7 @@ project "test_css_integration_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7817,6 +7867,7 @@ project "test_css_files_safe_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -7943,6 +7994,7 @@ project "test_css_frameworks_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -8069,6 +8121,7 @@ project "test_css_to_mark_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -8193,6 +8246,7 @@ project "test_mdx_roundtrip_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -8317,6 +8371,7 @@ project "test_jsx_roundtrip_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -8441,6 +8496,7 @@ project "test_latex_parser_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -8565,6 +8621,7 @@ project "test_latex_treesitter"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -8757,6 +8814,7 @@ project "test_latex_html_v2_baseline"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -8883,6 +8941,7 @@ project "test_latex_html_v2_lists_envs"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9007,6 +9066,7 @@ project "test_latex_html_v2_tables"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9131,6 +9191,7 @@ project "test_latex_html_v2_floats"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9255,6 +9316,7 @@ project "test_latex_html_v2_special_chars"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9379,6 +9441,7 @@ project "test_latex_html_v2_bibliography"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9503,6 +9566,7 @@ project "test_latex_html_v2_graphics_color"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9627,6 +9691,7 @@ project "test_latex_html_v2_macros"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9751,6 +9816,7 @@ project "test_latex_html_v2_new_commands"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -9875,6 +9941,7 @@ project "test_validator_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -10001,6 +10068,7 @@ project "test_ast_validator_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -10127,6 +10195,7 @@ project "test_validator_path_reporting"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
@@ -10566,6 +10635,7 @@ project "test_http_gtest"
     }
     
     linkoptions {
+        "-Wl,--allow-multiple-definition",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../win-native-deps/lib/libmir.a",
