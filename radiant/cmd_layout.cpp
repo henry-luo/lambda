@@ -2531,7 +2531,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    const char* xml_filepath = url_get_pathname(xml_url);
+    char* xml_filepath = url_to_local_path(xml_url);
     log_info("[Lambda XML] Loading XML file: %s", xml_filepath);
 
     // Step 1: Read XML file
