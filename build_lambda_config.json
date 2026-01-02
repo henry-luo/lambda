@@ -796,6 +796,19 @@
                     "link": "static"
                 },
                 {
+                    "name": "tree-sitter-javascript",
+                    "include": "lambda/tree-sitter-javascript/bindings/c",
+                    "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
+                    "link": "static"
+                },
+                {
+                    "name": "tree-sitter-latex",
+                    "description": "Tree-sitter LaTeX parser library",
+                    "include": "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+                    "lib": "lambda/tree-sitter-latex/libtree-sitter-latex.a",
+                    "link": "static"
+                },
+                {
                     "name": "curl",
                     "include": "/usr/include",
                     "lib": "-lcurl",
@@ -1212,7 +1225,8 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
-                            "lib/mempool.c"
+                            "lib/mempool.c",
+                            "lib/log.c"
                         ],
                         "binary": "test_avl_tree.exe",
                         "icon": "🌲"
@@ -1256,7 +1270,8 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
-                            "lib/mempool.c"
+                            "lib/mempool.c",
+                            "lib/log.c"
                         ],
                         "binary": "test_avl_tree_perf.exe",
                         "icon": "⚡"
