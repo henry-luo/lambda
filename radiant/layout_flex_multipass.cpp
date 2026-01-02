@@ -946,16 +946,25 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                         if (doc->html_root) {
                             // Save parent document and window dimensions
                             DomDocument* parent_doc = lycon->ui_context->document;
-                            int saved_window_width = lycon->ui_context->window_width;
-                            int saved_window_height = lycon->ui_context->window_height;
+                            float saved_window_width = lycon->ui_context->window_width;
+                            float saved_window_height = lycon->ui_context->window_height;
+                            
+                            log_debug(">>> FLEX ITEM IFRAME: flex_width=%.1f, flex_height=%.1f, saved_window_width=%.1f",
+                                      flex_width, flex_height, saved_window_width);
                             
                             // Temporarily set window dimensions to iframe size
                             // This ensures layout_html_doc uses iframe dimensions for layout
                             lycon->ui_context->document = doc;
-                            lycon->ui_context->window_width = (int)flex_width;
-                            lycon->ui_context->window_height = (int)flex_height;
+                            lycon->ui_context->window_width = flex_width;
+                            lycon->ui_context->window_height = flex_height;
+                            
+                            log_debug(">>> FLEX ITEM IFRAME: AFTER SET - uicon=%p, window_width=%.1f, window_height=%.1f",
+                                      lycon->ui_context, lycon->ui_context->window_width, lycon->ui_context->window_height);
                             
                             layout_html_doc(lycon->ui_context, doc, false);
+                            
+                            log_debug(">>> FLEX ITEM IFRAME: after layout_html_doc, restoring window_width=%.1f, window_height=%.1f",
+                                      saved_window_width, saved_window_height);
                             
                             // Restore parent document and window dimensions
                             lycon->ui_context->document = parent_doc;

@@ -108,6 +108,7 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     if (content_width > 0) {
         tvg_shape_set_fill_color(h_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
         sp->h_max_scroll = content_width > view_width ? content_width - view_width : 0;
+        log_debug("h_max_scroll: %f (content_width=%.1f, view_width=%.1f)", sp->h_max_scroll, content_width, view_width);
         float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
         log_debug("bar width: %f", bar_width);
         float h_ratio = min(view_width * 100 / content_width, 100.0f);
@@ -271,6 +272,22 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     // handle horizontal overflow
     log_debug("update scroller for block:%s, content_width:%.1f, content_height:%.1f, block_width:%.1f, block_height:%.1f",
         block->node_name(), content_width, content_height, block->width, block->height);
+    
+    // Update scroll pane max values if pane exists
+    if (block->scroller->pane) {
+        block->scroller->pane->h_max_scroll = content_width > block->width ? content_width - block->width : 0;
+        block->scroller->pane->v_max_scroll = content_height > block->height ? content_height - block->height : 0;
+        // Clamp current scroll positions to new max values
+        if (block->scroller->pane->h_scroll_position > block->scroller->pane->h_max_scroll) {
+            block->scroller->pane->h_scroll_position = block->scroller->pane->h_max_scroll;
+        }
+        if (block->scroller->pane->v_scroll_position > block->scroller->pane->v_max_scroll) {
+            block->scroller->pane->v_scroll_position = block->scroller->pane->v_max_scroll;
+        }
+        log_debug("update_scroller: h_max_scroll=%.1f, v_max_scroll=%.1f", 
+            block->scroller->pane->h_max_scroll, block->scroller->pane->v_max_scroll);
+    }
+    
     if (content_width > block->width) { // hz overflow
         block->scroller->has_hz_overflow = true;
         if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {}
