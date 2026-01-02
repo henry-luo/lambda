@@ -26,7 +26,6 @@ static String* create_string_key(Pool* pool, const char* str) {
 // Helper to get map value with string key
 static Item map_get_str(Map* map, const char* key_str, Pool* pool) {
     ConstItem result = map->get(key_str);
-    fprintf(stderr, "DEBUG: map_get_str key='%s', type_id=%d\n", key_str, result.type_id());
     return *(Item*)&result;
 }
 
@@ -36,8 +35,15 @@ static Item map_get_str(Map* map, const char* key_str, Pool* pool) {
 Item pdf_resolve_reference(Map* pdf_data, Item ref_obj, Pool* pool) {
     if (ref_obj.item == ITEM_NULL) return ref_obj;
 
+    // Check if this is actually a map before accessing
+    TypeId ref_type = ref_obj.type_id();
+    if (ref_type != LMD_TYPE_MAP && ref_type != LMD_TYPE_ELEMENT) {
+        // Not a map, return as-is
+        return ref_obj;
+    }
+
     // Check if this is an indirect reference map
-    Map* ref_map = (Map*)ref_obj.item;
+    Map* ref_map = ref_obj.map;
 
     // Look for "type" field
     Item type_item = map_get_str(ref_map, "type", pool);
@@ -46,8 +52,8 @@ Item pdf_resolve_reference(Map* pdf_data, Item ref_obj, Pool* pool) {
         return ref_obj;
     }
 
-    String* type_str = (String*)type_item.item;
-    if (strcmp(type_str->chars, "indirect_ref") != 0) {
+    String* type_str = type_item.get_string();
+    if (!type_str || strcmp(type_str->chars, "indirect_ref") != 0) {
         // Not an indirect reference
         return ref_obj;
     }
@@ -63,8 +69,7 @@ Item pdf_resolve_reference(Map* pdf_data, Item ref_obj, Pool* pool) {
         return {.item = ITEM_NULL};
     }
 
-    double* obj_num_ptr = (double*)obj_num_item.item;
-    int target_obj_num = (int)(*obj_num_ptr);
+    int target_obj_num = (int)obj_num_item.get_double();
 
     log_debug("Resolving indirect reference: %d 0 R", target_obj_num);
 
@@ -75,21 +80,21 @@ Item pdf_resolve_reference(Map* pdf_data, Item ref_obj, Pool* pool) {
         return {.item = ITEM_NULL};
     }
 
-    Array* objects = (Array*)objects_item.item;
+    Array* objects = objects_item.array;
 
     // Search for object with matching obj_num
     for (int i = 0; i < objects->length; i++) {
         Item obj_item = objects->items[i];
         if (obj_item.item == ITEM_NULL) continue;
 
-        Map* obj_map = (Map*)obj_item.item;
+        Map* obj_map = obj_item.map;
 
         // Check if this is an indirect_object
         Item obj_type_item = map_get_str(obj_map, "type", pool);
         if (obj_type_item.item == ITEM_NULL) continue;
 
-        String* obj_type_str = (String*)obj_type_item.item;
-        if (strcmp(obj_type_str->chars, "indirect_object") != 0) continue;
+        String* obj_type_str = obj_type_item.get_string();
+        if (!obj_type_str || strcmp(obj_type_str->chars, "indirect_object") != 0) continue;
 
         // Check obj_num matches
         // Try both "obj_num" and "object_num" (PDF parser uses "object_num")
@@ -99,13 +104,11 @@ Item pdf_resolve_reference(Map* pdf_data, Item ref_obj, Pool* pool) {
         }
         if (obj_num_field_item.item == ITEM_NULL) continue;
 
-        double* obj_num_field_ptr = (double*)obj_num_field_item.item;
-        int this_obj_num = (int)(*obj_num_field_ptr);
+        int this_obj_num = (int)obj_num_field_item.get_double();
 
         if (this_obj_num == target_obj_num) {
             // Found matching object - return its content
             Item content_item = map_get_str(obj_map, "content", pool);
-            fprintf(stderr, "DEBUG: Resolved object %d to content 0x%llx\n", target_obj_num, content_item.item);
             log_debug("Resolved object %d to content", target_obj_num);
             return content_item;
         }
@@ -135,13 +138,24 @@ bool pdf_extract_media_box(Map* page_dict, Map* pdf_data, double* media_box) {
         media_box_item = pdf_resolve_reference(pdf_data, media_box_item, temp_pool);
 
         if (media_box_item.item != ITEM_NULL) {
-            Array* box_array = (Array*)media_box_item.item;
+            // Check if it's actually an array
+            TypeId box_type = media_box_item.type_id();
+            if (box_type != LMD_TYPE_ARRAY && box_type != LMD_TYPE_LIST) {
+                pool_destroy(temp_pool);
+                return false;
+            }
+
+            Array* box_array = media_box_item.array;
             if (box_array && box_array->length >= 4) {
                 for (int i = 0; i < 4; i++) {
                     Item val_item = box_array->items[i];
                     if (val_item.item != ITEM_NULL) {
-                        double* val_ptr = (double*)val_item.item;
-                        media_box[i] = *val_ptr;
+                        TypeId val_type = val_item.type_id();
+                        if (val_type == LMD_TYPE_FLOAT || val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
+                            media_box[i] = val_item.get_double();
+                        } else {
+                            media_box[i] = 0.0;
+                        }
                     } else {
                         media_box[i] = 0.0;
                     }
@@ -160,7 +174,7 @@ bool pdf_extract_media_box(Map* page_dict, Map* pdf_data, double* media_box) {
         // Resolve parent reference
         parent_item = pdf_resolve_reference(pdf_data, parent_item, temp_pool);
         if (parent_item.item != ITEM_NULL) {
-            Map* parent_dict = (Map*)parent_item.item;
+            Map* parent_dict = parent_item.map;
             bool result = pdf_extract_media_box(parent_dict, pdf_data, media_box);
             pool_destroy(temp_pool);
             return result;
@@ -185,9 +199,19 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
     node_item = pdf_resolve_reference(pdf_data, node_item, pool);
     if (node_item.item == ITEM_NULL) return;
 
-    fprintf(stderr, "DEBUG: collect_pages after resolve, node_item=0x%llx\n", node_item.item);
 
-    Map* node_dict = (Map*)node_item.item;
+    // Check if this is actually a map
+    TypeId node_type = node_item.type_id();
+    if (node_type != LMD_TYPE_MAP && node_type != LMD_TYPE_ELEMENT) {
+        log_warn("collect_pages: expected map but got type %d", node_type);
+        return;
+    }
+
+    Map* node_dict = node_item.map;
+    if (!node_dict) {
+        log_warn("collect_pages: node_dict is null");
+        return;
+    }
 
     // Check Type field
     Item type_item = map_get_str(node_dict, "Type", pool);
@@ -209,7 +233,11 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
         return;
     }
 
-    String* type_str = (String*)type_item.item;
+    String* type_str = type_item.get_string();
+    if (!type_str) {
+        log_warn("Failed to get type string from Pages tree node");
+        return;
+    }
 
     if (strcmp(type_str->chars, "Pages") == 0) {
         // This is an intermediate Pages node - recurse into Kids
@@ -225,13 +253,11 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
         kids_item = pdf_resolve_reference(pdf_data, kids_item, pool);
         if (kids_item.item == ITEM_NULL) return;
 
-        Array* kids_array = (Array*)kids_item.item;
+        Array* kids_array = kids_item.array;
 
-        fprintf(stderr, "DEBUG: Kids array has %d items\n", kids_array->length);
 
         // Recurse into each kid
         for (int i = 0; i < kids_array->length; i++) {
-            fprintf(stderr, "DEBUG: Processing kid %d, item=0x%llx\n", i, kids_array->items[i].item);
             collect_pages(pdf_data, kids_array->items[i], pages_array, pool);
         }
     } else if (strcmp(type_str->chars, "Page") == 0) {
@@ -249,7 +275,6 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
 int pdf_get_page_count_from_data(Map* pdf_data) {
     if (!pdf_data) return 0;
 
-    fprintf(stderr, "TRACE: pdf_get_page_count_from_data called\n");
     log_debug("Getting page count from PDF data");
 
     Pool* temp_pool = pool_create();
@@ -261,7 +286,7 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
         return 0;
     }
 
-    Map* trailer_map = (Map*)trailer_item.item;
+    Map* trailer_map = trailer_item.map;
 
     // Get dictionary from trailer
     Item dict_item = map_get_str(trailer_map, "dictionary", temp_pool);
@@ -271,7 +296,7 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
         return 0;
     }
 
-    Map* trailer_dict = (Map*)dict_item.item;
+    Map* trailer_dict = dict_item.map;
 
     // Get Root (Catalog)
     Item root_item = map_get_str(trailer_dict, "Root", temp_pool);
@@ -289,7 +314,7 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
         return 0;
     }
 
-    Map* catalog = (Map*)root_item.item;
+    Map* catalog = root_item.map;
 
     // Get Pages from catalog
     Item pages_item = map_get_str(catalog, "Pages", temp_pool);
@@ -307,12 +332,11 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
         return 0;
     }
 
-    Map* pages_dict = (Map*)pages_item.item;
+    Map* pages_dict = pages_item.map;
 
     // Get Count from Pages dictionary
     Item count_item = map_get_str(pages_dict, "Count", temp_pool);
     if (count_item.item == ITEM_NULL) {
-        fprintf(stderr, "TRACE: No Count field, will traverse tree\n");
         log_warn("No Count in Pages dictionary, traversing tree");
 
         // Fall back to counting by traversing tree
@@ -330,11 +354,8 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
         return count;
     }
 
-    fprintf(stderr, "TRACE: Found Count field\n");
-    double* count_ptr = (double*)count_item.item;
-    int count = (int)(*count_ptr);
+    int count = (int)count_item.get_double();
 
-    fprintf(stderr, "TRACE: PDF has %d pages\n", count);
     log_info("PDF has %d pages", count);
     pool_destroy(temp_pool);
     return count;
@@ -355,12 +376,12 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
         return nullptr;
     }
 
-    Map* trailer_map = (Map*)trailer_item.item;
+    Map* trailer_map = trailer_item.map;
 
     Item dict_item = map_get_str(trailer_map, "dictionary", pool);
     if (dict_item.item == ITEM_NULL) return nullptr;
 
-    Map* trailer_dict = (Map*)dict_item.item;
+    Map* trailer_dict = dict_item.map;
 
     Item root_item = map_get_str(trailer_dict, "Root", pool);
     if (root_item.item == ITEM_NULL) return nullptr;
@@ -368,7 +389,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
     root_item = pdf_resolve_reference(pdf_data, root_item, pool);
     if (root_item.item == ITEM_NULL) return nullptr;
 
-    Map* catalog = (Map*)root_item.item;
+    Map* catalog = root_item.map;
 
     Item pages_item = map_get_str(catalog, "Pages", pool);
     if (pages_item.item == ITEM_NULL) return nullptr;
@@ -387,6 +408,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
         return nullptr;
     }
 
+
     // Get specific page
     Item page_item = pages_array->items[page_index];
     page_item = pdf_resolve_reference(pdf_data, page_item, pool);
@@ -395,7 +417,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
         return nullptr;
     }
 
-    Map* page_dict = (Map*)page_item.item;
+    Map* page_dict = page_item.map;
 
     // Create page info structure
     PDFPageInfo* page_info = (PDFPageInfo*)pool_calloc(pool, sizeof(PDFPageInfo));
@@ -408,24 +430,35 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
 
     // Extract CropBox (optional)
     Item crop_box_item = map_get_str(page_dict, "CropBox", pool);
-    if (crop_box_item.item != ITEM_NULL) {
+    if (crop_box_item.item != ITEM_NULL && crop_box_item.type_id() != LMD_TYPE_NULL) {
         crop_box_item = pdf_resolve_reference(pdf_data, crop_box_item, pool);
-        if (crop_box_item.item != ITEM_NULL) {
-            Array* crop_array = (Array*)crop_box_item.item;
+        if (crop_box_item.item != ITEM_NULL && crop_box_item.type_id() != LMD_TYPE_NULL) {
+            Array* crop_array = crop_box_item.array;
             if (crop_array && crop_array->length >= 4) {
                 for (int i = 0; i < 4; i++) {
                     Item val_item = crop_array->items[i];
-                    double* val_ptr = (double*)val_item.item;
-                    page_info->crop_box[i] = val_ptr ? *val_ptr : 0.0;
+                    page_info->crop_box[i] = (val_item.item != ITEM_NULL) ? val_item.get_double() : 0.0;
                 }
                 page_info->has_crop_box = true;
             }
         }
     }
 
+    // Extract Resources (must be done early, before any returns from Contents processing)
+    Item resources_item = map_get_str(page_dict, "Resources", pool);
+    log_debug("Looking up Resources for page %d: item=0x%llx, type=%d",
+              page_index + 1, (unsigned long long)resources_item.item, resources_item.type_id());
+    if (resources_item.item != ITEM_NULL) {
+        resources_item = pdf_resolve_reference(pdf_data, resources_item, pool);
+        if (resources_item.item != ITEM_NULL && resources_item.type_id() == LMD_TYPE_MAP) {
+            page_info->resources = resources_item.map;
+            log_debug("Extracted Resources for page %d", page_index + 1);
+        }
+    }
+
     // Extract Contents (content streams)
     Item contents_item = map_get_str(page_dict, "Contents", pool);
-    if (contents_item.item == ITEM_NULL) {
+    if (contents_item.item == ITEM_NULL || contents_item.type_id() == LMD_TYPE_NULL) {
         log_warn("Page %d has no Contents", page_index + 1);
         page_info->content_streams = array_pooled(pool);
         return page_info;
@@ -433,7 +466,7 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
 
     // Resolve Contents reference
     contents_item = pdf_resolve_reference(pdf_data, contents_item, pool);
-    if (contents_item.item == ITEM_NULL) {
+    if (contents_item.item == ITEM_NULL || contents_item.type_id() == LMD_TYPE_NULL) {
         log_warn("Could not resolve Contents for page %d", page_index + 1);
         page_info->content_streams = array_pooled(pool);
         return page_info;
@@ -444,18 +477,45 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
     if (!page_info->content_streams) return page_info;
 
     // Check if contents_item is a stream or array
-    Map* contents_map = (Map*)contents_item.item;
+    TypeId contents_type = contents_item.type_id();
+
+    if (contents_type != LMD_TYPE_MAP && contents_type != LMD_TYPE_ELEMENT) {
+        // Might be an array of content streams
+        if (contents_type == LMD_TYPE_ARRAY || contents_type == LMD_TYPE_LIST) {
+            Array* contents_array = contents_item.array;
+            if (contents_array) {
+                for (int i = 0; i < contents_array->length; i++) {
+                    Item stream_item = contents_array->items[i];
+                    stream_item = pdf_resolve_reference(pdf_data, stream_item, pool);
+                    if (stream_item.item != ITEM_NULL && stream_item.type_id() != LMD_TYPE_NULL) {
+                        array_append(page_info->content_streams, stream_item, pool);
+                    }
+                }
+                log_debug("Page %d has %d content streams", page_index + 1, contents_array->length);
+            }
+        } else {
+        }
+        return page_info;
+    }
+
+    Map* contents_map = contents_item.map;
+    if (!contents_map) {
+        return page_info;
+    }
     Item type_item = map_get_str(contents_map, "type", pool);
 
-    if (type_item.item != ITEM_NULL) {
-        String* type_str = (String*)type_item.item;
-        if (strcmp(type_str->chars, "stream") == 0) {
+    if (type_item.item != ITEM_NULL && type_item.type_id() != LMD_TYPE_NULL) {
+        String* type_str = type_item.get_string();
+        if (type_str) {
+        }
+        if (type_str && strcmp(type_str->chars, "stream") == 0) {
             // Single stream
             array_append(page_info->content_streams, contents_item, pool);
             log_debug("Page %d has 1 content stream", page_index + 1);
+            return page_info;
         } else {
             // Might be array - try to cast
-            Array* contents_array = (Array*)contents_item.item;
+            Array* contents_array = contents_item.array;
             if (contents_array) {
                 for (int i = 0; i < contents_array->length; i++) {
                     Item stream_item = contents_array->items[i];
@@ -466,16 +526,6 @@ PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool) {
                 }
                 log_debug("Page %d has %d content streams", page_index + 1, contents_array->length);
             }
-        }
-    }
-
-    // Extract Resources
-    Item resources_item = map_get_str(page_dict, "Resources", pool);
-    if (resources_item.item != ITEM_NULL) {
-        resources_item = pdf_resolve_reference(pdf_data, resources_item, pool);
-        if (resources_item.item != ITEM_NULL) {
-            page_info->resources = (Map*)resources_item.item;
-            log_debug("Extracted Resources for page %d", page_index + 1);
         }
     }
 

@@ -94,13 +94,13 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
         // Render textured quad with text color
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, texture);
-        
+
         // Set texture environment to modulate color with alpha texture
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-        
+
         // Set color just before drawing (r, g, b will be multiplied with texture alpha)
         glColor4f(r, g, b, 1.0f);
-        
+
         glBegin(GL_QUADS);
             glTexCoord2f(0.0f, 0.0f); glVertex2f(xpos, ypos);
             glTexCoord2f(1.0f, 0.0f); glVertex2f(xpos + w, ypos);
@@ -129,6 +129,22 @@ static void color_to_rgb(Color color, float* r, float* g, float* b) {
         *r = 0.0f;
         *g = 0.0f;
         *b = 0.0f;
+    }
+}
+
+// Helper function: Convert Color struct to RGBA floats (includes alpha)
+static void color_to_rgba(Color color, float* r, float* g, float* b, float* a) {
+    if (color.c) {  // Color is set
+        *r = color.r / 255.0f;
+        *g = color.g / 255.0f;
+        *b = color.b / 255.0f;
+        *a = color.a / 255.0f;
+    } else {
+        // Default to black if color not set
+        *r = 0.0f;
+        *g = 0.0f;
+        *b = 0.0f;
+        *a = 1.0f;  // Fully opaque by default
     }
 }
 
@@ -202,18 +218,24 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
 
     // Render background if set
     if (block->bound && block->bound->background && block->bound->background->color.c) {
-        float r, g, b;
-        color_to_rgb(block->bound->background->color, &r, &g, &b);
+        float r, g, b, a;
+        color_to_rgba(block->bound->background->color, &r, &g, &b, &a);
 
-        log_info("Block background color: (%.2f, %.2f, %.2f)", r, g, b);
+        log_info("Block background color: (%.2f, %.2f, %.2f, %.2f)", r, g, b, a);
 
-        glColor3f(r, g, b);
+        // Enable alpha blending for transparent backgrounds
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glColor4f(r, g, b, a);
         glBegin(GL_QUADS);
             glVertex2f(x, y);
             glVertex2f(x + w, y);
             glVertex2f(x + w, y + h);
             glVertex2f(x, y + h);
         glEnd();
+
+        glDisable(GL_BLEND);
     }
 
     // Render border if set
@@ -287,7 +309,7 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
                     glVertex2f(x, y);
                 glEnd();
             }
-            
+
             // Disable stipple after rendering all borders
             glDisable(GL_LINE_STIPPLE);
         }
@@ -295,29 +317,83 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
 
     // Debug: check vpath pointer
     log_info("Block vpath check: vpath=%p", (void*)block->vpath);
-    
+
     // Render vector path if present (for PDF curves)
     if (block->vpath && block->vpath->segments) {
         VectorPathProp* vpath = block->vpath;
-        log_info("Rendering VectorPath with %s stroke, width=%.1f", 
-                 vpath->has_stroke ? "has" : "no", vpath->stroke_width);
-        
-        // Set stroke color and width
+        log_info("Rendering VectorPath: has_fill=%d, has_stroke=%d, stroke_width=%.1f",
+                 vpath->has_fill, vpath->has_stroke, vpath->stroke_width);
+
+        // First, render fill if present
+        if (vpath->has_fill) {
+            float r = vpath->fill_color.r / 255.0f;
+            float g = vpath->fill_color.g / 255.0f;
+            float b = vpath->fill_color.b / 255.0f;
+            float a = vpath->fill_color.a / 255.0f;
+
+            log_info("VectorPath fill color: (%.2f, %.2f, %.2f, %.2f)", r, g, b, a);
+
+            // Enable alpha blending for transparent fills
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glColor4f(r, g, b, a);
+
+            // Render filled polygon using GL_POLYGON
+            // Note: This works for convex paths; complex paths may need tessellation
+            glBegin(GL_POLYGON);
+            for (VectorPathSegment* seg = vpath->segments; seg; seg = seg->next) {
+                // Transform PDF coordinates to screen coordinates
+                float sx = offset_x + seg->x * scale;
+                float sy = offset_y + (g_pdf_page_height - seg->y) * scale;
+
+                if (seg->type == VectorPathSegment::VPATH_CURVETO) {
+                    // For curves, get previous point and subdivide
+                    VectorPathSegment* prev = vpath->segments;
+                    while (prev && prev->next != seg) prev = prev->next;
+                    float p0x = offset_x + (prev ? prev->x : seg->x) * scale;
+                    float p0y = offset_y + (g_pdf_page_height - (prev ? prev->y : seg->y)) * scale;
+
+                    float cx1 = offset_x + seg->x1 * scale;
+                    float cy1 = offset_y + (g_pdf_page_height - seg->y1) * scale;
+                    float cx2 = offset_x + seg->x2 * scale;
+                    float cy2 = offset_y + (g_pdf_page_height - seg->y2) * scale;
+
+                    const int steps = 20;
+                    for (int i = 1; i <= steps; i++) {
+                        float t = (float)i / steps;
+                        float t2 = t * t;
+                        float t3 = t2 * t;
+                        float mt = 1 - t;
+                        float mt2 = mt * mt;
+                        float mt3 = mt2 * mt;
+
+                        float bx = mt3 * p0x + 3 * mt2 * t * cx1 + 3 * mt * t2 * cx2 + t3 * sx;
+                        float by = mt3 * p0y + 3 * mt2 * t * cy1 + 3 * mt * t2 * cy2 + t3 * sy;
+                        glVertex2f(bx, by);
+                    }
+                } else if (seg->type != VectorPathSegment::VPATH_CLOSE) {
+                    glVertex2f(sx, sy);
+                }
+            }
+            glEnd();
+            glDisable(GL_BLEND);
+        }
+
+        // Then render stroke if present
         if (vpath->has_stroke) {
-            float r, g, b;
-            r = vpath->stroke_color.r / 255.0f;
-            g = vpath->stroke_color.g / 255.0f;
-            b = vpath->stroke_color.b / 255.0f;
+            float r = vpath->stroke_color.r / 255.0f;
+            float g = vpath->stroke_color.g / 255.0f;
+            float b = vpath->stroke_color.b / 255.0f;
             glColor3f(r, g, b);
             glLineWidth(vpath->stroke_width * scale);
         }
-        
+
         // Render path segments
         glBegin(GL_LINE_STRIP);
         for (VectorPathSegment* seg = vpath->segments; seg; seg = seg->next) {
             float sx = offset_x + seg->x * scale;
             float sy = offset_y + seg->y * scale;
-            
+
             switch (seg->type) {
                 case VectorPathSegment::VPATH_MOVETO:
                     glEnd();  // End current strip
@@ -336,20 +412,20 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
                     float cy1 = offset_y + seg->y1 * scale;
                     float cx2 = offset_x + seg->x2 * scale;
                     float cy2 = offset_y + seg->y2 * scale;
-                    
+
                     // Subdivide curve into ~20 segments for smooth rendering
                     // We need the previous point, so we'll use the last vertex
                     // For now, just draw straight to the endpoint as approximation
                     // TODO: Implement proper Bezier curve subdivision
                     const int steps = 20;
                     float last_x = sx, last_y = sy;  // Will be updated by Bezier eval
-                    
+
                     // Get start point from previous segment
                     VectorPathSegment* prev = vpath->segments;
                     while (prev && prev->next != seg) prev = prev->next;
                     float p0x = offset_x + (prev ? prev->x : seg->x) * scale;
                     float p0y = offset_y + (prev ? prev->y : seg->y) * scale;
-                    
+
                     for (int i = 1; i <= steps; i++) {
                         float t = (float)i / steps;
                         float t2 = t * t;
@@ -357,13 +433,13 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
                         float mt = 1 - t;
                         float mt2 = mt * mt;
                         float mt3 = mt2 * mt;
-                        
+
                         // Cubic Bezier: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
                         float bx = mt3 * p0x + 3 * mt2 * t * cx1 + 3 * mt * t2 * cx2 + t3 * sx;
                         float by = mt3 * p0y + 3 * mt2 * t * cy1 + 3 * mt * t2 * cy2 + t3 * sy;
                         glVertex2f(bx, by);
                     }
-                    log_debug("  CURVETO (%.1f,%.1f)-(%.1f,%.1f)->(%.1f,%.1f)", 
+                    log_debug("  CURVETO (%.1f,%.1f)-(%.1f,%.1f)->(%.1f,%.1f)",
                              cx1, cy1, cx2, cy2, sx, sy);
                     break;
                 }
