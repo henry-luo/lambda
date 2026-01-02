@@ -229,6 +229,7 @@ PDFStreamParser* pdf_stream_parser_create(const char* stream, int length, Pool* 
     parser->stream_end = stream + length;
     parser->pool = pool;
     parser->input = input;
+    parser->resources = nullptr;  // Set later via pdf_stream_parser_set_resources
 
     pdf_graphics_state_init(&parser->state, pool);
 
@@ -276,6 +277,10 @@ void pdf_graphics_state_init(PDFGraphicsState* state, Pool* pool) {
 
     state->stroke_color_space = 0;  // RGB
     state->fill_color_space = 0;    // RGB
+
+    // Default alpha (fully opaque)
+    state->fill_alpha = 1.0;
+    state->stroke_alpha = 1.0;
 
     // Default line state
     state->line_width = 1.0;
@@ -363,6 +368,8 @@ void pdf_graphics_state_save(PDFGraphicsState* state) {
     memcpy(saved->fill_color, state->fill_color, sizeof(state->fill_color));
     saved->stroke_color_space = state->stroke_color_space;
     saved->fill_color_space = state->fill_color_space;
+    saved->fill_alpha = state->fill_alpha;
+    saved->stroke_alpha = state->stroke_alpha;
 
     saved->line_width = state->line_width;
     saved->dash_pattern = state->dash_pattern;
@@ -406,6 +413,8 @@ void pdf_graphics_state_restore(PDFGraphicsState* state) {
     memcpy(state->fill_color, saved->fill_color, sizeof(state->fill_color));
     state->stroke_color_space = saved->stroke_color_space;
     state->fill_color_space = saved->fill_color_space;
+    state->fill_alpha = saved->fill_alpha;
+    state->stroke_alpha = saved->stroke_alpha;
 
     state->line_width = saved->line_width;
     state->dash_pattern = saved->dash_pattern;
@@ -802,6 +811,15 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
         op->type = PDF_OP_b_star;
     } else if (strcmp(op_name, "n") == 0) {
         op->type = PDF_OP_n;
+    }
+    // Graphics state parameter dictionaries (gs operator)
+    else if (strcmp(op_name, "gs") == 0) {
+        op->type = PDF_OP_gs;
+        // The gs operator takes a name operand - store it for later processing
+        if (str_count >= 1 && strings[0]) {
+            op->operands.show_text.text = strings[0];  // Reuse show_text.text for gs name
+            log_debug("gs operator: graphics state name = %s", strings[0]->chars);
+        }
     }
 
     // Debug: log operator parsing for troubleshooting

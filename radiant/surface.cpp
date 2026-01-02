@@ -155,8 +155,37 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
 }
 
 void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
-    uint32_t* pixel = (uint32_t*)pixels + x;  uint32_t* end = pixel + wd;
-    while (pixel < end) { *pixel++ = color; }
+    uint32_t* pixel = (uint32_t*)pixels + x;
+    uint32_t* end = pixel + wd;
+    
+    // Extract source alpha from color (ABGR format: alpha in high byte)
+    uint8_t src_a = (color >> 24) & 0xFF;
+    
+    if (src_a == 255) {
+        // Fully opaque - fast path, just copy
+        while (pixel < end) { *pixel++ = color; }
+    } else if (src_a > 0) {
+        // Semi-transparent - alpha blend with existing pixels
+        uint8_t src_r = color & 0xFF;
+        uint8_t src_g = (color >> 8) & 0xFF;
+        uint8_t src_b = (color >> 16) & 0xFF;
+        uint8_t inv_a = 255 - src_a;
+        
+        while (pixel < end) {
+            uint32_t dst = *pixel;
+            uint8_t dst_r = dst & 0xFF;
+            uint8_t dst_g = (dst >> 8) & 0xFF;
+            uint8_t dst_b = (dst >> 16) & 0xFF;
+            
+            // Alpha blend: result = src * src_a + dst * (1 - src_a)
+            uint8_t out_r = (src_r * src_a + dst_r * inv_a) / 255;
+            uint8_t out_g = (src_g * src_a + dst_g * inv_a) / 255;
+            uint8_t out_b = (src_b * src_a + dst_b * inv_a) / 255;
+            
+            *pixel++ = (255 << 24) | (out_b << 16) | (out_g << 8) | out_r;
+        }
+    }
+    // else src_a == 0: fully transparent, don't draw anything
 }
 
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip) {
