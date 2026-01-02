@@ -26,7 +26,7 @@ static inline String* input_create_string(Input* input, const char* str) {
 // Forward declarations
 static ViewBlock* create_document_view(Pool* pool);
 static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent, Item obj_item);
-static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map);
+static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources);
 static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
 static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, String* text);
 static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
@@ -289,7 +289,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, flo
             Map* stream_map = (Map*)stream_item.item;
             log_debug("Processing content stream %d/%d for page %d",
                      i + 1, page_info->content_streams->length, page_index + 1);
-            process_pdf_stream(input, view_pool, root_view, stream_map);
+            process_pdf_stream(input, view_pool, root_view, stream_map, page_info->resources);
         }
     }
 
@@ -387,7 +387,7 @@ static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Process stream objects
     if (strcmp(type_str->chars, "stream") == 0) {
-        process_pdf_stream(input, view_pool, parent, obj_map);
+        process_pdf_stream(input, view_pool, parent, obj_map, nullptr);
     }
     // Process indirect objects
     else if (strcmp(type_str->chars, "indirect_object") == 0) {
@@ -402,7 +402,7 @@ static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent,
 /**
  * Process a PDF content stream
  */
-static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map) {
+static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources) {
     log_debug("Processing PDF stream");
 
     // Get stream data
@@ -496,6 +496,9 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
         }
         return;
     }
+
+    // Set page resources for ExtGState lookup
+    parser->resources = resources;
 
     // Process operators
     PDFOperator* op;
@@ -757,6 +760,58 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             pdf_clear_path_segments(&parser->state);
             break;
 
+        case PDF_OP_gs:
+            // Set graphics state from ExtGState dictionary
+            if (op->operands.show_text.text && parser->resources) {
+                const char* gs_name = op->operands.show_text.text->chars;
+                log_debug("Processing gs operator: %s", gs_name);
+                
+                // Look up ExtGState in resources
+                ConstItem extgstate_item = ((Map*)parser->resources)->get("ExtGState");
+                if (extgstate_item.item != ITEM_NULL && extgstate_item.type_id() == LMD_TYPE_MAP) {
+                    Map* extgstate_dict = (Map*)extgstate_item.map;
+                    
+                    // Look up the specific graphics state by name
+                    ConstItem gs_item = extgstate_dict->get(gs_name);
+                    if (gs_item.item != ITEM_NULL && gs_item.type_id() == LMD_TYPE_MAP) {
+                        Map* gs_dict = (Map*)gs_item.map;
+                        
+                        // Check for ca (fill alpha)
+                        ConstItem ca_item = gs_dict->get("ca");
+                        if (ca_item.item != ITEM_NULL) {
+                            double ca = 1.0;
+                            Item ca_mut = *(Item*)&ca_item;
+                            if (ca_mut.type_id() == LMD_TYPE_FLOAT) {
+                                ca = ca_mut.get_double();
+                            } else if (ca_mut.type_id() == LMD_TYPE_INT) {
+                                ca = (double)ca_mut.int_val;
+                            }
+                            parser->state.fill_alpha = ca;
+                            log_debug("Set fill alpha (ca): %.2f", ca);
+                        }
+                        
+                        // Check for CA (stroke alpha)
+                        ConstItem CA_item = gs_dict->get("CA");
+                        if (CA_item.item != ITEM_NULL) {
+                            double CA = 1.0;
+                            Item CA_mut = *(Item*)&CA_item;
+                            if (CA_mut.type_id() == LMD_TYPE_FLOAT) {
+                                CA = CA_mut.get_double();
+                            } else if (CA_mut.type_id() == LMD_TYPE_INT) {
+                                CA = (double)CA_mut.int_val;
+                            }
+                            parser->state.stroke_alpha = CA;
+                            log_debug("Set stroke alpha (CA): %.2f", CA);
+                        }
+                    } else {
+                        log_debug("Graphics state '%s' not found in ExtGState", gs_name);
+                    }
+                } else {
+                    log_debug("No ExtGState dictionary in resources");
+                }
+            }
+            break;
+
         default:
             if (op->type != PDF_OP_UNKNOWN) {
                 log_debug("Unhandled operator type: %d (%s)", op->type, op->name);
@@ -870,13 +925,14 @@ static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
                 bg->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
                 bg->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
                 bg->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
-                bg->color.a = 255; // Fully opaque
+                // Apply fill alpha from graphics state
+                bg->color.a = (uint8_t)(parser->state.fill_alpha * 255.0);
                 // NOTE: Don't set bg->color.c - it's a union with r,g,b,a
 
                 bound->background = bg;
 
-                log_debug("Applied fill color: RGB(%d, %d, %d)",
-                         bg->color.r, bg->color.g, bg->color.b);
+                log_debug("Applied fill color: RGB(%d, %d, %d) alpha=%.2f",
+                         bg->color.r, bg->color.g, bg->color.b, parser->state.fill_alpha);
             }
         }
     }
@@ -897,7 +953,8 @@ static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
                 stroke_color.r = (uint8_t)(parser->state.stroke_color[0] * 255.0);
                 stroke_color.g = (uint8_t)(parser->state.stroke_color[1] * 255.0);
                 stroke_color.b = (uint8_t)(parser->state.stroke_color[2] * 255.0);
-                stroke_color.a = 255; // Fully opaque
+                // Apply stroke alpha from graphics state
+                stroke_color.a = (uint8_t)(parser->state.stroke_alpha * 255.0);
                 // NOTE: Don't set stroke_color.c - it's a union with r,g,b,a
 
                 // Apply stroke color to all four sides

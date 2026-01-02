@@ -101,6 +101,9 @@ typedef enum {
     PDF_OP_b_star,      // Close, fill and stroke (even-odd)
     PDF_OP_n,           // End path without filling or stroking
 
+    // Graphics state parameter dictionary
+    PDF_OP_gs,          // Set graphics state from ExtGState dictionary
+
     // XObject operators
     PDF_OP_Do,          // Invoke named XObject
 
@@ -186,6 +189,8 @@ typedef struct PDFSavedState {
     double fill_color[3];
     int stroke_color_space;
     int fill_color_space;
+    double fill_alpha;
+    double stroke_alpha;
     double line_width;
     double* dash_pattern;
     int dash_pattern_length;
@@ -222,6 +227,8 @@ typedef struct {
     double fill_color[3];      // RGB
     int stroke_color_space;    // 0=RGB, 1=CMYK, 2=Gray
     int fill_color_space;      // 0=RGB, 1=CMYK, 2=Gray
+    double fill_alpha;         // ca operator (0.0-1.0, default 1.0)
+    double stroke_alpha;       // CA operator (0.0-1.0, default 1.0)
 
     // Line state
     double line_width;         // w operator (default 1.0)
@@ -268,6 +275,7 @@ typedef struct {
     Pool* pool;                // Memory pool
     PDFGraphicsState state;    // Current graphics state
     Input* input;              // Input context for string allocation
+    struct Map* resources;     // Page resources dictionary (for ExtGState lookup)
 } PDFStreamParser;
 
 // Function declarations
