@@ -970,14 +970,18 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_debug("DEBUG: Initializing layout context");
     lycon->elmt = elmt;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
-    lycon->block.max_width = lycon->block.content_width = lycon->ui_context->window_width;
+    // Layout uses physical pixels (lycon->width/height) for rendering surface compatibility.
+    // Font sizes are already scaled by pixel_ratio during style resolution.
+    float physical_width = lycon->width;
+    float physical_height = lycon->height;
+    lycon->block.max_width = lycon->block.content_width = physical_width;
     // Set root element height to viewport to enable scrollbars when content overflows
-    lycon->block.content_height = lycon->ui_context->window_height;
+    lycon->block.content_height = physical_height;
     lycon->block.advance_y = 0;  lycon->block.line_height = -1;
     lycon->block.text_align = CSS_VALUE_LEFT;
 
-    // Set available space to viewport dimensions
-    lycon->available_space = AvailableSpace::make_width_definite(lycon->ui_context->window_width);
+    // Set available space to viewport dimensions (physical pixels for layout)
+    lycon->available_space = AvailableSpace::make_width_definite(physical_width);
 
     line_init(lycon, 0, lycon->block.content_width);
 
@@ -991,22 +995,22 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // The viewport height will be used for scrollbar calculations via scroller->viewport_height
     lycon->doc->view_tree->root = (View*)html;  lycon->elmt = elmt;
 
-    // html->scroller->viewport_height = lycon->ui_context->window_height;  // For scrollbar calculations
-    lycon->block.given_width = lycon->ui_context->window_width;
+    // html->scroller->viewport_height = physical_height;  // For scrollbar calculations
+    lycon->block.given_width = physical_width;
     // Don't set given_height - let html use auto (content-based) height
     lycon->block.given_height = -1;  // -1 means auto height
     html->position = alloc_position_prop(lycon);
 
     // Create the initial Block Formatting Context for the root element
     // CSS 2.2: The root element establishes the initial BFC
-    html->content_width = lycon->ui_context->window_width;
+    html->content_width = physical_width;
     Pool* layout_pool = lycon->doc->view_tree->pool;
     log_debug("[BlockContext] Initializing root BFC for HTML element");
 
     // Initialize the unified BlockContext for the root element
     block_context_init(&lycon->block, html, layout_pool);
-    lycon->block.content_width = lycon->ui_context->window_width;
-    lycon->block.float_right_edge = lycon->ui_context->window_width;
+    lycon->block.content_width = physical_width;
+    lycon->block.float_right_edge = physical_width;
     log_debug("[BlockContext] Root BFC created (width=%.1f)", html->content_width);
 
     auto t_init = high_resolution_clock::now();
@@ -1067,8 +1071,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     if (body_node) {
         log_debug("Laying out body element: %p", (void*)body_node);
-        layout_block(lycon, body_node,
-            (DisplayValue){.outer = CSS_VALUE_BLOCK, .inner = CSS_VALUE_FLOW});
+        // Resolve body's actual display value from CSS (may be flex, grid, etc.)
+        DisplayValue body_display = resolve_display_value(body_node);
+        log_debug("Body element display resolved: outer=%d, inner=%d (FLEX=%d)", 
+            body_display.outer, body_display.inner, CSS_VALUE_FLEX);
+        layout_block(lycon, body_node, body_display);
 
         // After body layout, update html's advance_y from body's height
         // This is critical for scroll height calculation in iframes
@@ -1147,13 +1154,14 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
 
-    // Initialize viewport dimensions for vw/vh units (in CSS logical pixels)
-    // Use viewport_width/height which store the intended CSS viewport size
-    // (not the actual framebuffer size which may differ due to window decorations)
-    lycon->width = uicon->viewport_width > 0 ? uicon->viewport_width : 1200;
-    lycon->height = uicon->viewport_height > 0 ? uicon->viewport_height : 800;
-    log_debug("layout_init: viewport=%.1fx%.1f (CSS), framebuffer=%.1fx%.1f (physical), pixel_ratio=%.2f",
-              lycon->width, lycon->height, uicon->window_width, uicon->window_height, uicon->pixel_ratio);
+    // Initialize viewport dimensions for layout (in physical pixels for rendering)
+    // Layout uses physical pixels so the view tree coordinates match the rendering surface
+    // CSS vh/vw units are still resolved relative to CSS viewport, but the layout coordinates
+    // are in physical pixels to avoid needing to scale during rendering
+    lycon->width = uicon->window_width > 0 ? uicon->window_width : 1200;
+    lycon->height = uicon->window_height > 0 ? uicon->window_height : 800;
+    log_debug("layout_init: viewport=%.1fx%.1f (physical), pixel_ratio=%.2f",
+              lycon->width, lycon->height, uicon->pixel_ratio);
 
     // Initialize available space to indefinite (will be set properly during layout)
     lycon->available_space = AvailableSpace::make_indefinite();

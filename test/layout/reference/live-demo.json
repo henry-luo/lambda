@@ -375,8 +375,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        * {\n            box-sizing: border-box;\n        }\n        body {\n            margin: 0;\n            min-height: 100vh;\n            font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n            background: radial-gradient(circle at top, #101827 0, #020617 55%, #000 100%);\n            color: #e5e7eb;\n        }\n\n        a {\n            color: inherit;\n        }\n\n        .page {\n            max-width: 1440px;\n            margin: 0 auto;\n            padding: 24px 24px 32px;\n        }\n\n        header {\n            display: grid;\n            grid-template-columns: minmax(0, 2.2fr) minmax(0, 2.5fr);\n            gap: 24px;\n            align-items: center;\n            margin-bottom: 28px;\n        }\n\n        .brand {\n            display: flex;\n            align-items: center;\n            gap: 14px;\n            margin-bottom: 8px;\n        }\n\n        .brand-logo {\n            width: 40px;\n            height: 40px;\n            border-radius: 12px;\n            background: conic-gradient(from 210deg, #22c55e, #0ea5e9, #6366f1, #22c55e);\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #020617;\n            font-weight: 700;\n            font-size: 22px;\n        }\n\n        .brand-text h1 {\n            margin: 0;\n            font-size: 26px;\n            font-weight: 550;\n            letter-spacing: 0.03em;\n        }\n\n        .brand-text p {\n            margin: 4px 0 0;\n            font-size: 13px;\n            color: #9ca3af;\n        }\n\n        .hero-tagline {\n            margin-top: 12px;\n            padding: 8px 10px;\n            display: inline-flex;\n            align-items: center;\n            gap: 8px;\n            border-radius: 999px;\n            font-size: 11px;\n            letter-spacing: 0.08em;\n            text-transform: uppercase;\n            background: rgba(15, 23, 42, 0.9);\n            border: 1px solid rgba(148, 163, 184, 0.5);\n            color: #cbd5f5;\n        }\n\n        .hero-tagline span.badge {\n            padding: 3px 7px 4px;\n            border-radius: 999px;\n            background: linear-gradient(120deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .hero-copy {\n            margin-top: 14px;\n            font-size: 13px;\n            line-height: 1.6;\n            color: #9ca3af;\n        }\n\n        .hero-copy strong {\n            color: #e5e7eb;\n            font-weight: 600;\n        }\n\n        .hero-actions {\n            margin-top: 16px;\n            display: flex;\n            flex-wrap: wrap;\n            gap: 10px;\n        }\n\n        .pill {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 7px 12px;\n            border-radius: 999px;\n            border: 1px solid rgba(148, 163, 184, 0.6);\n            background: rgba(15, 23, 42, 0.9);\n            font-size: 11px;\n            color: #cbd5f5;\n            text-decoration: none;\n            white-space: nowrap;\n        }\n\n        .pill.primary {\n            border-color: transparent;\n            background: linear-gradient(135deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .pill code {\n            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;\n            font-size: 10px;\n        }\n\n        main {\n            display: flex;\n            gap: 20px;\n        }\n\n        .nav-panel {\n            display: flex;\n            flex-direction: column;\n            gap: 14px;\n            max-width: 200px;\n        }\n\n        .nav-group h2 {\n            margin: 0 0 6px;\n            font-size: 11px;\n            letter-spacing: 0.16em;\n            text-transform: uppercase;\n            color: #9ca3af;\n        }\n\n        .nav-links {\n            display: flex;\n            flex-wrap: wrap;\n            gap: 6px;\n        }\n\n        .nav-links a {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 6px 10px;\n            border-radius: 999px;\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            background: rgba(15, 23, 42, 0.96);\n            font-size: 11px;\n            text-decoration: none;\n            color: #d1d5db;\n            white-space: nowrap;\n        }\n\n        .nav-links a:hover {\n            border-color: rgba(96, 165, 250, 0.9);\n            color: #e5e7eb;\n        }\n\n        .nav-links a.active {\n            border-color: rgba(59, 130, 246, 1);\n            background: linear-gradient(135deg, rgba(37, 99, 235, 0.9), rgba(15, 23, 42, 0.95));\n            color: #e5e7eb;\n        }\n\n        .viewer {\n            flex: 1;\n            border-radius: 16px;\n            overflow: hidden;\n            background: rgba(15, 23, 42, 0.95);\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            box-shadow: 0 20px 55px rgba(0, 0, 0, 0.7);\n        }\n\n        .viewer-header {\n            display: flex;\n            align-items: center;\n            padding: 8px 10px;\n            gap: 8px;\n            background: linear-gradient(90deg, #020617, #020617 30%, #020617 100%);\n            border-bottom: 1px solid rgba(31, 41, 55, 0.95);\n        }\n\n        .viewer-dots {\n            display: flex;\n            align-items: center;\n            gap: 6px;\n        }\n\n        .viewer-dot {\n            width: 9px;\n            height: 9px;\n            border-radius: 999px;\n        }\n\n        .viewer-dot.red { background: #ef4444; }\n        .viewer-dot.amber { background: #f59e0b; }\n        .viewer-dot.green { background: #22c55e; }\n\n        .viewer-title {\n            flex: 1;\n            text-align: center;\n            font-size: 11px;\n            color: #9ca3af;\n        }\n\n        iframe[name=\"main_frame\"] {\n            width: 100%;\n            height: 580px;\n            border: none;\n            background: #ffffff;\n        }\n\n        footer {\n            margin-top: 18px;\n            padding-top: 12px;\n            border-top: 1px solid rgba(31, 41, 55, 0.8);\n            font-size: 11px;\n            color: #6b7280;\n            display: flex;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            gap: 8px;\n        }\n\n        footer .links a {\n            text-decoration: none;\n            color: #6b7280;\n        }\n\n        footer .links a:hover {\n            color: #9ca3af;\n        }\n\n        @media (max-width: 960px) {\n            header {\n                grid-template-columns: minmax(0, 1fr);\n            }\n            .nav-panel {\n                max-width: 100px;\n            }            \n        }\n    ",
-                "length": 6700,
+                "text": "\n        * {\n            box-sizing: border-box;\n        }\n        html, body {\n            height: 100%;\n            margin: 0;\n        }\n        body {\n            display: flex;\n            flex-direction: column;\n            font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n            background: radial-gradient(circle at top, #101827 0, #020617 55%, #000 100%);\n            color: #e5e7eb;\n            overflow: hidden;\n        }\n\n        a {\n            color: inherit;\n        }\n\n        .page {\n            flex: 1 1 0;\n            display: flex;\n            flex-direction: column;\n            max-width: 1440px;\n            width: 100%;\n            margin: 0 auto;\n            padding: 24px 24px 12px;\n            min-height: 0;\n            overflow: hidden;\n        }\n\n        header {\n            display: grid;\n            grid-template-columns: minmax(0, 2.2fr) minmax(0, 2.5fr);\n            gap: 24px;\n            align-items: center;\n            margin-bottom: 28px;\n        }\n\n        .brand {\n            display: flex;\n            align-items: center;\n            gap: 14px;\n            margin-bottom: 8px;\n        }\n\n        .brand-logo {\n            width: 40px;\n            height: 40px;\n            border-radius: 12px;\n            background: conic-gradient(from 210deg, #22c55e, #0ea5e9, #6366f1, #22c55e);\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #020617;\n            font-weight: 700;\n            font-size: 22px;\n        }\n\n        .brand-text h1 {\n            margin: 0;\n            font-size: 26px;\n            font-weight: 550;\n            letter-spacing: 0.03em;\n        }\n\n        .brand-text p {\n            margin: 4px 0 0;\n            font-size: 13px;\n            color: #9ca3af;\n        }\n\n        .hero-tagline {\n            margin-top: 12px;\n            padding: 8px 10px;\n            display: inline-flex;\n            align-items: center;\n            gap: 8px;\n            border-radius: 999px;\n            font-size: 11px;\n            letter-spacing: 0.08em;\n            text-transform: uppercase;\n            background: rgba(15, 23, 42, 0.9);\n            border: 1px solid rgba(148, 163, 184, 0.5);\n            color: #cbd5f5;\n        }\n\n        .hero-tagline span.badge {\n            padding: 3px 7px 4px;\n            border-radius: 999px;\n            background: linear-gradient(120deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .hero-copy {\n            margin-top: 14px;\n            font-size: 13px;\n            line-height: 1.6;\n            color: #9ca3af;\n        }\n\n        .hero-copy strong {\n            color: #e5e7eb;\n            font-weight: 600;\n        }\n\n        .hero-actions {\n            margin-top: 16px;\n            display: flex;\n            flex-wrap: wrap;\n            gap: 10px;\n        }\n\n        .pill {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 7px 12px;\n            border-radius: 999px;\n            border: 1px solid rgba(148, 163, 184, 0.6);\n            background: rgba(15, 23, 42, 0.9);\n            font-size: 11px;\n            color: #cbd5f5;\n            text-decoration: none;\n            white-space: nowrap;\n        }\n\n        .pill.primary {\n            border-color: transparent;\n            background: linear-gradient(135deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .pill code {\n            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;\n            font-size: 10px;\n        }\n\n        main {\n            flex: 1 1 0;\n            display: flex;\n            gap: 20px;\n            min-height: 0;\n            overflow: hidden;\n        }\n\n        .nav-panel {\n            flex-shrink: 0;\n            display: flex;\n            flex-direction: column;\n            gap: 14px;\n            max-width: 200px;\n            overflow-y: auto;\n        }\n\n        .nav-group h2 {\n            margin: 0 0 6px;\n            font-size: 11px;\n            letter-spacing: 0.16em;\n            text-transform: uppercase;\n            color: #9ca3af;\n        }\n\n        .nav-links {\n            display: flex;\n            flex-wrap: wrap;\n            gap: 6px;\n        }\n\n        .nav-links a {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 6px 10px;\n            border-radius: 999px;\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            background: rgba(15, 23, 42, 0.96);\n            font-size: 11px;\n            text-decoration: none;\n            color: #d1d5db;\n            white-space: nowrap;\n        }\n\n        .nav-links a:hover {\n            border-color: rgba(96, 165, 250, 0.9);\n            color: #e5e7eb;\n        }\n\n        .nav-links a.active {\n            border-color: rgba(59, 130, 246, 1);\n            background: linear-gradient(135deg, rgba(37, 99, 235, 0.9), rgba(15, 23, 42, 0.95));\n            color: #e5e7eb;\n        }\n\n        .viewer {\n            flex: 1 1 0;\n            display: flex;\n            flex-direction: column;\n            border-radius: 16px;\n            overflow: hidden;\n            background: rgba(15, 23, 42, 0.95);\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            box-shadow: 0 20px 55px rgba(0, 0, 0, 0.7);\n            min-height: 0;\n            margin-bottom: 22px;\n        }\n\n        .viewer-header {\n            display: flex;\n            align-items: center;\n            padding: 8px 10px;\n            gap: 8px;\n            background: linear-gradient(90deg, #020617, #020617 30%, #020617 100%);\n            border-bottom: 1px solid rgba(31, 41, 55, 0.95);\n        }\n\n        .viewer-dots {\n            display: flex;\n            align-items: center;\n            gap: 6px;\n        }\n\n        .viewer-dot {\n            width: 9px;\n            height: 9px;\n            border-radius: 999px;\n        }\n\n        .viewer-dot.red { background: #ef4444; }\n        .viewer-dot.amber { background: #f59e0b; }\n        .viewer-dot.green { background: #22c55e; }\n\n        .viewer-title {\n            flex: 1;\n            text-align: center;\n            font-size: 11px;\n            color: #9ca3af;\n        }\n\n        iframe[name=\"main_frame\"] {\n            flex: 1 1 0;\n            width: 100%;\n            border: none;\n            background: #ffffff;\n            min-height: 0;\n        }\n\n        footer {\n            flex-shrink: 0;\n            margin-top: auto;\n            padding: 12px 0 0;\n            border-top: 1px solid rgba(31, 41, 55, 0.8);\n            font-size: 11px;\n            color: #6b7280;\n            display: flex;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            gap: 8px;\n        }\n\n        footer .links a {\n            text-decoration: none;\n            color: #6b7280;\n        }\n\n        footer .links a:hover {\n            color: #9ca3af;\n        }\n\n        @media (max-width: 960px) {\n            header {\n                grid-template-columns: minmax(0, 1fr);\n            }\n            .nav-panel {\n                max-width: 100px;\n            }            \n        }\n    ",
+                "length": 7309,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -426,7 +426,7 @@
           "scrollHeight": 800
         },
         "computed": {
-          "display": "block",
+          "display": "flex",
           "position": "static",
           "marginTop": 0,
           "marginRight": 0,
@@ -440,7 +440,7 @@
           "borderRightWidth": 0,
           "borderBottomWidth": 0,
           "borderLeftWidth": 0,
-          "flexDirection": "row",
+          "flexDirection": "column",
           "flexWrap": "nowrap",
           "justifyContent": "normal",
           "alignItems": "normal",
@@ -462,9 +462,9 @@
           "bottom": "auto",
           "left": "auto",
           "zIndex": "auto",
-          "overflow": "visible",
-          "overflowX": "visible",
-          "overflowY": "visible"
+          "overflow": "hidden",
+          "overflowX": "hidden",
+          "overflowY": "hidden"
         },
         "depth": 1,
         "elementIndex": 2,
@@ -481,14 +481,14 @@
               "x": 0,
               "y": 0,
               "width": 1200,
-              "height": 715,
+              "height": 800,
               "contentWidth": 1200,
-              "contentHeight": 715,
+              "contentHeight": 800,
               "scrollWidth": 1200,
-              "scrollHeight": 715
+              "scrollHeight": 800
             },
             "computed": {
-              "display": "block",
+              "display": "flex",
               "position": "static",
               "marginTop": 0,
               "marginRight": 0,
@@ -496,20 +496,20 @@
               "marginLeft": 0,
               "paddingTop": 24,
               "paddingRight": 24,
-              "paddingBottom": 32,
+              "paddingBottom": 12,
               "paddingLeft": 24,
               "borderTopWidth": 0,
               "borderRightWidth": 0,
               "borderBottomWidth": 0,
               "borderLeftWidth": 0,
-              "flexDirection": "row",
+              "flexDirection": "column",
               "flexWrap": "nowrap",
               "justifyContent": "normal",
               "alignItems": "normal",
               "alignContent": "normal",
-              "flexGrow": 0,
+              "flexGrow": 1,
               "flexShrink": 1,
-              "flexBasis": "auto",
+              "flexBasis": "0px",
               "alignSelf": "auto",
               "order": 0,
               "gap": "normal",
@@ -524,9 +524,9 @@
               "bottom": "auto",
               "left": "auto",
               "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
+              "overflow": "hidden",
+              "overflowX": "hidden",
+              "overflowY": "hidden"
             },
             "depth": 2,
             "elementIndex": 1,
@@ -541,11 +541,11 @@
                   "x": 24,
                   "y": 24,
                   "width": 1152,
-                  "height": 615,
+                  "height": 738,
                   "contentWidth": 1152,
-                  "contentHeight": 615,
+                  "contentHeight": 738,
                   "scrollWidth": 1152,
-                  "scrollHeight": 615
+                  "scrollHeight": 738
                 },
                 "computed": {
                   "display": "flex",
@@ -567,9 +567,9 @@
                   "justifyContent": "normal",
                   "alignItems": "normal",
                   "alignContent": "normal",
-                  "flexGrow": 0,
+                  "flexGrow": 1,
                   "flexShrink": 1,
-                  "flexBasis": "auto",
+                  "flexBasis": "0px",
                   "alignSelf": "auto",
                   "order": 0,
                   "gap": "20px",
@@ -584,9 +584,9 @@
                   "bottom": "auto",
                   "left": "auto",
                   "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
+                  "overflow": "hidden",
+                  "overflowX": "hidden",
+                  "overflowY": "hidden"
                 },
                 "depth": 3,
                 "elementIndex": 1,
@@ -603,11 +603,11 @@
                       "x": 24,
                       "y": 24,
                       "width": 200,
-                      "height": 615,
+                      "height": 738,
                       "contentWidth": 200,
-                      "contentHeight": 615,
+                      "contentHeight": 738,
                       "scrollWidth": 200,
-                      "scrollHeight": 615
+                      "scrollHeight": 738
                     },
                     "computed": {
                       "display": "flex",
@@ -646,9 +646,9 @@
                       "bottom": "auto",
                       "left": "auto",
                       "zIndex": "auto",
-                      "overflow": "visible",
-                      "overflowX": "visible",
-                      "overflowY": "visible"
+                      "overflow": "auto",
+                      "overflowX": "auto",
+                      "overflowY": "auto"
                     },
                     "depth": 4,
                     "elementIndex": 1,
@@ -2455,18 +2455,18 @@
                       "x": 244,
                       "y": 24,
                       "width": 932,
-                      "height": 615,
+                      "height": 716,
                       "contentWidth": 930,
-                      "contentHeight": 613,
+                      "contentHeight": 714,
                       "scrollWidth": 930,
-                      "scrollHeight": 613
+                      "scrollHeight": 714
                     },
                     "computed": {
-                      "display": "block",
+                      "display": "flex",
                       "position": "static",
                       "marginTop": 0,
                       "marginRight": 0,
-                      "marginBottom": 0,
+                      "marginBottom": 22,
                       "marginLeft": 0,
                       "paddingTop": 0,
                       "paddingRight": 0,
@@ -2476,14 +2476,14 @@
                       "borderRightWidth": 1,
                       "borderBottomWidth": 1,
                       "borderLeftWidth": 1,
-                      "flexDirection": "row",
+                      "flexDirection": "column",
                       "flexWrap": "nowrap",
                       "justifyContent": "normal",
                       "alignItems": "normal",
                       "alignContent": "normal",
                       "flexGrow": 1,
                       "flexShrink": 1,
-                      "flexBasis": "0%",
+                      "flexBasis": "0px",
                       "alignSelf": "auto",
                       "order": 0,
                       "gap": "normal",
@@ -2988,14 +2988,14 @@
                           "x": 245,
                           "y": 55,
                           "width": 930,
-                          "height": 580,
+                          "height": 684,
                           "contentWidth": 930,
-                          "contentHeight": 580,
+                          "contentHeight": 684,
                           "scrollWidth": 930,
-                          "scrollHeight": 580
+                          "scrollHeight": 684
                         },
                         "computed": {
-                          "display": "inline",
+                          "display": "block",
                           "position": "static",
                           "marginTop": 0,
                           "marginRight": 0,
@@ -3014,9 +3014,9 @@
                           "justifyContent": "normal",
                           "alignItems": "normal",
                           "alignContent": "normal",
-                          "flexGrow": 0,
+                          "flexGrow": 1,
                           "flexShrink": 1,
-                          "flexBasis": "auto",
+                          "flexBasis": "0px",
                           "alignSelf": "auto",
                           "order": 0,
                           "gap": "normal",
@@ -3051,7 +3051,7 @@
                 "classes": [],
                 "layout": {
                   "x": 24,
-                  "y": 657,
+                  "y": 762,
                   "width": 1152,
                   "height": 26,
                   "contentWidth": 1152,
@@ -3062,7 +3062,7 @@
                 "computed": {
                   "display": "flex",
                   "position": "static",
-                  "marginTop": 18,
+                  "marginTop": 0,
                   "marginRight": 0,
                   "marginBottom": 0,
                   "marginLeft": 0,
@@ -3111,7 +3111,7 @@
                     "classes": [],
                     "layout": {
                       "x": 24,
-                      "y": 670,
+                      "y": 775,
                       "width": 251.69,
                       "height": 13,
                       "contentWidth": 252,
@@ -3172,11 +3172,11 @@
                           "rects": [
                             {
                               "x": 24,
-                              "y": 670,
+                              "y": 775,
                               "width": 251.69,
                               "height": 13,
                               "right": 275.69,
-                              "bottom": 683,
+                              "bottom": 788,
                               "text": "Lambda Script · Data → Layout → PDF/SVG/PNG",
                               "startIndex": 0,
                               "endIndex": 43
@@ -3203,7 +3203,7 @@
                     ],
                     "layout": {
                       "x": 847.86,
-                      "y": 670,
+                      "y": 775,
                       "width": 328.14,
                       "height": 13,
                       "contentWidth": 328,
@@ -3263,7 +3263,7 @@
                         "classes": [],
                         "layout": {
                           "x": 847.86,
-                          "y": 670,
+                          "y": 775,
                           "width": 104.67,
                           "height": 13,
                           "contentWidth": 0,
@@ -3324,11 +3324,11 @@
                               "rects": [
                                 {
                                   "x": 847.86,
-                                  "y": 670,
+                                  "y": 775,
                                   "width": 104.67,
                                   "height": 13,
                                   "right": 952.53,
-                                  "bottom": 683,
+                                  "bottom": 788,
                                   "text": "Language reference",
                                   "startIndex": 0,
                                   "endIndex": 18
@@ -3354,11 +3354,11 @@
                           "rects": [
                             {
                               "x": 952.53,
-                              "y": 670,
+                              "y": 775,
                               "width": 15.97,
                               "height": 13,
                               "right": 968.5,
-                              "bottom": 683,
+                              "bottom": 788,
                               "text": "\n                 · \n                ",
                               "startIndex": 0,
                               "endIndex": 37
@@ -3381,7 +3381,7 @@
                         "classes": [],
                         "layout": {
                           "x": 968.5,
-                          "y": 670,
+                          "y": 775,
                           "width": 78.83,
                           "height": 13,
                           "contentWidth": 0,
@@ -3442,11 +3442,11 @@
                               "rects": [
                                 {
                                   "x": 968.5,
-                                  "y": 670,
+                                  "y": 775,
                                   "width": 78.83,
                                   "height": 13,
                                   "right": 1047.33,
-                                  "bottom": 683,
+                                  "bottom": 788,
                                   "text": "Validator guide",
                                   "startIndex": 0,
                                   "endIndex": 15
@@ -3472,11 +3472,11 @@
                           "rects": [
                             {
                               "x": 1047.33,
-                              "y": 670,
+                              "y": 775,
                               "width": 15.97,
                               "height": 13,
                               "right": 1063.3,
-                              "bottom": 683,
+                              "bottom": 788,
                               "text": "\n                 · \n                ",
                               "startIndex": 0,
                               "endIndex": 37
@@ -3499,7 +3499,7 @@
                         "classes": [],
                         "layout": {
                           "x": 1063.3,
-                          "y": 670,
+                          "y": 775,
                           "width": 112.7,
                           "height": 13,
                           "contentWidth": 0,
@@ -3560,11 +3560,11 @@
                               "rects": [
                                 {
                                   "x": 1063.3,
-                                  "y": 670,
+                                  "y": 775,
                                   "width": 112.7,
                                   "height": 13,
                                   "right": 1176,
-                                  "bottom": 683,
+                                  "bottom": 788,
                                   "text": "Radiant layout design",
                                   "startIndex": 0,
                                   "endIndex": 21
