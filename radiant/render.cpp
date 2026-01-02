@@ -1094,7 +1094,33 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     if (block->bound) { render_bound(rdcon, block); }
 
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
-    // setup clip box
+    
+    // Constrain clip region to iframe content box (before scroller setup)
+    // This ensures embedded documents (SVG, PDF, etc.) don't render outside iframe bounds
+    float content_left = rdcon->block.x;
+    float content_top = rdcon->block.y;
+    float content_right = rdcon->block.x + block->width;
+    float content_bottom = rdcon->block.y + block->height;
+    
+    // Adjust for borders if present
+    if (block->bound && block->bound->border) {
+        content_left += block->bound->border->width.left;
+        content_top += block->bound->border->width.top;
+        content_right -= block->bound->border->width.right;
+        content_bottom -= block->bound->border->width.bottom;
+    }
+    
+    // Intersect with parent clip region
+    rdcon->block.clip.left = max(rdcon->block.clip.left, content_left);
+    rdcon->block.clip.top = max(rdcon->block.clip.top, content_top);
+    rdcon->block.clip.right = min(rdcon->block.clip.right, content_right);
+    rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, content_bottom);
+    
+    log_debug("iframe clip set to: left:%.0f, top:%.0f, right:%.0f, bottom:%.0f (content box)",
+              rdcon->block.clip.left, rdcon->block.clip.top, 
+              rdcon->block.clip.right, rdcon->block.clip.bottom);
+    
+    // setup clip box for scrolling
     if (block->scroller) { setup_scroller(rdcon, block); }
     // render the embedded doc
     if (block->embed && block->embed->doc) {
