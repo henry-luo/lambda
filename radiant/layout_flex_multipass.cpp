@@ -1390,12 +1390,104 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         
         // Update container height if needed (for auto-height containers)
         if (y_shift > 0.5f) {
+            // Check if container has explicit height from CSS
             bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height > 0);
+            
+            // CRITICAL FIX: Also check if this container is a flex item whose height was 
+            // set by parent flex sizing. This prevents growing containers that were 
+            // stretched by their parent row flex container (e.g., nav-panel inside main).
+            bool is_flex_item = flex_container->fi != nullptr ||
+                                (flex_container->item_prop_type == DomElement::ITEM_PROP_FORM && flex_container->form);
+            if (!has_explicit_height && is_flex_item && flex_container->height > 0) {
+                // Check if parent set the height via flex sizing (stretch or flex-grow)
+                float fg = get_item_flex_grow(flex_container);
+                float fs = get_item_flex_shrink(flex_container);
+                if (fg > 0 || fs > 0) {
+                    has_explicit_height = true;  // Height was set by parent flex
+                }
+            }
+            
+            log_debug("COLUMN ADJUST: container=%s, y_shift=%.1f, has_explicit=%d, height=%.1f",
+                    flex_container->node_name(), y_shift, has_explicit_height, flex_container->height);
             if (!has_explicit_height) {
                 float new_height = flex_container->height + y_shift;
                 log_debug("COLUMN ADJUST: container height: %.1f -> %.1f (shift=%.1f)",
                           flex_container->height, new_height, y_shift);
                 flex_container->height = new_height;
+            }
+        }
+    }
+
+    // CRITICAL FIX: For row flex containers with auto height, recalculate container
+    // height after nested content has been laid out. The initial height calculation
+    // (in Phase 7) happens before nested content is laid out, so items may have
+    // grown taller than their initial hypothetical cross size.
+    if (flex && is_main_axis_horizontal(flex)) {
+        bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height > 0);
+        if (!has_explicit_height) {
+            // Find the maximum height among all flex items
+            float max_item_height = 0;
+            View* item = flex_container->first_child;
+            while (item) {
+                if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                    item->view_type == RDT_VIEW_LIST_ITEM) {
+                    ViewElement* flex_item = (ViewElement*)item;
+                    // Include margins in the outer height
+                    float item_outer_height = flex_item->height;
+                    if (flex_item->bound) {
+                        item_outer_height += flex_item->bound->margin.top + flex_item->bound->margin.bottom;
+                    }
+                    if (item_outer_height > max_item_height) {
+                        max_item_height = item_outer_height;
+                        log_debug("ROW FLEX HEIGHT FIX: item %s height=%.1f (outer=%.1f), max=%.1f",
+                                  flex_item->node_name(), flex_item->height, item_outer_height, max_item_height);
+                    }
+                }
+                item = item->next();
+            }
+            
+            // Calculate new container height with padding
+            if (max_item_height > 0) {
+                float padding_height = 0;
+                if (flex_container->bound) {
+                    padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                }
+                float new_height = max_item_height + padding_height;
+                
+                if (new_height > flex_container->height + 0.5f) {
+                    log_debug("ROW FLEX HEIGHT FIX: container %s height: %.1f -> %.1f (max_item=%.1f + padding=%.1f)",
+                              flex_container->node_name(), flex_container->height, new_height, 
+                              max_item_height, padding_height);
+                    flex_container->height = new_height;
+                    
+                    // Update flex_layout cross_axis_size for stretch alignment
+                    flex->cross_axis_size = max_item_height;
+                    
+                    // Apply align-items: stretch to items that should stretch
+                    // Items with auto cross size and align-self: stretch (or inherit) should expand
+                    View* stretch_item = flex_container->first_child;
+                    while (stretch_item) {
+                        if (stretch_item->view_type == RDT_VIEW_BLOCK || 
+                            stretch_item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            stretch_item->view_type == RDT_VIEW_LIST_ITEM) {
+                            ViewElement* fi = (ViewElement*)stretch_item;
+                            
+                            // Check if item should stretch (no explicit height and align-self: stretch)
+                            bool has_item_explicit_height = (fi->blk && fi->blk->given_height > 0);
+                            // Inline check for stretch alignment (align-self or inherited align-items)
+                            int align_type = (fi->fi && fi->fi->align_self != ALIGN_AUTO) ?
+                                             fi->fi->align_self : flex->align_items;
+                            bool will_stretch = (align_type == ALIGN_STRETCH);
+                            if (!has_item_explicit_height && will_stretch) {
+                                float old_height = fi->height;
+                                fi->height = max_item_height;
+                                log_debug("ROW FLEX STRETCH: item %s height: %.1f -> %.1f",
+                                          fi->node_name(), old_height, fi->height);
+                            }
+                        }
+                        stretch_item = stretch_item->next();
+                    }
+                }
             }
         }
     }
