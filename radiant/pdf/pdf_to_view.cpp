@@ -62,7 +62,7 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio) {
         return nullptr;
     }
 
-    Map* pdf_data = (Map*)pdf_root.item;
+    Map* pdf_data = pdf_root.map;
 
     // Create a dedicated pool for the view tree (separate from input->pool)
     Pool* view_pool = pool_create();
@@ -86,7 +86,7 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio) {
     String* version_key = input_create_string(input, "version");
     Item version_item = {.item = map_get(pdf_data, {.item = s2it(version_key)}).item};
     if (version_item.item != ITEM_NULL) {
-        String* version = (String*)version_item.item;
+        String* version = version_item.get_string();
         log_info("PDF version: %s", version->chars);
     }
 
@@ -99,7 +99,7 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio) {
         return view_tree;
     }
 
-    Array* objects = (Array*)objects_item.item;
+    Array* objects = objects_item.array;
     log_info("Processing %d PDF objects", objects->length);
 
     // Create root view (represents the document)
@@ -143,13 +143,13 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio) {
  */
 static void scale_view_recursive(View* view, float pixel_ratio) {
     if (!view) return;
-    
+
     // Scale position and dimensions
     view->x *= pixel_ratio;
     view->y *= pixel_ratio;
     view->width *= pixel_ratio;
     view->height *= pixel_ratio;
-    
+
     // Scale VectorPathProp if present (for curves and dashed lines)
     if (view->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
@@ -170,7 +170,7 @@ static void scale_view_recursive(View* view, float pixel_ratio) {
                 }
             }
         }
-        
+
         // Scale border widths if present
         if (block->bound && block->bound->border) {
             block->bound->border->width.top *= pixel_ratio;
@@ -179,7 +179,7 @@ static void scale_view_recursive(View* view, float pixel_ratio) {
             block->bound->border->width.left *= pixel_ratio;
         }
     }
-    
+
     // Scale text font size and TextRect positions if present
     if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = (ViewText*)view;
@@ -196,7 +196,7 @@ static void scale_view_recursive(View* view, float pixel_ratio) {
         // Text views have no children, return early
         return;
     }
-    
+
     // Only block-type views have children - cast to ViewElement and recurse
     if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
         view->view_type == RDT_VIEW_LIST_ITEM || view->view_type == RDT_VIEW_TABLE ||
@@ -216,7 +216,7 @@ static void scale_view_recursive(View* view, float pixel_ratio) {
  */
 void pdf_scale_view_tree(ViewTree* view_tree, float pixel_ratio) {
     if (!view_tree || !view_tree->root || pixel_ratio <= 0) return;
-    
+
     log_info("Scaling PDF view tree by pixel_ratio=%.2f", pixel_ratio);
     scale_view_recursive(view_tree->root, pixel_ratio);
 }
@@ -233,7 +233,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, flo
         return nullptr;
     }
 
-    Map* pdf_data = (Map*)pdf_root.item;
+    Map* pdf_data = pdf_root.map;
 
     // Get page information
     PDFPageInfo* page_info = pdf_get_page_info(pdf_data, page_index, input->pool);
@@ -286,7 +286,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, flo
             Item stream_item = page_info->content_streams->items[i];
             if (stream_item.item == ITEM_NULL) continue;
 
-            Map* stream_map = (Map*)stream_item.item;
+            Map* stream_map = stream_item.map;
             log_debug("Processing content stream %d/%d for page %d",
                      i + 1, page_info->content_streams->length, page_index + 1);
             process_pdf_stream(input, view_pool, root_view, stream_map, page_info->resources);
@@ -322,7 +322,7 @@ int pdf_get_page_count(Item pdf_root) {
         return 0;
     }
 
-    Map* pdf_data = (Map*)pdf_root.item;
+    Map* pdf_data = pdf_root.map;
     return pdf_get_page_count_from_data(pdf_data);
 }
 
@@ -371,7 +371,7 @@ static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent,
         return;
     }
 
-    Map* obj_map = (Map*)obj_item.item;
+    Map* obj_map = obj_item.map;
 
     // Check for type field
     String* type_key = input_create_string(input, "type");
@@ -382,7 +382,7 @@ static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent,
         return;
     }
 
-    String* type_str = (String*)type_item.item;
+    String* type_str = type_item.get_string();
     log_debug("Processing object of type: %s", type_str->chars);
 
     // Process stream objects
@@ -414,7 +414,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
         return;
     }
 
-    String* stream_data = (String*)data_item.item;
+    String* stream_data = data_item.get_string();
     const char* content_data = stream_data->chars;
     size_t content_len = stream_data->len;
     char* decompressed_data = nullptr;
@@ -422,7 +422,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
     // Get stream dictionary (contains Length, Filter, etc.)
     String* dict_key = input_create_string(input, "dictionary");
     Item dict_item = {.item = map_get(stream_map, {.item = s2it(dict_key)}).item};
-    Map* stream_dict = (dict_item.item != ITEM_NULL) ? (Map*)dict_item.item : nullptr;
+    Map* stream_dict = (dict_item.item != ITEM_NULL) ? dict_item.map : nullptr;
 
     // Check if stream is compressed and decompress if needed
     if (stream_dict) {
@@ -435,12 +435,12 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
 
             if (filter_type == LMD_TYPE_ARRAY) {
                 // Multiple filters
-                Array* filter_array = (Array*)filter_item.item;
+                Array* filter_array = filter_item.array;
                 const char** filters = (const char**)malloc(sizeof(char*) * filter_array->length);
                 if (filters) {
                     for (int i = 0; i < filter_array->length; i++) {
                         Item filter_name_item = array_get(filter_array, i);
-                        String* filter_name = (String*)filter_name_item.item;
+                        String* filter_name = filter_name_item.get_string();
                         filters[i] = filter_name->chars;
                     }
 
@@ -461,7 +461,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                 }
             } else if (filter_type == LMD_TYPE_STRING) {
                 // Single filter
-                String* filter_name = (String*)filter_item.item;
+                String* filter_name = filter_item.get_string();
                 const char* filters[1] = { filter_name->chars };
 
                 size_t decompressed_len = 0;
@@ -519,6 +519,11 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
  */
 static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent,
                                  PDFStreamParser* parser, PDFOperator* op) {
+    // Debug: log every operator type
+    if (op->type == PDF_OP_gs) {
+        log_info(">>> Processing PDF_OP_gs operator (type=%d)", op->type);
+    }
+
     switch (op->type) {
         case PDF_OP_BT:
             // Begin text - reset text matrix to identity
@@ -762,20 +767,22 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
 
         case PDF_OP_gs:
             // Set graphics state from ExtGState dictionary
+            log_debug("PDF_OP_gs case: text=%p, resources=%p",
+                     (void*)op->operands.show_text.text, (void*)parser->resources);
             if (op->operands.show_text.text && parser->resources) {
                 const char* gs_name = op->operands.show_text.text->chars;
                 log_debug("Processing gs operator: %s", gs_name);
-                
+
                 // Look up ExtGState in resources
                 ConstItem extgstate_item = ((Map*)parser->resources)->get("ExtGState");
                 if (extgstate_item.item != ITEM_NULL && extgstate_item.type_id() == LMD_TYPE_MAP) {
                     Map* extgstate_dict = (Map*)extgstate_item.map;
-                    
+
                     // Look up the specific graphics state by name
                     ConstItem gs_item = extgstate_dict->get(gs_name);
                     if (gs_item.item != ITEM_NULL && gs_item.type_id() == LMD_TYPE_MAP) {
                         Map* gs_dict = (Map*)gs_item.map;
-                        
+
                         // Check for ca (fill alpha)
                         ConstItem ca_item = gs_dict->get("ca");
                         if (ca_item.item != ITEM_NULL) {
@@ -789,7 +796,7 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
                             parser->state.fill_alpha = ca;
                             log_debug("Set fill alpha (ca): %.2f", ca);
                         }
-                        
+
                         // Check for CA (stroke alpha)
                         ConstItem CA_item = gs_dict->get("CA");
                         if (CA_item.item != ITEM_NULL) {
@@ -813,6 +820,9 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             break;
 
         default:
+            if (op->type == PDF_OP_gs) {
+                log_error("PDF_OP_gs hit default case! op->type=%d, PDF_OP_gs=%d", op->type, PDF_OP_gs);
+            }
             if (op->type != PDF_OP_UNKNOWN) {
                 log_debug("Unhandled operator type: %d (%s)", op->type, op->name);
             }
@@ -1035,7 +1045,7 @@ static PathLineType detect_line_type(PathSegment* segments) {
     bool has_curve = false;
     PathSegment* first = nullptr;
     PathSegment* second = nullptr;
-    
+
     for (PathSegment* seg = segments; seg; seg = seg->next) {
         if (seg->type == PATH_SEG_CLOSE) continue;
         seg_count++;
@@ -1043,17 +1053,17 @@ static PathLineType detect_line_type(PathSegment* segments) {
         if (seg_count == 1) first = seg;
         if (seg_count == 2) second = seg;
     }
-    
+
     if (has_curve) return PATH_LINE_CURVE;
     if (seg_count > 2) return PATH_LINE_COMPLEX;
     if (seg_count != 2 || !first || !second) return PATH_LINE_COMPLEX;
-    
+
     // Simple MOVETO + LINETO - check orientation
     double dx = fabs(second->x - first->x);
     double dy = fabs(second->y - first->y);
-    
+
     const double epsilon = 0.1;  // tolerance for "same" coordinate
-    
+
     if (dy < epsilon && dx > epsilon) {
         return PATH_LINE_HORIZONTAL;
     } else if (dx < epsilon && dy > epsilon) {
@@ -1076,7 +1086,7 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
     }
 
     PathLineType line_type = detect_line_type(segments);
-    log_debug("Creating ThorVG path view with dash_pattern_length=%d, line_type=%d", 
+    log_debug("Creating ThorVG path view with dash_pattern_length=%d, line_type=%d",
              parser->state.dash_pattern_length, line_type);
 
     // Calculate bounding box from path segments
@@ -1154,19 +1164,19 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
     // Store path rendering info in a custom property
     // For curves and dashed/dotted lines, use VectorPath for ThorVG rendering
     // For simple solid lines, use single-sided border
-    
+
     // Check if we need VectorPath rendering (curves OR dashed/dotted)
     bool has_dash_pattern = (parser->state.dash_pattern && parser->state.dash_pattern_length > 0);
     bool use_vector_path = (line_type == PATH_LINE_CURVE) || has_dash_pattern;
-    
+
     // For curves and dashed/dotted lines, create VectorPathProp with path segments for ThorVG rendering
     if (use_vector_path) {
         log_debug("VectorPath rendering: line_type=%d, has_dash=%d", line_type, has_dash_pattern);
-        
+
         // path_view is at (pdf_x, screen_y), so segment coordinates should be relative to this
         float view_origin_x = (float)pdf_x;
         float view_origin_y = (float)(parent->height - pdf_y - height);  // screen_y
-        
+
         VectorPathProp* vpath = (VectorPathProp*)pool_calloc(view_pool, sizeof(VectorPathProp));
         if (vpath) {
             // Copy path segments (transformed to screen coordinates RELATIVE to path_view position)
@@ -1174,17 +1184,17 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
             for (PathSegment* seg = segments; seg; seg = seg->next) {
                 VectorPathSegment* vseg = (VectorPathSegment*)pool_calloc(view_pool, sizeof(VectorPathSegment));
                 if (!vseg) break;
-                
+
                 // Transform coordinates using CTM
                 double tx = ctm[0] * seg->x + ctm[2] * seg->y + ctm[4];
                 double ty = ctm[1] * seg->x + ctm[3] * seg->y + ctm[5];
-                
+
                 // Convert to screen coordinates and make relative to path_view position
                 float abs_screen_x = (float)tx;
                 float abs_screen_y = (float)(parent->height - ty);
                 vseg->x = abs_screen_x - view_origin_x;
                 vseg->y = abs_screen_y - view_origin_y;
-                
+
                 if (seg->type == PATH_SEG_MOVETO) {
                     vseg->type = VectorPathSegment::VPATH_MOVETO;
                 } else if (seg->type == PATH_SEG_LINETO) {
@@ -1203,7 +1213,7 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
                 } else if (seg->type == PATH_SEG_CLOSE) {
                     vseg->type = VectorPathSegment::VPATH_CLOSE;
                 }
-                
+
                 // Link segments
                 if (!vpath->segments) {
                     vpath->segments = vseg;
@@ -1212,11 +1222,11 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
                 }
                 last_vseg = vseg;
             }
-            
+
             // Set stroke properties
             vpath->has_stroke = (paint_op == PAINT_STROKE_ONLY || paint_op == PAINT_FILL_AND_STROKE);
             vpath->has_fill = (paint_op == PAINT_FILL_ONLY || paint_op == PAINT_FILL_AND_STROKE);
-            
+
             if (vpath->has_stroke) {
                 vpath->stroke_color.r = (uint8_t)(parser->state.stroke_color[0] * 255.0);
                 vpath->stroke_color.g = (uint8_t)(parser->state.stroke_color[1] * 255.0);
@@ -1230,37 +1240,37 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
                 vpath->fill_color.a = 255;
             }
             vpath->stroke_width = (float)line_width;
-            
+
             // Copy dash pattern if present
             if (parser->state.dash_pattern && parser->state.dash_pattern_length > 0) {
-                vpath->dash_pattern = (float*)pool_calloc(view_pool, 
+                vpath->dash_pattern = (float*)pool_calloc(view_pool,
                     sizeof(float) * parser->state.dash_pattern_length);
                 if (vpath->dash_pattern) {
                     for (int i = 0; i < parser->state.dash_pattern_length; i++) {
                         vpath->dash_pattern[i] = (float)parser->state.dash_pattern[i];
                     }
                     vpath->dash_pattern_length = parser->state.dash_pattern_length;
-                    log_debug("Copied dash pattern: length=%d, first=%.1f", 
+                    log_debug("Copied dash pattern: length=%d, first=%.1f",
                              vpath->dash_pattern_length, vpath->dash_pattern[0]);
                 }
             }
-            
+
             path_view->vpath = vpath;
-            
+
             log_info("Set vpath on path_view: vpath=%p, segments=%p, has_stroke=%d",
                     (void*)vpath, (void*)vpath->segments, vpath->has_stroke);
-            
+
             log_debug("Created VectorPathProp with stroke=(%d,%d,%d), width=%.1f",
                      vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b,
                      vpath->stroke_width);
         }
-        
+
         // Add to parent
         append_child_view((View*)parent, (View*)path_view);
-        
+
         log_debug("Created curve path view at (%.2f, %.2f) size %.2f x %.2f",
                  pdf_x, screen_y, width, height);
-        
+
         // Clear path state
         parser->state.has_current_rect = 0;
         parser->state.has_current_path = 0;
@@ -1448,7 +1458,7 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
 
         // Check if it's a string (text to show)
         if (item._type_id == LMD_TYPE_STRING) {
-            String* text = (String*)item.item;
+            String* text = item.get_string();
             if (text && text->len > 0) {
                 // Temporarily adjust text matrix for this text segment
                 double saved_x = parser->state.tm[4];
