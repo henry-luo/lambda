@@ -1495,9 +1495,15 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                             bool will_stretch = (align_type == ALIGN_STRETCH);
                             if (!has_item_explicit_height && will_stretch) {
                                 float old_height = fi->height;
-                                fi->height = max_item_height;
-                                log_debug("ROW FLEX STRETCH: item %s height: %.1f -> %.1f",
-                                          fi->node_name(), old_height, fi->height);
+                                // CSS Flexbox: stretched item's margin box equals line cross size
+                                // So content height = max_item_height - this item's cross-axis margins
+                                float item_margin_top = fi->bound ? fi->bound->margin.top : 0;
+                                float item_margin_bottom = fi->bound ? fi->bound->margin.bottom : 0;
+                                float stretched_height = max_item_height - item_margin_top - item_margin_bottom;
+                                if (stretched_height < 0) stretched_height = 0;
+                                fi->height = stretched_height;
+                                log_debug("ROW FLEX STRETCH: item %s height: %.1f -> %.1f (max=%.1f - margins=%.1f+%.1f)",
+                                          fi->node_name(), old_height, fi->height, max_item_height, item_margin_top, item_margin_bottom);
                             }
                         }
                         stretch_item = stretch_item->next();
