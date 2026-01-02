@@ -71,6 +71,10 @@ mkdir -p ./release/test/html
 cp ./test/html/live-demo.html ./release/test/html/
 echo "    Copied test/html/live-demo.html"
 
+# Copy demo.html as index.html
+cp ./test/html/demo.html ./release/test/html/index.html
+echo "    Copied test/html/demo.html as index.html"
+
 # Copy HTML files from test/html/ referenced by live-demo.html
 for file in flex.html grid.html table.html table_simple.html box.html position.html; do
     if [ -f "./test/html/$file" ]; then
