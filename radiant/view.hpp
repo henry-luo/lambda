@@ -980,8 +980,10 @@ typedef struct {
 
 typedef struct {
     GLFWwindow *window;    // current window
-    float window_width;    // window pixel width
-    float window_height;   // window pixel height
+    float window_width;    // window pixel width (actual framebuffer size, physical pixels)
+    float window_height;   // window pixel height (actual framebuffer size, physical pixels)
+    float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
+    float viewport_height; // intended viewport height (CSS logical pixels, for vh/vw units)
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling
