@@ -1244,6 +1244,7 @@ project "test_avl_tree"
         "test/test_avl_tree.cpp",
         "lib/avl_tree.c",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {
@@ -1468,6 +1469,7 @@ project "test_avl_tree_perf"
         "test/perf/test_avl_tree_perf.cpp",
         "lib/avl_tree.c",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {

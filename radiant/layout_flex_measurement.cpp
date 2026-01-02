@@ -528,20 +528,40 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 log_debug("Nested flex container with content: using text_line_height=%d", elem_height);
                             }
                         } else {
-                            bool has_content = false;
+                            // Non-flex container div - distinguish text-only vs. nested elements
+                            bool has_text_content = false;
+                            bool has_block_element = false;
+                            bool has_inline_element = false;
                             if (elem) {
                                 DomNode* content = elem->first_child;
-                                while (content && !has_content) {
+                                while (content) {
                                     if (content->is_element()) {
-                                        // Has nested element
-                                        has_content = true;
+                                        // Check if this is an inline element (a, span, etc.) or block
+                                        uintptr_t child_tag = content->tag();
+                                        bool is_inline = (child_tag == HTM_TAG_A || child_tag == HTM_TAG_SPAN ||
+                                                          child_tag == HTM_TAG_EM || child_tag == HTM_TAG_STRONG ||
+                                                          child_tag == HTM_TAG_B || child_tag == HTM_TAG_I ||
+                                                          child_tag == HTM_TAG_SMALL || child_tag == HTM_TAG_SUB ||
+                                                          child_tag == HTM_TAG_SUP || child_tag == HTM_TAG_ABBR ||
+                                                          child_tag == HTM_TAG_CODE || child_tag == HTM_TAG_KBD ||
+                                                          child_tag == HTM_TAG_MARK || child_tag == HTM_TAG_Q ||
+                                                          child_tag == HTM_TAG_S || child_tag == HTM_TAG_SAMP ||
+                                                          child_tag == HTM_TAG_VAR || child_tag == HTM_TAG_TIME ||
+                                                          child_tag == HTM_TAG_U || child_tag == HTM_TAG_CITE ||
+                                                          child_tag == HTM_TAG_BDI || child_tag == HTM_TAG_BDO ||
+                                                          child_tag == HTM_TAG_BR);
+                                        if (is_inline) {
+                                            has_inline_element = true;
+                                        } else {
+                                            has_block_element = true;
+                                        }
                                     } else if (content->is_text()) {
                                         // Check if text is non-whitespace
                                         const char* text = (const char*)content->text_data();
                                         if (text) {
                                             for (const char* p = text; *p; p++) {
                                                 if (!is_space((unsigned char)*p)) {
-                                                    has_content = true;
+                                                    has_text_content = true;
                                                     break;
                                                 }
                                             }
@@ -550,8 +570,19 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                     content = content->next_sibling;
                                 }
                             }
-                            // Only estimate height if container has actual content
-                            elem_height = has_content ? 56 : 0;
+                            // Estimate height based on content type:
+                            // - Divs with block elements: use 56 as fallback
+                            // - Divs with only inline elements or text: use text_line_height
+                            // - Empty divs: use 0
+                            if (has_block_element) {
+                                elem_height = 56;
+                                log_debug("Non-flex div with block elements: using estimate height=56");
+                            } else if (has_inline_element || has_text_content) {
+                                elem_height = text_line_height;
+                                log_debug("Non-flex div with inline/text content: using text_line_height=%d", elem_height);
+                            } else {
+                                elem_height = 0;
+                            }
                         }
                     }
                     else {

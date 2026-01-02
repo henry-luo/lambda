@@ -196,8 +196,16 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Initialize main_axis_size and cross_axis_size early for percentage resolution
     // This allows collect_and_prepare_flex_items to re-resolve percentages correctly
+    // CRITICAL: For containers with explicit height (like body with height: 100%), use given_height
+    // since container->height may not be set yet at this point in the layout flow.
     int content_width = container->width;
     int content_height = container->height;
+    
+    // Use given_height if container has explicit height (before container->height is set)
+    if (container->blk && container->blk->given_height > 0 && content_height <= 0) {
+        content_height = (int)container->blk->given_height;
+        log_debug("init_flex_container: using given_height=%d for content_height", content_height);
+    }
 
     // Subtract borders if they exist
     if (container->bound && container->bound->border) {
@@ -400,6 +408,16 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             has_definite_height = has_definite_height ||
                 (container->position->has_top && container->position->has_bottom);
         }
+
+        // CRITICAL FIX: If this container already has a height set by a parent flex algorithm,
+        // treat it as definite. This happens when a flex item with flex-grow > 0 is also a 
+        // flex container - the parent sizes it first, then we need to recognize that size as definite.
+        if (!has_definite_height && container->height > 0) {
+            has_definite_height = true;
+            log_debug("init_flex_container: using height set by parent (%.1f)",
+                      container->height);
+        }
+
         flex->main_axis_is_indefinite = !has_definite_height;
     }
 

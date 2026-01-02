@@ -1186,6 +1186,69 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
+    // Check if this block element has only inline content (text and inline elements).
+    // In that case, children flow inline on the same line(s), not stacked vertically.
+    bool has_only_inline_content = false;
+    
+    // First check if display is resolved; if not, try to resolve it
+    CssEnum display_inner = view->display.inner;
+    if (display_inner == 0 && element->specified_style) {
+        // Display not resolved yet, try to get from CSS
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value && 
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            display_inner = display_decl->value->data.keyword;
+            // block => flow layout
+            if (display_inner == CSS_VALUE_BLOCK) {
+                display_inner = CSS_VALUE_FLOW;
+            }
+        } else {
+            // Default: block element uses flow layout
+            display_inner = CSS_VALUE_FLOW;
+        }
+    }
+    
+    if (!is_grid_container && !is_flex_row && display_inner == CSS_VALUE_FLOW) {
+        // Block element with flow layout - check if all children are inline
+        has_only_inline_content = true;
+        for (DomNode* c = element->first_child; c; c = c->next_sibling) {
+            if (c->is_text()) {
+                continue;  // Text nodes are inline
+            }
+            if (c->is_element()) {
+                DomElement* child_elem = c->as_element();
+                // Check if child is an inline element
+                const char* child_tag = child_elem->node_name();
+                if (child_tag && (
+                    strcmp(child_tag, "a") == 0 ||
+                    strcmp(child_tag, "span") == 0 ||
+                    strcmp(child_tag, "strong") == 0 ||
+                    strcmp(child_tag, "b") == 0 ||
+                    strcmp(child_tag, "em") == 0 ||
+                    strcmp(child_tag, "i") == 0 ||
+                    strcmp(child_tag, "code") == 0 ||
+                    strcmp(child_tag, "br") == 0 ||
+                    strcmp(child_tag, "abbr") == 0 ||
+                    strcmp(child_tag, "small") == 0 ||
+                    strcmp(child_tag, "sub") == 0 ||
+                    strcmp(child_tag, "sup") == 0)) {
+                    continue;  // Known inline elements
+                }
+                // Check display.outer for inline
+                if (child_elem->display.outer == CSS_VALUE_INLINE) {
+                    continue;  // CSS says it's inline
+                }
+                // Found a block element
+                has_only_inline_content = false;
+                break;
+            }
+        }
+        if (has_only_inline_content) {
+            log_debug("calculate_max_content_height: %s has only inline content", element->node_name());
+        }
+    }
+
     // For multi-column grids, calculate height based on rows
     if (is_grid_container && grid_column_count > 1) {
         // Collect child heights
@@ -1229,7 +1292,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             float child_height = calculate_max_content_height(lycon, child, width);
 
-            if (is_grid_column_flow || is_flex_row) {
+            if (is_grid_column_flow || is_flex_row || has_only_inline_content) {
                 // Items are laid out horizontally - take max height
                 height = fmax(height, child_height);
             } else {
