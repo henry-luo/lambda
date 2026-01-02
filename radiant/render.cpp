@@ -1130,8 +1130,15 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
             View* root_view = doc->view_tree->root;
             if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
                 log_debug("render doc root view:");
-                // load default font
+                // Save parent context and reset for embedded document
                 FontBox pa_font = rdcon->font;
+                Color pa_color = rdcon->color;
+                
+                // Reset color to black for embedded document (don't inherit from parent doc)
+                // Each document should start with default black text color
+                rdcon->color.c = 0xFF000000;  // opaque black (ABGR)
+                
+                // load default font
                 FontProp* default_font = doc->view_tree->html_version == HTML5 ? &rdcon->ui_context->default_font : &rdcon->ui_context->legacy_default_font;
                 log_debug("render_init default font: %s, html version: %d", default_font->family, doc->view_tree->html_version);
                 setup_font(rdcon->ui_context, &rdcon->font, default_font);
@@ -1139,6 +1146,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 render_block_view(rdcon, (ViewBlock*)root_view);
 
                 rdcon->font = pa_font;
+                rdcon->color = pa_color;
             }
             else {
                 log_debug("Invalid root view");

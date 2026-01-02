@@ -500,9 +500,13 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             size_t value_len = strlen(value);
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, value, value_len);
-            log_debug("load iframe doc src: %s", src->str);
+            // Use iframe's actual dimensions as viewport, not window dimensions
+            // This ensures the embedded document layouts to fit within the iframe
+            int iframe_width = block->width > 0 ? (int)block->width : lycon->ui_context->window_width;
+            int iframe_height = block->height > 0 ? (int)block->height : lycon->ui_context->window_height;
+            log_debug("load iframe doc src: %s (iframe viewport=%dx%d)", src->str, iframe_width, iframe_height);
             doc = load_html_doc(lycon->ui_context->document->url, src->str,
-                lycon->ui_context->window_width, lycon->ui_context->window_height,
+                iframe_width, iframe_height,
                 lycon->ui_context->pixel_ratio);
             strbuf_free(src);
             if (!doc) {
@@ -512,13 +516,24 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                 block->embed->doc = doc; // assign loaded document to embed property
                 if (doc->html_root) {
-                    log_debug("IFRAME TRACE: about to layout iframe document (src: %s)", src->str);
-                    // save parent document and set iframe document for correct image URL resolution
+                    log_debug("IFRAME TRACE: about to layout iframe document");
+                    // Save parent document and window dimensions
                     DomDocument* parent_doc = lycon->ui_context->document;
+                    int saved_window_width = lycon->ui_context->window_width;
+                    int saved_window_height = lycon->ui_context->window_height;
+                    
+                    // Temporarily set window dimensions to iframe size
+                    // This ensures layout_html_doc uses iframe dimensions for layout
                     lycon->ui_context->document = doc;
+                    lycon->ui_context->window_width = iframe_width;
+                    lycon->ui_context->window_height = iframe_height;
+                    
                     layout_html_doc(lycon->ui_context, doc, false);
-                    // restore parent document
+                    
+                    // Restore parent document and window dimensions
                     lycon->ui_context->document = parent_doc;
+                    lycon->ui_context->window_width = saved_window_width;
+                    lycon->ui_context->window_height = saved_window_height;
                     log_debug("IFRAME TRACE: finished layout iframe document");
                 }
                 // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
