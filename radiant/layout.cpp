@@ -1160,8 +1160,8 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     // are in physical pixels to avoid needing to scale during rendering
     lycon->width = uicon->window_width > 0 ? uicon->window_width : 1200;
     lycon->height = uicon->window_height > 0 ? uicon->window_height : 800;
-    log_debug("layout_init: viewport=%.1fx%.1f (physical), pixel_ratio=%.2f",
-              lycon->width, lycon->height, uicon->pixel_ratio);
+    log_debug("layout_init: uicon=%p, window_width=%.1f, viewport=%.1fx%.1f (physical), pixel_ratio=%.2f",
+              uicon, uicon->window_width, lycon->width, lycon->height, uicon->pixel_ratio);
 
     // Initialize available space to indefinite (will be set properly during layout)
     lycon->available_space = AvailableSpace::make_indefinite();
