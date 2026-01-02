@@ -1147,9 +1147,13 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
 
-    // Initialize viewport dimensions for vw/vh units
-    lycon->width = uicon->window_width;
-    lycon->height = uicon->window_height;
+    // Initialize viewport dimensions for vw/vh units (in CSS logical pixels)
+    // Use viewport_width/height which store the intended CSS viewport size
+    // (not the actual framebuffer size which may differ due to window decorations)
+    lycon->width = uicon->viewport_width > 0 ? uicon->viewport_width : 1200;
+    lycon->height = uicon->viewport_height > 0 ? uicon->viewport_height : 800;
+    log_debug("layout_init: viewport=%.1fx%.1f (CSS), framebuffer=%.1fx%.1f (physical), pixel_ratio=%.2f",
+              lycon->width, lycon->height, uicon->window_width, uicon->window_height, uicon->pixel_ratio);
 
     // Initialize available space to indefinite (will be set properly during layout)
     lycon->available_space = AvailableSpace::make_indefinite();
