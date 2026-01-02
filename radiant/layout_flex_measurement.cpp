@@ -368,13 +368,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         if (!is_whitespace_only) {
                             // Use computed line height based on element's font-size
                             int text_height = text_line_height;
-                            if (is_row_flex) {
-                                // Row flex: text is a flex item, use max
-                                if (text_height > max_child_height) {
-                                    max_child_height = text_height;
-                                }
-                            } else {
-                                measured_height += text_height;
+                            // Text content is always inline - use MAX, not SUM
+                            // Text flows horizontally and should not stack heights
+                            if (text_height > max_child_height) {
+                                max_child_height = text_height;
                             }
                         }
                     }
@@ -385,6 +382,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                     // Estimate element height based on type
                     uintptr_t tag = sub_child->tag();
                     int elem_height = 0;
+                    bool has_explicit_height_css = false;  // Track if element has explicit CSS height
 
                     // Common block elements with typical heights
                     if (tag == HTM_TAG_H1) elem_height = 32;
@@ -393,6 +391,28 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                     else if (tag == HTM_TAG_H4) elem_height = 20;
                     else if (tag == HTM_TAG_H5 || tag == HTM_TAG_H6) elem_height = 18;
                     else if (tag == HTM_TAG_P) elem_height = 36;  // Typically 2-3 lines
+                    else if (tag == HTM_TAG_IFRAME || tag == HTM_TAG_IMG ||
+                             tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS) {
+                        // Replaced elements - use explicit CSS dimensions if available
+                        if (elem && elem->specified_style) {
+                            CssDeclaration* height_decl = style_tree_get_declaration(
+                                elem->specified_style, CSS_PROPERTY_HEIGHT);
+                            if (height_decl && height_decl->value &&
+                                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                elem_height = (int)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                                                         height_decl->value);
+                                has_explicit_height_css = true;
+                                log_debug("Replaced element %s has explicit CSS height=%d",
+                                          sub_child->node_name(), elem_height);
+                            }
+                        }
+                        // Default sizes for replaced elements without explicit height
+                        if (!has_explicit_height_css) {
+                            if (tag == HTM_TAG_IFRAME) elem_height = 150;  // CSS default iframe height
+                            else if (tag == HTM_TAG_VIDEO) elem_height = 150;
+                            else elem_height = 0;  // Other replaced elements need explicit size
+                        }
+                    }
                     else if (tag == HTM_TAG_UL || tag == HTM_TAG_OL) {
                         // Count list items
                         int li_count = 0;
@@ -440,10 +460,73 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         }
 
                         if (is_nested_flex) {
-                            // Nested flex container - don't estimate, use 0
-                            // The flex layout will determine actual height from content
-                            elem_height = 0;
-                            log_debug("Nested flex container: using 0 for height estimation");
+                            // Nested flex container - check if it has actual content
+                            // For empty flex containers (e.g., flex items with no children or
+                            // only empty children), the height should be 0
+                            // For flex containers with content, use recursive measurement or estimate
+                            
+                            // First check if direct children have explicit heights
+                            bool has_children_with_explicit_height = false;
+                            bool has_text_content = false;
+                            bool has_element_content = false;
+                            if (elem) {
+                                DomNode* content = elem->first_child;
+                                while (content) {
+                                    if (content->is_text()) {
+                                        const char* text = (const char*)content->text_data();
+                                        if (text) {
+                                            for (const char* p = text; *p; p++) {
+                                                if (!is_space((unsigned char)*p)) {
+                                                    has_text_content = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    } else if (content->is_element()) {
+                                        has_element_content = true;
+                                        // Check if this nested element has explicit height
+                                        DomElement* nested = content->as_element();
+                                        if (nested && nested->specified_style) {
+                                            CssDeclaration* h_decl = style_tree_get_declaration(
+                                                nested->specified_style, CSS_PROPERTY_HEIGHT);
+                                            if (h_decl && h_decl->value &&
+                                                h_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                                float h = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, h_decl->value);
+                                                if (h > 0) {
+                                                    has_children_with_explicit_height = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    content = content->next_sibling;
+                                }
+                            }
+                            
+                            if (!has_text_content && !has_element_content) {
+                                // Empty flex container - height is 0
+                                elem_height = 0;
+                                has_explicit_height_css = true;  // 0 is reliable, no margin needed
+                                log_debug("Nested flex container: empty, height=0");
+                            } else if (has_children_with_explicit_height) {
+                                // Children have explicit heights - use recursive measurement
+                                float content_height = measure_content_height_recursive((DomNode*)elem, lycon);
+                                if (content_height > 0) {
+                                    elem_height = (int)content_height;
+                                    has_explicit_height_css = true;  // Reliable measured height
+                                    log_debug("Nested flex container: measured content height=%d", elem_height);
+                                } else {
+                                    // Fallback: use 0 and let flex layout determine height
+                                    elem_height = 0;
+                                    has_explicit_height_css = false;
+                                    log_debug("Nested flex container: measurement returned 0, using 0");
+                                }
+                            } else {
+                                // Has content (text or elements) but no explicit heights
+                                // Use text_line_height as a reasonable estimate
+                                elem_height = text_line_height;
+                                has_explicit_height_css = false;
+                                log_debug("Nested flex container with content: using text_line_height=%d", elem_height);
+                            }
                         } else {
                             bool has_content = false;
                             if (elem) {
@@ -499,23 +582,60 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             log_debug("Element %s has text content, using text_line_height=%d",
                                       sub_child->node_name(), elem_height);
                         } else {
-                            elem_height = 20;  // Default element height
+                            // Check for explicit CSS height property before using default
+                            log_debug("Checking explicit CSS height for %s, elem=%p, specified_style=%p",
+                                      sub_child->node_name(), elem, elem ? elem->specified_style : nullptr);
+                            if (elem && elem->specified_style) {
+                                CssDeclaration* height_decl = style_tree_get_declaration(
+                                    elem->specified_style, CSS_PROPERTY_HEIGHT);
+                                log_debug("  height_decl=%p, value=%p, type=%d",
+                                          height_decl, height_decl ? height_decl->value : nullptr,
+                                          height_decl && height_decl->value ? height_decl->value->type : -1);
+                                if (height_decl && height_decl->value &&
+                                    height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                    elem_height = (int)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                                                             height_decl->value);
+                                    has_explicit_height_css = true;
+                                    log_debug("Element %s has explicit CSS height=%d",
+                                              sub_child->node_name(), elem_height);
+                                }
+                            }
+                            if (!has_explicit_height_css) {
+                                elem_height = 20;  // Default element height
+                                log_debug("Element %s using default height=20", sub_child->node_name());
+                            }
                         }
                     }
 
                     // Add margins only if element has height
+                    // Don't add margin for elements with explicit CSS height or text content
                     if (elem_height > 0) {
-                        if (is_row_flex) {
-                            // Row flex: use MAX of child heights
-                            // Don't add margin for text-containing inline elements
-                            int margin = (elem_height == text_line_height) ? 0 : 10;
+                        // Check if this child is an inline element (a, span, etc.)
+                        // Inline elements should not be summed - they flow on the same line
+                        bool is_inline_child = false;
+                        if (tag == HTM_TAG_A || tag == HTM_TAG_SPAN || tag == HTM_TAG_EM ||
+                            tag == HTM_TAG_STRONG || tag == HTM_TAG_B || tag == HTM_TAG_I ||
+                            tag == HTM_TAG_SMALL || tag == HTM_TAG_SUB || tag == HTM_TAG_SUP ||
+                            tag == HTM_TAG_ABBR || tag == HTM_TAG_CODE || tag == HTM_TAG_KBD ||
+                            tag == HTM_TAG_MARK || tag == HTM_TAG_Q || tag == HTM_TAG_S ||
+                            tag == HTM_TAG_SAMP || tag == HTM_TAG_VAR || tag == HTM_TAG_TIME ||
+                            tag == HTM_TAG_U || tag == HTM_TAG_CITE || tag == HTM_TAG_BDI ||
+                            tag == HTM_TAG_BDO) {
+                            is_inline_child = true;
+                        }
+                        
+                        if (is_row_flex || is_inline_child) {
+                            // Row flex or inline children: use MAX of child heights
+                            // Don't add margin for text-containing inline elements or explicit height elements
+                            int margin = (elem_height == text_line_height || has_explicit_height_css || is_inline_child) ? 0 : 10;
                             int total_elem_height = elem_height + margin;
                             if (total_elem_height > max_child_height) {
                                 max_child_height = total_elem_height;
                             }
                         } else {
-                            // Column flex or normal block: SUM of child heights
-                            measured_height += elem_height + 10;
+                            // Column flex or normal block with block children: SUM of child heights
+                            int margin = has_explicit_height_css ? 0 : 10;
+                            measured_height += elem_height + margin;
                         }
                     }
                 }
@@ -523,10 +643,11 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             }
         }
 
-        // For row flex containers, use max_child_height instead of accumulated sum
-        if (is_row_flex && max_child_height > 0) {
+        // For row flex containers OR blocks with only inline children, use max_child_height
+        // This is because inline children flow horizontally and should not stack heights
+        if (max_child_height > 0 && (is_row_flex || measured_height == 0)) {
             measured_height = max_child_height;
-            log_debug("Row flex container: using max child height %d", measured_height);
+            log_debug("Using max child height %d (is_row_flex=%d)", measured_height, is_row_flex);
         }
 
         // Set measured dimensions

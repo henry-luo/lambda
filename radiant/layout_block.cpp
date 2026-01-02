@@ -30,6 +30,9 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
+// Forward declarations for min/max constraint functions
+float adjust_min_max_height(ViewBlock* block, float height);
+
 // Counter system functions (from layout_counters.cpp)
 typedef struct CounterContext CounterContext;
 int counter_format(CounterContext* ctx, const char* name, uint32_t style,
@@ -424,8 +427,11 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("finalize block flow: has_embed=%d, has_flex=%d, block=%s",
                   has_embed, has_flex, block->node_name());
         if (!has_flex) {
-            log_debug("finalize block flow, set block height to flow height: %f", flow_height);
-            block->height = flow_height;
+            // Apply min-height/max-height constraints to auto height
+            float final_height = adjust_min_max_height(block, flow_height);
+            log_debug("finalize block flow, set block height to flow height: %f (after min/max: %f)", 
+                      flow_height, final_height);
+            block->height = final_height;
         } else {
             log_debug("finalize block flow: flex container, keeping height: %f (flow=%f)",
                       block->height, flow_height);
