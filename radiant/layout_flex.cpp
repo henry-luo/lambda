@@ -951,6 +951,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         if (line_count > 1) {
             total_line_cross += flex_layout->row_gap * (line_count - 1);
         }
+        log_debug("Phase 7: container=%s total_line_cross=%d, current height=%d",
+                  container->node_name(), total_line_cross, container->height);
         // Check if container has explicit height (given_height > 0 means explicit)
         // OR if this container is a flex item whose height was set by parent flex
         // OR if this container is a grid item whose height was set by parent grid
@@ -1904,6 +1906,14 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                 }
                 min_width = item->fi->intrinsic_width.min_content;
                 log_debug("resolve_flex_item_constraints: main axis auto min-width = min-content: %d", min_width);
+                
+                // CSS Flexbox §4.5: If the item has a definite main-axis max size,
+                // the automatic minimum size is clamped to max-width/max-height
+                // This ensures min-content doesn't exceed max-width constraint
+                if (max_width > 0 && max_width < INT_MAX && min_width > max_width) {
+                    log_debug("resolve_flex_item_constraints: clamping auto min-width %d to max-width %d", min_width, max_width);
+                    min_width = max_width;
+                }
             }
         } else {
             // Column layout: width is cross axis - automatic minimum is 0
@@ -1927,6 +1937,13 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                 }
                 min_height = item->fi->intrinsic_height.min_content;
                 log_debug("resolve_flex_item_constraints: main axis auto min-height = min-content: %d", min_height);
+                
+                // CSS Flexbox §4.5: If the item has a definite main-axis max size,
+                // the automatic minimum size is clamped to max-height
+                if (max_height > 0 && max_height < INT_MAX && min_height > max_height) {
+                    log_debug("resolve_flex_item_constraints: clamping auto min-height %d to max-height %d", min_height, max_height);
+                    min_height = max_height;
+                }
             }
         } else {
             // Row layout: height is cross axis
@@ -2592,11 +2609,13 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             total_initial_size += hypothetical;
             log_debug("ITERATIVE_FLEX - item %d: PRE-FROZEN (inflexible), size=%.1f", i, hypothetical);
         } else {
-            // Flexible items start at their flex-basis (will be adjusted during distribution)
-            set_main_axis_size(item, basis, flex_layout);
-            total_initial_size += basis;
-            log_debug("ITERATIVE_FLEX - item %d: FLEXIBLE (grow=%.2f, shrink=%.2f), basis=%.1f",
-                      i, fg, fs, basis);
+            // Flexible items start at their hypothetical main size (basis clamped by min/max)
+            // CSS Flexbox §9.7: Use hypothetical sizes for initial free space calculation
+            // Items with flex-grow:0 should stay at hypothetical size (won't grow beyond max-width)
+            set_main_axis_size(item, hypothetical, flex_layout);
+            total_initial_size += hypothetical;
+            log_debug("ITERATIVE_FLEX - item %d: FLEXIBLE (grow=%.2f, shrink=%.2f), hypothetical=%.1f (basis=%.1f)",
+                      i, fg, fs, hypothetical, basis);
         }
 
         // Add margins in the main axis direction
@@ -3924,11 +3943,12 @@ static float measure_flex_content_height(ViewElement* elem) {
                 padding_border += elem->bound->border->width.top + elem->bound->border->width.bottom;
             }
         }
-        return elem->blk->given_height - padding_border;
+        float result = elem->blk->given_height - padding_border;
+        return result;
     }
     // Prefer content_height (which is the actual content size without padding)
     if (elem->content_height > 0) {
-        return (float)elem->content_height;
+        return elem->content_height;
     }
     // elem->height is border-box, so subtract padding/border
     if (elem->height > 0) {
@@ -3939,7 +3959,8 @@ static float measure_flex_content_height(ViewElement* elem) {
                 padding_border += elem->bound->border->width.top + elem->bound->border->width.bottom;
             }
         }
-        return (float)elem->height - padding_border;
+        float result = (float)elem->height - padding_border;
+        return result;
     }
     // Check if intrinsic height was calculated (intrinsic_height is content-based)
     if (elem->fi && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
@@ -3952,7 +3973,6 @@ static float measure_flex_content_height(ViewElement* elem) {
         // Not a flex container - no content height available
         return 0;
     }
-
     // Determine flex direction
     FlexProp* flex_prop = block->embed ? block->embed->flex : nullptr;
     bool is_row = !flex_prop ||
@@ -4037,13 +4057,9 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                         // Update item dimensions so alignment uses correct size
                         item->height = (int)hypothetical_cross;
                         item->content_height = (int)measured_height;
-                        log_debug("HYPOTHETICAL_CROSS: item[%d][%d] measured height=%.1f + padding/border=%.1f = %.1f",
-                                  i, j, measured_height, padding_border_height, hypothetical_cross);
                     } else {
                         // use measured/content height
                         hypothetical_cross = item->height > 0 ? item->height : item->content_height;
-                        log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using content height=%.1f",
-                                  i, j, hypothetical_cross);
                     }
                 }
             } else {

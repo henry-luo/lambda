@@ -33,6 +33,9 @@ cache/
 *.dSYM/
 __pycache__/
 
+# Release directory
+release/
+
 # Executables and other project-specific generated files
 core/
 lambda-parser/test-lambda-parser
