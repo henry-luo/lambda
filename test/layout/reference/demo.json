@@ -16,11 +16,11 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 1171.5,
+      "height": 800,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
-      "scrollHeight": 1172
+      "scrollHeight": 800
     },
     "computed": {
       "display": "block",
@@ -375,8 +375,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        * {\n            box-sizing: border-box;\n        }\n        body {\n            margin: 0;\n            min-height: 100vh;\n            font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n            background: radial-gradient(circle at top, #101827 0, #020617 55%, #000 100%);\n            color: #e5e7eb;\n        }\n\n        a {\n            color: inherit;\n        }\n\n        .page {\n            max-width: 1440px;\n            margin: 0 auto;\n            padding: 24px 24px 32px;\n        }\n\n        header {\n            display: grid;\n            grid-template-columns: minmax(0, 2.2fr) minmax(0, 2.5fr);\n            gap: 24px;\n            align-items: center;\n            margin-bottom: 28px;\n        }\n\n        .brand {\n            display: flex;\n            align-items: center;\n            gap: 14px;\n            margin-bottom: 8px;\n        }\n\n        .brand-logo {\n            width: 40px;\n            height: 40px;\n            border-radius: 12px;\n            background: conic-gradient(from 210deg, #22c55e, #0ea5e9, #6366f1, #22c55e);\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #020617;\n            font-weight: 700;\n            font-size: 22px;\n        }\n\n        .brand-text h1 {\n            margin: 0;\n            font-size: 26px;\n            font-weight: 550;\n            letter-spacing: 0.03em;\n        }\n\n        .brand-text p {\n            margin: 4px 0 0;\n            font-size: 13px;\n            color: #9ca3af;\n        }\n\n        .hero-tagline {\n            margin-top: 12px;\n            padding: 8px 10px;\n            display: inline-flex;\n            align-items: center;\n            gap: 8px;\n            border-radius: 999px;\n            font-size: 11px;\n            letter-spacing: 0.08em;\n            text-transform: uppercase;\n            background: rgba(15, 23, 42, 0.9);\n            border: 1px solid rgba(148, 163, 184, 0.5);\n            color: #cbd5f5;\n        }\n\n        .hero-tagline span.badge {\n            padding: 3px 7px 4px;\n            border-radius: 999px;\n            background: linear-gradient(120deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .hero-copy {\n            margin-top: 14px;\n            font-size: 13px;\n            line-height: 1.6;\n            color: #9ca3af;\n        }\n\n        .hero-copy strong {\n            color: #e5e7eb;\n            font-weight: 600;\n        }\n\n        .hero-actions {\n            margin-top: 16px;\n            display: flex;\n            flex-wrap: wrap;\n            gap: 10px;\n        }\n\n        .pill {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 7px 12px;\n            border-radius: 999px;\n            border: 1px solid rgba(148, 163, 184, 0.6);\n            background: rgba(15, 23, 42, 0.9);\n            font-size: 11px;\n            color: #cbd5f5;\n            text-decoration: none;\n            white-space: nowrap;\n        }\n\n        .pill.primary {\n            border-color: transparent;\n            background: linear-gradient(135deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .pill code {\n            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;\n            font-size: 10px;\n        }\n\n        .hero-matrix {\n            border-radius: 14px;\n            padding: 14px 14px 12px;\n            background:\n                radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 55%),\n                radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.18), transparent 55%),\n                rgba(15, 23, 42, 0.96);\n            border: 1px solid rgba(148, 163, 184, 0.5);\n            box-shadow: 0 22px 55px rgba(0, 0, 0, 0.6);\n        }\n\n        .hero-matrix h2 {\n            margin: 0 0 10px;\n            font-size: 13px;\n            text-transform: uppercase;\n            letter-spacing: 0.16em;\n            color: #9ca3af;\n        }\n\n        .hero-matrix-grid {\n            display: grid;\n            grid-template-columns: repeat(2, minmax(0, 1fr));\n            gap: 8px;\n        }\n\n        .hero-card {\n            padding: 10px 10px 9px;\n            border-radius: 12px;\n            background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.7));\n            border: 1px solid rgba(148, 163, 184, 0.45);\n        }\n\n        .hero-card h3 {\n            margin: 0 0 4px;\n            font-size: 12px;\n            font-weight: 600;\n        }\n\n        .hero-card p {\n            margin: 0 0 4px;\n            font-size: 11px;\n            line-height: 1.5;\n            color: #9ca3af;\n        }\n\n        .hero-card pre {\n            margin: 4px 0 0;\n            padding: 6px 7px;\n            border-radius: 8px;\n            background: rgba(15, 23, 42, 0.9);\n            border: 1px solid rgba(31, 41, 55, 0.9);\n            font-size: 10px;\n            line-height: 1.4;\n            color: #e5e7eb;\n            overflow-x: auto;\n        }\n\n        .hero-card code {\n            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;\n        }\n\n        main {\n            display: grid;\n            grid-template-columns: minmax(0, 2.1fr) minmax(0, 3fr);\n            gap: 20px;\n        }\n\n        .nav-panel {\n            display: flex;\n            flex-direction: column;\n            gap: 14px;\n        }\n\n        .nav-group h2 {\n            margin: 0 0 6px;\n            font-size: 11px;\n            letter-spacing: 0.16em;\n            text-transform: uppercase;\n            color: #9ca3af;\n        }\n\n        .nav-links {\n            display: flex;\n            flex-wrap: wrap;\n            gap: 6px;\n        }\n\n        .nav-links a {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 6px 10px;\n            border-radius: 999px;\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            background: rgba(15, 23, 42, 0.96);\n            font-size: 11px;\n            text-decoration: none;\n            color: #d1d5db;\n            white-space: nowrap;\n        }\n\n        .nav-links a:hover {\n            border-color: rgba(96, 165, 250, 0.9);\n            color: #e5e7eb;\n        }\n\n        .nav-links a.active {\n            border-color: rgba(59, 130, 246, 1);\n            background: linear-gradient(135deg, rgba(37, 99, 235, 0.9), rgba(15, 23, 42, 0.95));\n            color: #e5e7eb;\n        }\n\n        .viewer {\n            border-radius: 16px;\n            overflow: hidden;\n            background: rgba(15, 23, 42, 0.95);\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            box-shadow: 0 20px 55px rgba(0, 0, 0, 0.7);\n        }\n\n        .viewer-header {\n            display: flex;\n            align-items: center;\n            padding: 8px 10px;\n            gap: 8px;\n            background: linear-gradient(90deg, #020617, #020617 30%, #020617 100%);\n            border-bottom: 1px solid rgba(31, 41, 55, 0.95);\n        }\n\n        .viewer-dots {\n            display: flex;\n            align-items: center;\n            gap: 6px;\n        }\n\n        .viewer-dot {\n            width: 9px;\n            height: 9px;\n            border-radius: 999px;\n        }\n\n        .viewer-dot.red { background: #ef4444; }\n        .viewer-dot.amber { background: #f59e0b; }\n        .viewer-dot.green { background: #22c55e; }\n\n        .viewer-title {\n            flex: 1;\n            text-align: center;\n            font-size: 11px;\n            color: #9ca3af;\n        }\n\n        iframe[name=\"main_frame\"] {\n            width: 100%;\n            height: 580px;\n            border: none;\n            background: #ffffff;\n        }\n\n        footer {\n            margin-top: 18px;\n            padding-top: 12px;\n            border-top: 1px solid rgba(31, 41, 55, 0.8);\n            font-size: 11px;\n            color: #6b7280;\n            display: flex;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            gap: 8px;\n        }\n\n        footer .links a {\n            text-decoration: none;\n            color: #6b7280;\n        }\n\n        footer .links a:hover {\n            color: #9ca3af;\n        }\n\n        @media (max-width: 960px) {\n            header {\n                grid-template-columns: minmax(0, 1fr);\n            }\n            main {\n                grid-template-columns: minmax(0, 1fr);\n            }\n            iframe[name=\"main_frame\"] {\n                height: 520px;\n            }\n        }\n    ",
-                "length": 8661,
+                "text": "\n        * {\n            box-sizing: border-box;\n        }\n        body {\n            margin: 0;\n            min-height: 100vh;\n            font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;\n            background: radial-gradient(circle at top, #101827 0, #020617 55%, #000 100%);\n            color: #e5e7eb;\n        }\n\n        a {\n            color: inherit;\n        }\n\n        .page {\n            max-width: 1440px;\n            margin: 0 auto;\n            padding: 24px 24px 32px;\n        }\n\n        header {\n            display: grid;\n            grid-template-columns: minmax(0, 2.2fr) minmax(0, 2.5fr);\n            gap: 24px;\n            align-items: center;\n            margin-bottom: 28px;\n        }\n\n        .brand {\n            display: flex;\n            align-items: center;\n            gap: 14px;\n            margin-bottom: 8px;\n        }\n\n        .brand-logo {\n            width: 40px;\n            height: 40px;\n            border-radius: 12px;\n            background: conic-gradient(from 210deg, #22c55e, #0ea5e9, #6366f1, #22c55e);\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #020617;\n            font-weight: 700;\n            font-size: 22px;\n        }\n\n        .brand-text h1 {\n            margin: 0;\n            font-size: 26px;\n            font-weight: 550;\n            letter-spacing: 0.03em;\n        }\n\n        .brand-text p {\n            margin: 4px 0 0;\n            font-size: 13px;\n            color: #9ca3af;\n        }\n\n        .hero-tagline {\n            margin-top: 12px;\n            padding: 8px 10px;\n            display: inline-flex;\n            align-items: center;\n            gap: 8px;\n            border-radius: 999px;\n            font-size: 11px;\n            letter-spacing: 0.08em;\n            text-transform: uppercase;\n            background: rgba(15, 23, 42, 0.9);\n            border: 1px solid rgba(148, 163, 184, 0.5);\n            color: #cbd5f5;\n        }\n\n        .hero-tagline span.badge {\n            padding: 3px 7px 4px;\n            border-radius: 999px;\n            background: linear-gradient(120deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .hero-copy {\n            margin-top: 14px;\n            font-size: 13px;\n            line-height: 1.6;\n            color: #9ca3af;\n        }\n\n        .hero-copy strong {\n            color: #e5e7eb;\n            font-weight: 600;\n        }\n\n        .hero-actions {\n            margin-top: 16px;\n            display: flex;\n            flex-wrap: wrap;\n            gap: 10px;\n        }\n\n        .pill {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 7px 12px;\n            border-radius: 999px;\n            border: 1px solid rgba(148, 163, 184, 0.6);\n            background: rgba(15, 23, 42, 0.9);\n            font-size: 11px;\n            color: #cbd5f5;\n            text-decoration: none;\n            white-space: nowrap;\n        }\n\n        .pill.primary {\n            border-color: transparent;\n            background: linear-gradient(135deg, #22c55e, #0ea5e9);\n            color: #020617;\n            font-weight: 600;\n        }\n\n        .pill code {\n            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;\n            font-size: 10px;\n        }\n\n        .hero-matrix {\n            border-radius: 14px;\n            padding: 14px 14px 12px;\n            background:\n                radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 55%),\n                radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.18), transparent 55%),\n                rgba(15, 23, 42, 0.96);\n            border: 1px solid rgba(148, 163, 184, 0.5);\n            box-shadow: 0 22px 55px rgba(0, 0, 0, 0.6);\n        }\n\n        .hero-matrix h2 {\n            margin: 0 0 10px;\n            font-size: 13px;\n            text-transform: uppercase;\n            letter-spacing: 0.16em;\n            color: #9ca3af;\n        }\n\n        .hero-matrix-grid {\n            display: grid;\n            grid-template-columns: repeat(2, minmax(0, 1fr));\n            gap: 8px;\n        }\n\n        .hero-card {\n            padding: 10px 10px 9px;\n            border-radius: 12px;\n            background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.7));\n            border: 1px solid rgba(148, 163, 184, 0.45);\n        }\n\n        .hero-card h3 {\n            margin: 0 0 4px;\n            font-size: 12px;\n            font-weight: 600;\n        }\n\n        .hero-card p {\n            margin: 0 0 4px;\n            font-size: 11px;\n            line-height: 1.5;\n            color: #9ca3af;\n        }\n\n        .hero-card pre {\n            margin: 4px 0 0;\n            padding: 6px 7px;\n            border-radius: 8px;\n            background: rgba(15, 23, 42, 0.9);\n            border: 1px solid rgba(31, 41, 55, 0.9);\n            font-size: 10px;\n            line-height: 1.4;\n            color: #e5e7eb;\n            overflow-x: auto;\n        }\n\n        .hero-card code {\n            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;\n        }\n\n        main {\n            display: grid;\n            grid-template-columns: minmax(0, 2.1fr) minmax(0, 3fr);\n            gap: 20px;\n        }\n\n        .nav-panel {\n            display: flex;\n            flex-direction: column;\n            gap: 14px;\n        }\n\n        .nav-group h2 {\n            margin: 0 0 6px;\n            font-size: 11px;\n            letter-spacing: 0.16em;\n            text-transform: uppercase;\n            color: #9ca3af;\n        }\n\n        .nav-links {\n            display: flex;\n            flex-wrap: wrap;\n            gap: 6px;\n        }\n\n        .nav-links a {\n            display: inline-flex;\n            align-items: center;\n            gap: 6px;\n            padding: 6px 10px;\n            border-radius: 999px;\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            background: rgba(15, 23, 42, 0.96);\n            font-size: 11px;\n            text-decoration: none;\n            color: #d1d5db;\n            white-space: nowrap;\n        }\n\n        .nav-links a:hover {\n            border-color: rgba(96, 165, 250, 0.9);\n            color: #e5e7eb;\n        }\n\n        .nav-links a.active {\n            border-color: rgba(59, 130, 246, 1);\n            background: linear-gradient(135deg, rgba(37, 99, 235, 0.9), rgba(15, 23, 42, 0.95));\n            color: #e5e7eb;\n        }\n\n        .viewer {\n            border-radius: 16px;\n            overflow: hidden;\n            background: rgba(15, 23, 42, 0.95);\n            border: 1px solid rgba(31, 41, 55, 0.95);\n            box-shadow: 0 20px 55px rgba(0, 0, 0, 0.7);\n            align-self: start;\n        }\n\n        .viewer-header {\n            display: flex;\n            align-items: center;\n            padding: 8px 10px;\n            gap: 8px;\n            background: linear-gradient(90deg, #020617, #020617 30%, #020617 100%);\n            border-bottom: 1px solid rgba(31, 41, 55, 0.95);\n        }\n\n        .viewer-dots {\n            display: flex;\n            align-items: center;\n            gap: 6px;\n        }\n\n        .viewer-dot {\n            width: 9px;\n            height: 9px;\n            border-radius: 999px;\n        }\n\n        .viewer-dot.red { background: #ef4444; }\n        .viewer-dot.amber { background: #f59e0b; }\n        .viewer-dot.green { background: #22c55e; }\n\n        .viewer-title {\n            flex: 1;\n            text-align: center;\n            font-size: 11px;\n            color: #9ca3af;\n        }\n\n        iframe[name=\"main_frame\"] {\n            width: 100%;\n            height: 100px;\n            border: none;\n            background: #ffffff;\n        }\n\n        footer {\n            margin-top: 18px;\n            padding-top: 12px;\n            border-top: 1px solid rgba(31, 41, 55, 0.8);\n            font-size: 11px;\n            color: #6b7280;\n            display: flex;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            gap: 8px;\n        }\n\n        footer .links a {\n            text-decoration: none;\n            color: #6b7280;\n        }\n\n        footer .links a:hover {\n            color: #9ca3af;\n        }\n\n        @media (max-width: 960px) {\n            header {\n                grid-template-columns: minmax(0, 1fr);\n            }\n            main {\n                grid-template-columns: minmax(0, 1fr);\n            }\n            iframe[name=\"main_frame\"] {\n                height: 520px;\n            }\n        }\n    ",
+                "length": 8692,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -419,11 +419,11 @@
           "x": 0,
           "y": 0,
           "width": 1200,
-          "height": 1171.5,
+          "height": 800,
           "contentWidth": 1200,
-          "contentHeight": 1172,
+          "contentHeight": 800,
           "scrollWidth": 1200,
-          "scrollHeight": 1172
+          "scrollHeight": 800
         },
         "computed": {
           "display": "block",
@@ -481,11 +481,11 @@
               "x": 0,
               "y": 0,
               "width": 1200,
-              "height": 1171.5,
+              "height": 681.5,
               "contentWidth": 1200,
-              "contentHeight": 1172,
+              "contentHeight": 682,
               "scrollWidth": 1200,
-              "scrollHeight": 1172
+              "scrollHeight": 682
             },
             "computed": {
               "display": "block",
@@ -541,11 +541,11 @@
                   "x": 24,
                   "y": 24,
                   "width": 1152,
-                  "height": 428.5,
+                  "height": 414.5,
                   "contentWidth": 1152,
-                  "contentHeight": 429,
+                  "contentHeight": 415,
                   "scrollWidth": 1152,
-                  "scrollHeight": 429
+                  "scrollHeight": 415
                 },
                 "computed": {
                   "display": "grid",
@@ -599,7 +599,7 @@
                     "classes": [],
                     "layout": {
                       "x": 24,
-                      "y": 84.55,
+                      "y": 77.55,
                       "width": 528,
                       "height": 307.39,
                       "contentWidth": 528,
@@ -661,7 +661,7 @@
                         ],
                         "layout": {
                           "x": 24,
-                          "y": 84.55,
+                          "y": 77.55,
                           "width": 528,
                           "height": 50,
                           "contentWidth": 528,
@@ -723,7 +723,7 @@
                             ],
                             "layout": {
                               "x": 24,
-                              "y": 89.55,
+                              "y": 82.55,
                               "width": 40,
                               "height": 40,
                               "contentWidth": 40,
@@ -784,11 +784,11 @@
                                   "rects": [
                                     {
                                       "x": 37.72,
-                                      "y": 96.55,
+                                      "y": 89.55,
                                       "width": 12.56,
                                       "height": 26,
                                       "right": 50.28,
-                                      "bottom": 122.55,
+                                      "bottom": 115.55,
                                       "text": "λ",
                                       "startIndex": 0,
                                       "endIndex": 1
@@ -815,7 +815,7 @@
                             ],
                             "layout": {
                               "x": 78,
-                              "y": 84.55,
+                              "y": 77.55,
                               "width": 415.91,
                               "height": 50,
                               "contentWidth": 416,
@@ -875,7 +875,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 78,
-                                  "y": 84.55,
+                                  "y": 77.55,
                                   "width": 415.91,
                                   "height": 30,
                                   "contentWidth": 416,
@@ -936,11 +936,11 @@
                                       "rects": [
                                         {
                                           "x": 78,
-                                          "y": 84.55,
+                                          "y": 77.55,
                                           "width": 306.28,
                                           "height": 30,
                                           "right": 384.28,
-                                          "bottom": 114.55,
+                                          "bottom": 107.55,
                                           "text": "Lambda Script & Radiant",
                                           "startIndex": 0,
                                           "endIndex": 23
@@ -965,7 +965,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 78,
-                                  "y": 118.55,
+                                  "y": 111.55,
                                   "width": 415.91,
                                   "height": 16,
                                   "contentWidth": 416,
@@ -1026,11 +1026,11 @@
                                       "rects": [
                                         {
                                           "x": 78,
-                                          "y": 118.55,
+                                          "y": 111.55,
                                           "width": 415.91,
                                           "height": 16,
                                           "right": 493.91,
-                                          "bottom": 134.55,
+                                          "bottom": 127.55,
                                           "text": "Pure functional data engine with browser-grade layout and rendering",
                                           "startIndex": 0,
                                           "endIndex": 67
@@ -1061,7 +1061,7 @@
                         ],
                         "layout": {
                           "x": 24,
-                          "y": 154.55,
+                          "y": 147.55,
                           "width": 456.59,
                           "height": 38,
                           "contentWidth": 455,
@@ -1123,7 +1123,7 @@
                             ],
                             "layout": {
                               "x": 35,
-                              "y": 163.55,
+                              "y": 156.55,
                               "width": 156.17,
                               "height": 20,
                               "contentWidth": 156,
@@ -1184,11 +1184,11 @@
                                   "rects": [
                                     {
                                       "x": 42,
-                                      "y": 166.55,
+                                      "y": 159.55,
                                       "width": 142.17,
                                       "height": 13,
                                       "right": 184.17,
-                                      "bottom": 179.55,
+                                      "bottom": 172.55,
                                       "text": "End-to-end pipeline",
                                       "startIndex": 0,
                                       "endIndex": 19
@@ -1214,11 +1214,11 @@
                               "rects": [
                                 {
                                   "x": 199.17,
-                                  "y": 167.05,
+                                  "y": 160.05,
                                   "width": 270.42,
                                   "height": 13,
                                   "right": 469.59,
-                                  "bottom": 180.05,
+                                  "bottom": 173.05,
                                   "text": "\n                    Transform · Validate · Layout · Render\n                ",
                                   "startIndex": 0,
                                   "endIndex": 76
@@ -1245,7 +1245,7 @@
                         ],
                         "layout": {
                           "x": 24,
-                          "y": 206.55,
+                          "y": 199.55,
                           "width": 528,
                           "height": 62.39,
                           "contentWidth": 528,
@@ -1306,11 +1306,11 @@
                               "rects": [
                                 {
                                   "x": 24,
-                                  "y": 208.55,
+                                  "y": 201.55,
                                   "width": 475.48,
                                   "height": 16,
                                   "right": 499.48,
-                                  "bottom": 224.55,
+                                  "bottom": 217.55,
                                   "text": "\n                    Lambda Script parses documents into a rich typed data model, transforms and\n",
                                   "startIndex": 0,
                                   "endIndex": 97
@@ -1334,11 +1334,11 @@
                               "rects": [
                                 {
                                   "x": 24,
-                                  "y": 229.34,
+                                  "y": 222.34,
                                   "width": 433.27,
                                   "height": 16,
                                   "right": 457.27,
-                                  "bottom": 245.34,
+                                  "bottom": 238.34,
                                   "text": "                    validates them with a pure functional language, then hands them to the\n                    ",
                                   "startIndex": 0,
                                   "endIndex": 111
@@ -1361,7 +1361,7 @@
                             "classes": [],
                             "layout": {
                               "x": 457.27,
-                              "y": 229.34,
+                              "y": 222.34,
                               "width": 48.3,
                               "height": 16,
                               "contentWidth": 0,
@@ -1422,11 +1422,11 @@
                                   "rects": [
                                     {
                                       "x": 457.27,
-                                      "y": 229.34,
+                                      "y": 222.34,
                                       "width": 48.3,
                                       "height": 16,
                                       "right": 505.56,
-                                      "bottom": 245.34,
+                                      "bottom": 238.34,
                                       "text": "Radiant",
                                       "startIndex": 0,
                                       "endIndex": 7
@@ -1452,11 +1452,11 @@
                               "rects": [
                                 {
                                   "x": 505.56,
-                                  "y": 229.34,
+                                  "y": 222.34,
                                   "width": 44.28,
                                   "height": 16,
                                   "right": 549.84,
-                                  "bottom": 245.34,
+                                  "bottom": 238.34,
                                   "text": " engine ",
                                   "startIndex": 0,
                                   "endIndex": 8
@@ -1480,11 +1480,11 @@
                               "rects": [
                                 {
                                   "x": 24,
-                                  "y": 250.14,
+                                  "y": 243.14,
                                   "width": 378.81,
                                   "height": 16,
                                   "right": 402.81,
-                                  "bottom": 266.14,
+                                  "bottom": 259.14,
                                   "text": "for pixel-perfect HTML/CSS layout and\n                    multi-format rendering.\n                ",
                                   "startIndex": 0,
                                   "endIndex": 98
@@ -1511,7 +1511,7 @@
                         ],
                         "layout": {
                           "x": 24,
-                          "y": 284.94,
+                          "y": 277.94,
                           "width": 528,
                           "height": 107,
                           "contentWidth": 528,
@@ -1574,7 +1574,7 @@
                             ],
                             "layout": {
                               "x": 24,
-                              "y": 284.94,
+                              "y": 277.94,
                               "width": 110.47,
                               "height": 29,
                               "contentWidth": 108,
@@ -1635,11 +1635,11 @@
                                   "rects": [
                                     {
                                       "x": 37,
-                                      "y": 292.94,
+                                      "y": 285.94,
                                       "width": 84.47,
                                       "height": 13,
                                       "right": 121.47,
-                                      "bottom": 305.94,
+                                      "bottom": 298.94,
                                       "text": "\n                        Open live demo\n                    ",
                                       "startIndex": 0,
                                       "endIndex": 60
@@ -1666,7 +1666,7 @@
                             ],
                             "layout": {
                               "x": 144.47,
-                              "y": 284.94,
+                              "y": 277.94,
                               "width": 311.91,
                               "height": 29,
                               "contentWidth": 310,
@@ -1727,11 +1727,11 @@
                                   "rects": [
                                     {
                                       "x": 157.47,
-                                      "y": 292.94,
+                                      "y": 285.94,
                                       "width": 51.13,
                                       "height": 13,
                                       "right": 208.59,
-                                      "bottom": 305.94,
+                                      "bottom": 298.94,
                                       "text": "\n                        transform\n                        ",
                                       "startIndex": 0,
                                       "endIndex": 59
@@ -1754,7 +1754,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 214.59,
-                                  "y": 293.94,
+                                  "y": 286.94,
                                   "width": 228.78,
                                   "height": 11,
                                   "contentWidth": 229,
@@ -1815,11 +1815,11 @@
                                       "rects": [
                                         {
                                           "x": 214.59,
-                                          "y": 293.94,
+                                          "y": 286.94,
                                           "width": 228.78,
                                           "height": 11,
                                           "right": 443.38,
-                                          "bottom": 304.94,
+                                          "bottom": 297.94,
                                           "text": "./lambda.exe convert data.json -t yaml",
                                           "startIndex": 0,
                                           "endIndex": 38
@@ -1848,7 +1848,7 @@
                             ],
                             "layout": {
                               "x": 24,
-                              "y": 323.94,
+                              "y": 316.94,
                               "width": 337.77,
                               "height": 29,
                               "contentWidth": 336,
@@ -1909,11 +1909,11 @@
                                   "rects": [
                                     {
                                       "x": 37,
-                                      "y": 331.94,
+                                      "y": 324.94,
                                       "width": 40.86,
                                       "height": 13,
                                       "right": 77.86,
-                                      "bottom": 344.94,
+                                      "bottom": 337.94,
                                       "text": "\n                        validate\n                        ",
                                       "startIndex": 0,
                                       "endIndex": 58
@@ -1936,7 +1936,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 83.86,
-                                  "y": 332.94,
+                                  "y": 325.94,
                                   "width": 264.91,
                                   "height": 11,
                                   "contentWidth": 265,
@@ -1997,11 +1997,11 @@
                                       "rects": [
                                         {
                                           "x": 83.86,
-                                          "y": 332.94,
+                                          "y": 325.94,
                                           "width": 264.91,
                                           "height": 11,
                                           "right": 348.77,
-                                          "bottom": 343.94,
+                                          "bottom": 336.94,
                                           "text": "./lambda.exe validate data.json -s schema.ls",
                                           "startIndex": 0,
                                           "endIndex": 44
@@ -2030,7 +2030,7 @@
                             ],
                             "layout": {
                               "x": 24,
-                              "y": 362.94,
+                              "y": 355.94,
                               "width": 295.14,
                               "height": 29,
                               "contentWidth": 293,
@@ -2091,11 +2091,11 @@
                                   "rects": [
                                     {
                                       "x": 37,
-                                      "y": 370.94,
+                                      "y": 363.94,
                                       "width": 34.36,
                                       "height": 13,
                                       "right": 71.36,
-                                      "bottom": 383.94,
+                                      "bottom": 376.94,
                                       "text": "\n                        render\n                        ",
                                       "startIndex": 0,
                                       "endIndex": 56
@@ -2118,7 +2118,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 77.36,
-                                  "y": 371.94,
+                                  "y": 364.94,
                                   "width": 228.78,
                                   "height": 11,
                                   "contentWidth": 229,
@@ -2179,11 +2179,11 @@
                                       "rects": [
                                         {
                                           "x": 77.36,
-                                          "y": 371.94,
+                                          "y": 364.94,
                                           "width": 228.78,
                                           "height": 11,
                                           "right": 306.14,
-                                          "bottom": 382.94,
+                                          "bottom": 375.94,
                                           "text": "./lambda.exe view test/html/index.html",
                                           "startIndex": 0,
                                           "endIndex": 38
@@ -2218,11 +2218,11 @@
                       "x": 576,
                       "y": 24,
                       "width": 600,
-                      "height": 428.5,
+                      "height": 414.5,
                       "contentWidth": 598,
-                      "contentHeight": 427,
+                      "contentHeight": 413,
                       "scrollWidth": 598,
-                      "scrollHeight": 427
+                      "scrollHeight": 413
                     },
                     "computed": {
                       "display": "block",
@@ -2370,11 +2370,11 @@
                           "x": 591,
                           "y": 65,
                           "width": 570,
-                          "height": 374.5,
+                          "height": 360.5,
                           "contentWidth": 570,
-                          "contentHeight": 375,
+                          "contentHeight": 361,
                           "scrollWidth": 570,
-                          "scrollHeight": 375
+                          "scrollHeight": 361
                         },
                         "computed": {
                           "display": "grid",
@@ -3532,11 +3532,11 @@
                               "x": 591,
                               "y": 262,
                               "width": 281,
-                              "height": 177.5,
+                              "height": 163.5,
                               "contentWidth": 279,
-                              "contentHeight": 176,
+                              "contentHeight": 162,
                               "scrollWidth": 279,
-                              "scrollHeight": 176
+                              "scrollHeight": 162
                             },
                             "computed": {
                               "display": "block",
@@ -4012,11 +4012,11 @@
                               "x": 880,
                               "y": 262,
                               "width": 281,
-                              "height": 177.5,
+                              "height": 163.5,
                               "contentWidth": 279,
-                              "contentHeight": 176,
+                              "contentHeight": 162,
                               "scrollWidth": 279,
-                              "scrollHeight": 176
+                              "scrollHeight": 162
                             },
                             "computed": {
                               "display": "block",
@@ -4308,11 +4308,11 @@
                                   "x": 891,
                                   "y": 345.5,
                                   "width": 259,
-                                  "height": 84,
+                                  "height": 70,
                                   "contentWidth": 257,
-                                  "contentHeight": 82,
+                                  "contentHeight": 68,
                                   "scrollWidth": 261,
-                                  "scrollHeight": 82
+                                  "scrollHeight": 68
                                 },
                                 "computed": {
                                   "display": "block",
@@ -4368,7 +4368,7 @@
                                       "x": 899,
                                       "y": 353.5,
                                       "width": 246.84,
-                                      "height": 67,
+                                      "height": 53,
                                       "contentWidth": 0,
                                       "contentHeight": 0,
                                       "scrollWidth": 0,
@@ -4476,43 +4476,15 @@
                                       },
                                       {
                                         "nodeType": "text",
-                                        "text": "\n",
-                                        "length": 1,
-                                        "isWhitespaceOnly": true,
-                                        "layout": {
-                                          "rects": [
-                                            {
-                                              "x": 899,
-                                              "y": 367.5,
-                                              "width": 228.78,
-                                              "height": 11,
-                                              "right": 1127.78,
-                                              "bottom": 378.5,
-                                              "text": "\n",
-                                              "startIndex": 0,
-                                              "endIndex": 1
-                                            }
-                                          ],
-                                          "hasLayout": true,
-                                          "parentVisible": true,
-                                          "parentDisplay": "inline",
-                                          "parentVisibility": "visible"
-                                        },
-                                        "depth": 9,
-                                        "nodeIndex": 0,
-                                        "children": []
-                                      },
-                                      {
-                                        "nodeType": "text",
                                         "text": "// off-screen rendering\n",
                                         "length": 24,
                                         "isWhitespaceOnly": false,
                                         "layout": {
                                           "rects": [
                                             {
-                                              "x": 1127.78,
+                                              "x": 899,
                                               "y": 367.5,
-                                              "width": 0,
+                                              "width": 228.78,
                                               "height": 11,
                                               "right": 1127.78,
                                               "bottom": 378.5,
@@ -4538,12 +4510,12 @@
                                         "layout": {
                                           "rects": [
                                             {
-                                              "x": 899,
-                                              "y": 381.5,
+                                              "x": 1127.78,
+                                              "y": 367.5,
                                               "width": 0,
                                               "height": 11,
-                                              "right": 899,
-                                              "bottom": 392.5,
+                                              "right": 1127.78,
+                                              "bottom": 378.5,
                                               "text": "./lambda.exe render page.html -o page.pdf",
                                               "startIndex": 0,
                                               "endIndex": 41
@@ -4578,13 +4550,13 @@
                 "classes": [],
                 "layout": {
                   "x": 24,
-                  "y": 480.5,
+                  "y": 466.5,
                   "width": 1152,
-                  "height": 615,
+                  "height": 139,
                   "contentWidth": 1152,
-                  "contentHeight": 615,
+                  "contentHeight": 139,
                   "scrollWidth": 1152,
-                  "scrollHeight": 615
+                  "scrollHeight": 139
                 },
                 "computed": {
                   "display": "grid",
@@ -4640,13 +4612,13 @@
                     ],
                     "layout": {
                       "x": 24,
-                      "y": 480.5,
+                      "y": 466.5,
                       "width": 466.11,
-                      "height": 615,
+                      "height": 139,
                       "contentWidth": 466,
-                      "contentHeight": 615,
+                      "contentHeight": 139,
                       "scrollWidth": 466,
-                      "scrollHeight": 615
+                      "scrollHeight": 139
                     },
                     "computed": {
                       "display": "flex",
@@ -4702,7 +4674,7 @@
                         ],
                         "layout": {
                           "x": 24,
-                          "y": 480.5,
+                          "y": 466.5,
                           "width": 466.11,
                           "height": 79,
                           "contentWidth": 466,
@@ -4762,7 +4734,7 @@
                             "classes": [],
                             "layout": {
                               "x": 24,
-                              "y": 480.5,
+                              "y": 466.5,
                               "width": 466.11,
                               "height": 13,
                               "contentWidth": 466,
@@ -4823,11 +4795,11 @@
                                   "rects": [
                                     {
                                       "x": 24,
-                                      "y": 480.5,
+                                      "y": 466.5,
                                       "width": 151.64,
                                       "height": 13,
                                       "right": 175.64,
-                                      "bottom": 493.5,
+                                      "bottom": 479.5,
                                       "text": "Document samples",
                                       "startIndex": 0,
                                       "endIndex": 16
@@ -4854,7 +4826,7 @@
                             ],
                             "layout": {
                               "x": 24,
-                              "y": 499.5,
+                              "y": 485.5,
                               "width": 466.11,
                               "height": 60,
                               "contentWidth": 466,
@@ -4916,7 +4888,7 @@
                                 ],
                                 "layout": {
                                   "x": 24,
-                                  "y": 499.5,
+                                  "y": 485.5,
                                   "width": 89.17,
                                   "height": 27,
                                   "contentWidth": 87,
@@ -4977,11 +4949,11 @@
                                       "rects": [
                                         {
                                           "x": 35,
-                                          "y": 506.5,
+                                          "y": 492.5,
                                           "width": 67.17,
                                           "height": 13,
                                           "right": 102.17,
-                                          "bottom": 519.5,
+                                          "bottom": 505.5,
                                           "text": "\n                            HTML article\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 66
@@ -5006,7 +4978,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 119.17,
-                                  "y": 499.5,
+                                  "y": 485.5,
                                   "width": 111.44,
                                   "height": 27,
                                   "contentWidth": 109,
@@ -5067,11 +5039,11 @@
                                       "rects": [
                                         {
                                           "x": 130.17,
-                                          "y": 506.5,
+                                          "y": 492.5,
                                           "width": 89.44,
                                           "height": 13,
                                           "right": 219.61,
-                                          "bottom": 519.5,
+                                          "bottom": 505.5,
                                           "text": "\n                            Markdown report\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 69
@@ -5096,12 +5068,12 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 236.61,
-                                  "y": 499.5,
-                                  "width": 95.83,
+                                  "y": 485.5,
+                                  "width": 75.98,
                                   "height": 27,
-                                  "contentWidth": 94,
+                                  "contentWidth": 74,
                                   "contentHeight": 25,
-                                  "scrollWidth": 94,
+                                  "scrollWidth": 74,
                                   "scrollHeight": 25
                                 },
                                 "computed": {
@@ -5150,21 +5122,21 @@
                                 "children": [
                                   {
                                     "nodeType": "text",
-                                    "text": "\n                            LaTeX typeset\n                        ",
-                                    "length": 67,
+                                    "text": "\n                            LaTeX doc\n                        ",
+                                    "length": 63,
                                     "isWhitespaceOnly": false,
                                     "layout": {
                                       "rects": [
                                         {
                                           "x": 247.61,
-                                          "y": 506.5,
-                                          "width": 73.83,
+                                          "y": 492.5,
+                                          "width": 53.98,
                                           "height": 13,
-                                          "right": 321.44,
-                                          "bottom": 519.5,
-                                          "text": "\n                            LaTeX typeset\n                        ",
+                                          "right": 301.59,
+                                          "bottom": 505.5,
+                                          "text": "\n                            LaTeX doc\n                        ",
                                           "startIndex": 0,
-                                          "endIndex": 67
+                                          "endIndex": 63
                                         }
                                       ],
                                       "hasLayout": true,
@@ -5185,13 +5157,13 @@
                                 "id": null,
                                 "classes": [],
                                 "layout": {
-                                  "x": 338.44,
-                                  "y": 499.5,
-                                  "width": 71.83,
+                                  "x": 318.59,
+                                  "y": 485.5,
+                                  "width": 80.56,
                                   "height": 27,
-                                  "contentWidth": 70,
+                                  "contentWidth": 79,
                                   "contentHeight": 25,
-                                  "scrollWidth": 70,
+                                  "scrollWidth": 79,
                                   "scrollHeight": 25
                                 },
                                 "computed": {
@@ -5240,21 +5212,21 @@
                                 "children": [
                                   {
                                     "nodeType": "text",
-                                    "text": "\n                            XML data\n                        ",
-                                    "length": 62,
+                                    "text": "\n                            XML styled\n                        ",
+                                    "length": 64,
                                     "isWhitespaceOnly": false,
                                     "layout": {
                                       "rects": [
                                         {
-                                          "x": 349.44,
-                                          "y": 506.5,
-                                          "width": 49.83,
+                                          "x": 329.59,
+                                          "y": 492.5,
+                                          "width": 58.56,
                                           "height": 13,
-                                          "right": 399.27,
-                                          "bottom": 519.5,
-                                          "text": "\n                            XML data\n                        ",
+                                          "right": 388.16,
+                                          "bottom": 505.5,
+                                          "text": "\n                            XML styled\n                        ",
                                           "startIndex": 0,
-                                          "endIndex": 62
+                                          "endIndex": 64
                                         }
                                       ],
                                       "hasLayout": true,
@@ -5275,13 +5247,13 @@
                                 "id": null,
                                 "classes": [],
                                 "layout": {
-                                  "x": 24,
-                                  "y": 532.5,
-                                  "width": 97.02,
+                                  "x": 405.16,
+                                  "y": 485.5,
+                                  "width": 84.2,
                                   "height": 27,
-                                  "contentWidth": 95,
+                                  "contentWidth": 82,
                                   "contentHeight": 25,
-                                  "scrollWidth": 95,
+                                  "scrollWidth": 82,
                                   "scrollHeight": 25
                                 },
                                 "computed": {
@@ -5330,21 +5302,21 @@
                                 "children": [
                                   {
                                     "nodeType": "text",
-                                    "text": "\n                            PDF rendering\n                        ",
-                                    "length": 67,
+                                    "text": "\n                            PDF sample\n                        ",
+                                    "length": 64,
                                     "isWhitespaceOnly": false,
                                     "layout": {
                                       "rects": [
                                         {
-                                          "x": 35,
-                                          "y": 539.5,
-                                          "width": 75.02,
+                                          "x": 416.16,
+                                          "y": 492.5,
+                                          "width": 62.2,
                                           "height": 13,
-                                          "right": 110.02,
-                                          "bottom": 552.5,
-                                          "text": "\n                            PDF rendering\n                        ",
+                                          "right": 478.36,
+                                          "bottom": 505.5,
+                                          "text": "\n                            PDF sample\n                        ",
                                           "startIndex": 0,
-                                          "endIndex": 67
+                                          "endIndex": 64
                                         }
                                       ],
                                       "hasLayout": true,
@@ -5365,8 +5337,8 @@
                                 "id": null,
                                 "classes": [],
                                 "layout": {
-                                  "x": 127.02,
-                                  "y": 532.5,
+                                  "x": 24,
+                                  "y": 518.5,
                                   "width": 71.83,
                                   "height": 27,
                                   "contentWidth": 70,
@@ -5426,12 +5398,12 @@
                                     "layout": {
                                       "rects": [
                                         {
-                                          "x": 138.02,
-                                          "y": 539.5,
+                                          "x": 35,
+                                          "y": 525.5,
                                           "width": 49.83,
                                           "height": 13,
-                                          "right": 187.84,
-                                          "bottom": 552.5,
+                                          "right": 84.83,
+                                          "bottom": 538.5,
                                           "text": "\n                            SVG tiger\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 63
@@ -5455,8 +5427,8 @@
                                 "id": null,
                                 "classes": [],
                                 "layout": {
-                                  "x": 204.84,
-                                  "y": 532.5,
+                                  "x": 101.83,
+                                  "y": 518.5,
                                   "width": 80.39,
                                   "height": 27,
                                   "contentWidth": 78,
@@ -5516,12 +5488,12 @@
                                     "layout": {
                                       "rects": [
                                         {
-                                          "x": 215.84,
-                                          "y": 539.5,
+                                          "x": 112.83,
+                                          "y": 525.5,
                                           "width": 58.39,
                                           "height": 13,
-                                          "right": 274.23,
-                                          "bottom": 552.5,
+                                          "right": 171.22,
+                                          "bottom": 538.5,
                                           "text": "\n                            PNG image\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 63
@@ -5545,8 +5517,8 @@
                                 "id": null,
                                 "classes": [],
                                 "layout": {
-                                  "x": 291.23,
-                                  "y": 532.5,
+                                  "x": 188.22,
+                                  "y": 518.5,
                                   "width": 87.95,
                                   "height": 27,
                                   "contentWidth": 86,
@@ -5606,12 +5578,12 @@
                                     "layout": {
                                       "rects": [
                                         {
-                                          "x": 302.23,
-                                          "y": 539.5,
+                                          "x": 199.22,
+                                          "y": 525.5,
                                           "width": 65.95,
                                           "height": 13,
-                                          "right": 368.19,
-                                          "bottom": 552.5,
+                                          "right": 265.17,
+                                          "bottom": 538.5,
                                           "text": "\n                            YAML config\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 65
@@ -5635,8 +5607,8 @@
                                 "id": null,
                                 "classes": [],
                                 "layout": {
-                                  "x": 385.19,
-                                  "y": 532.5,
+                                  "x": 282.17,
+                                  "y": 518.5,
                                   "width": 96.94,
                                   "height": 27,
                                   "contentWidth": 95,
@@ -5696,12 +5668,12 @@
                                     "layout": {
                                       "rects": [
                                         {
-                                          "x": 396.19,
-                                          "y": 539.5,
+                                          "x": 293.17,
+                                          "y": 525.5,
                                           "width": 74.94,
                                           "height": 13,
-                                          "right": 471.13,
-                                          "bottom": 552.5,
+                                          "right": 368.11,
+                                          "bottom": 538.5,
                                           "text": "\n                            Lambda script\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 67
@@ -5732,13 +5704,13 @@
                         ],
                         "layout": {
                           "x": 24,
-                          "y": 573.5,
+                          "y": 559.5,
                           "width": 466.11,
-                          "height": 79,
+                          "height": 46,
                           "contentWidth": 466,
-                          "contentHeight": 79,
+                          "contentHeight": 46,
                           "scrollWidth": 466,
-                          "scrollHeight": 79
+                          "scrollHeight": 46
                         },
                         "computed": {
                           "display": "block",
@@ -5792,7 +5764,7 @@
                             "classes": [],
                             "layout": {
                               "x": 24,
-                              "y": 573.5,
+                              "y": 559.5,
                               "width": 466.11,
                               "height": 13,
                               "contentWidth": 466,
@@ -5853,11 +5825,11 @@
                                   "rects": [
                                     {
                                       "x": 24,
-                                      "y": 573.5,
+                                      "y": 559.5,
                                       "width": 125.05,
                                       "height": 13,
                                       "right": 149.05,
-                                      "bottom": 586.5,
+                                      "bottom": 572.5,
                                       "text": "Layout gallery",
                                       "startIndex": 0,
                                       "endIndex": 14
@@ -5884,13 +5856,13 @@
                             ],
                             "layout": {
                               "x": 24,
-                              "y": 592.5,
+                              "y": 578.5,
                               "width": 466.11,
-                              "height": 60,
+                              "height": 27,
                               "contentWidth": 466,
-                              "contentHeight": 60,
+                              "contentHeight": 27,
                               "scrollWidth": 466,
-                              "scrollHeight": 60
+                              "scrollHeight": 27
                             },
                             "computed": {
                               "display": "flex",
@@ -5944,7 +5916,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 24,
-                                  "y": 592.5,
+                                  "y": 578.5,
                                   "width": 62.13,
                                   "height": 27,
                                   "contentWidth": 60,
@@ -6005,11 +5977,11 @@
                                       "rects": [
                                         {
                                           "x": 35,
-                                          "y": 599.5,
+                                          "y": 585.5,
                                           "width": 40.13,
                                           "height": 13,
                                           "right": 75.13,
-                                          "bottom": 612.5,
+                                          "bottom": 598.5,
                                           "text": "\n                            Flexbox\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 61
@@ -6034,7 +6006,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 92.13,
-                                  "y": 592.5,
+                                  "y": 578.5,
                                   "width": 44.14,
                                   "height": 27,
                                   "contentWidth": 42,
@@ -6095,11 +6067,11 @@
                                       "rects": [
                                         {
                                           "x": 103.13,
-                                          "y": 599.5,
+                                          "y": 585.5,
                                           "width": 22.14,
                                           "height": 13,
                                           "right": 125.27,
-                                          "bottom": 612.5,
+                                          "bottom": 598.5,
                                           "text": "\n                            Grid\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 58
@@ -6124,7 +6096,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 142.27,
-                                  "y": 592.5,
+                                  "y": 578.5,
                                   "width": 55.89,
                                   "height": 27,
                                   "contentWidth": 54,
@@ -6185,11 +6157,11 @@
                                       "rects": [
                                         {
                                           "x": 153.27,
-                                          "y": 599.5,
+                                          "y": 585.5,
                                           "width": 33.89,
                                           "height": 13,
                                           "right": 187.16,
-                                          "bottom": 612.5,
+                                          "bottom": 598.5,
                                           "text": "\n                            Tables\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 60
@@ -6214,7 +6186,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 204.16,
-                                  "y": 592.5,
+                                  "y": 578.5,
                                   "width": 95.97,
                                   "height": 27,
                                   "contentWidth": 94,
@@ -6275,11 +6247,11 @@
                                       "rects": [
                                         {
                                           "x": 215.16,
-                                          "y": 599.5,
+                                          "y": 585.5,
                                           "width": 73.97,
                                           "height": 13,
                                           "right": 289.13,
-                                          "bottom": 612.5,
+                                          "bottom": 598.5,
                                           "text": "\n                            Table (simple)\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 68
@@ -6304,7 +6276,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 306.13,
-                                  "y": 592.5,
+                                  "y": 578.5,
                                   "width": 76.8,
                                   "height": 27,
                                   "contentWidth": 75,
@@ -6365,11 +6337,11 @@
                                       "rects": [
                                         {
                                           "x": 317.13,
-                                          "y": 599.5,
+                                          "y": 585.5,
                                           "width": 54.8,
                                           "height": 13,
                                           "right": 371.92,
-                                          "bottom": 612.5,
+                                          "bottom": 598.5,
                                           "text": "\n                            Box model\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 63
@@ -6394,7 +6366,7 @@
                                 "classes": [],
                                 "layout": {
                                   "x": 388.92,
-                                  "y": 592.5,
+                                  "y": 578.5,
                                   "width": 79.98,
                                   "height": 27,
                                   "contentWidth": 78,
@@ -6455,104 +6427,14 @@
                                       "rects": [
                                         {
                                           "x": 399.92,
-                                          "y": 599.5,
+                                          "y": 585.5,
                                           "width": 57.98,
                                           "height": 13,
                                           "right": 457.91,
-                                          "bottom": 612.5,
+                                          "bottom": 598.5,
                                           "text": "\n                            Positioning\n                        ",
                                           "startIndex": 0,
                                           "endIndex": 65
-                                        }
-                                      ],
-                                      "hasLayout": true,
-                                      "parentVisible": true,
-                                      "parentDisplay": "flex",
-                                      "parentVisibility": "visible"
-                                    },
-                                    "depth": 8,
-                                    "nodeIndex": 0,
-                                    "children": []
-                                  }
-                                ]
-                              },
-                              {
-                                "nodeType": "element",
-                                "selector": "a:nth-of-type(7)",
-                                "tag": "a",
-                                "id": null,
-                                "classes": [],
-                                "layout": {
-                                  "x": 24,
-                                  "y": 625.5,
-                                  "width": 106.8,
-                                  "height": 27,
-                                  "contentWidth": 105,
-                                  "contentHeight": 25,
-                                  "scrollWidth": 105,
-                                  "scrollHeight": 25
-                                },
-                                "computed": {
-                                  "display": "flex",
-                                  "position": "static",
-                                  "marginTop": 0,
-                                  "marginRight": 0,
-                                  "marginBottom": 0,
-                                  "marginLeft": 0,
-                                  "paddingTop": 6,
-                                  "paddingRight": 10,
-                                  "paddingBottom": 6,
-                                  "paddingLeft": 10,
-                                  "borderTopWidth": 1,
-                                  "borderRightWidth": 1,
-                                  "borderBottomWidth": 1,
-                                  "borderLeftWidth": 1,
-                                  "flexDirection": "row",
-                                  "flexWrap": "nowrap",
-                                  "justifyContent": "normal",
-                                  "alignItems": "center",
-                                  "alignContent": "normal",
-                                  "flexGrow": 0,
-                                  "flexShrink": 1,
-                                  "flexBasis": "auto",
-                                  "alignSelf": "auto",
-                                  "order": 0,
-                                  "gap": "6px",
-                                  "fontSize": 11,
-                                  "lineHeight": "normal",
-                                  "fontFamily": "-apple-system, \"system-ui\", \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
-                                  "fontWeight": "400",
-                                  "textAlign": "start",
-                                  "verticalAlign": "baseline",
-                                  "top": "auto",
-                                  "right": "auto",
-                                  "bottom": "auto",
-                                  "left": "auto",
-                                  "zIndex": "auto",
-                                  "overflow": "visible",
-                                  "overflowX": "visible",
-                                  "overflowY": "visible"
-                                },
-                                "depth": 7,
-                                "elementIndex": 13,
-                                "children": [
-                                  {
-                                    "nodeType": "text",
-                                    "text": "\n                            Baseline sample\n                        ",
-                                    "length": 69,
-                                    "isWhitespaceOnly": false,
-                                    "layout": {
-                                      "rects": [
-                                        {
-                                          "x": 35,
-                                          "y": 632.5,
-                                          "width": 84.8,
-                                          "height": 13,
-                                          "right": 119.8,
-                                          "bottom": 645.5,
-                                          "text": "\n                            Baseline sample\n                        ",
-                                          "startIndex": 0,
-                                          "endIndex": 69
                                         }
                                       ],
                                       "hasLayout": true,
@@ -6582,13 +6464,13 @@
                     ],
                     "layout": {
                       "x": 510.11,
-                      "y": 480.5,
+                      "y": 466.5,
                       "width": 665.88,
-                      "height": 615,
+                      "height": 135,
                       "contentWidth": 664,
-                      "contentHeight": 613,
+                      "contentHeight": 133,
                       "scrollWidth": 664,
-                      "scrollHeight": 613
+                      "scrollHeight": 133
                     },
                     "computed": {
                       "display": "block",
@@ -6613,7 +6495,7 @@
                       "flexGrow": 0,
                       "flexShrink": 1,
                       "flexBasis": "auto",
-                      "alignSelf": "auto",
+                      "alignSelf": "start",
                       "order": 0,
                       "gap": "normal",
                       "fontSize": 16,
@@ -6644,7 +6526,7 @@
                         ],
                         "layout": {
                           "x": 511.11,
-                          "y": 481.5,
+                          "y": 467.5,
                           "width": 663.88,
                           "height": 30,
                           "contentWidth": 664,
@@ -6706,7 +6588,7 @@
                             ],
                             "layout": {
                               "x": 521.11,
-                              "y": 491.5,
+                              "y": 477.5,
                               "width": 39,
                               "height": 9,
                               "contentWidth": 39,
@@ -6769,7 +6651,7 @@
                                 ],
                                 "layout": {
                                   "x": 521.11,
-                                  "y": 491.5,
+                                  "y": 477.5,
                                   "width": 9,
                                   "height": 9,
                                   "contentWidth": 9,
@@ -6833,7 +6715,7 @@
                                 ],
                                 "layout": {
                                   "x": 536.11,
-                                  "y": 491.5,
+                                  "y": 477.5,
                                   "width": 9,
                                   "height": 9,
                                   "contentWidth": 9,
@@ -6897,7 +6779,7 @@
                                 ],
                                 "layout": {
                                   "x": 551.11,
-                                  "y": 491.5,
+                                  "y": 477.5,
                                   "width": 9,
                                   "height": 9,
                                   "contentWidth": 9,
@@ -6962,7 +6844,7 @@
                             ],
                             "layout": {
                               "x": 568.11,
-                              "y": 489.5,
+                              "y": 475.5,
                               "width": 548.88,
                               "height": 13,
                               "contentWidth": 549,
@@ -7023,11 +6905,11 @@
                                   "rects": [
                                     {
                                       "x": 808.95,
-                                      "y": 489.5,
+                                      "y": 475.5,
                                       "width": 67.17,
                                       "height": 13,
                                       "right": 876.13,
-                                      "bottom": 502.5,
+                                      "bottom": 488.5,
                                       "text": "HTML article",
                                       "startIndex": 0,
                                       "endIndex": 12
@@ -7052,7 +6934,7 @@
                             "classes": [],
                             "layout": {
                               "x": 1124.98,
-                              "y": 496,
+                              "y": 482,
                               "width": 40,
                               "height": 0,
                               "contentWidth": 40,
@@ -7115,13 +6997,13 @@
                         "classes": [],
                         "layout": {
                           "x": 511.11,
-                          "y": 511.5,
+                          "y": 497.5,
                           "width": 663.88,
-                          "height": 580,
+                          "height": 100,
                           "contentWidth": 664,
-                          "contentHeight": 580,
+                          "contentHeight": 100,
                           "scrollWidth": 664,
-                          "scrollHeight": 580
+                          "scrollHeight": 100
                         },
                         "computed": {
                           "display": "inline",
@@ -7180,7 +7062,7 @@
                 "classes": [],
                 "layout": {
                   "x": 24,
-                  "y": 1113.5,
+                  "y": 623.5,
                   "width": 1152,
                   "height": 26,
                   "contentWidth": 1152,
@@ -7240,7 +7122,7 @@
                     "classes": [],
                     "layout": {
                       "x": 24,
-                      "y": 1126.5,
+                      "y": 636.5,
                       "width": 251.69,
                       "height": 13,
                       "contentWidth": 252,
@@ -7301,11 +7183,11 @@
                           "rects": [
                             {
                               "x": 24,
-                              "y": 1126.5,
+                              "y": 636.5,
                               "width": 251.69,
                               "height": 13,
                               "right": 275.69,
-                              "bottom": 1139.5,
+                              "bottom": 649.5,
                               "text": "Lambda Script · Data → Layout → PDF/SVG/PNG",
                               "startIndex": 0,
                               "endIndex": 43
@@ -7332,7 +7214,7 @@
                     ],
                     "layout": {
                       "x": 847.86,
-                      "y": 1126.5,
+                      "y": 636.5,
                       "width": 328.14,
                       "height": 13,
                       "contentWidth": 328,
@@ -7392,7 +7274,7 @@
                         "classes": [],
                         "layout": {
                           "x": 847.86,
-                          "y": 1126.5,
+                          "y": 636.5,
                           "width": 104.67,
                           "height": 13,
                           "contentWidth": 0,
@@ -7453,11 +7335,11 @@
                               "rects": [
                                 {
                                   "x": 847.86,
-                                  "y": 1126.5,
+                                  "y": 636.5,
                                   "width": 104.67,
                                   "height": 13,
                                   "right": 952.53,
-                                  "bottom": 1139.5,
+                                  "bottom": 649.5,
                                   "text": "Language reference",
                                   "startIndex": 0,
                                   "endIndex": 18
@@ -7483,11 +7365,11 @@
                           "rects": [
                             {
                               "x": 952.53,
-                              "y": 1126.5,
+                              "y": 636.5,
                               "width": 15.97,
                               "height": 13,
                               "right": 968.5,
-                              "bottom": 1139.5,
+                              "bottom": 649.5,
                               "text": "\n                 · \n                ",
                               "startIndex": 0,
                               "endIndex": 37
@@ -7510,7 +7392,7 @@
                         "classes": [],
                         "layout": {
                           "x": 968.5,
-                          "y": 1126.5,
+                          "y": 636.5,
                           "width": 78.83,
                           "height": 13,
                           "contentWidth": 0,
@@ -7571,11 +7453,11 @@
                               "rects": [
                                 {
                                   "x": 968.5,
-                                  "y": 1126.5,
+                                  "y": 636.5,
                                   "width": 78.83,
                                   "height": 13,
                                   "right": 1047.33,
-                                  "bottom": 1139.5,
+                                  "bottom": 649.5,
                                   "text": "Validator guide",
                                   "startIndex": 0,
                                   "endIndex": 15
@@ -7601,11 +7483,11 @@
                           "rects": [
                             {
                               "x": 1047.33,
-                              "y": 1126.5,
+                              "y": 636.5,
                               "width": 15.97,
                               "height": 13,
                               "right": 1063.3,
-                              "bottom": 1139.5,
+                              "bottom": 649.5,
                               "text": "\n                 · \n                ",
                               "startIndex": 0,
                               "endIndex": 37
@@ -7628,7 +7510,7 @@
                         "classes": [],
                         "layout": {
                           "x": 1063.3,
-                          "y": 1126.5,
+                          "y": 636.5,
                           "width": 112.7,
                           "height": 13,
                           "contentWidth": 0,
@@ -7689,11 +7571,11 @@
                               "rects": [
                                 {
                                   "x": 1063.3,
-                                  "y": 1126.5,
+                                  "y": 636.5,
                                   "width": 112.7,
                                   "height": 13,
                                   "right": 1176,
-                                  "bottom": 1139.5,
+                                  "bottom": 649.5,
                                   "text": "Radiant layout design",
                                   "startIndex": 0,
                                   "endIndex": 21
