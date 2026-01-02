@@ -1095,6 +1095,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             } else if (!lycon->block.parent && lycon && lycon->height > 0) {
                 // No parent context (root html element) - use viewport height
                 // This handles html element with height: 100%
+                // Layout now uses CSS pixels, so use lycon->height directly (no pixel_ratio scaling)
                 log_debug("percentage height value %.2f%% of viewport height %.1f = %.2f (no parent)",
                        percentage, lycon->height, percentage * lycon->height / 100.0);
                 result = percentage * lycon->height / 100.0;
@@ -5702,7 +5703,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     CssValue* val = values[i];
 
                     if (val->type == CSS_VALUE_TYPE_NUMBER) {
-                        // Numbers are grow and shrink (unitless)
+                        // Numbers are grow and shrink (unitless), except:
+                        // - Third number is flex-basis (unitless 0 is valid for lengths)
+                        // - If the number is 0 and we already have grow+shrink, it's basis=0
                         if (value_index == 0) {
                             flex_grow = (float)val->data.number.value;
                             log_debug("[CSS]   flex-grow: %.2f", flex_grow);
@@ -5711,6 +5714,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             flex_shrink = (float)val->data.number.value;
                             log_debug("[CSS]   flex-shrink: %.2f", flex_shrink);
                             value_index++;
+                        } else if (value_index == 2 && val->data.number.value == 0) {
+                            // Third value is unitless 0 -> flex-basis: 0
+                            // CSS allows unitless 0 for any length value
+                            flex_basis = 0;
+                            flex_basis_is_percent = false;
+                            found_basis = true;
+                            log_debug("[CSS]   flex-basis: 0 (unitless zero)");
                         }
                     } else if (val->type == CSS_VALUE_TYPE_LENGTH) {
                         // Length is basis

@@ -363,6 +363,12 @@ void render(GLFWwindow* window) {
         log_debug("render: window size changed to %dx%d, reflowing", width, height);
         double start_time = glfwGetTime();
         ui_context.window_width = width;  ui_context.window_height = height;
+        // CRITICAL: Update viewport dimensions (CSS logical pixels) for layout
+        // This ensures vh/vw units and percentage heights use the correct window size
+        ui_context.viewport_width = (int)(width / ui_context.pixel_ratio);
+        ui_context.viewport_height = (int)(height / ui_context.pixel_ratio);
+        log_debug("render: updated viewport to %dx%d CSS pixels", 
+                  (int)ui_context.viewport_width, (int)ui_context.viewport_height);
         // resize the surface
         ui_context_create_surface(&ui_context, width, height);
         // reflow the document
@@ -479,6 +485,18 @@ int view_doc_in_window(const char* doc_file) {
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
     framebuffer_size_callback(window, width, height);
+
+    // CRITICAL: Update ui_context dimensions to match actual framebuffer size
+    // This ensures the initial layout uses the correct viewport dimensions
+    ui_context.window_width = width;
+    ui_context.window_height = height;
+    ui_context.viewport_width = (int)(width / ui_context.pixel_ratio);
+    ui_context.viewport_height = (int)(height / ui_context.pixel_ratio);
+    log_debug("view_doc_in_window: updated viewport to %dx%d CSS pixels (framebuffer %dx%d)",
+              (int)ui_context.viewport_width, (int)ui_context.viewport_height, width, height);
+
+    // Recreate surface with correct dimensions
+    ui_context_create_surface(&ui_context, width, height);
 
     Url* cwd = get_current_dir();
     if (cwd) {

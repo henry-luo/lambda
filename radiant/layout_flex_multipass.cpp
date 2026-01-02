@@ -1422,8 +1422,23 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // height after nested content has been laid out. The initial height calculation
     // (in Phase 7) happens before nested content is laid out, so items may have
     // grown taller than their initial hypothetical cross size.
+    // BUT: Do NOT expand if this container is a flex item that was sized by parent's
+    // column flex layout (i.e., has flex-grow > 0 and parent is column flex).
     if (flex && is_main_axis_horizontal(flex)) {
         bool has_explicit_height = (flex_container->blk && flex_container->blk->given_height > 0);
+        
+        // Also check if this element is a flex item that was sized by parent flex layout
+        // If it has flex-grow > 0 and is in a column flex container, its height is constrained
+        if (!has_explicit_height && flex_container->fi) {
+            float fg = get_item_flex_grow(flex_container);
+            if (fg > 0) {
+                // This flex item grew to fill parent space - don't expand beyond parent's sizing
+                has_explicit_height = true;
+                log_debug("ROW FLEX HEIGHT FIX: skipping %s - height was set by parent flex-grow (fg=%.1f)",
+                          flex_container->node_name(), fg);
+            }
+        }
+        
         if (!has_explicit_height) {
             // Find the maximum height among all flex items
             float max_item_height = 0;
