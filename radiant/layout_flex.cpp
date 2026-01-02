@@ -986,14 +986,18 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 log_debug("Phase 7: Updating cross_axis_size from %.1f to %d (auto-height)",
                          flex_layout->cross_axis_size, total_line_cross);
                 flex_layout->cross_axis_size = (float)total_line_cross;
-                // Container height should be content + padding (not just content)
+                // Container height should be content + padding + border (not just content)
                 int padding_height = 0;
+                int border_height = 0;
                 if (container->bound) {
                     padding_height = (int)(container->bound->padding.top + container->bound->padding.bottom);
+                    if (container->bound->border) {
+                        border_height = (int)(container->bound->border->width.top + container->bound->border->width.bottom);
+                    }
                 }
-                container->height = total_line_cross + padding_height;
-                log_debug("Phase 7: UPDATED container=%p (%s) height to %.1f (total_line_cross=%d + padding=%d)",
-                         container, container->node_name(), container->height, total_line_cross, padding_height);
+                container->height = total_line_cross + padding_height + border_height;
+                log_debug("Phase 7: UPDATED container=%p (%s) height to %.1f (total_line_cross=%d + padding=%d + border=%d)",
+                         container, container->node_name(), container->height, total_line_cross, padding_height, border_height);
             } else {
                 log_debug("Phase 7: Container has explicit height, not updating");
             }
@@ -1046,12 +1050,16 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 log_debug("Phase 7: (Column) Updating main_axis_size from %.1f to %d (auto-height)",
                          flex_layout->main_axis_size, total_line_main);
                 flex_layout->main_axis_size = (float)total_line_main;
-                // Container height should be content + padding (not just content)
+                // Container height should be content + padding + border (not just content)
                 int padding_height = 0;
+                int border_height = 0;
                 if (container->bound) {
                     padding_height = (int)(container->bound->padding.top + container->bound->padding.bottom);
+                    if (container->bound->border) {
+                        border_height = (int)(container->bound->border->width.top + container->bound->border->width.bottom);
+                    }
                 }
-                container->height = total_line_main + padding_height;
+                container->height = total_line_main + padding_height + border_height;
             } else {
                 log_debug("Phase 7: (Column) Container has explicit height, not updating");
             }
