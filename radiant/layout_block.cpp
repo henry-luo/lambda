@@ -22,6 +22,7 @@ extern double g_block_layout_time;
 extern int64_t g_block_layout_count;
 
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 // void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);  // Removed: lexbor dependency
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
@@ -527,6 +528,9 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                     lycon->ui_context->document = doc;
                     lycon->ui_context->window_width = (float)iframe_width;
                     lycon->ui_context->window_height = (float)iframe_height;
+                    
+                    // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
+                    process_document_font_faces(lycon->ui_context, doc);
                     
                     layout_html_doc(lycon->ui_context, doc, false);
                     

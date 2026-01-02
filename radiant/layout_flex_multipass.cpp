@@ -26,6 +26,9 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height, float pixel_ratio);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 
+// External function for @font-face processing (from font_face.cpp) - C linkage
+extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
+
 // External function for scroller (from scroller.cpp)
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 
@@ -960,6 +963,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                             
                             log_debug(">>> FLEX ITEM IFRAME: AFTER SET - uicon=%p, window_width=%.1f, window_height=%.1f",
                                       lycon->ui_context, lycon->ui_context->window_width, lycon->ui_context->window_height);
+                            
+                            // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
+                            process_document_font_faces(lycon->ui_context, doc);
                             
                             layout_html_doc(lycon->ui_context, doc, false);
                             

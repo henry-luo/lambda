@@ -1,6 +1,24 @@
 /* Essential styles extracted from base.css for HTML viewer compatibility */
 /* Full base.css uses CSS Grid and variables that may not work in all renderers */
 
+/*********/
+/* fonts */
+/*********/
+
+body, .body {
+    font-family: "Computer Modern Serif", "Times New Roman", Times, serif;
+    font-size: 10pt;
+    line-height: 1.2;
+}
+
+.sf, .textsf {
+    font-family: "Computer Modern Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.tt, .texttt, code, pre {
+    font-family: "Computer Modern Typewriter", "Menlo", "Monaco", "Courier New", monospace;
+}
+
 /*************/
 /* alignment */
 /*************/
