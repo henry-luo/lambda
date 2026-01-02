@@ -19,6 +19,16 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 // External function for laying out absolute positioned children
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
+// External function for iframe layout (from layout_block.cpp)
+void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
+
+// External functions for iframe document loading (from cmd_layout.cpp/layout.cpp)
+DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height, float pixel_ratio);
+void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+
+// External function for scroller (from scroller.cpp)
+void update_scroller(ViewBlock* block, float content_width, float content_height);
+
 // External function from layout.cpp for whitespace detection
 extern bool is_only_whitespace(const char* str);
 
@@ -898,6 +908,104 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
         log_leave();
         log_info(">>> NESTED FLEX COMPLETE: item=%p", flex_item);
+    } else if (flex_item->display.inner == RDT_DISPLAY_REPLACED) {
+        // Replaced elements as flex items (iframe, img, etc.) need special handling
+        // They don't have children to lay out - they need their embedded content loaded
+        // IMPORTANT: For flex items, the width/height are already determined by the flex algorithm.
+        // We should NOT change them based on content. We only load the content and set up scrolling.
+        uintptr_t elmt_name = flex_item->tag();
+        if (elmt_name == HTM_TAG_IFRAME) {
+            log_debug(">>> FLEX ITEM IFRAME: loading embedded document for %s (flex size=%.1fx%.1f)",
+                      flex_item->node_name(), flex_item->width, flex_item->height);
+            
+            // Save the flex-determined dimensions - we must preserve these
+            float flex_width = flex_item->width;
+            float flex_height = flex_item->height;
+            
+            // Load and layout the iframe document (but we'll restore dimensions after)
+            if (!(flex_item->embed && flex_item->embed->doc)) {
+                const char *src_value = flex_item->get_attribute("src");
+                if (src_value) {
+                    log_debug(">>> FLEX ITEM IFRAME: loading src=%s (iframe viewport=%.0fx%.0f)", src_value, flex_width, flex_height);
+                    // Use iframe's actual dimensions as viewport, not window dimensions
+                    // This ensures the embedded document layouts to fit within the iframe
+                    DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
+                        (int)flex_width, (int)flex_height,
+                        lycon->ui_context->pixel_ratio);
+                    log_debug(">>> FLEX ITEM IFRAME: load_html_doc returned doc=%p", doc);
+                    if (doc) {
+                        log_debug(">>> FLEX ITEM IFRAME: doc loaded, allocating embed prop (flex_item=%p, embed before=%p)", 
+                                  flex_item, flex_item->embed);
+                        if (!flex_item->embed) {
+                            flex_item->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                            log_debug(">>> FLEX ITEM IFRAME: allocated embed=%p", flex_item->embed);
+                        }
+                        flex_item->embed->doc = doc;
+                        log_debug(">>> FLEX ITEM IFRAME: set embed->doc=%p, html_root=%p", 
+                                  flex_item->embed->doc, doc->html_root);
+                        if (doc->html_root) {
+                            // Save parent document and window dimensions
+                            DomDocument* parent_doc = lycon->ui_context->document;
+                            int saved_window_width = lycon->ui_context->window_width;
+                            int saved_window_height = lycon->ui_context->window_height;
+                            
+                            // Temporarily set window dimensions to iframe size
+                            // This ensures layout_html_doc uses iframe dimensions for layout
+                            lycon->ui_context->document = doc;
+                            lycon->ui_context->window_width = (int)flex_width;
+                            lycon->ui_context->window_height = (int)flex_height;
+                            
+                            layout_html_doc(lycon->ui_context, doc, false);
+                            
+                            // Restore parent document and window dimensions
+                            lycon->ui_context->document = parent_doc;
+                            lycon->ui_context->window_width = saved_window_width;
+                            lycon->ui_context->window_height = saved_window_height;
+                        }
+                    }
+                }
+            }
+            
+            // Set content dimensions for scrolling (from embedded document)
+            log_debug(">>> FLEX ITEM IFRAME: checking content dims - embed=%p, doc=%p, view_tree=%p",
+                      flex_item->embed, 
+                      flex_item->embed ? flex_item->embed->doc : nullptr,
+                      (flex_item->embed && flex_item->embed->doc) ? flex_item->embed->doc->view_tree : nullptr);
+            if (flex_item->embed && flex_item->embed->doc && flex_item->embed->doc->view_tree) {
+                ViewBlock* doc_root = (ViewBlock*)flex_item->embed->doc->view_tree->root;
+                log_debug(">>> FLEX ITEM IFRAME: view_tree->root=%p", doc_root);
+                if (doc_root) {
+                    flex_item->content_width = doc_root->content_width > 0 ? doc_root->content_width : doc_root->width;
+                    flex_item->content_height = doc_root->content_height > 0 ? doc_root->content_height : doc_root->height;
+                    log_debug(">>> FLEX ITEM IFRAME: content size=%.1fx%.1f (for scrolling)", 
+                              flex_item->content_width, flex_item->content_height);
+                    
+                    // Ensure iframe scroller is set up for overflow scrolling
+                    // The scroller should already be allocated from resolve_htm_style,
+                    // but verify and allocate if needed
+                    if (!flex_item->scroller) {
+                        log_debug(">>> FLEX ITEM IFRAME: allocating scroller (was NULL)");
+                        flex_item->scroller = alloc_scroll_prop(lycon);
+                        flex_item->scroller->overflow_x = CSS_VALUE_AUTO;
+                        flex_item->scroller->overflow_y = CSS_VALUE_AUTO;
+                    }
+                    log_debug(">>> FLEX ITEM IFRAME: scroller=%p, overflow_x=%d, overflow_y=%d",
+                              flex_item->scroller, flex_item->scroller->overflow_x, flex_item->scroller->overflow_y);
+                    
+                    // Set up scroller if content is larger than the flex item
+                    update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
+                    log_debug(">>> FLEX ITEM IFRAME: after update_scroller, has_vt_scroll=%d, has_vt_overflow=%d",
+                              flex_item->scroller->has_vt_scroll, flex_item->scroller->has_vt_overflow);
+                }
+            }
+            
+            // CRITICAL: Restore the flex-determined dimensions
+            // The flex algorithm already calculated the correct size for this item
+            flex_item->width = flex_width;
+            flex_item->height = flex_height;
+            log_debug(">>> FLEX ITEM IFRAME: preserved flex dimensions=%.1fx%.1f", flex_width, flex_height);
+        }
+        // Note: IMG elements are handled during intrinsic sizing measurement in calculate_item_intrinsic_sizes
     } else {
         // Layout all nested content using standard flow algorithm
         // This handles: text nodes, nested blocks, inline elements, images, etc.
@@ -920,8 +1028,11 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     }
 
     // Update flex item content dimensions for intrinsic sizing
-    flex_item->content_width = lycon->block.max_width;
-    flex_item->content_height = lycon->block.advance_y - content_y_offset;
+    // Skip for replaced elements (iframe, img) that already set content dimensions above
+    if (flex_item->display.inner != RDT_DISPLAY_REPLACED) {
+        flex_item->content_width = lycon->block.max_width;
+        flex_item->content_height = lycon->block.advance_y - content_y_offset;
+    }
 
     // CRITICAL FIX: For column flex items without explicit height,
     // update item height based on actual content height.
@@ -932,7 +1043,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         // Column flex: main axis is height
         // Only update if no explicit height and content is larger than current height
         bool has_explicit_height = (flex_item->blk && flex_item->blk->given_height > 0);
-        if (!has_explicit_height && flex_item->content_height > 0) {
+        // Skip height adjustment for replaced elements (iframe, img) that use scrolling
+        // Their dimensions should be constrained by the flex algorithm
+        bool is_replaced = (flex_item->display.inner == RDT_DISPLAY_REPLACED);
+        if (!has_explicit_height && !is_replaced && flex_item->content_height > 0) {
             // Calculate total height including padding and border
             float padding_top = 0, padding_bottom = 0, border_top = 0, border_bottom = 0;
             if (flex_item->bound) {

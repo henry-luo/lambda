@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flexbox Layout Test Cases</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            margin-top: 0px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .test-case {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            display: inline-block;
+            width: 400px;
+            vertical-align: top;
+        }
+        .container {
+            border: 2px solid #333;
+            margin-top: 20px;
+            position: relative;
+        }
+        .test-case.wide {
+            width: 600px;
+        }
+        .wide .container {
+            box-sizing: border-box;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+        .item::after {
+            content: attr(data-info);
+            font-size: 12px;
+            display: block;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .explanation {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9f7fe;
+            border-radius: 4px;
+        }
+        /* Specific test styles */
+        .basic-layout .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            gap: 10px;
+        }
+        .basic-layout .item {
+            width: 100px;
+            height: 100px;
+        }
+        .wrap-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .wrap-test .item {
+            width: 200px;
+            height: 80px;
+        }
+        .align-items-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .align-items-test .item:nth-child(1) {
+            width: 150px;
+            height: 100px;
+        }
+        .align-items-test .item:nth-child(2) {
+            width: 150px;
+            height: 150px;
+        }
+        .column-direction-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .column-direction-test .item {
+            width: 200px;
+            height: 100px;
+        }
+        .flex-grow-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            gap: 10px;
+        }
+        .flex-grow-test .item:nth-child(1) {
+            flex-grow: 1;
+            height: 100px;
+        }
+        .flex-grow-test .item:nth-child(2) {
+            flex-grow: 2;
+            height: 100px;
+        }
+        .justify-content-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            justify-content: space-evenly;
+            gap: 10px;
+        }
+        .justify-content-test .item {
+            width: 120px;
+            height: 100px;
+        }
+        .row-reverse-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            flex-direction: row-reverse;
+            gap: 10px;
+        }
+        .row-reverse-test .item {
+            width: 150px;
+            height: 100px;
+        }
+        .absolute-positioning-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            gap: 10px;
+        }
+        .absolute-positioning-test .item:nth-child(2) {
+            position: absolute;
+            left: 0;
+            top: 0;
+        }
+        .hidden-visibility-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            gap: 10px;
+        }
+        .hidden-visibility-test .item:nth-child(2) {
+            visibility: hidden;
+        }
+        .flex-basis-test .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            gap: 10px;
+        }
+        .flex-basis-test .item:nth-child(1) {
+            flex-basis: 150px;
+            height: 100px;
+        }
+        .flex-basis-test .item:nth-child(2) {
+            flex-basis: 200px;
+            height: 100px;
+        }
+
+        /* Nested Content Test Styles */
+        .nested-text-test .container {
+            width: 600px;
+            height: 200px;
+            display: flex;
+            gap: 15px;
+            padding: 10px;
+        }
+        .nested-text-test .item {
+            flex: 1;
+            padding: 15px;
+            text-align: left;
+            line-height: 1.4;
+            font-size: 12px;
+        }
+        .nested-text-test .item:nth-child(1) { text-align: center; }
+        .nested-text-test .item:nth-child(3) { text-align: right; }
+        .nested-text-test .highlight { font-weight: bold; color: #d63384; }
+        .nested-text-test .small-text { font-size: 10px; color: #666; }
+
+        .nested-blocks-test .container {
+            width: 600px;
+            height: 250px;
+            display: flex;
+            gap: 20px;
+            padding: 15px;
+        }
+        .nested-blocks-test .item {
+            flex: 1;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+        }
+        .nested-blocks-test .nested-div {
+            margin: 8px 0;
+            padding: 8px;
+            background-color: #e9ecef;
+            border-left: 3px solid #6c757d;
+            font-size: 11px;
+        }
+        .nested-blocks-test h3 {
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #495057;
+        }
+
+        .mixed-inline-test .container {
+            width: 600px;
+            height: 280px;
+            display: flex;
+            gap: 15px;
+            padding: 15px;
+        }
+        .mixed-inline-test .item {
+            flex: 1;
+            padding: 12px;
+            line-height: 1.5;
+            font-size: 12px;
+        }
+        .mixed-inline-test .bold { font-weight: bold; }
+        .mixed-inline-test .italic { font-style: italic; }
+        .mixed-inline-test .code {
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            padding: 2px 4px;
+            border: 1px solid #dee2e6;
+        }
+        .mixed-inline-test a { color: #0d6efd; text-decoration: none; }
+
+        .nested-flex-test .container {
+            width: 600px;
+            height: 300px;
+            display: flex;
+            gap: 15px;
+            padding: 10px;
+
+        }
+        .nested-flex-test .item {
+            flex: 1;
+            padding: 10px;
+        }
+        .nested-flex-test .nested-flex {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100%;
+        }
+        .nested-flex-test .nested-item {
+            flex: 1;
+            padding: 8px;
+            background-color: #e9ecef;
+            border: 1px solid #adb5bd;
+            text-align: center;
+            font-size: 11px;
+        }
+        .nested-flex-test h5 {
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #495057;
+        }
+
+        .column-content-test .container {
+            width: 600px;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 15px;
+        }
+        .column-content-test .item {
+            flex: 1;
+            padding: 15px;
+        }
+        .column-content-test h4 {
+            margin-bottom: 10px;
+            font-size: 13px;
+            color: #495057;
+            text-align: center;
+        }
+        .column-content-test .nested-section {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-left: 3px solid #6c757d;
+            font-size: 11px;
+        }
+
+        .complex-content-test .container {
+            width: 600px;
+            height: 400px;
+            display: flex;
+            gap: 20px;
+            padding: 15px;
+        }
+        .complex-content-test .item {
+            flex: 1;
+            padding: 15px;
+            overflow: hidden;
+        }
+        .complex-content-test h3 {
+            margin-bottom: 12px;
+            font-size: 14px;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            padding-bottom: 5px;
+        }
+        .complex-content-test .content-section {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        .complex-content-test .highlight-box {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 8px;
+            margin: 8px 0;
+            border-radius: 3px;
+        }
+        .complex-content-test .code-block {
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 8px;
+            margin: 8px 0;
+            font-size: 10px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Flexbox Layout Test Cases</h1>
+    <div class="test-case basic-layout">
+        <h2>Basic Layout</h2>
+        <div class="explanation">A simple row layout with 3 items of equal size and 10px gap between them.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+            <div class="item" data-info="height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case wrap-test">
+        <h2>Wrap</h2>
+        <div class="explanation">Items wrap to multiple lines when they exceed container width.</div>
+        <div class="container">
+            <div class="item" data-info="height: 80px">Item 1</div>
+            <div class="item" data-info="height: 80px">Item 2</div>
+            <div class="item" data-info="height: 80px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case align-items-test">
+        <h2>Align Items</h2>
+        <div class="explanation">Items are aligned to the center of the container's cross axis.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 150px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case column-direction-test">
+        <h2>Column Direction</h2>
+        <div class="explanation">Items are laid out in a column direction with a 10px gap.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case flex-grow-test">
+        <h2>Flex Grow</h2>
+        <div class="explanation">Items grow to fill the available space proportionally based on their flex-grow values.</div>
+        <div class="container">
+            <div class="item" data-info="flex-grow: 1">Item 1</div>
+            <div class="item" data-info="flex-grow: 2">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case justify-content-test">
+        <h2>Justify Content</h2>
+        <div class="explanation">Items are evenly distributed along the main axis with equal spacing.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case row-reverse-test">
+        <h2>Row Reverse</h2>
+        <div class="explanation">Items are laid out in reverse order along the main axis.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case absolute-positioning-test">
+        <h2>Absolute Positioning</h2>
+        <div class="explanation">One item is absolutely positioned, while others follow the flex layout.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px; position: absolute">Item 2</div>
+            <div class="item" data-info="height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case hidden-visibility-test">
+        <h2>Hidden Visibility</h2>
+        <div class="explanation">One item is hidden, but it still occupies space in the layout.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px; visibility: hidden">Item 2</div>
+            <div class="item" data-info="height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case flex-basis-test">
+        <h2>Flex Basis</h2>
+        <div class="explanation">Items have specific flex-basis values that determine their initial size.</div>
+        <div class="container">
+            <div class="item" data-info="flex-basis: 300px">Item 1</div>
+            <div class="item" data-info="flex-basis: 400px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case align-self-override-test">
+        <h2>Align Self Override</h2>
+        <div class="explanation">An item's align-self property overrides the container's align-items property.</div>
+        <div class="container">
+            <div class="item" data-info="align-self: flex-end; height: 100px">Item 1</div>
+            <div class="item" data-info="height: 150px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case zero-size-test">
+        <h2>Zero Size Container</h2>
+        <div class="explanation">A container with zero width causes all items to overlap at the starting position.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case min-max-constraints-test">
+        <h2>Min/Max Constraints</h2>
+        <div class="explanation">Items respect their min-width and max-width constraints during layout.</div>
+        <div class="container">
+            <div class="item" data-info="min-width: 150px; max-width: 250px; flex-grow: 1">Item 1</div>
+            <div class="item" data-info="min-width: 150px; max-width: 200px; flex-shrink: 1">Item 2</div>
+            <div class="item" data-info="min-width: 200px; max-width: 250px; flex-grow: 1">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case wrap-reverse-test">
+        <h2>Wrap Reverse</h2>
+        <div class="explanation">Items wrap in reverse order when the container's wrap property is set to wrap-reverse.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+            <div class="item" data-info="height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case nested-containers-test">
+        <h2>Nested Containers</h2>
+        <div class="explanation">A nested container demonstrates how child containers are laid out within parent containers.</div>
+        <div class="outer-container container">
+            <div class="inner-container container">
+                <div class="item" data-info="height: 100px">Inner Item 1</div>
+                <div class="item" data-info="height: 100px">Inner Item 2</div>
+            </div>
+        </div>
+    </div>
+    <div class="test-case aspect-ratio-test">
+        <h2>Aspect Ratio</h2>
+        <div class="explanation">Items respect their aspect ratio when width or height is specified.</div>
+        <div class="container">
+            <div class="item" data-info="aspect-ratio: 2">Item 1</div>
+            <div class="item" data-info="height: 100px; aspect-ratio: 1.5">Item 2</div>
+            <div class="item" data-info="height: 75px; aspect-ratio: 2">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case column-reverse-test">
+        <h2>Column Reverse Flex Direction</h2>
+        <div class="explanation">Items are laid out in reverse column order.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+            <div class="item" data-info="height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case align-content-space-evenly-test">
+        <h2>Align Content: Space Evenly</h2>
+        <div class="explanation">Lines are distributed evenly, including equal space at the edges.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px">Item 1</div>
+            <div class="item" data-info="height: 100px">Item 2</div>
+            <div class="item" data-info="height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case auto-margins-center-test">
+        <h2>Auto Margins for Centering</h2>
+        <div class="explanation">An item with auto margins on both sides is centered within the container.</div>
+        <div class="container">
+            <div class="item" data-info="height: 100px; margin: auto">Item 1</div>
+        </div>
+    </div>
+    <div class="test-case deep-nested-test">
+        <h2>Deep Nested Containers</h2>
+        <div class="explanation">Demonstrates layout with three levels of nested containers.</div>
+        <div class="grandparent container">
+            <div class="parent container">
+                <div class="child container">
+                    <div class="item" data-info="height: 100px">Child Item 1</div>
+                    <div class="item" data-info="height: 100px">Child Item 2</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Nested Content Tests -->
+    <div class="test-case nested-text-test wide">
+        <h2>Nested Text Content</h2>
+        <div class="explanation">Tests various text content nested within flex items including paragraphs, spans, and different text alignments.</div>
+        <div class="container">
+            <div class="item">
+                <p>Centered text with <span class="highlight">highlighted</span> content.</p>
+                <p class="small-text">Small subtitle text below.</p>
+            </div>
+            <div class="item">
+                Left-aligned text with multiple lines of content that should wrap properly within the flex item boundaries.
+                <br><br>
+                <span class="highlight">Bold text</span> and normal text mixed together.
+            </div>
+            <div class="item">
+                <p>Right-aligned content</p>
+                <p>Multiple paragraphs</p>
+                <p class="small-text">With different styles</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case nested-blocks-test wide">
+        <h2>Nested Block Elements</h2>
+        <div class="explanation">Tests nested block-level elements within flex items including divs, sections, and headings.</div>
+        <div class="container">
+            <div class="item">
+                <h3>Nested Divs</h3>
+                <div class="nested-div">
+                    <p>First nested div with text content</p>
+                </div>
+                <div class="nested-div">
+                    <p>Second nested div</p>
+                    <p>With multiple paragraphs</p>
+                </div>
+            </div>
+            <div class="item">
+                <h3>Nested Section</h3>
+                <section class="nested-div">
+                    <p>Section element with semantic content</p>
+                </section>
+            </div>
+            <div class="item">
+                <h3>Mixed Content</h3>
+                <div class="nested-div">
+                    <p>Additional div content</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case mixed-inline-test wide">
+        <h2>Mixed Inline Elements</h2>
+        <div class="explanation">Tests mixed inline elements within flex items including spans, links, code elements, and various text styling combinations.</div>
+        <div class="container">
+            <div class="item">
+                This is a paragraph with <span class="bold">bold text</span>,
+                <span class="italic">italic text</span>, and underlined text.
+                <br><br>
+                It also contains highlighted content and <code class="code">inline code</code> elements.
+            </div>
+            <div class="item">
+                Mixed content with <a href="#">links</a>, small text, and larger text.
+                <br><br>
+                Multiple <span class="bold italic">combined styles</span>
+                and overlapping effects.
+            </div>
+            <div class="item">
+                <span class="bold">Large heading-like text</span>
+                <br><br>
+                Normal paragraph text with
+                <span class="code">code snippets</span> and
+                <a href="#">multiple links</a> throughout the flowing content.
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case nested-flex-test wide">
+        <h2>Nested Flexbox</h2>
+        <div class="explanation">Tests nested flexbox containers within flex items, including both vertical and horizontal nested flex layouts.</div>
+        <div class="container">
+            <div class="item">
+                <h5>Vertical Nested Flex</h5>
+                <div class="nested-flex">
+                    <div class="nested-item">Nested Item 1</div>
+                    <div class="nested-item">Nested Item 2</div>
+                    <div class="nested-item">Nested Item 3</div>
+                </div>
+            </div>
+            <div class="item">
+                <h5>Horizontal Layout</h5>
+                <div style="display: flex; gap: 5px; margin: 8px 0;">
+                    <div class="nested-item" style="flex: 1;">H1</div>
+                    <div class="nested-item" style="flex: 1;">H2</div>
+                </div>
+                <div style="display: flex; gap: 5px;">
+                    <div class="nested-item" style="flex: 1;">H3</div>
+                    <div class="nested-item" style="flex: 1;">H4</div>
+                </div>
+            </div>
+            <div class="item">
+                <h5>Mixed Content</h5>
+                <p style="font-size: 11px; margin-bottom: 8px;">Regular paragraph text</p>
+                <div class="nested-flex" style="height: auto;">
+                    <div class="nested-item">Flex item with text</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case column-content-test wide">
+        <h2>Column Direction with Nested Content</h2>
+        <div class="explanation">Tests nested content within flex items arranged in column direction, including text, lists, and nested sections.</div>
+        <div class="container">
+            <div class="item">
+                <h4>First Column Item</h4>
+                <p style="font-size: 11px;">
+                    This is the first item in a column layout with highlighted text and regular content.
+                </p>
+                <div class="nested-section">
+                    <p>Nested section with additional information and structured content layout.</p>
+                </div>
+            </div>
+
+            <div class="item">
+                <h4>Second Column Item</h4>
+                <ul style="margin: 8px 0; padding-left: 18px;">
+                    <li style="font-size: 11px;">First list item with content</li>
+                    <li style="font-size: 11px;">Second item with emphasis</li>
+                    <li style="font-size: 11px;">Third item in the vertical list</li>
+                </ul>
+                <p style="text-align: center; font-style: italic; color: #6c757d; margin: 8px 0; font-size: 11px;">Centered italic text below the list</p>
+            </div>
+
+            <div class="item">
+                <h4>Third Column Item</h4>
+                <p style="font-size: 11px;">
+                    Final item demonstrating vertical flex layout with proper content distribution and text flow.
+                </p>
+                <div class="nested-section">
+                    <p>Another nested section to test the vertical spacing and content layout within column direction.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case complex-content-test wide">
+        <h2>Complex Mixed Content</h2>
+        <div class="explanation">Tests complex mixed content within flex items including articles, code blocks, highlighted sections, and deeply nested element combinations.</div>
+        <div class="container">
+            <div class="item">
+                <h3>Article Content</h3>
+                <div class="content-section">
+                    <p style="margin: 8px 0; line-height: 1.4;">
+                        This is a <strong>complex article</strong> with
+                        <a href="#" style="color: #0d6efd;">embedded links</a> and various content types.
+                    </p>
+                    <div class="highlight-box">
+                        <strong>Important Note:</strong> This box contains highlighted information
+                        with <code style="font-family: monospace;">inline code</code> elements.
+                    </div>
+                    <ul style="margin: 8px 0; padding-left: 20px;">
+                        <li style="margin: 3px 0; font-size: 10px;">First bullet point with emphasis</li>
+                        <li style="margin: 3px 0; font-size: 10px;">Second point with <a href="#" style="color: #0d6efd;">a link</a></li>
+                        <li style="margin: 3px 0; font-size: 10px;">Third point with subtle text</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="item">
+                <h3>Code Example</h3>
+                <div class="content-section">
+                    <p style="margin: 8px 0;">Here's a code example with explanation:</p>
+                    <div class="code-block">
+function example() {<br>
+&nbsp;&nbsp;return "Hello World";<br>
+}
+                    </div>
+                    <p style="margin: 8px 0;">
+                        The above function demonstrates <strong>basic syntax</strong>
+                        with proper <a href="#" style="color: #0d6efd;">formatting</a>.
+                    </p>
+                </div>
+            </div>
+
+            <div class="item">
+                <h3>Mixed Layout</h3>
+                <div class="content-section">
+                    <p style="margin: 8px 0;">Complex content mixing:</p>
+                    <ul style="margin: 8px 0; padding-left: 20px;">
+                        <li style="margin: 3px 0; font-size: 10px;"><strong>Bold items</strong> in lists</li>
+                        <li style="margin: 3px 0; font-size: 10px;">Items with <code style="font-family: monospace;">code snippets</code></li>
+                        <li style="margin: 3px 0; font-size: 10px;">Links to <a href="#" style="color: #0d6efd;">external resources</a></li>
+                    </ul>
+                    <div class="highlight-box">
+                        Highlighted section with <strong>multiple</strong>
+                        <a href="#" style="color: #0d6efd;">different</a> <code style="font-family: monospace;">element</code>
+                        types combined.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
