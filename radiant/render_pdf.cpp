@@ -16,6 +16,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 
 typedef struct PdfRenderContext {
     HPDF_Doc pdf_doc;
@@ -294,6 +295,18 @@ void render_block_view_pdf(PdfRenderContext* ctx, ViewBlock* view_block) {
     FontBox pa_font = ctx->font;
     Color pa_color = ctx->color;
 
+    // Update font if specified
+    if (view_block->font) {
+        setup_font(ctx->ui_context, &ctx->font, view_block->font);
+        // Update PDF font
+        const char* pdf_font_name = get_pdf_font_name(view_block->font->family);
+        HPDF_Font font = HPDF_GetFont(ctx->pdf_doc, pdf_font_name, NULL);
+        if (font) {
+            ctx->current_font = font;
+            HPDF_Page_SetFontAndSize(ctx->current_page, font, view_block->font->font_size);
+        }
+    }
+
     // Update position context - add this block's offset to parent context
     ctx->block.x = pa_block.x + (int)view_block->x;
     ctx->block.y = pa_block.y + (int)view_block->y;
@@ -353,14 +366,18 @@ void render_block_view_pdf(PdfRenderContext* ctx, ViewBlock* view_block) {
 void render_inline_view_pdf(PdfRenderContext* ctx, ViewSpan* view_span) {
     if (!view_span) return;
 
+    // Save parent font context
+    FontBox pa_font = ctx->font;
+
     // Set font if specified
-    if (view_span->font && view_span->font->family) {
+    if (view_span->font) {
+        setup_font(ctx->ui_context, &ctx->font, view_span->font);
+        // Update PDF font
         const char* pdf_font_name = get_pdf_font_name(view_span->font->family);
         HPDF_Font font = HPDF_GetFont(ctx->pdf_doc, pdf_font_name, NULL);
         if (font) {
             ctx->current_font = font;
-            float font_size = view_span->font->font_size ? view_span->font->font_size : 16.0f;
-            HPDF_Page_SetFontAndSize(ctx->current_page, font, font_size);
+            HPDF_Page_SetFontAndSize(ctx->current_page, font, view_span->font->font_size);
         }
     }
 
@@ -371,6 +388,9 @@ void render_inline_view_pdf(PdfRenderContext* ctx, ViewSpan* view_span) {
 
     // Render children
     render_children_pdf(ctx, (View*)view_span);
+
+    // Restore font context
+    ctx->font = pa_font;
 }
 
 // Render children recursively
