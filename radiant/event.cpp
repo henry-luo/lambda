@@ -6,6 +6,7 @@
 #include "../lambda/input/css/css_parser.hpp"
 DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void to_repaint();
 
 void target_block_view(EventContext* evcon, ViewBlock* block);
@@ -493,6 +494,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 float saved_window_height = evcon.ui_context->window_height;
                                 evcon.ui_context->window_width = iframe_width;
                                 evcon.ui_context->window_height = iframe_height;
+                                // Process @font-face rules before layout (critical for custom fonts)
+                                process_document_font_faces(evcon.ui_context, new_doc);
                                 layout_html_doc(evcon.ui_context, new_doc, false);
                                 // Restore window dimensions
                                 evcon.ui_context->window_width = saved_window_width;

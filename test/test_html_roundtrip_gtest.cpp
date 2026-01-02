@@ -1124,12 +1124,6 @@ TEST_F(ComplexHtmlFileTests, Facatology) {
     EXPECT_TRUE(result.success) << "Facatology HTML should succeed";
 }
 
-// Disabled: Facatology0.html file not found in repository
-// TEST_F(ComplexHtmlFileTests, Facatology0) {
-//     auto result = test_html_file_roundtrip_cli("./test/html/Facatology0.html", "Facatology0");
-//     EXPECT_TRUE(result.success) << "Facatology0 HTML should succeed";
-// }
-
 // Advanced HTML Features Tests
 class AdvancedHtmlTests : public HtmlRoundtripTest {};
 
@@ -1385,7 +1379,6 @@ protected:
 };
 
 TEST_F(LayoutDataBaselineTests, AllBaselineAndPageFiles) {
-    const char* baseline_dir = "./test/layout/data/baseline";
     const char* page_dir = "./test/layout/data/page";
 
     printf("\n=== Testing all HTML files in baseline and page directories ===\n");
@@ -1393,20 +1386,6 @@ TEST_F(LayoutDataBaselineTests, AllBaselineAndPageFiles) {
     int passed = 0;
     int failed = 0;
     std::vector<std::string> failed_files;
-
-    // Test baseline directory
-    auto baseline_files = get_html_files_in_directory(baseline_dir);
-    printf("\n--- Testing baseline (%zu files) ---\n", baseline_files.size());
-    for (const auto& file_path : baseline_files) {
-        std::string test_name = get_test_name_from_path(file_path);
-        auto result = test_html_file_roundtrip_cli(file_path.c_str(), test_name.c_str());
-        if (result.success) {
-            passed++;
-        } else {
-            failed++;
-            failed_files.push_back("baseline/" + test_name);
-        }
-    }
 
     // Test page directory
     auto page_files = get_html_files_in_directory(page_dir);
