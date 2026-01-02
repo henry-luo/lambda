@@ -17,6 +17,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 
 typedef struct {
     StrBuf* svg_content;
@@ -193,10 +194,10 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     char color_str[32];
     svg_color_to_string(ctx->color, color_str);
 
-    // y_ppem is already in pixels (not 26.6 fixed point), so use directly
-    // ascender is in 26.6 format, so divide by 64 for pixels
-    float font_size = ctx->font.ft_face ? (float)ctx->font.ft_face->size->metrics.y_ppem : 16;
-    float baseline_y = y + (ctx->font.ft_face ? (ctx->font.ft_face->size->metrics.ascender / 64.0f) : font_size * 0.8f);
+    // Use CSS font-size from style, fallback to 16 if not available
+    float font_size = ctx->font.style->font_size > 0 ? ctx->font.style->font_size : 16;
+    // Use font ascender from FontProp (already in pixels), or fallback to 80% of font_size
+    float baseline_y = y + (ctx->font.style->ascender > 0 ? ctx->font.style->ascender : font_size * 0.8f);
 
     strbuf_append_format(ctx->svg_content,
         "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" fill=\"%s\"",
@@ -328,9 +329,7 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     // Update font if specified
     if (block->font) {
-        // In a real implementation, we'd call setup_font here
-        // For now, just copy the font properties
-        ctx->font = pa_font; // Keep parent font for now
+        setup_font(ctx->ui_context, &ctx->font, block->font);
     }
 
     // Render background and borders
@@ -395,7 +394,7 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
 
     // Update font and color if specified
     if (view_span->font) {
-        ctx->font = pa_font; // Keep parent font for now
+        setup_font(ctx->ui_context, &ctx->font, view_span->font);
     }
 
     if (view_span->in_line && view_span->in_line->color.c) {

@@ -136,11 +136,22 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // Get glyph index for the (possibly transformed) codepoint
         FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, codepoint);
         if (!glyph_index) {
-            // Unknown character - use fallback width that matches font fallback behavior
-            // Font fallback typically uses a different font with different metrics.
-            // Use 11.0 to match common fallback font widths (e.g., PingFang SC for CJK/symbols)
-            current_word += 11.0f;
-            total_width += 11.0f;
+            // Glyph not found in primary font - try font fallback via load_glyph
+            // This ensures intrinsic sizing uses the same fallback fonts as layout_text.cpp
+            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
+            if (glyph) {
+                float advance = glyph->advance.x / 64.0f;
+                // Apply letter-spacing
+                if (i + bytes < length && lycon->font.style) {
+                    advance += lycon->font.style->letter_spacing;
+                }
+                current_word += advance;
+                total_width += advance;
+            } else {
+                // No fallback found - use estimate
+                current_word += 11.0f;
+                total_width += 11.0f;
+            }
             prev_glyph = 0;
             i += bytes;
             continue;
