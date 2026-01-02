@@ -1,10 +1,12 @@
 #include "layout.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
+#include "font_face.h"  // for FontFaceDescriptor
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font_config.h"
 #include <string.h>
+#include <strings.h>  // for strcasecmp
 #include <cmath>
 #include FT_TRUETYPE_TABLES_H
 
@@ -2431,7 +2433,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->font = alloc_font_prop(lycon);
             }
 
-            // Helper lambda to check if a font family exists in the database or is a generic family
+            // Helper lambda to check if a font family exists in the database, @font-face, or is a generic family
             auto is_font_available = [&](const char* family) -> bool {
                 if (!family) return false;
                 // Generic font families are always "available" (resolved later)
@@ -2449,7 +2451,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     strcmp(family, "BlinkMacSystemFont") == 0) {
                     return true;
                 }
-                // Check font database
+                // Check @font-face descriptors first (custom fonts take precedence)
+                if (lycon->ui_context && lycon->ui_context->font_faces && lycon->ui_context->font_face_count > 0) {
+                    for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
+                        FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
+                        if (desc && desc->family_name && strcasecmp(desc->family_name, family) == 0) {
+                            return true;  // Found in @font-face declarations
+                        }
+                    }
+                }
+                // Check system font database
                 if (lycon->ui_context && lycon->ui_context->font_db) {
                     ArrayList* matches = font_database_find_all_matches(lycon->ui_context->font_db, family);
                     bool exists = (matches && matches->length > 0);

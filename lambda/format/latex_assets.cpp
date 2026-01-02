@@ -66,6 +66,11 @@ std::string LatexAssets::getStylesheetLinks(const char* doc_class,
         base += '/';
     }
 
+    // Computer Modern fonts for proper LaTeX rendering
+    // Use cmu-combined.css which has inlined @font-face rules (CSS engine doesn't follow @import)
+    out << "    <link rel=\"stylesheet\" type=\"text/css\" href=\""
+        << base << "fonts/cmu-combined.css\">\n";
+
     // KaTeX CSS for math rendering
     out << "    <link rel=\"stylesheet\" type=\"text/css\" href=\""
         << base << "css/katex.css\">\n";
