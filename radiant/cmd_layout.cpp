@@ -2331,7 +2331,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Step 2: Generate complete HTML document with external CSS links
     log_debug("[Lambda LaTeX] Converting LaTeX to HTML with external CSS...");
 
-    // Compute relative path from LaTeX file location to conf/input/latex/
+    // Compute relative path from LaTeX file location to lambda/input/latex/
     // We need to find how many directories deep the file is from the CWD
     char cwd[PATH_MAX];
     if (getcwd(cwd, sizeof(cwd)) == nullptr) {
@@ -2368,12 +2368,12 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         }
     }
 
-    // Build relative path: go up 'depth' levels, then into conf/input/latex/
+    // Build relative path: go up 'depth' levels, then into lambda/input/latex/
     std::string asset_base_url_str;
     for (int i = 0; i < depth; i++) {
         asset_base_url_str += "../";
     }
-    asset_base_url_str += "conf/input/latex/";
+    asset_base_url_str += "lambda/input/latex/";
 
     log_debug("[Lambda LaTeX] CWD: %s, LaTeX dir: %s, rel: %s, depth: %d, asset URL: %s",
               cwd_str.c_str(), latex_abs_dir.c_str(), rel_latex_dir.c_str(), depth, asset_base_url_str.c_str());
@@ -2446,7 +2446,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 5: Load LaTeX.css stylesheet (if it exists)
     // LaTeX to HTML conversion may embed styles, but we can provide default styling
-    const char* css_filename = "lambda/format/latex.css";
+    const char* css_filename = "lambda/input/latex/css/article.css";
     log_debug("[Lambda LaTeX] Loading default LaTeX stylesheet: %s", css_filename);
 
     CssStylesheet* latex_stylesheet = nullptr;
@@ -2499,6 +2499,25 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     apply_inline_styles_to_tree(dom_root, html_root, pool);
 
     log_debug("[Lambda LaTeX] CSS cascade complete");
+
+    // Store stylesheets in DomDocument for @font-face processing later
+    int total_stylesheets = inline_stylesheet_count + (latex_stylesheet ? 1 : 0);
+    if (total_stylesheets > 0) {
+        dom_doc->stylesheet_capacity = total_stylesheets;
+        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
+        dom_doc->stylesheet_count = 0;
+
+        if (latex_stylesheet) {
+            dom_doc->stylesheets[dom_doc->stylesheet_count++] = latex_stylesheet;
+        }
+        for (int i = 0; i < inline_stylesheet_count; i++) {
+            if (inline_stylesheets[i]) {
+                dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
+            }
+        }
+        log_debug("[Lambda LaTeX] Stored %d stylesheets in DomDocument for @font-face processing",
+                  dom_doc->stylesheet_count);
+    }
 
     // Step 8: Populate DomDocument structure
     dom_doc->root = dom_root;
