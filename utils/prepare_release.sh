@@ -101,7 +101,7 @@ done
 
 # Copy test/input/ files referenced by live-demo.html
 mkdir -p ./release/test/input
-for file in comprehensive_test.md latex-showcase.tex test.xml raw_commands_test.pdf more_test.yaml; do
+for file in comprehensive_test.md latex-showcase.tex test.xml test-xml.css raw_commands_test.pdf more_test.yaml; do
     if [ -f "./test/input/$file" ]; then
         cp "./test/input/$file" ./release/test/input/
         echo "    Copied test/input/$file"
