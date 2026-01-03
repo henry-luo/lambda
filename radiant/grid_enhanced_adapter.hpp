@@ -58,7 +58,9 @@ inline MinTrackSizingFunction convert_to_min_sizing(GridTrackSize* old_size) {
             return MinTrackSizingFunction::Length(static_cast<float>(old_size->value));
 
         case GRID_TRACK_SIZE_PERCENTAGE:
-            return MinTrackSizingFunction::Percent(static_cast<float>(old_size->value) / 100.0f);
+            // old_size->value is the percentage (e.g., 10 for 10%)
+            // MinTrackSizingFunction::Percent expects it as-is (resolve will divide by 100)
+            return MinTrackSizingFunction::Percent(static_cast<float>(old_size->value));
 
         case GRID_TRACK_SIZE_MIN_CONTENT:
             return MinTrackSizingFunction::MinContent();
@@ -99,7 +101,9 @@ inline MaxTrackSizingFunction convert_to_max_sizing(GridTrackSize* old_size) {
             return MaxTrackSizingFunction::Length(static_cast<float>(old_size->value));
 
         case GRID_TRACK_SIZE_PERCENTAGE:
-            return MaxTrackSizingFunction::Percent(static_cast<float>(old_size->value) / 100.0f);
+            // old_size->value is the percentage (e.g., 20 for 20%)
+            // MaxTrackSizingFunction::Percent expects it as-is (resolve will divide by 100)
+            return MaxTrackSizingFunction::Percent(static_cast<float>(old_size->value));
 
         case GRID_TRACK_SIZE_MIN_CONTENT:
             return MaxTrackSizingFunction::MinContent();
@@ -140,9 +144,9 @@ inline TrackSizingFunction convert_to_track_sizing(GridTrackSize* old_size) {
 }
 
 /**
- * Convert old GridTrack to new EnhancedGridTrack
+ * Convert old GridTrack (from grid.hpp) to new EnhancedGridTrack
  */
-inline EnhancedGridTrack convert_to_enhanced_track(GridTrack* old_track) {
+inline EnhancedGridTrack convert_to_enhanced_track(::GridTrack* old_track) {
     if (!old_track) {
         return EnhancedGridTrack(TrackSizingFunction::Auto());
     }
@@ -160,7 +164,7 @@ inline EnhancedGridTrack convert_to_enhanced_track(GridTrack* old_track) {
  * Convert old GridContainerLayout tracks to vector of EnhancedGridTrack
  */
 inline std::vector<EnhancedGridTrack> convert_tracks_to_enhanced(
-    GridTrack* old_tracks, int count)
+    ::GridTrack* old_tracks, int count)
 {
     std::vector<EnhancedGridTrack> result;
     result.reserve(count);
@@ -177,9 +181,9 @@ inline std::vector<EnhancedGridTrack> convert_tracks_to_enhanced(
 // ============================================================================
 
 /**
- * Copy EnhancedGridTrack computed values back to old GridTrack
+ * Copy EnhancedGridTrack computed values back to old GridTrack (from grid.hpp)
  */
-inline void copy_enhanced_to_old(const EnhancedGridTrack& enhanced, GridTrack* old_track) {
+inline void copy_enhanced_to_old(const EnhancedGridTrack& enhanced, ::GridTrack* old_track) {
     if (!old_track) return;
 
     old_track->base_size = static_cast<int>(enhanced.base_size);
@@ -189,11 +193,11 @@ inline void copy_enhanced_to_old(const EnhancedGridTrack& enhanced, GridTrack* o
 }
 
 /**
- * Copy vector of EnhancedGridTrack back to old GridTrack array
+ * Copy vector of EnhancedGridTrack back to old GridTrack array (from grid.hpp)
  */
 inline void copy_enhanced_tracks_to_old(
     const std::vector<EnhancedGridTrack>& enhanced_tracks,
-    GridTrack* old_tracks, int count)
+    ::GridTrack* old_tracks, int count)
 {
     int copy_count = std::min(static_cast<int>(enhanced_tracks.size()), count);
     for (int i = 0; i < copy_count; i++) {
@@ -468,6 +472,84 @@ inline void place_items_with_occupancy(
 // ============================================================================
 
 /**
+ * Collect item contributions for intrinsic track sizing.
+ * For each item, calculate its min/max content contribution in the given axis.
+ *
+ * @param grid_layout The grid container layout
+ * @param items Array of grid items
+ * @param item_count Number of items
+ * @param is_column_axis True if sizing columns, false if sizing rows
+ * @return Vector of item contributions
+ */
+inline std::vector<GridItemContribution> collect_item_contributions(
+    GridContainerLayout* grid_layout,
+    ViewBlock** items,
+    int item_count,
+    bool is_column_axis)
+{
+    std::vector<GridItemContribution> contributions;
+    if (!grid_layout || !items || item_count <= 0) return contributions;
+
+    contributions.reserve(item_count);
+
+    for (int i = 0; i < item_count; i++) {
+        ViewBlock* item = items[i];
+        if (!item || !item->gi) continue;
+
+        GridItemContribution contrib;
+        contrib.item = item;
+
+        // Get item's placement (1-based line numbers from GridItemProp)
+        if (is_column_axis) {
+            int col_start = item->gi->computed_grid_column_start;
+            int col_end = item->gi->computed_grid_column_end;
+            if (col_start < 1 || col_end < 1) continue;
+
+            contrib.track_start = col_start - 1;  // Convert to 0-based
+            contrib.track_span = col_end - col_start;
+
+            // Get intrinsic sizes from pre-computed measurements or calculate
+            if (item->gi->has_measured_size &&
+                (item->gi->measured_min_width > 0 || item->gi->measured_max_width > 0)) {
+                contrib.min_content_contribution = item->gi->measured_min_width;
+                contrib.max_content_contribution = item->gi->measured_max_width;
+            } else {
+                // Fallback: use calculate_grid_item_intrinsic_sizes
+                IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
+                    grid_layout->lycon, item, false /* is_row_axis = false for width */);
+                contrib.min_content_contribution = sizes.min_content;
+                contrib.max_content_contribution = sizes.max_content;
+            }
+        } else {
+            // Row axis
+            int row_start = item->gi->computed_grid_row_start;
+            int row_end = item->gi->computed_grid_row_end;
+            if (row_start < 1 || row_end < 1) continue;
+
+            contrib.track_start = row_start - 1;  // Convert to 0-based
+            contrib.track_span = row_end - row_start;
+
+            // For row axis, ALWAYS calculate heights on-demand since they depend on
+            // final column widths. measured_min_height/measured_max_height are not
+            // populated during the measurement pass (only width is).
+            // This follows CSS Grid spec §11.5 where row sizing happens after column sizing.
+            IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
+                grid_layout->lycon, item, true /* is_row_axis = true for height */);
+            contrib.min_content_contribution = sizes.min_content;
+            contrib.max_content_contribution = sizes.max_content;
+        }
+
+        // Only add if the contribution is meaningful
+        if (contrib.track_span > 0 &&
+            (contrib.min_content_contribution > 0 || contrib.max_content_contribution > 0)) {
+            contributions.push_back(contrib);
+        }
+    }
+
+    return contributions;
+}
+
+/**
  * Run the enhanced track sizing algorithm
  *
  * @param grid_layout The existing GridContainerLayout
@@ -493,32 +575,79 @@ inline void run_enhanced_track_sizing(
         convert_tracks_to_enhanced(grid_layout->computed_rows,
                                    grid_layout->computed_row_count);
 
-    // Run track sizing for columns
+    // Calculate gap-adjusted available space (gaps reduce available space for tracks)
+    float col_gap_total = (grid_layout->computed_column_count > 1)
+        ? (grid_layout->computed_column_count - 1) * grid_layout->column_gap
+        : 0.0f;
+    float row_gap_total = (grid_layout->computed_row_count > 1)
+        ? (grid_layout->computed_row_count - 1) * grid_layout->row_gap
+        : 0.0f;
+
+    float col_available = container_width - col_gap_total;
+    float row_available = container_height > 0 ? container_height - row_gap_total : -1.0f;
+
+    // === Run track sizing for columns ===
     if (!col_tracks.empty()) {
-        initialize_track_sizes(col_tracks, container_width);
-        maximize_tracks(col_tracks, container_width, container_width);
-        expand_flexible_tracks(col_tracks, 0.0f, container_width, container_width);
-        stretch_auto_tracks(col_tracks, 0.0f, container_width);
-        compute_track_offsets(col_tracks, grid_layout->column_gap);
-    }
+        // 11.4 Initialize Track Sizes
+        initialize_track_sizes(col_tracks, col_available);
 
-    // Run track sizing for rows (may use indefinite height)
-    if (!row_tracks.empty()) {
-        float row_space = container_height > 0 ? container_height : -1.0f;
-        initialize_track_sizes(row_tracks, row_space);
-        if (container_height > 0) {
-            maximize_tracks(row_tracks, row_space, row_space);
-            expand_flexible_tracks(row_tracks, 0.0f, row_space, row_space);
-            stretch_auto_tracks(row_tracks, 0.0f, row_space);
+        // 11.5 Resolve Intrinsic Track Sizes
+        std::vector<GridItemContribution> col_contributions =
+            collect_item_contributions(grid_layout, items, item_count, true /* is_column_axis */);
+        if (!col_contributions.empty()) {
+            resolve_intrinsic_track_sizes(col_tracks, col_contributions, grid_layout->column_gap);
         }
-        compute_track_offsets(row_tracks, grid_layout->row_gap);
+
+        // 11.6 Maximize Tracks
+        maximize_tracks(col_tracks, col_available, col_available);
+
+        // 11.7 Expand Flexible Tracks
+        expand_flexible_tracks(col_tracks, 0.0f, col_available, col_available);
+
+        // 11.8 Stretch auto Tracks
+        stretch_auto_tracks(col_tracks, 0.0f, col_available);
+
+        // Compute track positions
+        compute_track_offsets(col_tracks, grid_layout->column_gap);
+
+        // IMPORTANT: Copy column results back BEFORE sizing rows
+        // Row sizing needs to know the final column widths to calculate item heights
+        copy_enhanced_tracks_to_old(col_tracks, grid_layout->computed_columns,
+                                     grid_layout->computed_column_count);
     }
 
-    // Copy results back to old track structures
-    copy_enhanced_tracks_to_old(col_tracks, grid_layout->computed_columns,
-                                 grid_layout->computed_column_count);
-    copy_enhanced_tracks_to_old(row_tracks, grid_layout->computed_rows,
-                                 grid_layout->computed_row_count);
+    // === Run track sizing for rows ===
+    if (!row_tracks.empty()) {
+        // 11.4 Initialize Track Sizes
+        initialize_track_sizes(row_tracks, row_available);
+
+        // 11.5 Resolve Intrinsic Track Sizes
+        // NOTE: This uses grid_layout->computed_columns which was just updated above
+        std::vector<GridItemContribution> row_contributions =
+            collect_item_contributions(grid_layout, items, item_count, false /* is_column_axis */);
+        if (!row_contributions.empty()) {
+            resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap);
+        }
+
+        // Only do maximize/expand/stretch if we have definite space
+        if (row_available > 0) {
+            // 11.6 Maximize Tracks
+            maximize_tracks(row_tracks, row_available, row_available);
+
+            // 11.7 Expand Flexible Tracks
+            expand_flexible_tracks(row_tracks, 0.0f, row_available, row_available);
+
+            // 11.8 Stretch auto Tracks
+            stretch_auto_tracks(row_tracks, 0.0f, row_available);
+        }
+
+        // Compute track positions
+        compute_track_offsets(row_tracks, grid_layout->row_gap);
+
+        // Copy row results back
+        copy_enhanced_tracks_to_old(row_tracks, grid_layout->computed_rows,
+                                     grid_layout->computed_row_count);
+    }
 }
 
 } // namespace grid_adapter
