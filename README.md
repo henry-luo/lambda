@@ -53,6 +53,7 @@ Internally, Lambda treats documents as structured data. Different input formats 
   <img src="doc/demo.png" width="49%" />
   <img src="doc/demo2.png" width="49%" />
 </p>
+
 ### Run the demo
 
 1. Download the Lambda binary for your platform from the GitHub Releases page, and unzip it.
