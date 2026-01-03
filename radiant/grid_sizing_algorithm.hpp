@@ -275,6 +275,178 @@ inline void distribute_space_to_tracks(
     }
 }
 
+// ============================================================================
+// 11.5 Resolve Intrinsic Track Sizes
+// ============================================================================
+
+/**
+ * Item contribution information for track sizing.
+ * Contains the min/max content sizes and which tracks the item spans.
+ */
+struct GridItemContribution {
+    float min_content_contribution;    // Item's min-content size in this axis
+    float max_content_contribution;    // Item's max-content size in this axis
+    size_t track_start;                // First track index spanned (0-based)
+    size_t track_span;                 // Number of tracks spanned
+    ViewBlock* item;                   // Reference to the item for debugging
+};
+
+/**
+ * Calculate the space already accounted for by spanned tracks.
+ * Used when distributing item contributions across multiple tracks.
+ */
+inline float spanned_tracks_size(
+    const std::vector<EnhancedGridTrack>& tracks,
+    size_t start_index,
+    size_t span,
+    float gap
+) {
+    float sum = 0.0f;
+    size_t end = std::min(start_index + span, tracks.size());
+    for (size_t i = start_index; i < end; ++i) {
+        sum += tracks[i].base_size;
+    }
+    // Add gaps between tracks (span - 1 gaps)
+    if (span > 1) {
+        sum += (span - 1) * gap;
+    }
+    return sum;
+}
+
+/**
+ * Increase the base size of intrinsic tracks that an item spans.
+ * This implements the "distribute extra space" step from §11.5.
+ *
+ * @param tracks The axis tracks
+ * @param start_index Starting track index
+ * @param span Number of tracks spanned
+ * @param space_to_distribute The extra space to distribute
+ * @param contribution_type Whether this is for min or max content
+ */
+inline void increase_sizes_for_spanning_item(
+    std::vector<EnhancedGridTrack>& tracks,
+    size_t start_index,
+    size_t span,
+    float space_to_distribute,
+    IntrinsicContributionType contribution_type
+) {
+    if (space_to_distribute <= 0 || span == 0) return;
+
+    size_t end = std::min(start_index + span, tracks.size());
+
+    // Determine which tracks can receive space
+    std::vector<size_t> eligible_indices;
+    for (size_t i = start_index; i < end; ++i) {
+        const auto& track = tracks[i];
+        bool is_intrinsic = track.min_track_sizing_function.is_intrinsic() ||
+                            track.max_track_sizing_function.is_intrinsic();
+        if (is_intrinsic || track.max_track_sizing_function.type == SizingFunctionType::Auto) {
+            eligible_indices.push_back(i);
+        }
+    }
+
+    if (eligible_indices.empty()) {
+        // No intrinsic tracks to distribute to.
+        // Per CSS Grid spec §11.5, if all spanned tracks are fixed-size,
+        // the item's contribution is limited by those tracks - we don't grow them.
+        // This is different from the old code which distributed to all tracks.
+        return;
+    }
+
+    if (eligible_indices.empty()) return;
+
+    // Distribute space equally among eligible tracks
+    float extra_per_track = space_to_distribute / eligible_indices.size();
+
+    for (size_t idx : eligible_indices) {
+        auto& track = tracks[idx];
+        track.base_size += extra_per_track;
+
+        // For max content, also increase growth limit if it was infinity
+        if (contribution_type == IntrinsicContributionType::Maximum) {
+            if (std::isinf(track.growth_limit)) {
+                track.growth_limit = track.base_size;
+            } else {
+                track.growth_limit = std::max(track.growth_limit, track.base_size);
+            }
+        }
+
+        // Ensure growth limit >= base size
+        if (track.growth_limit < track.base_size) {
+            track.growth_limit = track.base_size;
+        }
+    }
+}
+
+/**
+ * Process items sorted by span count (ascending) to resolve intrinsic track sizes.
+ * Items with smaller spans are processed first per CSS Grid spec §11.5.
+ *
+ * @param tracks The axis tracks to size
+ * @param contributions Vector of item contributions (will be sorted by span)
+ * @param gap Gap between tracks
+ */
+inline void resolve_intrinsic_track_sizes(
+    std::vector<EnhancedGridTrack>& tracks,
+    std::vector<GridItemContribution>& contributions,
+    float gap
+) {
+    if (contributions.empty() || tracks.empty()) return;
+
+    // Sort contributions by span count (ascending)
+    std::sort(contributions.begin(), contributions.end(),
+        [](const GridItemContribution& a, const GridItemContribution& b) {
+            return a.track_span < b.track_span;
+        });
+
+    // Process in two phases: first min-content, then max-content
+    // Phase 1: Size tracks to min-content contributions
+    for (const auto& contrib : contributions) {
+        if (contrib.track_span == 0) continue;
+
+        float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
+        float extra_space = contrib.min_content_contribution - current_size;
+
+        if (extra_space > 0) {
+            increase_sizes_for_spanning_item(
+                tracks,
+                contrib.track_start,
+                contrib.track_span,
+                extra_space,
+                IntrinsicContributionType::Minimum
+            );
+        }
+    }
+
+    // Flush planned increases to base sizes
+    flush_planned_base_size_increases(tracks);
+
+    // Phase 2: Size tracks to max-content contributions (for tracks with max-content sizing)
+    for (const auto& contrib : contributions) {
+        if (contrib.track_span == 0) continue;
+
+        float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
+        float extra_space = contrib.max_content_contribution - current_size;
+
+        if (extra_space > 0) {
+            increase_sizes_for_spanning_item(
+                tracks,
+                contrib.track_start,
+                contrib.track_span,
+                extra_space,
+                IntrinsicContributionType::Maximum
+            );
+        }
+    }
+
+    // Ensure growth limits are at least as large as base sizes
+    for (auto& track : tracks) {
+        if (track.growth_limit < track.base_size) {
+            track.growth_limit = track.base_size;
+        }
+    }
+}
+
 // --- 11.6 Maximize Tracks ---
 
 /**
@@ -538,6 +710,129 @@ inline void compute_track_offsets(
             offset += gap;
         }
     }
+}
+
+// ============================================================================
+// Alignment Gutter Adjustment (Taffy-inspired)
+// ============================================================================
+
+/**
+ * CSS alignment values that distribute space as gutters
+ */
+constexpr int ALIGNMENT_SPACE_BETWEEN = 18;  // CSS_VALUE_SPACE_BETWEEN
+constexpr int ALIGNMENT_SPACE_AROUND = 19;   // CSS_VALUE_SPACE_AROUND
+constexpr int ALIGNMENT_SPACE_EVENLY = 64;   // CSS_VALUE_SPACE_EVENLY
+
+/**
+ * Check if alignment mode distributes space between tracks.
+ */
+inline bool is_space_distribution_alignment(int alignment) {
+    return alignment == ALIGNMENT_SPACE_BETWEEN ||
+           alignment == ALIGNMENT_SPACE_AROUND ||
+           alignment == ALIGNMENT_SPACE_EVENLY;
+}
+
+/**
+ * Compute the gutter adjustment for intrinsic track sizing.
+ *
+ * When justify-content or align-content uses space-between, space-around, or
+ * space-evenly, extra space is distributed as "gutters" between tracks. During
+ * intrinsic sizing, we estimate this gutter size to improve accuracy.
+ *
+ * @param alignment The justify-content or align-content value
+ * @param axis_inner_size The definite inner size of the container (or -1 if indefinite)
+ * @param tracks The tracks being sized
+ * @param gap The explicit gap between tracks
+ * @return The estimated gutter adjustment (per gutter)
+ */
+inline float compute_alignment_gutter_adjustment(
+    int alignment,
+    float axis_inner_size,
+    const std::vector<EnhancedGridTrack>& tracks,
+    float gap
+) {
+    // If inner size is indefinite, we can't compute gutters
+    if (axis_inner_size < 0) return 0.0f;
+
+    // Count the number of tracks (excluding gutter tracks)
+    size_t track_count = 0;
+    for (const auto& track : tracks) {
+        if (track.kind == GridTrackKind::Track) {
+            track_count++;
+        }
+    }
+
+    if (track_count <= 1) return 0.0f;
+
+    // Sum current track sizes
+    float total_track_size = 0.0f;
+    for (const auto& track : tracks) {
+        if (track.kind == GridTrackKind::Track) {
+            total_track_size += track.base_size;
+        }
+    }
+
+    // Calculate free space
+    float total_gap = gap * (track_count - 1);
+    float free_space = axis_inner_size - total_track_size - total_gap;
+
+    if (free_space <= 0) return 0.0f;
+
+    // Calculate gutter based on alignment mode
+    size_t num_gutters = track_count - 1;
+
+    switch (alignment) {
+        case ALIGNMENT_SPACE_BETWEEN:
+            // All space goes between tracks
+            return (num_gutters > 0) ? (free_space / num_gutters) : 0.0f;
+
+        case ALIGNMENT_SPACE_AROUND:
+            // Half-space at edges, full space between
+            // Total units = track_count (half at each edge = 1 unit, between = 1 unit each)
+            return free_space / track_count;
+
+        case ALIGNMENT_SPACE_EVENLY:
+            // Equal space everywhere (edges and between)
+            // Total units = track_count + 1
+            return free_space / (track_count + 1);
+
+        default:
+            return 0.0f;
+    }
+}
+
+/**
+ * Estimate total content size including alignment gutters.
+ * Used during intrinsic sizing to estimate container size.
+ */
+inline float estimate_content_size_with_gutters(
+    const std::vector<EnhancedGridTrack>& tracks,
+    float gap,
+    int alignment,
+    float axis_inner_size
+) {
+    float total = 0.0f;
+    size_t track_count = 0;
+
+    for (const auto& track : tracks) {
+        if (track.kind == GridTrackKind::Track) {
+            total += track.base_size;
+            track_count++;
+        }
+    }
+
+    if (track_count == 0) return 0.0f;
+
+    // Add explicit gaps
+    total += gap * (track_count - 1);
+
+    // Add alignment gutters if applicable
+    if (is_space_distribution_alignment(alignment) && axis_inner_size >= 0) {
+        float gutter = compute_alignment_gutter_adjustment(alignment, axis_inner_size, tracks, gap);
+        total += gutter * (track_count - 1);  // Gutters go between tracks
+    }
+
+    return total;
 }
 
 } // namespace grid

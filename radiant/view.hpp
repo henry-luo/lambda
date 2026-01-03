@@ -40,6 +40,40 @@ inline auto min(T a, U b) -> typename std::common_type<T, U>::type {
     return (a < b) ? a : b;
 }
 
+// Absolute value - works for any signed numeric type
+template<typename T>
+inline T abs(T a) {
+    return (a < 0) ? -a : a;
+}
+
+// Clamp value to range [lo, hi] - very useful for layout calculations
+template<typename T>
+inline T clamp(T value, T lo, T hi) {
+    return (value < lo) ? lo : ((value > hi) ? hi : value);
+}
+
+// Mixed-type clamp for cases like clamp(int_val, 0.0f, float_max)
+template<typename T, typename U, typename V>
+inline auto clamp(T value, U lo, V hi) -> typename std::common_type<T, U, V>::type {
+    using Common = typename std::common_type<T, U, V>::type;
+    Common v = static_cast<Common>(value);
+    Common l = static_cast<Common>(lo);
+    Common h = static_cast<Common>(hi);
+    return (v < l) ? l : ((v > h) ? h : v);
+}
+
+// Sign function: returns -1, 0, or 1
+template<typename T>
+inline int sign(T a) {
+    return (a > 0) - (a < 0);
+}
+
+// Linear interpolation: lerp(a, b, t) = a + t * (b - a)
+template<typename T>
+inline T lerp(T a, T b, float t) {
+    return a + t * (b - a);
+}
+
 // Forward declarations
 struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;

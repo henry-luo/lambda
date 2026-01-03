@@ -751,10 +751,10 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
     // Phase 2: Complete column sizing FIRST
     // ========================================================
     log_debug("Phase 2: Sizing columns\n");
-    
+
     // 2a: Resolve column intrinsic sizes
     resolve_intrinsic_column_sizes(grid_layout);
-    
+
     // 2b: Maximize column tracks
     for (int i = 0; i < grid_layout->computed_column_count; i++) {
         GridTrack* track = &grid_layout->computed_columns[i];
@@ -762,12 +762,12 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
             track->computed_size = track->growth_limit;
         }
     }
-    
+
     // 2c: Expand flexible column tracks (FR units)
     if (grid_layout->content_width > 0) {
         int col_gap_total = (grid_layout->computed_column_count - 1) * grid_layout->column_gap;
         int available_col_space = grid_layout->content_width - col_gap_total;
-        
+
         // Subtract space used by non-flexible tracks (sized in step 2b)
         for (int i = 0; i < grid_layout->computed_column_count; i++) {
             GridTrack* track = &grid_layout->computed_columns[i];
@@ -775,12 +775,12 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
                 available_col_space -= track->computed_size;
             }
         }
-        
-        expand_flexible_tracks_in_axis(grid_layout->computed_columns, 
-                                        grid_layout->computed_column_count, 
+
+        expand_flexible_tracks_in_axis(grid_layout->computed_columns,
+                                        grid_layout->computed_column_count,
                                         available_col_space);
     }
-    
+
     // 2d: Distribute remaining space to auto column tracks
     if (grid_layout->content_width > 0) {
         int col_gap_total = (grid_layout->computed_column_count - 1) * grid_layout->column_gap;
@@ -789,17 +789,17 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
                                                   grid_layout->computed_column_count,
                                                   available);
     }
-    
+
     log_debug("Columns fully sized, now sizing rows\n");
-    
+
     // ========================================================
     // Phase 3: Complete row sizing (columns are now known)
     // ========================================================
     log_debug("Phase 3: Sizing rows\n");
-    
+
     // 3a: Resolve row intrinsic sizes (will use column sizes for height calc)
     resolve_intrinsic_row_sizes(grid_layout);
-    
+
     // 3b: Maximize row tracks
     for (int i = 0; i < grid_layout->computed_row_count; i++) {
         GridTrack* track = &grid_layout->computed_rows[i];
@@ -807,12 +807,12 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
             track->computed_size = track->growth_limit;
         }
     }
-    
+
     // 3c: Expand flexible row tracks (FR units)
     if (grid_layout->has_explicit_height && grid_layout->content_height > 0) {
         int row_gap_total = (grid_layout->computed_row_count - 1) * grid_layout->row_gap;
         int available_row_space = grid_layout->content_height - row_gap_total;
-        
+
         // Subtract space used by non-flexible tracks (sized in step 3b)
         for (int i = 0; i < grid_layout->computed_row_count; i++) {
             GridTrack* track = &grid_layout->computed_rows[i];
@@ -820,12 +820,12 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
                 available_row_space -= track->computed_size;
             }
         }
-        
+
         expand_flexible_tracks_in_axis(grid_layout->computed_rows,
                                         grid_layout->computed_row_count,
                                         available_row_space);
     }
-    
+
     // 3d: Distribute remaining space to auto row tracks (only if explicit height)
     if (grid_layout->has_explicit_height && grid_layout->content_height > 0) {
         int row_gap_total = (grid_layout->computed_row_count - 1) * grid_layout->row_gap;
@@ -848,15 +848,35 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* c
     // Phase 1: Initialize track sizes (still needed for memory allocation)
     initialize_track_sizes(grid_layout);
 
+    // For shrink-to-fit containers, use indefinite width (-1) so tracks size to content
+    // rather than expanding to fill available space
+    float sizing_width = grid_layout->is_shrink_to_fit_width
+        ? -1.0f
+        : static_cast<float>(grid_layout->content_width);
+
     // Use the enhanced track sizing algorithm from the adapter
     // This implements the full CSS Grid track sizing algorithm (§11.4-11.8)
     radiant::grid_adapter::run_enhanced_track_sizing(
         grid_layout,
         grid_layout->grid_items,
         grid_layout->item_count,
-        static_cast<float>(grid_layout->content_width),
+        sizing_width,
         static_cast<float>(grid_layout->content_height)
     );
+
+    // For shrink-to-fit containers, update content_width based on resolved track sizes
+    if (grid_layout->is_shrink_to_fit_width && grid_layout->computed_column_count > 0) {
+        float total_column_width = 0;
+        for (int i = 0; i < grid_layout->computed_column_count; i++) {
+            total_column_width += grid_layout->computed_columns[i].computed_size;
+        }
+        // Add gaps between columns
+        if (grid_layout->computed_column_count > 1) {
+            total_column_width += grid_layout->column_gap * (grid_layout->computed_column_count - 1);
+        }
+        grid_layout->content_width = (int)total_column_width;
+        log_debug("GRID shrink-to-fit: updated content_width to %d\n", grid_layout->content_width);
+    }
 
     log_debug("Track sizes resolved (enhanced algorithm)\n");
 }
