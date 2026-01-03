@@ -4,6 +4,8 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_mode.hpp"
+#include "layout_cache.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -32,6 +34,64 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
 
     log_enter();
     log_info("GRID LAYOUT START: container=%p (%s)", grid_container, grid_container->node_name());
+
+    // =========================================================================
+    // CACHE LOOKUP: Check if we have a cached result for these constraints
+    // This avoids redundant layout for repeated measurements with same inputs
+    // =========================================================================
+    DomElement* dom_elem = (DomElement*)grid_container;
+    radiant::LayoutCache* cache = dom_elem ? dom_elem->layout_cache : nullptr;
+
+    // Build known dimensions from current constraints
+    radiant::KnownDimensions known_dims = radiant::known_dimensions_none();
+    if (lycon->block.given_width >= 0) {
+        known_dims.width = lycon->block.given_width;
+        known_dims.has_width = true;
+    }
+    if (lycon->block.given_height >= 0) {
+        known_dims.height = lycon->block.given_height;
+        known_dims.has_height = true;
+    }
+
+    // Try cache lookup
+    if (cache) {
+        radiant::SizeF cached_size;
+        if (radiant::layout_cache_get(cache, known_dims, lycon->available_space,
+                                       lycon->run_mode, &cached_size)) {
+            // Cache hit! Use cached dimensions
+            grid_container->width = cached_size.width;
+            grid_container->height = cached_size.height;
+            g_layout_cache_hits++;
+            log_info("GRID CACHE HIT: container=%p, size=(%.1f x %.1f), mode=%d",
+                     grid_container, cached_size.width, cached_size.height, (int)lycon->run_mode);
+            log_leave();
+            return;
+        }
+        g_layout_cache_misses++;
+        log_debug("GRID CACHE MISS: container=%p, mode=%d", grid_container, (int)lycon->run_mode);
+    }
+
+    // =========================================================================
+    // EARLY BAILOUT: For ComputeSize mode, check if dimensions are already known
+    // This optimization avoids redundant layout when only measurements are needed
+    // =========================================================================
+    if (lycon->run_mode == radiant::RunMode::ComputeSize) {
+        // Check if both dimensions are explicitly set via CSS
+        bool has_definite_width = (lycon->block.given_width >= 0);
+        bool has_definite_height = (lycon->block.given_height >= 0);
+
+        if (has_definite_width && has_definite_height) {
+            // Both dimensions known - can skip full layout
+            grid_container->width = lycon->block.given_width;
+            grid_container->height = lycon->block.given_height;
+            log_info("GRID EARLY BAILOUT: Both dimensions known (%.1fx%.1f), skipping full layout",
+                     grid_container->width, grid_container->height);
+            log_leave();
+            return;
+        }
+        log_debug("GRID: ComputeSize mode but dimensions not fully known (w=%d, h=%d)",
+                  has_definite_width, has_definite_height);
+    }
 
     // Save parent grid context (for nested grids)
     GridContainerLayout* pa_grid = lycon->grid_container;
@@ -77,7 +137,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // ========================================================================
     log_info("=== GRID PASS 3: Final content layout ===");
     layout_final_grid_content(lycon, lycon->grid_container);
-    
+
     // Re-align items after content is laid out (now items have final heights)
     // This is needed for align-items: center/end to work correctly
     align_grid_items(lycon->grid_container);
@@ -91,20 +151,20 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // ========================================================================
     GridContainerLayout* grid_layout = lycon->grid_container;
     bool has_explicit_height = grid_container->blk && grid_container->blk->given_height > 0;
-    
+
     if (grid_layout && grid_layout->item_count > 0 && !has_explicit_height) {
         // Find the maximum extent of all grid items
         float max_item_bottom = 0;
         for (int i = 0; i < grid_layout->item_count; i++) {
             ViewBlock* item = grid_layout->grid_items[i];
             if (!item) continue;
-            
+
             float item_bottom = item->y + item->height;
             if (item_bottom > max_item_bottom) {
                 max_item_bottom = item_bottom;
             }
         }
-        
+
         // Add container's bottom padding and border
         float required_height = max_item_bottom;
         if (grid_container->bound) {
@@ -113,13 +173,13 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 required_height += grid_container->bound->border->width.bottom;
             }
         }
-        
+
         // Update container height if needed
         if (required_height > grid_container->height) {
             log_info("GRID: Updating container height from %.1f to %.1f (based on item extents)",
                      grid_container->height, required_height);
             grid_container->height = required_height;
-            
+
             // Also fix any item with negative y position (pushed above due to centering)
             // by shifting all items down
             float min_item_y = 0;
@@ -143,9 +203,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
     }
-    
+
     // Fallback: also check row-based calculation for containers without items
-    if (grid_layout && grid_layout->computed_row_count > 0) {
+    // Only apply if container height is auto (not explicitly set)
+    if (grid_layout && grid_layout->computed_row_count > 0 && !has_explicit_height) {
         // Calculate total height from row sizes plus gaps
         float total_row_height = 0;
         for (int i = 0; i < grid_layout->computed_row_count; i++) {
@@ -164,8 +225,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
 
-        // Only update if container height is auto (not explicitly set)
-        if (grid_container->height < container_height) {
+        // Only update if calculated height is greater (content overflow case)
+        if (container_height > grid_container->height) {
             log_info("GRID: Updating container height from %.1f to %.1f (rows=%.1f, gaps=%.1f)",
                      grid_container->height, container_height, total_row_height,
                      grid_layout->row_gap * (grid_layout->computed_row_count - 1));
@@ -222,6 +283,28 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_info("=== GRID PASS 4: Absolute positioned children ===");
     layout_grid_absolute_children(lycon, grid_container);
     log_info("=== GRID PASS 4 COMPLETE ===");
+
+    // =========================================================================
+    // CACHE STORE: Save computed result for future lookups
+    // =========================================================================
+    if (cache || (dom_elem && lycon->pool)) {
+        // Lazy allocate cache if needed
+        if (!cache && dom_elem) {
+            cache = (radiant::LayoutCache*)pool_calloc(lycon->pool, sizeof(radiant::LayoutCache));
+            if (cache) {
+                radiant::layout_cache_init(cache);
+                dom_elem->layout_cache = cache;
+            }
+        }
+        if (cache) {
+            radiant::SizeF result = radiant::size_f(grid_container->width, grid_container->height);
+            radiant::layout_cache_store(cache, known_dims, lycon->available_space,
+                                        lycon->run_mode, result);
+            g_layout_cache_stores++;
+            log_debug("GRID CACHE STORE: container=%p, size=(%.1f x %.1f), mode=%d",
+                      grid_container, grid_container->width, grid_container->height, (int)lycon->run_mode);
+        }
+    }
 
     // Cleanup and restore parent context
     cleanup_grid_container(lycon);
@@ -366,7 +449,7 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
                     // heights on-demand using the actual column width.
                     item->gi->has_measured_size = true;  // Indicates width measurements are valid
                     log_debug("Stored width measurements for %s (gi=%p): min_w=%.1f, max_w=%.1f",
-                              child->node_name(), item->gi, 
+                              child->node_name(), item->gi,
                               item->gi->measured_min_width, item->gi->measured_max_width);
                 } else {
                     log_debug("WARN: No gi for %s to store measurements", child->node_name());
@@ -439,7 +522,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         // Height calculation for grid items:
         // - For min-content height: use max-content width (content flows without wrapping)
         // - For max-content height: same as min-content for block containers
-        // 
+        //
         // Note: Counter-intuitively, using max-content WIDTH gives MINIMUM height
         // because text doesn't wrap. Using min-content width causes wrapping = taller.
         //
@@ -448,12 +531,12 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         //
         // The actual grid track sizing will use max-content height for auto rows.
         float width_for_height = (float)*max_width;
-        
+
         // Cap to a reasonable maximum to avoid extremely long single-line text
         if (width_for_height > 2000) {
             width_for_height = 2000;
         }
-        
+
         // For block containers, min-content height == max-content height
         float content_height = calculate_max_content_height(lycon, (DomNode*)item, width_for_height);
         *min_height = (int)(content_height + 0.5f);
