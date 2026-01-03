@@ -48,6 +48,19 @@ Internally, Lambda treats documents as structured data. Different input formats 
    - PDF viewing
    - Lambda script results (`.ls`) evaluated and rendered
 
+## Demo
+<p align="center">
+  <img src="demo.png" width="49%" />
+  <img src="demo2.png" width="49%" />
+</p>
+### Run the demo
+
+1. Download the Lambda binary for your platform from the GitHub Releases page, and unzip it.
+2. Run:
+   ```bash
+   ./lambda.exe view
+   ```
+
 ## Quick Start
 
 ### Prerequisites
