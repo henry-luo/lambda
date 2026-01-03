@@ -3,6 +3,9 @@
 /* LOG_IMPL prevents log.h from defining macros that would replace function definitions */
 #define LOG_IMPL
 
+/* Define POSIX feature test macro for fileno() and isatty() */
+#define _POSIX_C_SOURCE 200809L
+
 #include <string.h>
 #include "log.h"
 #include <stdlib.h>
