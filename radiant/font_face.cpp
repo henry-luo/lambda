@@ -10,6 +10,27 @@ extern "C" {
 #include <strings.h>  // for strcasecmp
 #include <stdlib.h>
 
+// Font face cache entry - matches the one in font.cpp
+typedef struct FontfaceEntry {
+    char* name;
+    FT_Face face;
+} FontfaceEntry;
+
+// Hash and compare functions for fontface cache - declarations match font.cpp
+static int fontface_compare_local(const void *a, const void *b, void *udata) {
+    (void)udata;
+    const FontfaceEntry *fa = (const FontfaceEntry*)a;
+    const FontfaceEntry *fb = (const FontfaceEntry*)b;
+    if (!fa || !fb || !fa->name || !fb->name) return (fa == fb) ? 0 : -1;
+    return strcmp(fa->name, fb->name);
+}
+
+static uint64_t fontface_hash_local(const void *item, uint64_t seed0, uint64_t seed1) {
+    const FontfaceEntry *fontface = (const FontfaceEntry*)item;
+    if (!fontface || !fontface->name) return 0;
+    return hashmap_xxhash3(fontface->name, strlen(fontface->name), seed0, seed1);
+}
+
 // Text flow logging categories
 log_category_t* font_log = NULL;
 log_category_t* text_log = NULL;
@@ -443,6 +464,37 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                                    FontProp* style, bool* is_fallback) {
     if (!uicon || !family_name) { return NULL; }
 
+    // Create a cache key including family, weight, style, size to avoid redundant font loading
+    // This is critical for performance - avoids reloading the same font file thousands of times
+    StrBuf* cache_key = strbuf_create("@fontface:");
+    if (!cache_key) {
+        log_error("Failed to create cache key strbuf");
+        return NULL;
+    }
+    strbuf_append_str(cache_key, family_name);
+    strbuf_append_str(cache_key, style && style->font_weight == CSS_VALUE_BOLD ? ":bold:" : ":normal:");
+    strbuf_append_str(cache_key, style && style->font_style == CSS_VALUE_ITALIC ? "italic:" : "normal:");
+    strbuf_append_int(cache_key, style ? (int)style->font_size : 16);
+
+    // Initialize fontface map if needed (uses same format as font.cpp)
+    if (uicon->fontface_map == NULL) {
+        uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
+            fontface_hash_local, fontface_compare_local, NULL, NULL);
+    }
+
+    // Check cache first - avoid expensive font file loading for repeated requests
+    if (uicon->fontface_map && cache_key->str) {
+        FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
+        FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
+        if (entry) {
+            strbuf_free(cache_key);
+            if (is_fallback) *is_fallback = (entry->face == NULL);
+            return entry->face;  // cache hit - skip font file loading
+        }
+    }
+
+    FT_Face result_face = NULL;
+
     // Search registered @font-face descriptors first
     if (uicon->font_faces && uicon->font_face_count > 0) {
         FontFaceDescriptor* best_match = NULL;
@@ -547,30 +599,46 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                 best_match->loaded_face = face;
                 best_match->is_loaded = true;
                 if (is_fallback) *is_fallback = false;
-                return face;
+                result_face = face;
             } else {
                 log_warn("All font sources failed for @font-face: %s", family_name);
             }
         }
     }
 
-    // Fall back to system fonts if no @font-face match
-    clog_debug(font_log, "No @font-face match found, falling back to system fonts for: %s", family_name);
-    if (is_fallback) *is_fallback = true;
+    // Fall back to system fonts if no @font-face match (and not already found)
+    if (!result_face) {
+        clog_debug(font_log, "No @font-face match found, falling back to system fonts for: %s", family_name);
+        if (is_fallback) *is_fallback = true;
 
-    // Early-exit optimization: Check if font family exists in database before expensive lookups
-    ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_name);
-    bool family_exists = (family_matches && family_matches->length > 0);
+        // Early-exit optimization: Check if font family exists in database before expensive lookups
+        ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_name);
+        bool family_exists = (family_matches && family_matches->length > 0);
 
-    if (family_exists) {
-        arraylist_free(family_matches);
-        return load_styled_font(uicon, family_name, style);
-    } else {
-        // Font doesn't exist in database - skip expensive platform lookup
-        clog_info(font_log, "Font family '%s' not in database, skipping platform lookup", family_name);
-        if (family_matches) arraylist_free(family_matches);
-        return NULL;
+        if (family_exists) {
+            arraylist_free(family_matches);
+            // load_styled_font already caches its results, so we skip caching here
+            strbuf_free(cache_key);
+            return load_styled_font(uicon, family_name, style);
+        } else {
+            // Font doesn't exist in database - skip expensive platform lookup
+            clog_info(font_log, "Font family '%s' not in database, skipping platform lookup", family_name);
+            if (family_matches) arraylist_free(family_matches);
+        }
     }
+
+    // Cache the @font-face result (don't cache system font results - they're cached by load_styled_font)
+    // Only cache non-NULL results to avoid FT_Done_Face on NULL during cleanup
+    if (uicon->fontface_map && result_face) {
+        char* name = (char*)malloc(cache_key->length + 1);
+        memcpy(name, cache_key->str, cache_key->length);
+        name[cache_key->length] = '\0';
+        FontfaceEntry new_entry = {.name = name, .face = result_face};
+        hashmap_set(uicon->fontface_map, &new_entry);
+    }
+    strbuf_free(cache_key);
+
+    return result_face;
 }
 
 // Enhanced font matching (basic implementation)

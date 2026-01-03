@@ -172,6 +172,96 @@ All tests pass after optimization:
 
 ---
 
+## 4. Phase 2: @font-face Caching (January 3, 2026)
+
+### Test Case
+```bash
+./lambda.exe render test/input/latex-showcase.tex -o /tmp/test.png
+```
+- LaTeX document with extensive use of Computer Modern fonts via `@font-face` rules
+
+### Problem Identified
+
+Profiling revealed that `@font-face` fonts were being loaded repeatedly:
+- **4,603 font load operations** for the same fonts
+- Each `load_font_with_descriptors()` call would:
+  1. Search through all `@font-face` descriptors
+  2. Call `load_local_font_file()` which runs `FT_New_Face()` (expensive I/O)
+  3. Call `FT_Set_Pixel_Sizes()`
+- The same font file (e.g., `cmunrm.woff`) was loaded **hundreds of times**
+
+Log analysis showed:
+```
+grep "Successfully loaded @font-face" log.txt | wc -l
+4603
+
+grep "Successfully loaded @font-face" log.txt | sort | uniq -c | sort -rn | head -5
+ 168 ... 'Computer Modern Serif' from .../cmunrm.woff
+ 152 ... 'Computer Modern Serif' from .../cmunrm.woff
+ 132 ... 'Computer Modern Serif' from .../cmunrm.woff
+ ...
+```
+
+### Solution
+
+**File:** `radiant/font_face.cpp` - `load_font_with_descriptors()`
+
+Added cache lookup at the beginning of the function using the existing `fontface_map`:
+
+```cpp
+FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
+                                   FontProp* style, bool* is_fallback) {
+    if (!uicon || !family_name) { return NULL; }
+
+    // Create a cache key including family, weight, style, size
+    // Prefix with "@fontface:" to distinguish from system font cache entries
+    StrBuf* cache_key = strbuf_create("@fontface:");
+    strbuf_append_str(cache_key, family_name);
+    strbuf_append_str(cache_key, style && style->font_weight == CSS_VALUE_BOLD ? ":bold:" : ":normal:");
+    strbuf_append_str(cache_key, style && style->font_style == CSS_VALUE_ITALIC ? "italic:" : "normal:");
+    strbuf_append_int(cache_key, style ? (int)style->font_size : 16);
+
+    // Check cache first - avoid expensive font file loading
+    if (uicon->fontface_map && cache_key->str) {
+        FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
+        FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
+        if (entry) {
+            strbuf_free(cache_key);
+            if (is_fallback) *is_fallback = (entry->face == NULL);
+            return entry->face;  // Cache hit - skip font file loading
+        }
+    }
+    
+    // ... rest of function: search descriptors, load font file ...
+    
+    // Cache the @font-face result (only non-NULL to avoid cleanup issues)
+    if (uicon->fontface_map && result_face) {
+        FontfaceEntry new_entry = {.name = strdup(cache_key->str), .face = result_face};
+        hashmap_set(uicon->fontface_map, &new_entry);
+    }
+}
+```
+
+**Key implementation details:**
+- Uses `@fontface:` prefix to avoid key collision with system font cache entries
+- Only caches successful loads (non-NULL faces) to prevent `FT_Done_Face(NULL)` during cleanup
+- System font fallbacks are NOT cached here (they're already cached by `load_styled_font()`)
+
+### Results
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Font load operations | 4,603 | 10 | **460x fewer** |
+| Total render time | ~5+ seconds | **0.75 seconds** | **~7x faster** |
+
+### Regression Tests
+
+All tests pass after optimization:
+- Lambda baseline: **73/73** ✅
+- Radiant baseline: **1,645/1,645** ✅
+
+---
+
 ## Key Takeaways
 
 1. **Cache by request parameters, not by result** - The original code cached FT_Face by file path, but lookups still went through the database. Caching by the input parameters (family, weight, style, size) allows skipping expensive lookups entirely.
@@ -181,3 +271,5 @@ All tests pass after optimization:
 3. **Negative caching matters** - For glyphs not found in any fallback font, caching the negative result prevents repeated searches through all 7 fallback fonts.
 
 4. **Logging has cost** - Even DEBUG-level logs that are "disabled" may have runtime cost if the logging framework still evaluates arguments. Use `log.conf` to set appropriate levels for production.
+
+5. **@font-face fonts need separate caching** - System fonts and `@font-face` fonts take different code paths. The system font cache in `load_styled_font()` didn't cover `@font-face` loaded fonts, causing massive redundant I/O.
