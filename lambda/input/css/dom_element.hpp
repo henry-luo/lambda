@@ -92,6 +92,9 @@ typedef struct TableProp TableProp;
 typedef struct FormControlProp FormControlProp;
 typedef struct ViewBlock ViewBlock;
 
+// Layout cache (from radiant/layout_cache.hpp)
+namespace radiant { struct LayoutCache; }
+
 // CSS Custom Property (CSS Variable) storage
 struct CssCustomProp {
     const char* name;       // Variable name (e.g., "--primary-color")
@@ -179,6 +182,9 @@ struct DomElement : DomNode {
     PseudoContentProp* pseudo;
     // vector path for PDF/SVG curve rendering
     VectorPathProp* vpath;
+    // Layout cache for avoiding redundant layout computations (Taffy-inspired)
+    // Stores up to 9 measurement results + 1 final layout result
+    radiant::LayoutCache* layout_cache;
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
@@ -187,7 +193,7 @@ struct DomElement : DomNode {
         before_styles(nullptr), after_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
         pseudo_state(0), doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
-        item_prop_type(ITEM_PROP_NONE), fi(nullptr), vpath(nullptr) {}
+        item_prop_type(ITEM_PROP_NONE), fi(nullptr), vpath(nullptr), layout_cache(nullptr) {}
 };
 
 // Pseudo-class state flags

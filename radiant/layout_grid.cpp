@@ -180,6 +180,21 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("GRID START - container: %dx%d at (%d,%d)",
         container->width, container->height, container->x, container->y);
 
+    // Check if container is shrink-to-fit (absolutely positioned with no explicit width)
+    // This affects how we determine available width for track sizing
+    bool is_shrink_to_fit_width = false;
+    if (container->position &&
+        (container->position->position == CSS_VALUE_ABSOLUTE ||
+         container->position->position == CSS_VALUE_FIXED)) {
+        bool has_explicit_width = container->blk && container->blk->given_width > 0;
+        bool has_left_right = container->position->has_left && container->position->has_right;
+        if (!has_explicit_width && !has_left_right) {
+            is_shrink_to_fit_width = true;
+        }
+    }
+    grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
+    log_debug("GRID: is_shrink_to_fit_width=%d", is_shrink_to_fit_width);
+
     // Set container dimensions
     grid_layout->container_width = container->width;
     grid_layout->container_height = container->height;
@@ -249,9 +264,29 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("DEBUG: Phase 5 - Updating grid size after placement");
     determine_grid_size(grid_layout);
 
-    // Phase 6: Resolve track sizes
+    // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     log_debug("DEBUG: Phase 6 - Resolving track sizes");
-    resolve_track_sizes(grid_layout, container);
+    resolve_track_sizes_enhanced(grid_layout, container);
+
+    // For shrink-to-fit containers, update container width based on resolved track sizes
+    if (grid_layout->is_shrink_to_fit_width && grid_layout->computed_column_count > 0) {
+        float total_column_width = grid_layout->content_width;
+
+        // Add padding and border back to get container width
+        float container_width = total_column_width;
+        if (container->bound) {
+            container_width += container->bound->padding.left + container->bound->padding.right;
+            if (container->bound->border) {
+                container_width += container->bound->border->width.left +
+                                   container->bound->border->width.right;
+            }
+        }
+
+        log_debug("GRID shrink-to-fit: updating container width from %d to %.1f",
+                  container->width, container_width);
+        container->width = (int)container_width;
+        grid_layout->container_width = container->width;
+    }
 
     // Phase 6: Position grid items
     log_debug("DEBUG: Phase 6 - Positioning grid items");
