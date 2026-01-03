@@ -2,7 +2,7 @@
 
 A general-purpose, cross-platform, pure functional scripting language and document processing engine.
 
-Built from scratch in C/C++ with a custom runtime, Tree-sitter parsing, MIR-based JIT compilation, and reference-counted memory management.
+Built from scratch in C/C++ with a custom and light-weight runtime (only **6 MB**), Tree-sitter parsing, MIR-based JIT compilation.
 
 > Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
 > A stable subset of the literal data model is separately formalised and released as
@@ -32,7 +32,7 @@ Internally, Lambda treats documents as structured data. Different input formats 
 - **Document-centric tooling**: designed to treat “documents as data”, not just as text.
 
 ### 3. Type system & schema validation
-- **Rich type system** with type inference and explicit type annotations.
+- **Rich type system** with type inference and explicit type annotations, similar to that of TypeScript.
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
 - **Format-aware validation** helpers that unwrap/normalize documents before validation.
 - **Detailed error reporting** with paths and expected/actual diagnostics.
@@ -97,19 +97,9 @@ The build produces a runnable executable at the repo root: `lambda.exe`.
 ./lambda.exe
 ```
 
-**Interactive REPL with MIR JIT:**
-```bash
-./lambda.exe --mir
-```
-
 **Run a script:**
 ```bash
 ./lambda.exe script.ls
-```
-
-**Run a script with MIR JIT:**
-```bash
-./lambda.exe --mir script.ls
 ```
 
 ### CLI Commands
@@ -190,7 +180,6 @@ Lambda uses a Premake5-based build system generated from `build_lambda_config.js
 
 ```bash
 make build             # Incremental build (recommended)
-make debug             # Debug build (ASan)
 make release           # Optimized release build
 make clean             # Clean build artifacts
 make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar changes)
@@ -201,8 +190,7 @@ make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar c
 - Language reference: `doc/Lambda_Reference.md`
 - Validator guide: `doc/Lambda_Validator_Guide.md`
 - Radiant layout design: `doc/Radiant_Layout_Design.md`
-- Mark doc schema (unified node tree): `doc/Doc_Schema.md`
-- Build system details: `Compile.md`
+- Mark doc schema (for lightweight markup, like Markdown, Wiki, RST, etc.): `doc/Doc_Schema.md`
 
 ## Platform Support
 
