@@ -15,6 +15,9 @@
  * Copyright (c) 2025 Lambda Script Project
  */
 
+/* Define POSIX feature test macro for strcasecmp() */
+#define _POSIX_C_SOURCE 200809L
+
 #include "font_config.h"
 #include "mempool.h"
 #include "arena.h"
@@ -38,6 +41,7 @@
 #elif defined(__linux__)
 #include <dirent.h>
 #include <unistd.h>
+#include <strings.h>  // for strcasecmp on Linux
 #elif defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
