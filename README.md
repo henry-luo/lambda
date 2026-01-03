@@ -50,8 +50,8 @@ Internally, Lambda treats documents as structured data. Different input formats 
 
 ## Demo
 <p align="center">
-  <img src="demo.png" width="49%" />
-  <img src="demo2.png" width="49%" />
+  <img src="doc/demo.png" width="49%" />
+  <img src="doc/demo2.png" width="49%" />
 </p>
 ### Run the demo
 
