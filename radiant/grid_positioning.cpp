@@ -1,6 +1,7 @@
 #include "grid.hpp"
 #include "view.hpp"
 #include "layout_alignment.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -280,14 +281,55 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     int available_height = item->gi->track_area_height;
 
     // Check if item has aspect-ratio constraint
-    float aspect_ratio = (item->fi && item->fi->aspect_ratio > 0) ? item->fi->aspect_ratio : 0;
+    // IMPORTANT: fi and gi are in a union - for grid items, fi is overwritten by gi
+    // So we need to check specified_style directly for aspect-ratio
+    float aspect_ratio = 0;
+
+    // First check fi (only valid for flex items)
+    if (item->item_prop_type == DomElement::ITEM_PROP_FLEX && item->fi && item->fi->aspect_ratio > 0) {
+        aspect_ratio = item->fi->aspect_ratio;
+    }
+    // For grid items, check specified_style directly
+    else if (item->specified_style) {
+        CssDeclaration* aspect_decl = style_tree_get_declaration(
+            item->specified_style, CSS_PROPERTY_ASPECT_RATIO);
+        if (aspect_decl && aspect_decl->value) {
+            if (aspect_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                aspect_ratio = (float)aspect_decl->value->data.number.value;
+                log_debug("align_grid_item: aspect-ratio from specified_style: %.3f", aspect_ratio);
+            } else if (aspect_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                       aspect_decl->value->data.list.count >= 2) {
+                // Handle "width / height" format - find two numbers in the list
+                double numerator = 0, denominator = 0;
+                bool got_numerator = false, got_denominator = false;
+                for (int i = 0; i < aspect_decl->value->data.list.count && !got_denominator; i++) {
+                    CssValue* v = aspect_decl->value->data.list.values[i];
+                    if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
+                        if (!got_numerator) {
+                            numerator = v->data.number.value;
+                            got_numerator = true;
+                        } else {
+                            denominator = v->data.number.value;
+                            got_denominator = true;
+                        }
+                    }
+                }
+                if (got_numerator && got_denominator && denominator > 0) {
+                    aspect_ratio = (float)(numerator / denominator);
+                    log_debug("align_grid_item: aspect-ratio from specified_style list: %.3f", aspect_ratio);
+                } else if (got_numerator) {
+                    aspect_ratio = (float)numerator;
+                }
+            }
+        }
+    }
     bool has_explicit_width = (item->blk && item->blk->given_width > 0);
     bool has_explicit_height = (item->blk && item->blk->given_height > 0);
     float max_width = (item->blk && item->blk->given_max_width > 0) ? item->blk->given_max_width : 0;
     float max_height = (item->blk && item->blk->given_max_height > 0) ? item->blk->given_max_height : 0;
 
-    log_debug("align_grid_item: base_pos=(%d,%d), aspect_ratio=%.3f, has_explicit_width=%d, has_explicit_height=%d, max_width=%.1f, max_height=%.1f",
-              item->gi->track_base_x, item->gi->track_base_y, aspect_ratio, has_explicit_width, has_explicit_height, max_width, max_height);
+    log_debug("align_grid_item: aspect_ratio=%.6f, available=%dx%d",
+              aspect_ratio, available_width, available_height);
 
     // If aspect-ratio is set, compute the missing dimension
     if (aspect_ratio > 0) {
@@ -405,6 +447,6 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         }
     }
 
-    log_debug("Aligned grid item: justify=%d, align=%d, final_pos=(%d,%d), final_size=%dx%d\n",
+    log_debug("Aligned grid item: justify=%d, align=%d, final_pos=(%.0f,%.0f), final_size=%.0fx%.0f\n",
               justify, align, item->x, item->y, item->width, item->height);
 }
