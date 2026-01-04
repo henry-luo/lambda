@@ -1,5 +1,7 @@
 #include "grid.hpp"
 #include "view.hpp"
+#include "layout_alignment.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -46,80 +48,56 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
               grid_layout->content_width, grid_layout->content_height);
 
     // Calculate justify-content offset and spacing (horizontal)
+    // Using unified alignment functions from layout_alignment.hpp
     int justify_offset = 0;
     float justify_spacing = 0;  // Additional spacing between tracks
     int extra_column_space = grid_layout->content_width - total_column_size;
     int col_count = grid_layout->computed_column_count;
-    if (extra_column_space > 0 && col_count > 0) {
-        switch (grid_layout->justify_content) {
-            case CSS_VALUE_CENTER:
-                justify_offset = extra_column_space / 2;
-                break;
-            case CSS_VALUE_END:
-            case CSS_VALUE_FLEX_END:
-                justify_offset = extra_column_space;
-                break;
-            case CSS_VALUE_SPACE_BETWEEN:
-                // Space distributed between tracks (first and last track at edges)
-                if (col_count > 1) {
-                    justify_spacing = (float)extra_column_space / (col_count - 1);
-                }
-                break;
-            case CSS_VALUE_SPACE_AROUND:
-                // Equal space around each track (half space at edges)
-                justify_spacing = (float)extra_column_space / col_count;
-                justify_offset = (int)(justify_spacing / 2);
-                break;
-            case CSS_VALUE_SPACE_EVENLY:
-                // Equal space between all tracks including edges
-                justify_spacing = (float)extra_column_space / (col_count + 1);
-                justify_offset = (int)justify_spacing;
-                break;
-            case CSS_VALUE_START:
-            case CSS_VALUE_FLEX_START:
-            default:
-                justify_offset = 0;
-                break;
+    if (col_count > 0) {
+        int32_t justify = grid_layout->justify_content;
+        if (extra_column_space > 0 && radiant::alignment_is_space_distribution(justify)) {
+            // Use space distribution for space-between/around/evenly (only with positive space)
+            radiant::SpaceDistribution dist = radiant::compute_space_distribution(
+                justify, (float)extra_column_space, col_count, 0.0f);
+            justify_offset = (int)dist.gap_before_first;
+            justify_spacing = dist.gap_between;
+        } else {
+            // Use single offset for start/end/center
+            // Also handles negative free space (overflow centering)
+            // Space distribution types fall back to start with negative space
+            int32_t effective_align = justify;
+            if (extra_column_space < 0 && radiant::alignment_is_space_distribution(justify)) {
+                effective_align = CSS_VALUE_START;  // Fall back to start for overflow
+            }
+            justify_offset = (int)radiant::compute_alignment_offset_simple(effective_align, (float)extra_column_space);
         }
     }
     log_debug(" justify-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
               grid_layout->justify_content, extra_column_space, justify_offset, justify_spacing);
 
     // Calculate align-content offset and spacing (vertical)
+    // Using unified alignment functions from layout_alignment.hpp
     int align_offset = 0;
     float align_spacing = 0;  // Additional spacing between tracks
     int extra_row_space = grid_layout->content_height - total_row_size;
     int row_count = grid_layout->computed_row_count;
-    if (extra_row_space > 0 && row_count > 0) {
-        switch (grid_layout->align_content) {
-            case CSS_VALUE_CENTER:
-                align_offset = extra_row_space / 2;
-                break;
-            case CSS_VALUE_END:
-            case CSS_VALUE_FLEX_END:
-                align_offset = extra_row_space;
-                break;
-            case CSS_VALUE_SPACE_BETWEEN:
-                // Space distributed between tracks (first and last track at edges)
-                if (row_count > 1) {
-                    align_spacing = (float)extra_row_space / (row_count - 1);
-                }
-                break;
-            case CSS_VALUE_SPACE_AROUND:
-                // Equal space around each track (half space at edges)
-                align_spacing = (float)extra_row_space / row_count;
-                align_offset = (int)(align_spacing / 2);
-                break;
-            case CSS_VALUE_SPACE_EVENLY:
-                // Equal space between all tracks including edges
-                align_spacing = (float)extra_row_space / (row_count + 1);
-                align_offset = (int)align_spacing;
-                break;
-            case CSS_VALUE_START:
-            case CSS_VALUE_FLEX_START:
-            default:
-                align_offset = 0;
-                break;
+    if (row_count > 0) {
+        int32_t align = grid_layout->align_content;
+        if (extra_row_space > 0 && radiant::alignment_is_space_distribution(align)) {
+            // Use space distribution for space-between/around/evenly (only with positive space)
+            radiant::SpaceDistribution dist = radiant::compute_space_distribution(
+                align, (float)extra_row_space, row_count, 0.0f);
+            align_offset = (int)dist.gap_before_first;
+            align_spacing = dist.gap_between;
+        } else {
+            // Use single offset for start/end/center
+            // Also handles negative free space (overflow centering)
+            // Space distribution types fall back to start with negative space
+            int32_t effective_align = align;
+            if (extra_row_space < 0 && radiant::alignment_is_space_distribution(align)) {
+                effective_align = CSS_VALUE_START;  // Fall back to start for overflow
+            }
+            align_offset = (int)radiant::compute_alignment_offset_simple(effective_align, (float)extra_row_space);
         }
     }
     log_debug(" align-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
@@ -252,13 +230,13 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
         // Set item position and size (relative to parent's border box, per Radiant coordinate system)
         float new_x = container_offset_x + item_x;
         float new_y = container_offset_y + item_y;
-        
+
         // Store base track position (before alignment) for later re-alignment
         if (item->gi) {
             item->gi->track_base_x = new_x;
             item->gi->track_base_y = new_y;
         }
-        
+
         log_debug(" Assigning item %d: x=%.0f (%d+%d), y=%.0f, width=%d, height=%d\n",
                i, new_x, container_offset_x, item_x, new_y, item_width, item_height);
         log_debug(" Before assignment - item->x=%.0f, item->y=%.0f, item=%p\n", item->x, item->y, (void*)item);
@@ -315,14 +293,55 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     int available_height = item->gi->track_area_height;
 
     // Check if item has aspect-ratio constraint
-    float aspect_ratio = (item->fi && item->fi->aspect_ratio > 0) ? item->fi->aspect_ratio : 0;
+    // IMPORTANT: fi and gi are in a union - for grid items, fi is overwritten by gi
+    // So we need to check specified_style directly for aspect-ratio
+    float aspect_ratio = 0;
+
+    // First check fi (only valid for flex items)
+    if (item->item_prop_type == DomElement::ITEM_PROP_FLEX && item->fi && item->fi->aspect_ratio > 0) {
+        aspect_ratio = item->fi->aspect_ratio;
+    }
+    // For grid items, check specified_style directly
+    else if (item->specified_style) {
+        CssDeclaration* aspect_decl = style_tree_get_declaration(
+            item->specified_style, CSS_PROPERTY_ASPECT_RATIO);
+        if (aspect_decl && aspect_decl->value) {
+            if (aspect_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                aspect_ratio = (float)aspect_decl->value->data.number.value;
+                log_debug("align_grid_item: aspect-ratio from specified_style: %.3f", aspect_ratio);
+            } else if (aspect_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                       aspect_decl->value->data.list.count >= 2) {
+                // Handle "width / height" format - find two numbers in the list
+                double numerator = 0, denominator = 0;
+                bool got_numerator = false, got_denominator = false;
+                for (int i = 0; i < aspect_decl->value->data.list.count && !got_denominator; i++) {
+                    CssValue* v = aspect_decl->value->data.list.values[i];
+                    if (v && v->type == CSS_VALUE_TYPE_NUMBER) {
+                        if (!got_numerator) {
+                            numerator = v->data.number.value;
+                            got_numerator = true;
+                        } else {
+                            denominator = v->data.number.value;
+                            got_denominator = true;
+                        }
+                    }
+                }
+                if (got_numerator && got_denominator && denominator > 0) {
+                    aspect_ratio = (float)(numerator / denominator);
+                    log_debug("align_grid_item: aspect-ratio from specified_style list: %.3f", aspect_ratio);
+                } else if (got_numerator) {
+                    aspect_ratio = (float)numerator;
+                }
+            }
+        }
+    }
     bool has_explicit_width = (item->blk && item->blk->given_width > 0);
     bool has_explicit_height = (item->blk && item->blk->given_height > 0);
     float max_width = (item->blk && item->blk->given_max_width > 0) ? item->blk->given_max_width : 0;
     float max_height = (item->blk && item->blk->given_max_height > 0) ? item->blk->given_max_height : 0;
 
-    log_debug("align_grid_item: base_pos=(%d,%d), aspect_ratio=%.3f, has_explicit_width=%d, has_explicit_height=%d, max_width=%.1f, max_height=%.1f",
-              item->gi->track_base_x, item->gi->track_base_y, aspect_ratio, has_explicit_width, has_explicit_height, max_width, max_height);
+    log_debug("align_grid_item: aspect_ratio=%.6f, available=%dx%d",
+              aspect_ratio, available_width, available_height);
 
     // If aspect-ratio is set, compute the missing dimension
     if (aspect_ratio > 0) {
@@ -373,7 +392,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                           available_height, item->width, item->height);
             }
         }
-        
+
         // Apply max-width/max-height constraints after aspect-ratio calculation
         if (max_width > 0 && item->width > max_width) {
             item->width = max_width;
@@ -386,8 +405,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     }
 
     // Apply justify-self (horizontal alignment)
-    int justify = (item->gi->justify_self != CSS_VALUE_AUTO) ?
-                  item->gi->justify_self : grid_layout->justify_items;
+    // Using unified resolve function from layout_alignment.hpp
+    int justify = radiant::resolve_justify_self(item->gi->justify_self, grid_layout->justify_items);
 
     // For non-stretch alignment, use content width if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size
@@ -400,37 +419,20 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         }
     }
 
-    switch (justify) {
-        case CSS_VALUE_START:
-            // Already positioned at start, use item's intrinsic width
-            break;
-
-        case CSS_VALUE_END:
-            item->x += (available_width - actual_width);
-            break;
-
-        case CSS_VALUE_CENTER:
-            item->x += (available_width - actual_width) / 2;
-            break;
-
-        case CSS_VALUE_STRETCH:
-            // Stretch to fill track area (unless item has explicit width or aspect-ratio)
-            if (!has_explicit_width && aspect_ratio <= 0) {
-                item->width = available_width;
-            }
-            break;
-
-        default:
-            // Default to stretch for grid items (unless item has explicit width or aspect-ratio)
-            if (!has_explicit_width && aspect_ratio <= 0) {
-                item->width = available_width;
-            }
-            break;
+    // Apply horizontal alignment offset
+    float free_width = available_width - actual_width;
+    if (!radiant::alignment_is_stretch(justify)) {
+        item->x += radiant::compute_alignment_offset_simple(justify, free_width);
+    } else {
+        // Stretch to fill track area (unless item has explicit width or aspect-ratio)
+        if (!has_explicit_width && aspect_ratio <= 0) {
+            item->width = available_width;
+        }
     }
 
     // Apply align-self (vertical alignment)
-    int align = (item->gi->align_self_grid != CSS_VALUE_AUTO) ?
-                item->gi->align_self_grid : grid_layout->align_items;
+    // Using unified resolve function from layout_alignment.hpp
+    int align = radiant::resolve_align_self(item->gi->align_self_grid, grid_layout->align_items);
 
     // For non-stretch alignment, use content height if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size
@@ -446,34 +448,17 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         }
     }
 
-    switch (align) {
-        case CSS_VALUE_START:
-            // Already positioned at start, use item's intrinsic height
-            break;
-
-        case CSS_VALUE_END:
-            item->y += (available_height - actual_height);
-            break;
-
-        case CSS_VALUE_CENTER:
-            item->y += (available_height - actual_height) / 2;
-            break;
-
-        case CSS_VALUE_STRETCH:
-            // Stretch to fill track area (unless item has explicit height or aspect-ratio)
-            if (!has_explicit_height && aspect_ratio <= 0) {
-                item->height = available_height;
-            }
-            break;
-
-        default:
-            // Default to stretch for grid items (unless item has explicit height or aspect-ratio)
-            if (!has_explicit_height && aspect_ratio <= 0) {
-                item->height = available_height;
-            }
-            break;
+    // Apply vertical alignment offset
+    float free_height = available_height - actual_height;
+    if (!radiant::alignment_is_stretch(align)) {
+        item->y += radiant::compute_alignment_offset_simple(align, free_height);
+    } else {
+        // Stretch to fill track area (unless item has explicit height or aspect-ratio)
+        if (!has_explicit_height && aspect_ratio <= 0) {
+            item->height = available_height;
+        }
     }
 
-    log_debug("Aligned grid item: justify=%d, align=%d, final_pos=(%d,%d), final_size=%dx%d\n",
+    log_debug("Aligned grid item: justify=%d, align=%d, final_pos=(%.0f,%.0f), final_size=%.0fx%.0f\n",
               justify, align, item->x, item->y, item->width, item->height);
 }

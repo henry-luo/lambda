@@ -157,111 +157,139 @@ int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value,
 }
 
 // Enhanced grid template areas parser
+// Parses CSS grid-template-areas syntax like:
+//   "header header header"
+//   "sidebar main aside"
+//   "footer footer footer"
 void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
-    log_debug("parse_grid_template_areas called with grid_layout=%p, areas_string='%s'\n", grid, areas_string);
-    if (!grid || !areas_string) {
-        log_debug("Early return - grid_layout=%p, areas_string=%p\n", grid, areas_string);
+    log_debug("parse_grid_template_areas: grid=%p, areas='%s'", grid, areas_string ? areas_string : "NULL");
+    if (!grid || !areas_string || areas_string[0] == '\0') {
         return;
     }
 
-    log_debug("grid_layout->grid_areas=%p, allocated_areas=%d\n", grid->grid_areas, grid->allocated_areas);
-    log_debug("Parsing grid template areas: %s\n", areas_string);
-
-    // TEMPORARY: Skip complex parsing to avoid stack overflow
-    log_debug("Skipping grid-template-areas parsing to avoid crash\n");
-    grid->area_count = 0;
-    return;
-
-    // Clear existing areas
+    // Free existing area names before clearing
+    for (int i = 0; i < grid->area_count; i++) {
+        if (grid->grid_areas && grid->grid_areas[i].name) {
+            free(grid->grid_areas[i].name);
+            grid->grid_areas[i].name = nullptr;
+        }
+    }
     grid->area_count = 0;
 
-    // Parse CSS grid-template-areas syntax
-    // Format: "area1 area2 area3" "area4 area5 area6" "area7 area8 area9"
+    // Constants for grid limits
+    const int MAX_GRID_SIZE = 16;   // Support up to 16x16 grids
+    const int MAX_NAME_LEN = 32;    // Area names up to 31 chars
+    const int MAX_AREAS = 32;       // Max unique named areas
 
-    char work_string[512];
-    strncpy(work_string, areas_string, sizeof(work_string) - 1);
-    work_string[sizeof(work_string) - 1] = '\0';
+    // Heap-allocated grid cell storage to avoid stack overflow
+    char*** grid_cells = (char***)calloc(MAX_GRID_SIZE, sizeof(char**));
+    if (!grid_cells) {
+        log_debug("parse_grid_template_areas: allocation failed");
+        return;
+    }
+    for (int r = 0; r < MAX_GRID_SIZE; r++) {
+        grid_cells[r] = (char**)calloc(MAX_GRID_SIZE, sizeof(char*));
+        if (!grid_cells[r]) {
+            // cleanup and return
+            for (int j = 0; j < r; j++) free(grid_cells[j]);
+            free(grid_cells);
+            return;
+        }
+        for (int c = 0; c < MAX_GRID_SIZE; c++) {
+            grid_cells[r][c] = (char*)calloc(MAX_NAME_LEN, sizeof(char));
+        }
+    }
 
-    // Use smaller fixed-size grid to prevent stack overflow
-    const int MAX_GRID_SIZE = 4;
-    const int MAX_NAME_LEN = 8;
-    char grid_cells[4][4][8]; // Max 4x4 grid, 8 char area names
     int rows = 0, cols = 0;
+    const char* p = areas_string;
 
-    // Parse quoted strings (rows)
-    char* row_start = work_string;
-    char* current = work_string;
+    // Parse quoted strings (each quoted string is one row)
+    while (*p && rows < MAX_GRID_SIZE) {
+        // Skip whitespace and find opening quote
+        while (*p && *p != '"') p++;
+        if (!*p) break;
+        p++; // skip opening quote
 
-    while (*current && rows < MAX_GRID_SIZE) {
-        // Find start of quoted string
-        while (*current && *current != '"') current++;
-        if (!*current) break;
-
-        current++; // Skip opening quote
-        char* row_content_start = current;
-
-        // Find end of quoted string
-        while (*current && *current != '"') current++;
-        if (!*current) break;
-
-        *current = '\0'; // Null terminate the row content
-        current++; // Skip closing quote
-
-        // Parse the row content (space-separated area names)
-        char* token = strtok(row_content_start, " \t");
+        // Parse area names within this row
         int col = 0;
+        while (*p && *p != '"' && col < MAX_GRID_SIZE) {
+            // Skip leading whitespace
+            while (*p && *p != '"' && (*p == ' ' || *p == '\t')) p++;
+            if (!*p || *p == '"') break;
 
-        while (token && col < MAX_GRID_SIZE) {
-            strncpy(grid_cells[rows][col], token, MAX_NAME_LEN - 1);
-            grid_cells[rows][col][MAX_NAME_LEN - 1] = '\0';
-            col++;
-            token = strtok(NULL, " \t");
+            // Read area name
+            int name_len = 0;
+            while (*p && *p != '"' && *p != ' ' && *p != '\t' && name_len < MAX_NAME_LEN - 1) {
+                grid_cells[rows][col][name_len++] = *p++;
+            }
+            grid_cells[rows][col][name_len] = '\0';
+
+            if (name_len > 0) {
+                col++;
+            }
         }
 
         if (col > cols) cols = col;
-        rows++;
+        if (col > 0) rows++;
+
+        // Skip to closing quote
+        while (*p && *p != '"') p++;
+        if (*p == '"') p++;
     }
 
-    log_debug("Parsed grid: %d rows x %d columns\n", rows, cols);
+    log_debug("parse_grid_template_areas: parsed %d rows x %d cols", rows, cols);
 
-    // Update grid layout dimensions
+    if (rows == 0 || cols == 0) {
+        // cleanup
+        for (int r = 0; r < MAX_GRID_SIZE; r++) {
+            for (int c = 0; c < MAX_GRID_SIZE; c++) free(grid_cells[r][c]);
+            free(grid_cells[r]);
+        }
+        free(grid_cells);
+        return;
+    }
+
+    // Update grid dimensions from template areas
     grid->computed_row_count = rows;
     grid->computed_column_count = cols;
 
-    // Extract unique areas and calculate their bounds
-    char area_names[8][8]; // Max 8 unique areas
-    int area_count = 0;
+    // Collect unique area names (excluding "." which means empty cell)
+    char** unique_names = (char**)calloc(MAX_AREAS, sizeof(char*));
+    int unique_count = 0;
 
-    // Find all unique area names
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
-            const char* area_name = grid_cells[r][c];
-            if (strlen(area_name) == 0 || strcmp(area_name, ".") == 0) continue;
+            const char* name = grid_cells[r][c];
+            if (!name[0] || strcmp(name, ".") == 0) continue;
 
-            // Check if we already have this area name
+            // Check if already in unique list
             bool found = false;
-            for (int i = 0; i < area_count; i++) {
-                if (strcmp(area_names[i], area_name) == 0) {
+            for (int i = 0; i < unique_count; i++) {
+                if (strcmp(unique_names[i], name) == 0) {
                     found = true;
                     break;
                 }
             }
-
-            if (!found && area_count < 8) {
-                strncpy(area_names[area_count], area_name, 7);
-                area_names[area_count][7] = '\0';
-                area_count++;
+            if (!found && unique_count < MAX_AREAS) {
+                unique_names[unique_count] = strdup(name);
+                unique_count++;
             }
         }
     }
 
-    // Calculate bounds for each area
-    for (int i = 0; i < area_count && grid->area_count < grid->allocated_areas; i++) {
-        const char* area_name = area_names[i];
+    // Ensure we have enough space for areas
+    if (grid->allocated_areas < unique_count) {
+        grid->grid_areas = (GridArea*)realloc(grid->grid_areas, unique_count * sizeof(GridArea));
+        grid->allocated_areas = unique_count;
+    }
+
+    // Calculate bounds for each unique area
+    for (int i = 0; i < unique_count; i++) {
+        const char* area_name = unique_names[i];
         int min_row = rows, max_row = -1;
         int min_col = cols, max_col = -1;
 
-        // Find the bounding rectangle for this area
+        // Find bounding box
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
                 if (strcmp(grid_cells[r][c], area_name) == 0) {
@@ -273,49 +301,46 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
             }
         }
 
-        // Validate that the area forms a rectangle
+        // Validate rectangle (all cells in bounding box must have same name)
         bool is_rectangle = true;
         for (int r = min_row; r <= max_row && is_rectangle; r++) {
             for (int c = min_col; c <= max_col && is_rectangle; c++) {
                 if (strcmp(grid_cells[r][c], area_name) != 0) {
                     is_rectangle = false;
-                    log_debug("Warning: Area '%s' is not rectangular\n", area_name);
+                    log_debug("parse_grid_template_areas: area '%s' is not rectangular", area_name);
                 }
             }
         }
 
         if (is_rectangle && min_row <= max_row && min_col <= max_col) {
-            log_debug("Creating area '%s' - bounds: row %d-%d, col %d-%d\n", area_name, min_row, max_row, min_col, max_col);
-            log_debug("area_count=%d, allocated_areas=%d\n", grid->area_count, grid->allocated_areas);
-
-            // Create the area (convert to 1-based indexing)
-            GridArea area;
-            log_debug("area_name pointer=%p\n", area_name);
-            if (!area_name) {
-                log_debug("ERROR: area_name is NULL!\n");
-                continue;
-            }
-            log_debug("About to strncpy area_name='%s'\n", area_name);
-            strncpy(area.name, area_name, sizeof(area.name) - 1);
-            area.name[sizeof(area.name) - 1] = '\0';
-            log_debug("strncpy completed\n");
-            area.row_start = min_row + 1;
-            area.row_end = max_row + 2;
-            area.column_start = min_col + 1;
-            area.column_end = max_col + 2;
-
-            log_debug("About to assign area to grid_areas[%d]\n", grid->area_count);
-            grid->grid_areas[grid->area_count] = area;
-            log_debug("Area assigned successfully\n");
+            GridArea* area = &grid->grid_areas[grid->area_count];
+            // Allocate and copy name (GridArea.name is char*)
+            area->name = strdup(area_name);
+            // Convert to 1-based CSS grid line numbers
+            area->row_start = min_row + 1;
+            area->row_end = max_row + 2;      // +2 because end line is exclusive
+            area->column_start = min_col + 1;
+            area->column_end = max_col + 2;
             grid->area_count++;
 
-            log_debug("Created area '%s': rows %d-%d, columns %d-%d\n",
-                     area_name, area.row_start, area.row_end - 1,
-                     area.column_start, area.column_end - 1);
+            log_debug("parse_grid_template_areas: area '%s' -> rows %d-%d, cols %d-%d",
+                      area_name, area->row_start, area->row_end, area->column_start, area->column_end);
         }
     }
 
-    log_debug("Successfully parsed %d grid areas\n", grid->area_count);
+    // Cleanup
+    for (int i = 0; i < unique_count; i++) {
+        free(unique_names[i]);
+    }
+    free(unique_names);
+
+    for (int r = 0; r < MAX_GRID_SIZE; r++) {
+        for (int c = 0; c < MAX_GRID_SIZE; c++) free(grid_cells[r][c]);
+        free(grid_cells[r]);
+    }
+    free(grid_cells);
+
+    log_debug("parse_grid_template_areas: successfully parsed %d areas", grid->area_count);
 }
 
 // Resolve grid template areas
@@ -363,21 +388,21 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         if (is_row_axis) {
             // Use pre-computed height measurements if available
             log_debug("Checking pre-computed height for %s (gi=%p): min=%.1f, max=%.1f, has_measured=%d",
-                      item->node_name(), item->gi, 
+                      item->node_name(), item->gi,
                       item->gi->measured_min_height, item->gi->measured_max_height,
                       item->gi->has_measured_size);
             if (item->gi->has_measured_size && (item->gi->measured_min_height > 0 || item->gi->measured_max_height > 0)) {
                 sizes.min_content = item->gi->measured_min_height;
                 sizes.max_content = item->gi->measured_max_height;
-                
+
                 // Don't force minimum height - empty items should have 0 height
                 if (sizes.max_content < sizes.min_content) {
                     sizes.max_content = sizes.min_content;
                 }
-                
+
                 log_debug("Using pre-computed height for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
-                
+
                 // Apply height constraints from BlockProp
                 if (item->blk) {
                     if (item->blk->given_min_height > 0) {
@@ -394,15 +419,15 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             if (item->gi->measured_min_width > 0 || item->gi->measured_max_width > 0) {
                 sizes.min_content = item->gi->measured_min_width;
                 sizes.max_content = item->gi->measured_max_width;
-                
+
                 // Don't force minimum width - empty items should have 0 width
                 if (sizes.max_content < sizes.min_content) {
                     sizes.max_content = sizes.min_content;
                 }
-                
+
                 log_debug("Using pre-computed width for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
-                
+
                 // Apply width constraints from BlockProp
                 if (item->blk) {
                     if (item->blk->given_min_width > 0) {
@@ -418,32 +443,29 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     }
 
     // Fallback: Use unified intrinsic sizing API if layout context is available
-    // ViewBlock inherits from DomNode through the chain: ViewBlock -> ViewSpan -> ViewGroup -> DomElement -> DomNode
-    DomNode* node = (DomNode*)item;
-    if (lycon && node) {
+    if (lycon) {
+        // Determine available space for measurement
+        AvailableSpace available;
+
         if (is_row_axis) {
-            // For row axis, we're measuring height
-            // Height depends on width, so we need to determine the correct width to use:
-            // 1. If item->width is already set, use it
-            // 2. Otherwise, try to calculate from computed column tracks (if sized)
-            // 3. For FR tracks (computed_size == 0), estimate from container width
-            // 4. Fall back to a reasonable estimate
-            int width = 200; // Default fallback
-            
+            // For row axis (height measurement), we need to determine the width constraint
+            // Height depends on width due to text wrapping
+            float width = 200; // Default fallback
+
             if (item->width > 0) {
                 // Item already has a width (e.g., from previous layout pass)
-                width = (int)item->width;
+                width = item->width;
             } else if (item->gi && lycon->grid_container) {
                 // Calculate width from computed column tracks
                 GridContainerLayout* grid = lycon->grid_container;
                 int col_start = item->gi->computed_grid_column_start - 1;
                 int col_end = item->gi->computed_grid_column_end - 1;
-                
+
                 // Clamp to valid ranges
                 if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
                     int span_width = 0;
                     bool has_unsized_fr_track = false;
-                    
+
                     for (int c = col_start; c < col_end; c++) {
                         int track_size = grid->computed_columns[c].computed_size;
                         if (track_size > 0) {
@@ -456,28 +478,27 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                             has_unsized_fr_track = true;
                         }
                     }
-                    
+
                     if (span_width > 0 && !has_unsized_fr_track) {
                         // All tracks are sized, use actual span width
                         int box_adjustment = 0;
                         if (item->bound) {
                             box_adjustment += item->bound->padding.left + item->bound->padding.right;
                             if (item->bound->border) {
-                                box_adjustment += item->bound->border->width.left + item->bound->border->width.right;
+                                box_adjustment += (int)(item->bound->border->width.left + item->bound->border->width.right);
                             }
                         }
-                        width = span_width - box_adjustment;
+                        width = (float)(span_width - box_adjustment);
                         if (width < 10) width = 10;
-                        log_debug("Row sizing: using column span width %d for %s (cols %d-%d)",
+                        log_debug("Row sizing: using column span width %.1f for %s (cols %d-%d)",
                                   width, item->node_name(), col_start + 1, col_end);
                     } else if (grid->content_width > 0) {
                         // FR tracks not sized yet - estimate from container width
-                        // For a simple estimate, divide container width by column count
                         int col_count = grid->computed_column_count > 0 ? grid->computed_column_count : 1;
                         int total_gaps = (col_count - 1) * (int)grid->column_gap;
                         int span_cols = col_end - col_start;
-                        width = ((grid->content_width - total_gaps) * span_cols) / col_count;
-                        
+                        width = (float)((grid->content_width - total_gaps) * span_cols) / col_count;
+
                         // Subtract item's own padding/border
                         if (item->bound) {
                             width -= item->bound->padding.left + item->bound->padding.right;
@@ -486,29 +507,28 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                             }
                         }
                         if (width < 10) width = 10;
-                        log_debug("Row sizing: estimating width %d for %s (FR tracks, container=%d, cols=%d)",
+                        log_debug("Row sizing: estimating width %.1f for %s (FR tracks, container=%d, cols=%d)",
                                   width, item->node_name(), grid->content_width, col_count);
                     }
                 }
             }
-            
-            sizes.min_content = calculate_min_content_height(lycon, node, width);
-            sizes.max_content = calculate_max_content_height(lycon, node, width);
 
-            // Don't force minimum height - empty items should have 0 height
-            // The grid algorithm will handle minimum track sizes based on content
-            if (sizes.max_content < sizes.min_content) {
-                sizes.max_content = sizes.min_content;
-            }
+            // Create available space with definite width for height calculation
+            available = AvailableSpace::make_width_definite(width);
         } else {
-            // For column axis, we're measuring width
-            sizes.min_content = calculate_min_content_width(lycon, node);
-            sizes.max_content = calculate_max_content_width(lycon, node);
+            // For column axis (width measurement), use max-content
+            available = AvailableSpace::make_max_content();
+        }
 
-            // Don't force minimum width - empty items should have 0 width
-            if (sizes.max_content < sizes.min_content) {
-                sizes.max_content = sizes.min_content;
-            }
+        // Use unified API to measure all sizes
+        IntrinsicSizesBidirectional all_sizes = measure_intrinsic_sizes(lycon, item, available);
+
+        // Extract the axis we need
+        sizes = intrinsic_sizes_for_axis(all_sizes, !is_row_axis);
+
+        // Ensure max >= min
+        if (sizes.max_content < sizes.min_content) {
+            sizes.max_content = sizes.min_content;
         }
     } else {
         // Fallback: use item dimensions if no layout context
