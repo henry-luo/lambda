@@ -414,6 +414,37 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
         return info;
     }
     
+    // Map type - this could be an ICCBased stream or similar
+    if (type == LMD_TYPE_MAP) {
+        Map* cs_map = cs_item.map;
+        if (!cs_map) return nullptr;
+        
+        // Check if it's an ICCBased stream by looking for /N key
+        String* n_key = input_create_string(input, "N");
+        Item n_item = {.item = map_get(cs_map, {.item = s2it(n_key)}).item};
+        
+        if (n_item.item != ITEM_NULL) {
+            // It's an ICCBased stream
+            info->type = PDF_CS_ICCBASED;
+            if (get_type_id(n_item) == LMD_TYPE_INT) {
+                info->icc_n = n_item.int_val;
+            } else if (get_type_id(n_item) == LMD_TYPE_FLOAT) {
+                info->icc_n = (int)n_item.get_double();
+            } else {
+                info->icc_n = 3;  // Default to RGB
+            }
+            info->num_components = info->icc_n;
+            log_debug("Map color space: ICCBased with N=%d", info->icc_n);
+            return info;
+        }
+        
+        // Unknown map type - default to DeviceGray (common for single-component spaces)
+        log_debug("Unknown map color space, defaulting to DeviceGray");
+        info->type = PDF_CS_DEVICE_GRAY;
+        info->num_components = 1;
+        return info;
+    }
+    
     // Array color space (e.g., [/Indexed /DeviceRGB 255 <data>])
     if (type == LMD_TYPE_ARRAY) {
         Array* cs_array = cs_item.array;
@@ -1222,7 +1253,6 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
         case PDF_OP_f:
         case PDF_OP_F:
             // Fill path
-            log_debug("Fill path");
             create_rect_view(input, view_pool, parent, parser, PAINT_FILL_ONLY);
             break;
 
@@ -1952,6 +1982,17 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
     double x = parser->state.tm[4];  // e component (x translation)
     double y = parser->state.tm[5];  // f component (y translation)
 
+    // Calculate effective font size from text matrix
+    // The text matrix encodes the font scaling. The effective font size is:
+    // font_size * sqrt(tm[0]^2 + tm[1]^2) for the horizontal component
+    // For typical PDFs without rotation, this simplifies to font_size * abs(tm[0])
+    double tm_scale = sqrt(parser->state.tm[0] * parser->state.tm[0] +
+                          parser->state.tm[1] * parser->state.tm[1]);
+    double effective_font_size = parser->state.font_size * tm_scale;
+    
+    // Ensure minimum font size
+    if (effective_font_size < 1.0) effective_font_size = 12.0;
+
     // Convert PDF coordinates (bottom-left origin, Y up) to screen coordinates (top-left origin, Y down)
     // For text, the PDF y is the baseline position from the bottom
     // Screen y = page_height - pdf_y
@@ -1968,7 +2009,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
     text_view->x = 0;  // Position is now in TextRect, not on ViewText
     text_view->y = 0;
     text_view->width = 0;  // Will be calculated during rendering
-    text_view->height = (float)parser->state.font_size;
+    text_view->height = (float)effective_font_size;
 
     // Set DomText fields directly on ViewText (since ViewText extends DomText)
     text_view->node_type = DOM_NODE_TEXT;
@@ -1984,21 +2025,21 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
         rect->x = (float)x;
         rect->y = (float)screen_y;
         rect->width = 0;   // Width will be calculated during rendering
-        rect->height = (float)parser->state.font_size;
+        rect->height = (float)effective_font_size;
         rect->start_index = 0;
         rect->length = text->len;
         rect->next = nullptr;
         text_view->rect = rect;
     }
 
-    log_debug("Created text view at PDF(%.2f, %.2f) -> screen(%.2f, %.2f): '%s'",
-             x, y, (float)x, (float)screen_y, text->chars);
+    log_debug("Created text view at PDF(%.2f, %.2f) -> screen(%.2f, %.2f) font_size=%.2f: '%s'",
+             x, y, (float)x, (float)screen_y, effective_font_size, text->chars);
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
         FontProp* font = create_font_from_pdf(view_pool,
                                               parser->state.font_name->chars,
-                                              parser->state.font_size);
+                                              effective_font_size);
         if (font) {
             text_view->font = font;
         }
