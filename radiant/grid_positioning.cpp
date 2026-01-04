@@ -53,17 +53,23 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     float justify_spacing = 0;  // Additional spacing between tracks
     int extra_column_space = grid_layout->content_width - total_column_size;
     int col_count = grid_layout->computed_column_count;
-    if (extra_column_space > 0 && col_count > 0) {
+    if (col_count > 0) {
         int32_t justify = grid_layout->justify_content;
-        if (radiant::alignment_is_space_distribution(justify)) {
-            // Use space distribution for space-between/around/evenly
+        if (extra_column_space > 0 && radiant::alignment_is_space_distribution(justify)) {
+            // Use space distribution for space-between/around/evenly (only with positive space)
             radiant::SpaceDistribution dist = radiant::compute_space_distribution(
                 justify, (float)extra_column_space, col_count, 0.0f);
             justify_offset = (int)dist.gap_before_first;
             justify_spacing = dist.gap_between;
         } else {
             // Use single offset for start/end/center
-            justify_offset = (int)radiant::compute_alignment_offset_simple(justify, (float)extra_column_space);
+            // Also handles negative free space (overflow centering)
+            // Space distribution types fall back to start with negative space
+            int32_t effective_align = justify;
+            if (extra_column_space < 0 && radiant::alignment_is_space_distribution(justify)) {
+                effective_align = CSS_VALUE_START;  // Fall back to start for overflow
+            }
+            justify_offset = (int)radiant::compute_alignment_offset_simple(effective_align, (float)extra_column_space);
         }
     }
     log_debug(" justify-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
@@ -75,17 +81,23 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     float align_spacing = 0;  // Additional spacing between tracks
     int extra_row_space = grid_layout->content_height - total_row_size;
     int row_count = grid_layout->computed_row_count;
-    if (extra_row_space > 0 && row_count > 0) {
+    if (row_count > 0) {
         int32_t align = grid_layout->align_content;
-        if (radiant::alignment_is_space_distribution(align)) {
-            // Use space distribution for space-between/around/evenly
+        if (extra_row_space > 0 && radiant::alignment_is_space_distribution(align)) {
+            // Use space distribution for space-between/around/evenly (only with positive space)
             radiant::SpaceDistribution dist = radiant::compute_space_distribution(
                 align, (float)extra_row_space, row_count, 0.0f);
             align_offset = (int)dist.gap_before_first;
             align_spacing = dist.gap_between;
         } else {
             // Use single offset for start/end/center
-            align_offset = (int)radiant::compute_alignment_offset_simple(align, (float)extra_row_space);
+            // Also handles negative free space (overflow centering)
+            // Space distribution types fall back to start with negative space
+            int32_t effective_align = align;
+            if (extra_row_space < 0 && radiant::alignment_is_space_distribution(align)) {
+                effective_align = CSS_VALUE_START;  // Fall back to start for overflow
+            }
+            align_offset = (int)radiant::compute_alignment_offset_simple(effective_align, (float)extra_row_space);
         }
     }
     log_debug(" align-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
