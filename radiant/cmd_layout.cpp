@@ -79,7 +79,7 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
-void parse_pdf(Input* input, const char* pdf_data);  // From input-pdf.cpp
+void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
@@ -1410,17 +1410,18 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
     char* pdf_filepath = url_to_local_path(pdf_url);
     log_info("[TIMING] Loading PDF document: %s", pdf_filepath);
 
-    // Step 1: Read PDF file content
+    // Step 1: Read PDF file content (binary mode for proper handling)
     auto step1_start = std::chrono::high_resolution_clock::now();
-    char* pdf_content = read_text_file(pdf_filepath);
+    size_t pdf_size = 0;
+    char* pdf_content = read_binary_file(pdf_filepath, &pdf_size);
     if (!pdf_content) {
         log_error("Failed to read PDF file: %s", pdf_filepath);
         return nullptr;
     }
 
     auto step1_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 1 - Read PDF file: %.1fms",
-        std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+    log_info("[TIMING] Step 1 - Read PDF file: %.1fms (%zu bytes)",
+        std::chrono::duration<double, std::milli>(step1_end - step1_start).count(), pdf_size);
 
     // Step 2: Create Input structure and parse PDF
     auto step2_start = std::chrono::high_resolution_clock::now();
@@ -1431,8 +1432,8 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    // Parse PDF content
-    parse_pdf(input, pdf_content);
+    // Parse PDF content with explicit size
+    parse_pdf(input, pdf_content, pdf_size);
     free(pdf_content);  // Done with raw content
 
     // Check if parsing succeeded
