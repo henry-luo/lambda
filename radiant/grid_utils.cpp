@@ -363,21 +363,21 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         if (is_row_axis) {
             // Use pre-computed height measurements if available
             log_debug("Checking pre-computed height for %s (gi=%p): min=%.1f, max=%.1f, has_measured=%d",
-                      item->node_name(), item->gi, 
+                      item->node_name(), item->gi,
                       item->gi->measured_min_height, item->gi->measured_max_height,
                       item->gi->has_measured_size);
             if (item->gi->has_measured_size && (item->gi->measured_min_height > 0 || item->gi->measured_max_height > 0)) {
                 sizes.min_content = item->gi->measured_min_height;
                 sizes.max_content = item->gi->measured_max_height;
-                
+
                 // Don't force minimum height - empty items should have 0 height
                 if (sizes.max_content < sizes.min_content) {
                     sizes.max_content = sizes.min_content;
                 }
-                
+
                 log_debug("Using pre-computed height for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
-                
+
                 // Apply height constraints from BlockProp
                 if (item->blk) {
                     if (item->blk->given_min_height > 0) {
@@ -394,15 +394,15 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
             if (item->gi->measured_min_width > 0 || item->gi->measured_max_width > 0) {
                 sizes.min_content = item->gi->measured_min_width;
                 sizes.max_content = item->gi->measured_max_width;
-                
+
                 // Don't force minimum width - empty items should have 0 width
                 if (sizes.max_content < sizes.min_content) {
                     sizes.max_content = sizes.min_content;
                 }
-                
+
                 log_debug("Using pre-computed width for %s: min=%.1f, max=%.1f",
                           item->node_name(), sizes.min_content, sizes.max_content);
-                
+
                 // Apply width constraints from BlockProp
                 if (item->blk) {
                     if (item->blk->given_min_width > 0) {
@@ -421,12 +421,12 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     if (lycon) {
         // Determine available space for measurement
         AvailableSpace available;
-        
+
         if (is_row_axis) {
             // For row axis (height measurement), we need to determine the width constraint
             // Height depends on width due to text wrapping
             float width = 200; // Default fallback
-            
+
             if (item->width > 0) {
                 // Item already has a width (e.g., from previous layout pass)
                 width = item->width;
@@ -435,12 +435,12 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                 GridContainerLayout* grid = lycon->grid_container;
                 int col_start = item->gi->computed_grid_column_start - 1;
                 int col_end = item->gi->computed_grid_column_end - 1;
-                
+
                 // Clamp to valid ranges
                 if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
                     int span_width = 0;
                     bool has_unsized_fr_track = false;
-                    
+
                     for (int c = col_start; c < col_end; c++) {
                         int track_size = grid->computed_columns[c].computed_size;
                         if (track_size > 0) {
@@ -453,7 +453,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                             has_unsized_fr_track = true;
                         }
                     }
-                    
+
                     if (span_width > 0 && !has_unsized_fr_track) {
                         // All tracks are sized, use actual span width
                         int box_adjustment = 0;
@@ -473,7 +473,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                         int total_gaps = (col_count - 1) * (int)grid->column_gap;
                         int span_cols = col_end - col_start;
                         width = (float)((grid->content_width - total_gaps) * span_cols) / col_count;
-                        
+
                         // Subtract item's own padding/border
                         if (item->bound) {
                             width -= item->bound->padding.left + item->bound->padding.right;
@@ -487,20 +487,20 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                     }
                 }
             }
-            
+
             // Create available space with definite width for height calculation
             available = AvailableSpace::make_width_definite(width);
         } else {
             // For column axis (width measurement), use max-content
             available = AvailableSpace::make_max_content();
         }
-        
+
         // Use unified API to measure all sizes
         IntrinsicSizesBidirectional all_sizes = measure_intrinsic_sizes(lycon, item, available);
-        
+
         // Extract the axis we need
         sizes = intrinsic_sizes_for_axis(all_sizes, !is_row_axis);
-        
+
         // Ensure max >= min
         if (sizes.max_content < sizes.min_content) {
             sizes.max_content = sizes.min_content;
