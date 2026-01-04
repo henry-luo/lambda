@@ -10,6 +10,11 @@ extern "C" {
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <stdlib.h>
+#include <string>
+
+// WOFF2 decompression support
+#include <woff2/decode.h>
+#include <woff2/output.h>
 
 // Font face cache entry - matches the one in font.cpp
 typedef struct FontfaceEntry {
@@ -462,6 +467,58 @@ static char* create_data_uri_hash_key(const char* data_uri) {
     return key;
 }
 
+// Check if data is WOFF2 format by checking magic number
+static bool is_woff2_data(const uint8_t* data, size_t size) {
+    // WOFF2 signature: 'wOF2' (0x774F4632)
+    if (size < 4) return false;
+    return data[0] == 'w' && data[1] == 'O' && data[2] == 'F' && data[3] == '2';
+}
+
+// Decompress WOFF2 to TTF/OTF font data
+// Returns newly allocated buffer with decompressed font, or NULL on failure
+// Caller is responsible for freeing the returned buffer
+static uint8_t* woff2_decompress_to_ttf(const uint8_t* woff2_data, size_t woff2_size, size_t* out_size) {
+    if (!woff2_data || woff2_size == 0 || !out_size) {
+        return NULL;
+    }
+
+    *out_size = 0;
+
+    // Compute final decompressed size
+    size_t ttf_size = woff2::ComputeWOFF2FinalSize(woff2_data, woff2_size);
+    if (ttf_size == 0) {
+        clog_error(font_log, "WOFF2: ComputeWOFF2FinalSize failed or returned 0");
+        return NULL;
+    }
+
+    log_debug("WOFF2: decompressing %zu bytes to estimated %zu bytes", woff2_size, ttf_size);
+
+    // Use std::string as output buffer (WOFF2StringOut handles resizing)
+    std::string ttf_buffer;
+    ttf_buffer.reserve(ttf_size);
+    woff2::WOFF2StringOut output(&ttf_buffer);
+
+    // Perform decompression
+    if (!woff2::ConvertWOFF2ToTTF(woff2_data, woff2_size, &output)) {
+        clog_error(font_log, "WOFF2: ConvertWOFF2ToTTF decompression failed");
+        return NULL;
+    }
+
+    // Allocate output buffer and copy data
+    size_t actual_size = ttf_buffer.size();
+    uint8_t* result = (uint8_t*)malloc(actual_size);
+    if (!result) {
+        clog_error(font_log, "WOFF2: failed to allocate %zu bytes for decompressed font", actual_size);
+        return NULL;
+    }
+
+    memcpy(result, ttf_buffer.data(), actual_size);
+    *out_size = actual_size;
+
+    log_debug("WOFF2: successfully decompressed to %zu bytes TTF", actual_size);
+    return result;
+}
+
 // Load font from data URI - decodes base64 and uses FT_New_Memory_Face
 // Caches the decoded font data to avoid re-decoding
 FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp* style) {
@@ -513,9 +570,9 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
         log_debug("load_font_from_data_uri: cache miss, decoding data URI");
 
         char mime_type[128] = {0};
-        font_data = parse_data_uri(data_uri, mime_type, sizeof(mime_type), &font_data_size);
+        uint8_t* raw_data = parse_data_uri(data_uri, mime_type, sizeof(mime_type), &font_data_size);
 
-        if (!font_data || font_data_size == 0) {
+        if (!raw_data || font_data_size == 0) {
             clog_error(font_log, "Failed to decode data URI font data");
             free(hash_key);
             return NULL;
@@ -523,7 +580,28 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
 
         log_debug("load_font_from_data_uri: decoded %zu bytes (mime: %s)", font_data_size, mime_type);
 
-        // Cache the decoded data for future use
+        // Check if this is WOFF2 format and decompress if needed
+        if (is_woff2_data(raw_data, font_data_size)) {
+            log_debug("load_font_from_data_uri: detected WOFF2 format, decompressing...");
+            size_t ttf_size = 0;
+            uint8_t* ttf_data = woff2_decompress_to_ttf(raw_data, font_data_size, &ttf_size);
+            free(raw_data);  // free the WOFF2 data
+
+            if (!ttf_data || ttf_size == 0) {
+                clog_error(font_log, "WOFF2 decompression failed");
+                free(hash_key);
+                return NULL;
+            }
+
+            font_data = ttf_data;
+            font_data_size = ttf_size;
+            log_debug("load_font_from_data_uri: WOFF2 decompressed to %zu bytes TTF", font_data_size);
+        } else {
+            // Not WOFF2 - use raw data directly (TTF/OTF)
+            font_data = raw_data;
+        }
+
+        // Cache the decoded/decompressed data for future use
         // Note: We must keep font_data alive as long as FreeType might use it
         DataUriFontCacheEntry new_entry = {
             .uri_hash = hash_key,  // transfer ownership
