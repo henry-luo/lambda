@@ -229,6 +229,21 @@
             "link": "static"
         },
         {
+            "name": "woff2dec",
+            "description": "WOFF2 font decompression library",
+            "include": "/opt/homebrew/include/woff2",
+            "lib": "-lwoff2dec",
+            "libpath": "/opt/homebrew/lib",
+            "link": "dynamic"
+        },
+        {
+            "name": "woff2common",
+            "description": "WOFF2 common library",
+            "lib": "-lwoff2common",
+            "libpath": "/opt/homebrew/lib",
+            "link": "dynamic"
+        },
+        {
             "name": "ThorVG",
             "include": "/usr/local/include",
             "lib": "/usr/local/lib/libthorvg.a",
