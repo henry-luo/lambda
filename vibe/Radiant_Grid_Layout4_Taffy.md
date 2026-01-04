@@ -13,18 +13,18 @@ This proposal documents learnings from analyzing Taffy (a Rust CSS layout librar
 
 ## Implementation Status Summary
 
-| Phase | Description | Status | Notes |
-|-------|-------------|--------|-------|
-| Phase 1 | Foundation Types | ✅ **COMPLETE** | `available_space.hpp`, `layout_mode.hpp`, `layout_cache.hpp` created |
-| Phase 1b | Grid Track Sizing Algorithm | ✅ **COMPLETE** | CSS Grid §11.4-11.8 fully implemented in `grid_sizing_algorithm.hpp` |
-| Phase 1c | Grid Shrink-to-Fit | ✅ **COMPLETE** | Absolutely positioned grids shrink-to-fit content |
-| Phase 1d | Grid-Specific Taffy Enhancements | ✅ **COMPLETE** | ItemBatcher, space distribution fix, 0fr handling, alignment/baseline helpers |
-| Phase 2 | Unified Alignment | ✅ **COMPLETE** | `layout_alignment.hpp/cpp` - unified alignment for flex/grid |
-| Phase 4.2 | Unified Intrinsic Sizing API | ✅ **COMPLETE** | `measure_intrinsic_sizes()` unified entry point |
-| Phase 4.2b | AvailableSpace Consistency | ✅ **COMPLETE** | Block and table layout now use `lycon->available_space` |
-| Phase 3 | Run Mode Integration | ✅ **COMPLETE** | Cache lookup + early bailout in `layout_block()` |
-| Phase 4 | Layout Cache Integration | ✅ **COMPLETE** | 9-slot cache in block/flex/grid layout |
-| Phase 5-6 | FlexGridItem/Context Unification | ⏳ Planned | |
+| Phase      | Description                      | Status         | Notes                                                                         |
+| ---------- | -------------------------------- | -------------- | ----------------------------------------------------------------------------- |
+| Phase 1    | Foundation Types                 | ✅ **COMPLETE** | `available_space.hpp`, `layout_mode.hpp`, `layout_cache.hpp` created          |
+| Phase 1b   | Grid Track Sizing Algorithm      | ✅ **COMPLETE** | CSS Grid §11.4-11.8 fully implemented in `grid_sizing_algorithm.hpp`          |
+| Phase 1c   | Grid Shrink-to-Fit               | ✅ **COMPLETE** | Absolutely positioned grids shrink-to-fit content                             |
+| Phase 1d   | Grid-Specific Taffy Enhancements | ✅ **COMPLETE** | ItemBatcher, space distribution fix, 0fr handling, alignment/baseline helpers |
+| Phase 2    | Unified Alignment                | ✅ **COMPLETE** | `layout_alignment.hpp/cpp` - unified alignment for flex/grid                  |
+| Phase 4.2  | Unified Intrinsic Sizing API     | ✅ **COMPLETE** | `measure_intrinsic_sizes()` unified entry point                               |
+| Phase 4.2b | AvailableSpace Consistency       | ✅ **COMPLETE** | Block and table layout now use `lycon->available_space`                       |
+| Phase 3    | Run Mode Integration             | ✅ **COMPLETE** | Cache lookup + early bailout in `layout_block()`                              |
+| Phase 4    | Layout Cache Integration         | ✅ **COMPLETE** | 9-slot cache in block/flex/grid layout                                        |
+| Phase 5-6  | FlexGridItem/Context Unification | ❌ Cancelled    | Decided not to implement - existing flex/grid separation works well           |
 
 **Current Test Status:** 1665/1665 baseline layout tests passing (100%)
 

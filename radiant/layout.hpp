@@ -6,7 +6,6 @@
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
-#include "flex_grid_context.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 
@@ -201,11 +200,6 @@ typedef struct LayoutContext {
     // StackingBox* stacking;  // current stacking context for positioned elements
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
-
-    // Unified flex/grid context (Taffy-inspired, for incremental migration)
-    // When non-null, layout uses FlexGridItem array for item state instead of
-    // FlexItemProp/GridItemProp stored directly on views
-    radiant::FlexGridContext* flex_grid_context;
 
     DomDocument* doc;
     UiContext* ui_context;
