@@ -202,19 +202,111 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element);
 
 // ============================================================================
-// Future Integration Points
+// Unified Intrinsic Sizing API (Section 4.2)
+// ============================================================================
+
+/**
+ * IntrinsicSizesBidirectional - Complete intrinsic sizes for both axes
+ *
+ * This structure contains min-content and max-content sizes for both
+ * width and height in a single measurement result.
+ */
+struct IntrinsicSizesBidirectional {
+    float min_content_width;   // Width of longest unbreakable segment
+    float max_content_width;   // Width without any wrapping
+    float min_content_height;  // Height at min-content width
+    float max_content_height;  // Height at max-content width
+};
+
+/**
+ * Unified intrinsic size measurement entry point.
+ *
+ * This is the SINGLE ENTRY POINT for measuring intrinsic sizes,
+ * used by flex, grid, and table layouts. It measures both width
+ * and height intrinsic sizes in a single call.
+ *
+ * The available_space parameter provides cross-axis constraints:
+ * - For width measurement: height constraint (if any)
+ * - For height measurement: width constraint (affects text wrapping)
+ *
+ * @param lycon Layout context with font and style information
+ * @param element Element to measure (ViewBlock/DomElement)
+ * @param available_space Available space constraints for measurement (2D)
+ * @return IntrinsicSizesBidirectional with all four intrinsic sizes
+ */
+IntrinsicSizesBidirectional measure_intrinsic_sizes(
+    LayoutContext* lycon,
+    ViewBlock* element,
+    AvailableSpace available_space
+);
+
+/**
+ * Helper to extract width-axis sizes from bidirectional result
+ */
+inline IntrinsicSizes intrinsic_sizes_width(IntrinsicSizesBidirectional sizes) {
+    return {sizes.min_content_width, sizes.max_content_width};
+}
+
+/**
+ * Helper to extract height-axis sizes from bidirectional result
+ */
+inline IntrinsicSizes intrinsic_sizes_height(IntrinsicSizesBidirectional sizes) {
+    return {sizes.min_content_height, sizes.max_content_height};
+}
+
+/**
+ * Helper to extract axis-specific sizes based on direction
+ */
+inline IntrinsicSizes intrinsic_sizes_for_axis(IntrinsicSizesBidirectional sizes, bool is_row_axis) {
+    if (is_row_axis) {
+        return {sizes.min_content_width, sizes.max_content_width};
+    } else {
+        return {sizes.min_content_height, sizes.max_content_height};
+    }
+}
+
+// ============================================================================
+// Table-Specific Intrinsic Sizing
+// ============================================================================
+
+/**
+ * CellWidths - Intrinsic widths for table cell measurement
+ *
+ * This is used by table layout for measuring cell intrinsic widths.
+ * Table cells need both min-content (MCW) and max-content (PCW) widths
+ * for the table column width algorithm.
+ */
+struct CellIntrinsicWidths {
+    float min_width;  // Minimum content width (MCW) - longest word
+    float max_width;  // Preferred/maximum content width (PCW) - no wrapping
+};
+
+/**
+ * Measure table cell intrinsic widths.
+ *
+ * This is a convenience wrapper around measure_intrinsic_sizes() for
+ * table layout. It handles the table-specific measurement context
+ * (infinite available width, proper font setup, etc.).
+ *
+ * @param lycon Layout context
+ * @param cell Table cell to measure
+ * @return CellIntrinsicWidths with min and max content widths
+ */
+CellIntrinsicWidths measure_table_cell_intrinsic_widths(
+    LayoutContext* lycon,
+    ViewBlock* cell
+);
+
+// ============================================================================
+// Backward Compatibility Notes
 // ============================================================================
 //
-// The following areas are candidates for future unification:
+// The following functions remain for backward compatibility:
+// - calculate_min_content_width() - use measure_intrinsic_sizes().min_content_width
+// - calculate_max_content_width() - use measure_intrinsic_sizes().max_content_width
+// - calculate_min_content_height() - use measure_intrinsic_sizes().min_content_height
+// - calculate_max_content_height() - use measure_intrinsic_sizes().max_content_height
+// - measure_element_intrinsic_widths() - use measure_intrinsic_sizes() for width
 //
-// 1. Table Layout (layout_table.cpp):
-//    - measure_cell_intrinsic_width() - can use measure_text_intrinsic_widths()
-//    - measure_cell_minimum_width() - can use min-content calculation
-//
-// 2. Flex Layout (layout_flex_measurement.cpp):
-//    - calculate_item_intrinsic_sizes() - can delegate to this module
-//    - measure_text_content_width() - should share text measurement logic
-//
-// 3. Grid Layout (grid_utils.cpp):
-//    - Grid item sizing should use the same intrinsic size calculations
+// These will be gradually deprecated in favor of the unified API.
 // ============================================================================

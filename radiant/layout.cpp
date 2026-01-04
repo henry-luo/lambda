@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_positioned.hpp"
+#include "layout_cache.hpp"
 #include "font_face.h"
 
 #include <ft2build.h>
@@ -34,6 +35,13 @@ int64_t g_text_layout_count = 0;
 int64_t g_block_layout_count = 0;
 int64_t g_inline_layout_count = 0;
 
+// ============================================================================
+// Layout cache statistics (Taffy-inspired)
+// ============================================================================
+int64_t g_layout_cache_hits = 0;
+int64_t g_layout_cache_misses = 0;
+int64_t g_layout_cache_stores = 0;
+
 void reset_layout_timing() {
     g_style_resolve_time = 0;
     g_text_layout_time = 0;
@@ -48,6 +56,10 @@ void reset_layout_timing() {
     g_text_layout_count = 0;
     g_block_layout_count = 0;
     g_inline_layout_count = 0;
+    // Reset cache statistics
+    g_layout_cache_hits = 0;
+    g_layout_cache_misses = 0;
+    g_layout_cache_stores = 0;
 }
 
 void log_layout_timing_summary() {
@@ -57,6 +69,13 @@ void log_layout_timing_summary() {
         g_block_layout_time, g_block_layout_count);
     log_info("[TIMING] layout breakdown: table=%.1fms, flex=%.1fms, grid=%.1fms",
         g_table_layout_time, g_flex_layout_time, g_grid_layout_time);
+    // Log cache statistics if any cache activity occurred
+    if (g_layout_cache_hits > 0 || g_layout_cache_misses > 0) {
+        int64_t total = g_layout_cache_hits + g_layout_cache_misses;
+        double hit_rate = total > 0 ? (100.0 * g_layout_cache_hits / total) : 0.0;
+        log_info("[CACHE] layout cache: hits=%lld, misses=%lld, stores=%lld, hit_rate=%.1f%%",
+            g_layout_cache_hits, g_layout_cache_misses, g_layout_cache_stores, hit_rate);
+    }
 }
 
 void view_pool_init(ViewTree* tree);
@@ -221,7 +240,7 @@ float calc_normal_line_height(FT_Face face) {
     // Reference: SkScalerContext_FreeType::generateFontMetrics() in Chromium
     TypoMetrics typo = get_os2_typo_metrics(face);
     float leading;
-    
+
     if (typo.valid && typo.use_typo_metrics) {
         // Font has OS/2 table with USE_TYPO_METRICS flag set - use typo metrics
         // This matches Chrome's behavior via Skia on Linux
@@ -229,7 +248,7 @@ float calc_normal_line_height(FT_Face face) {
         descent = typo.descender;
         leading = typo.line_gap;
         log_debug("Using OS/2 typo metrics (USE_TYPO_METRICS=1) for %s", family);
-        
+
         // Round each component individually (Chrome's SkScalarRoundToScalar)
         float rounded_ascent = roundf(ascent);
         float rounded_descent = roundf(descent);
@@ -245,25 +264,25 @@ float calc_normal_line_height(FT_Face face) {
         // by FreeType, losing precision that affects the final rounding.
         // Reference: Skia SkScalerContext_FreeType::generateFontMetrics() in Chromium
         //            Blink SimpleFontData::AscentDescentWithHacks()
-        
+
         float scale = font_size / (float)face->units_per_EM;
         // face->ascender is positive, face->descender is negative
         float raw_ascent = (float)face->ascender * scale;
         float raw_descent = -(float)face->descender * scale;  // make positive
-        
+
         // Compute line gap (leading) from HHEA: height - ascender + descender
         // Note: descender is negative, so height = ascender - descender + line_gap
         int hhea_line_gap = face->height - face->ascender + face->descender;
         float raw_leading = (float)hhea_line_gap * scale;
-        
+
         // Round each component individually (Chrome's SkScalarRoundToScalar)
         float rounded_ascent = roundf(raw_ascent);
         float rounded_descent = roundf(raw_descent);
         float rounded_leading = roundf(raw_leading);
-        
+
         // LineSpacing = ascent + descent + leading (matches Chrome's Blink behavior)
         line_height = rounded_ascent + rounded_descent + rounded_leading;
-        log_debug("Using HHEA metrics (USE_TYPO_METRICS=0) for %s: raw_ascent=%.4f->%.0f, raw_descent=%.4f->%.0f, raw_leading=%.4f->%.0f, line_height=%.0f", 
+        log_debug("Using HHEA metrics (USE_TYPO_METRICS=0) for %s: raw_ascent=%.4f->%.0f, raw_descent=%.4f->%.0f, raw_leading=%.4f->%.0f, line_height=%.0f",
                   family, raw_ascent, rounded_ascent, raw_descent, rounded_descent, raw_leading, rounded_leading, line_height);
     }
 
@@ -322,7 +341,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
             log_debug("line-height var() unresolved, using normal: %f", lycon->block.line_height);
             return;
         }
-        
+
         // resolve length/number/percentage
         float resolved_height =
         resolved_value->type == CSS_VALUE_TYPE_NUMBER ?
@@ -364,6 +383,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 auto t_end = high_resolution_clock::now();
                 g_style_resolve_time += duration<double, std::milli>(t_end - t_start).count();
                 return;  // early return - reuse existing styles
+            }
+
+            // Invalidate layout cache when styles are being re-resolved
+            // This ensures cached measurements are recomputed with new styles
+            if (dom_elem->layout_cache) {
+                radiant::layout_cache_clear(dom_elem->layout_cache);
             }
 
             // Apply element default styles ONLY if not already resolved
@@ -807,20 +832,20 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 if (marker_span) {
                     marker_span->width = marker_prop->width;
                     marker_span->height = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.height / 64.0f) : 16.0f;
-                    
+
                     // Set marker position
                     marker_span->x = lycon->line.advance_x;
                     marker_span->y = lycon->block.advance_y;
-                    
+
                     // Advance inline position by fixed marker width
                     lycon->line.advance_x += marker_prop->width;
-                    
+
                     // Update line metrics (marker contributes to line height)
                     float ascender = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
                     float descender = lycon->font.ft_face ? (-lycon->font.ft_face->size->metrics.descender / 64.0f) : 4.0f;
                     if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
                     if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
-                    
+
                     log_debug("[MARKER] Laid out marker with fixed width=%.1f, height=%.1f at (%.1f, %.1f)",
                              marker_prop->width, marker_span->height, marker_span->x, marker_span->y);
                 }
@@ -1073,7 +1098,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         log_debug("Laying out body element: %p", (void*)body_node);
         // Resolve body's actual display value from CSS (may be flex, grid, etc.)
         DisplayValue body_display = resolve_display_value(body_node);
-        log_debug("Body element display resolved: outer=%d, inner=%d (FLEX=%d)", 
+        log_debug("Body element display resolved: outer=%d, inner=%d (FLEX=%d)",
             body_display.outer, body_display.inner, CSS_VALUE_FLEX);
         layout_block(lycon, body_node, body_display);
 
@@ -1153,6 +1178,11 @@ void reset_styles_resolved(DomDocument* doc) {
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
+
+    // Initialize run mode to full layout (default for layout_html_doc)
+    // Measurement passes will override this to ComputeSize
+    lycon->run_mode = radiant::RunMode::PerformLayout;
+    lycon->sizing_mode = radiant::SizingMode::InherentSize;
 
     // Initialize viewport dimensions for layout (in physical pixels for rendering)
     // Layout uses physical pixels so the view tree coordinates match the rendering surface
