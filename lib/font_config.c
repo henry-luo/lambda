@@ -38,6 +38,7 @@
 #ifdef __APPLE__
 #include <CoreText/CoreText.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <strings.h>  // for strcasecmp on macOS
 #elif defined(__linux__)
 #include <dirent.h>
 #include <unistd.h>
