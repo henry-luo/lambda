@@ -53,6 +53,50 @@ char* read_text_file(const char *filename) {
     return buf;
 }
 
+// Read binary file with explicit size output
+// Returns allocated buffer, sets out_size to number of bytes read
+// Caller must free() the returned buffer
+char* read_binary_file(const char *filename, size_t *out_size) {
+    if (out_size) *out_size = 0;
+    
+    FILE *file = fopen(filename, "rb"); // open in binary mode
+    if (file == NULL) {
+        log_error("Error opening file: %s", filename);
+        return NULL;
+    }
+    // ensure it is a regular file
+    struct stat sb;
+    if (fstat(fileno(file), &sb) == -1) {
+        log_error("Error getting file status: %s", filename);
+        fclose(file);
+        return NULL;
+    }
+    if (!S_ISREG(sb.st_mode)) {
+        log_error("Not regular file: %s", filename);
+        fclose(file);
+        return NULL;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long fileSize = ftell(file);
+    rewind(file);
+
+    char* buf = (char*)malloc(fileSize + 1);
+    if (!buf) {
+        perror("Memory allocation failed");
+        fclose(file);
+        return NULL;
+    }
+
+    size_t bytesRead = fread(buf, 1, fileSize, file);
+    buf[bytesRead] = '\0'; // null-terminate for safety, but don't rely on it
+    
+    if (out_size) *out_size = bytesRead;
+
+    fclose(file);
+    return buf;
+}
+
 void write_text_file(const char *filename, const char *content) {
     FILE *file = fopen(filename, "w"); // Open the file in write mode
     if (file == NULL) {
