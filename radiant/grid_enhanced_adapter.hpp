@@ -587,11 +587,12 @@ inline void place_items_with_occupancy(
     auto [initial_cols, initial_rows] = calculate_initial_grid_extent(
         item_infos, explicit_col_count, explicit_row_count);
 
-    // Step 2: Resolve negative line numbers against the initial grid extent
-    // CSS spec says negative lines reference the explicit grid, but if there's no explicit grid,
-    // browsers typically resolve against the implicit grid determined by other items
-    int resolve_cols = explicit_col_count > 0 ? explicit_col_count : initial_cols;
-    int resolve_rows = explicit_row_count > 0 ? explicit_row_count : initial_rows;
+    // Step 2: Resolve negative line numbers against the EXPLICIT grid only
+    // CSS Grid spec §8.3: "Numeric indices count from the edges of the EXPLICIT grid."
+    // If there's no explicit grid (0 tracks), -1 = line 1, -2 and beyond clamp to line 1.
+    // This is the CORRECT spec behavior - negative lines NEVER reference implicit grid.
+    int resolve_cols = explicit_col_count;  // Use explicit count, can be 0
+    int resolve_rows = explicit_row_count;  // Use explicit count, can be 0
     resolve_negative_lines_in_items(item_infos, resolve_cols, resolve_rows);
 
     // Per CSS Grid spec: If there's no explicit grid-template-columns,
