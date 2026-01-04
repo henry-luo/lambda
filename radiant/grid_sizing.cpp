@@ -12,7 +12,8 @@ extern "C" {
 void initialize_track_sizes(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
 
-    log_debug("Initializing track sizes\n");
+    log_debug("Initializing track sizes: computed_rows=%d, computed_cols=%d",
+              grid_layout->computed_row_count, grid_layout->computed_column_count);
 
     // Get negative implicit offsets (tracks added before the explicit grid)
     int neg_row_offset = grid_layout->negative_implicit_row_count;
@@ -21,6 +22,7 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
     // Allocate computed tracks
     if (grid_layout->computed_row_count > 0) {
         grid_layout->computed_rows = (GridTrack*)calloc(grid_layout->computed_row_count, sizeof(GridTrack));
+        log_debug("  Allocated %d row tracks", grid_layout->computed_row_count);
 
         // Initialize row tracks
         for (int i = 0; i < grid_layout->computed_row_count; i++) {
@@ -92,6 +94,7 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
 
     if (grid_layout->computed_column_count > 0) {
         grid_layout->computed_columns = (GridTrack*)calloc(grid_layout->computed_column_count, sizeof(GridTrack));
+        log_debug("  Allocated %d column tracks", grid_layout->computed_column_count);
 
         // Initialize column tracks
         for (int i = 0; i < grid_layout->computed_column_count; i++) {
