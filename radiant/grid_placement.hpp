@@ -70,14 +70,16 @@ inline AbsoluteAxis primary_axis(GridAutoFlow flow) {
 struct GridPlacement {
     // Start line (1-based CSS coordinates, 0 = auto)
     int16_t start;
-    // End line (1-based CSS coordinates, 0 = auto)
+    // End line (1-based CSS coordinates, 0 = auto, negative = count from end)
     int16_t end;
     // Span (if using span instead of explicit end)
     uint16_t span;
     // Whether this placement is definite (has at least one explicit line)
     bool is_definite;
+    // Whether end is a negative line number (needs deferred resolution)
+    bool has_negative_end;
 
-    GridPlacement() : start(0), end(0), span(1), is_definite(false) {}
+    GridPlacement() : start(0), end(0), span(1), is_definite(false), has_negative_end(false) {}
 
     /**
      * Create placement from start and end lines
@@ -88,6 +90,7 @@ struct GridPlacement {
         p.end = e;
         p.span = 1;
         p.is_definite = (s != 0) || (e != 0);
+        p.has_negative_end = (e < 0);
         return p;
     }
 
@@ -100,6 +103,20 @@ struct GridPlacement {
         p.end = 0;
         p.span = sp;
         p.is_definite = (s != 0);
+        p.has_negative_end = false;
+        return p;
+    }
+
+    /**
+     * Create placement from start and negative end line
+     */
+    static GridPlacement FromStartNegativeEnd(int16_t s, int16_t neg_end) {
+        GridPlacement p;
+        p.start = s;
+        p.end = neg_end;  // Store the negative value
+        p.span = 1;       // Placeholder, will be resolved later
+        p.is_definite = (s != 0);
+        p.has_negative_end = true;
         return p;
     }
 
@@ -112,6 +129,7 @@ struct GridPlacement {
         p.end = 0;
         p.span = sp;
         p.is_definite = false;
+        p.has_negative_end = false;
         return p;
     }
 
@@ -119,7 +137,7 @@ struct GridPlacement {
      * Get the span of this placement
      */
     uint16_t get_span() const {
-        if (start != 0 && end != 0) {
+        if (start != 0 && end != 0 && !has_negative_end) {
             int16_t s = start > 0 ? start : start;
             int16_t e = end > 0 ? end : end;
             // Note: This is simplified - actual CSS grid line calculation is more complex

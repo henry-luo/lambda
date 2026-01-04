@@ -56,8 +56,16 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Initialize dynamic arrays
     grid->allocated_items = 8;
     grid->grid_items = (ViewBlock**)calloc(grid->allocated_items, sizeof(ViewBlock*));
-    grid->allocated_areas = 4;
-    grid->grid_areas = (GridArea*)calloc(grid->allocated_areas, sizeof(GridArea));
+
+    // Only allocate new areas array if not already copied from embed->grid
+    if (!grid->grid_areas || grid->area_count == 0) {
+        grid->allocated_areas = 4;
+        grid->grid_areas = (GridArea*)calloc(grid->allocated_areas, sizeof(GridArea));
+        grid->area_count = 0;  // Reset if we allocated new
+    }
+    // If grid_areas was copied from embed->grid, keep it as-is
+    log_debug("Grid areas after init: area_count=%d, grid_areas=%p", grid->area_count, (void*)grid->grid_areas);
+
     grid->allocated_line_names = 8;
     grid->line_names = (GridLineName*)calloc(grid->allocated_line_names, sizeof(GridLineName));
 
@@ -439,12 +447,17 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
 void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int item_count) {
     if (!grid_layout || !items || item_count == 0) return;
 
-    log_debug("Placing %d grid items\n", item_count);
+    log_debug("Placing %d grid items, area_count=%d\n", item_count, grid_layout->area_count);
 
     // Phase 1: Place items with explicit positions
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
         if (!item->gi) continue;  // Skip items without grid item properties
+
+        // Debug: log grid_area status
+        log_debug("Item %d: grid_area='%s', row_start=%d, col_start=%d",
+                  i, item->gi->grid_area ? item->gi->grid_area : "NULL",
+                  item->gi->grid_row_start, item->gi->grid_column_start);
 
         // Check if item has explicit grid positioning
         // Note: Negative values indicate span (e.g., -2 means "span 2")
@@ -455,12 +468,17 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
 
             if (item->gi->grid_area) {
                 // Resolve named grid area
+                log_debug("Looking up grid_area '%s' in %d areas", item->gi->grid_area, grid_layout->area_count);
                 for (int j = 0; j < grid_layout->area_count; j++) {
+                    log_debug("  Checking area[%d].name='%s'", j, grid_layout->grid_areas[j].name);
                     if (strcmp(grid_layout->grid_areas[j].name, item->gi->grid_area) == 0) {
                         item->gi->computed_grid_row_start = grid_layout->grid_areas[j].row_start;
                         item->gi->computed_grid_row_end = grid_layout->grid_areas[j].row_end;
                         item->gi->computed_grid_column_start = grid_layout->grid_areas[j].column_start;
                         item->gi->computed_grid_column_end = grid_layout->grid_areas[j].column_end;
+                        log_debug("  MATCH! Setting computed positions: rows %d-%d, cols %d-%d",
+                                  item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+                                  item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
                         break;
                     }
                 }

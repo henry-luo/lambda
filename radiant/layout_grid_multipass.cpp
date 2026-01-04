@@ -380,7 +380,8 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     }
 
     // Ensure grid item properties are allocated
-    if (!elem->gi) {
+    // IMPORTANT: fi and gi are in a union! Check item_prop_type, not just gi pointer
+    if (elem->item_prop_type != DomElement::ITEM_PROP_GRID) {
         Pool* pool = lycon->doc->view_tree->pool;
         elem->gi = (GridItemProp*)pool_calloc(pool, sizeof(GridItemProp));
         if (elem->gi) {

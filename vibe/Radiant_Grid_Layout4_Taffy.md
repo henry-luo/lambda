@@ -1233,6 +1233,81 @@ Add tests for:
 
 ---
 
+## Part 8: Considered and Rejected Proposals
+
+### 8.1 FlexGridItem/Context Unification (Phase 5-6) ❌ Cancelled
+
+**Original Proposal:** Create unified `FlexGridItem` and `FlexGridContext` structs that both flex and grid layout would use, reducing code duplication.
+
+**Decision:** Cancelled - the existing separation between flex and grid structures works well.
+
+**Rationale:** See section 2.2.4-2.2.6 for the original proposal details.
+
+### 8.2 GridItem Extending FlexItem / GridContext Extending FlexContext ❌ Rejected
+
+**Proposal:** Use C++ inheritance to have `GridItemProp` extend `FlexItemProp` and `GridContainerLayout` extend `FlexContainerLayout`.
+
+**Analysis:**
+
+#### FlexItemProp vs GridItemProp Comparison
+
+| FlexItemProp | GridItemProp | Shared? |
+|-------------|--------------|---------|
+| `flex_basis`, `flex_grow`, `flex_shrink` | - | Flex-only |
+| `align_self` | `align_self_grid`, `justify_self` | Similar but different |
+| `order` | `order` | ✅ Same |
+| `aspect_ratio`, `baseline_offset` | - | Flex-only |
+| `intrinsic_width`, `intrinsic_height` | `measured_*` | ✅ Similar (intrinsic sizing) |
+| `resolved_min/max_*` | - | Flex-only (grid computes differently) |
+| `hypothetical_cross_size` | - | Flex-only |
+| `has_explicit_width/height` | - | Flex-only |
+| - | `grid_row/column_start/end` | Grid-only |
+| - | `track_area_*` | Grid-only |
+| - | `is_grid_auto_placed`, `*_is_span` | Grid-only |
+
+#### FlexContainerLayout vs GridContainerLayout Comparison
+
+| FlexContainerLayout | GridContainerLayout | Shared? |
+|--------------------|---------------------|---------|
+| `flex_items[]`, `item_count` | `grid_items[]`, `item_count` | ✅ Same pattern |
+| `lines[]`, `line_count` | - | Flex-only (flex lines) |
+| `main_axis_size`, `cross_axis_size` | `container_width/height` | Similar |
+| `needs_reflow` | `needs_reflow` | ✅ Same |
+| `main_axis_is_indefinite` | `is_shrink_to_fit_width` | Similar |
+| `has_definite_cross_size` | `has_explicit_height` | Similar |
+| `lycon` | `lycon` | ✅ Same |
+| Extends `FlexProp` | Extends `GridProp` | Different base |
+| - | `computed_rows/columns[]` | Grid-only (tracks) |
+| - | `line_names[]` | Grid-only |
+| - | `auto_row/col_cursor` | Grid-only |
+
+**Decision:** Rejected - inheritance is not beneficial here.
+
+**Reasons:**
+
+1. **Different base classes**: `FlexContainerLayout` extends `FlexProp`, `GridContainerLayout` extends `GridProp`. Both have CSS properties specific to their layout mode.
+
+2. **Fundamentally different models**:
+   - Flex: 1D layout with lines, main/cross axes that can flip
+   - Grid: 2D layout with row/column tracks, explicit/implicit grid
+
+3. **Different item state**:
+   - FlexItemProp: flex-basis, grow/shrink ratios, hypothetical sizes
+   - GridItemProp: grid line positions, span flags, track area dimensions
+
+4. **Limited overlap**: Only `order`, `lycon`, `item_count`, and `needs_reflow` are truly shared. Not enough to justify inheritance complexity.
+
+5. **C compatibility**: Current structs use `typedef struct` for C compatibility. C++ inheritance would break this.
+
+**What's Already Unified (and works well):**
+- `IntrinsicSizes` struct (shared between flex and grid)
+- `layout_alignment.hpp/cpp` (unified alignment functions)
+- `AvailableSpace`, `RunMode`, `LayoutCache` (unified foundation types)
+
+**Conclusion:** Keep flex and grid structures separate but continue sharing algorithms where it makes sense (alignment, intrinsic sizing API).
+
+---
+
 ## Appendix A: File Organization
 
 ### Files Created ✅
