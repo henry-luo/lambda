@@ -12,7 +12,7 @@
 #include "../../lib/mempool.h"
 
 // External functions
-void parse_pdf(Input* input, const char* pdf_data); // From input-pdf.cpp
+void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length); // From input-pdf.cpp
 int ui_context_init(UiContext* uicon, bool headless); // From window.cpp
 void ui_context_cleanup(UiContext* uicon); // From window.cpp
 void ui_context_create_surface(UiContext* uicon, int width, int height); // From window.cpp
@@ -778,7 +778,9 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
 /**
  * Read file contents to string
  */
-static char* read_pdf_file(const char* filename) {
+static char* read_pdf_file(const char* filename, size_t* out_size) {
+    if (out_size) *out_size = 0;
+    
     FILE* file = fopen(filename, "rb");
     if (!file) {
         log_error("Failed to open file: %s", filename);
@@ -799,6 +801,7 @@ static char* read_pdf_file(const char* filename) {
     content[bytes_read] = '\0';
     fclose(file);
 
+    if (out_size) *out_size = bytes_read;
     return content;
 }
 
@@ -809,12 +812,14 @@ static char* read_pdf_file(const char* filename) {
 int view_pdf_in_window(const char* pdf_file) {
     log_info("Opening PDF file in viewer: %s", pdf_file);
 
-    // Read PDF file content
-    char* pdf_content = read_pdf_file(pdf_file);
+    // Read PDF file content with explicit size for binary-safe parsing
+    size_t pdf_size = 0;
+    char* pdf_content = read_pdf_file(pdf_file, &pdf_size);
     if (!pdf_content) {
         log_error("Failed to read PDF file: %s", pdf_file);
         return 1;
     }
+    log_info("Read PDF file: %zu bytes", pdf_size);
 
     // Create Input structure properly using InputManager
     Input* input = InputManager::create_input(nullptr); // URL not needed for direct parsing
@@ -824,9 +829,9 @@ int view_pdf_in_window(const char* pdf_file) {
         return 1;
     }
 
-    // Parse PDF content
+    // Parse PDF content with explicit size
     log_info("Parsing PDF content...");
-    parse_pdf(input, pdf_content);
+    parse_pdf(input, pdf_content, pdf_size);
     free(pdf_content); // Done with raw content
 
     // Check if parsing succeeded
