@@ -135,8 +135,11 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
 
 // Parse all src entries from a src declaration value
 // Format: url(...) format(...), url(...) format(...), ...
+// Note: URLs can contain commas (e.g., data URIs) so we must properly parse url() boundaries
 static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int max_entries, Pool* pool) {
     if (!src_value || !entries || max_entries <= 0) return 0;
+
+    log_debug("[CSS FontFace] parse_src_entries input (first 100 chars): %.100s", src_value);
 
     int count = 0;
     const char* p = src_value;
@@ -150,14 +153,79 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         const char* url_start = strstr(p, "url(");
         if (!url_start) break;
 
-        // Find end of this entry (next comma or end)
-        const char* entry_end = strchr(url_start, ',');
-        if (!entry_end) {
-            entry_end = url_start + strlen(url_start);
+        // Find the matching closing parenthesis for url()
+        // Must track nested parentheses and respect quotes
+        const char* url_content_start = url_start + 4; // after "url("
+        const char* scan = url_content_start;
+        int paren_depth = 1;
+        char in_quote = 0;
+
+        while (*scan && paren_depth > 0) {
+            if (!in_quote) {
+                if (*scan == '"' || *scan == '\'') {
+                    in_quote = *scan;
+                } else if (*scan == '(') {
+                    paren_depth++;
+                } else if (*scan == ')') {
+                    paren_depth--;
+                }
+            } else {
+                // In quote - look for closing quote (handle escape sequences)
+                if (*scan == '\\' && scan[1]) {
+                    scan++; // skip escaped char
+                } else if (*scan == in_quote) {
+                    in_quote = 0;
+                }
+            }
+            if (paren_depth > 0) scan++;
         }
 
-        // Extract URL from this entry
+        // scan now points to the closing ')' of url()
+        const char* url_paren_end = scan;
+
+        log_debug("[CSS FontFace] Found url() content length: %zu", (size_t)(url_paren_end - url_content_start));
+
+        // Look for optional format() after the url()
+        const char* after_url = url_paren_end;
+        if (*after_url == ')') after_url++;
+
+        // Skip whitespace
+        while (*after_url && (*after_url == ' ' || *after_url == '\t')) after_url++;
+
+        // Check for format()
+        const char* format_end = after_url;
+        if (strncmp(after_url, "format(", 7) == 0) {
+            // Find closing paren of format()
+            format_end = after_url + 7;
+            paren_depth = 1;
+            in_quote = 0;
+            while (*format_end && paren_depth > 0) {
+                if (!in_quote) {
+                    if (*format_end == '"' || *format_end == '\'') {
+                        in_quote = *format_end;
+                    } else if (*format_end == '(') {
+                        paren_depth++;
+                    } else if (*format_end == ')') {
+                        paren_depth--;
+                    }
+                } else {
+                    if (*format_end == in_quote) in_quote = 0;
+                }
+                if (paren_depth > 0) format_end++;
+            }
+            if (*format_end == ')') format_end++;
+        }
+
+        // entry_end is now at the end of url() format() pair
+        const char* entry_end = format_end;
+
+        // Skip to next comma or end
+        while (*entry_end && *entry_end != ',') entry_end++;
+
+        // Extract URL and format from this entry
         size_t entry_len = entry_end - url_start;
+        log_debug("[CSS FontFace] Entry string length: %zu", entry_len);
+
         char* entry_str;
         if (pool) {
             entry_str = (char*)pool_alloc(pool, entry_len + 1);
@@ -176,8 +244,17 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         if (!pool) free(entry_str);
 
         if (entries[count].url) {
-            log_debug("[CSS FontFace] Parsed src entry %d: url='%s', format='%s'",
-                count, entries[count].url, entries[count].format ? entries[count].format : "(none)");
+            // Only log first 60 chars of URL to avoid huge log messages for data URIs
+            char url_preview[64];
+            size_t url_len = strlen(entries[count].url);
+            if (url_len > 60) {
+                snprintf(url_preview, sizeof(url_preview), "%.57s...", entries[count].url);
+            } else {
+                strncpy(url_preview, entries[count].url, sizeof(url_preview) - 1);
+                url_preview[sizeof(url_preview) - 1] = '\0';
+            }
+            log_debug("[CSS FontFace] Parsed src entry %d: url='%s' (len=%zu), format='%s'",
+                count, url_preview, url_len, entries[count].format ? entries[count].format : "(none)");
             count++;
         }
 
@@ -196,6 +273,16 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
     if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
         log_debug("[CSS FontFace] Skipping remote font URL: %s", url);
         return nullptr;  // Return nullptr to indicate font can't be loaded
+    }
+
+    // Data URIs are self-contained - preserve them as-is
+    if (strncmp(url, "data:", 5) == 0) {
+        log_debug("[CSS FontFace] Preserving data URI font (length=%zu)", strlen(url));
+        if (pool) {
+            return pool_strdup(pool, url);
+        } else {
+            return strdup(url);
+        }
     }
 
     // If URL is absolute path, return as-is
@@ -262,6 +349,40 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
     return result;
 }
 
+// Helper: find the end of a CSS property value
+// Must respect url(), quotes, and parentheses boundaries
+// Returns pointer to the semicolon or closing brace that ends the value
+static const char* find_value_end(const char* start) {
+    if (!start) return start;
+
+    const char* p = start;
+    char in_quote = 0;
+    int paren_depth = 0;
+
+    while (*p && !(*p == ';' && !in_quote && paren_depth == 0) &&
+           !(*p == '}' && !in_quote && paren_depth == 0)) {
+        if (!in_quote) {
+            if (*p == '"' || *p == '\'') {
+                in_quote = *p;
+            } else if (*p == '(') {
+                paren_depth++;
+            } else if (*p == ')' && paren_depth > 0) {
+                paren_depth--;
+            }
+        } else {
+            // In quote - handle escapes and closing quote
+            if (*p == '\\' && p[1]) {
+                p++; // skip escaped char
+            } else if (*p == in_quote) {
+                in_quote = 0;
+            }
+        }
+        p++;
+    }
+
+    return p;
+}
+
 CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* pool) {
     if (!content) {
         log_error("css_parse_font_face_content: null content");
@@ -300,6 +421,16 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
         while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
         if (!*p || *p == '}') break;
 
+        // Skip CSS comments /* ... */
+        while (*p == '/' && *(p+1) == '*') {
+            p += 2;  // Skip /*
+            while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+            if (*p) p += 2;  // Skip */
+            // Skip whitespace after comment
+            while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
+        }
+        if (!*p || *p == '}') break;
+
         // Find property name end
         const char* prop_start = p;
         while (*p && *p != ':' && *p != '}') p++;
@@ -318,9 +449,9 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
         // Skip whitespace after colon
         while (*p && (*p == ' ' || *p == '\t')) p++;
 
-        // Find value end (semicolon or closing brace)
+        // Find value end - must respect url() and quote boundaries!
         const char* val_start = p;
-        while (*p && *p != ';' && *p != '}') p++;
+        p = find_value_end(p);
         size_t val_len = p - val_start;
 
         // Skip semicolon

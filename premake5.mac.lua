@@ -306,6 +306,7 @@ project "lambda"
         "lib/mime-detect.c",
         "lib/mime-types.c",
         "lib/font_config.c",
+        "lib/base64.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
