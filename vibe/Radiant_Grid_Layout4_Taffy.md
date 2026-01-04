@@ -18,12 +18,13 @@ This proposal documents learnings from analyzing Taffy (a Rust CSS layout librar
 | Phase 1 | Foundation Types | ✅ **COMPLETE** | `available_space.hpp`, `layout_mode.hpp`, `layout_cache.hpp` created |
 | Phase 1b | Grid Track Sizing Algorithm | ✅ **COMPLETE** | CSS Grid §11.4-11.8 fully implemented in `grid_sizing_algorithm.hpp` |
 | Phase 1c | Grid Shrink-to-Fit | ✅ **COMPLETE** | Absolutely positioned grids shrink-to-fit content |
-| Phase 2 | Unified Alignment | ⏳ Planned | |
+| Phase 1d | Grid-Specific Taffy Enhancements | ✅ **COMPLETE** | ItemBatcher, space distribution fix, 0fr handling, alignment/baseline helpers |
+| Phase 2 | Unified Alignment | ✅ **COMPLETE** | `layout_alignment.hpp/cpp` - unified alignment for flex/grid |
 | Phase 3 | Run Mode Integration | ⏳ Planned | |
 | Phase 4 | Layout Cache Integration | ⏳ Planned | |
 | Phase 5-6 | FlexGridItem/Context Unification | ⏳ Planned | |
 
-**Current Test Status:** 1645/1645 baseline layout tests passing (100%)
+**Current Test Status:** 1665/1665 baseline layout tests passing (100%)
 
 ---
 
@@ -852,23 +853,48 @@ float minimum_contribution(
 - `radiant/layout_grid.cpp` - Shrink-to-fit detection and container width update
 - `radiant/grid_sizing.cpp` - Pass indefinite width for shrink-to-fit containers
 
-### Phase 2: Unified Alignment (Week 2)
+### Phase 2: Unified Alignment (Week 2) ✅ **COMPLETE**
 
 **Goal:** Extract and unify alignment code
 
-1. Create `radiant/layout_alignment.cpp/hpp`
-2. Extract `compute_alignment_offset()` from flex and grid code
-3. Extract `fallback_alignment()` from `layout_flex.cpp`
-4. Extract `compute_space_distribution()`
-5. Update flex to use unified alignment functions
-6. Update grid to use unified alignment functions
+**Implementation Summary:**
+- `layout_alignment.hpp/cpp` already existed with unified functions
+- Refactored `layout_flex.cpp` to use unified alignment:
+  - Removed duplicate `fallback_alignment()` and `fallback_justify()` functions
+  - Updated justify-content/align-content to use `alignment_fallback_for_overflow()`
+- Refactored `grid_positioning.cpp` to use unified alignment:
+  - Replaced justify-content/align-content switch statements (~50 lines) with `compute_space_distribution()` and `compute_alignment_offset_simple()` calls
+  - Replaced justify-self/align-self switch statements (~75 lines) with `resolve_justify_self()`, `resolve_align_self()`, `compute_alignment_offset_simple()` calls
 
-**Files affected:**
-- `radiant/layout_flex.cpp` (reduce ~100 lines)
-- `radiant/layout_grid.cpp` (reduce ~50 lines)
-- `radiant/grid_positioning.cpp`
+**Unified Alignment Functions (in `layout_alignment.hpp`):**
+```cpp
+namespace radiant {
+// Core alignment offset computation
+float compute_alignment_offset(int alignment, float free_space, bool is_safe);
+float compute_alignment_offset_simple(int alignment, float free_space);
 
-**Risk:** Medium - refactoring existing code
+// Space distribution for space-between/around/evenly
+struct SpaceDistribution { float gap_before_first, gap_between, gap_after_last; };
+SpaceDistribution compute_space_distribution(int alignment, float free_space, int item_count, float existing_gap);
+
+// Alignment property resolution
+int resolve_align_self(int align_self, int align_items);
+int resolve_justify_self(int justify_self, int justify_items);
+
+// Alignment classification
+bool alignment_is_space_distribution(int alignment);
+bool alignment_is_stretch(int alignment);
+int alignment_fallback_for_overflow(int alignment, float free_space);
+}
+```
+
+**Files modified:**
+- `radiant/layout_flex.cpp` - ~20 lines removed, now uses unified functions
+- `radiant/grid_positioning.cpp` - ~125 lines of switch statements replaced with ~40 lines using unified functions
+
+**Test Status:** 1665/1665 baseline tests passing (100%)
+
+**Risk Assessment:** Medium - Successfully tested, no regressions
 
 ### Phase 3: Run Mode Integration (Week 3)
 
@@ -997,7 +1023,7 @@ void dom_element_invalidate_layout_cache(DomElement* element);
 
 ## Part 5: Grid-Specific Improvements from Taffy
 
-### 5.1 ItemBatcher for Track Sizing ✅ PARTIALLY IMPLEMENTED
+### 5.1 ItemBatcher for Track Sizing ✅ COMPLETE
 
 Taffy processes grid items in span-order using `ItemBatcher`:
 
@@ -1014,18 +1040,27 @@ This is important because CSS Grid spec requires processing items:
 1. First by whether they cross a flexible track (non-flex first)
 2. Then by ascending span count
 
-**Current Status:** ✅ Item span-order processing implemented in `resolve_intrinsic_track_sizes()`:
+**Implementation in `grid_sizing_algorithm.hpp`:**
+
+1. Added `crosses_flexible_track` field to `GridItemContribution` struct
+2. Added `item_crosses_flexible_track()` function to detect if an item spans any truly flexible (non-zero fr) tracks
+3. Added `sort_contributions_for_intrinsic_sizing()` to sort items correctly:
+   - Primary sort: non-flex items before flex items
+   - Secondary sort: ascending span count
+4. Items crossing flexible tracks are skipped during intrinsic sizing (handled in §11.7)
+
 ```cpp
-// Sort contributions by span count (ascending)
+// Sort: non-flex items first, then by span count (ascending)
 std::sort(contributions.begin(), contributions.end(),
     [](const GridItemContribution& a, const GridItemContribution& b) {
+        if (a.crosses_flexible_track != b.crosses_flexible_track) {
+            return !a.crosses_flexible_track;  // non-flex first
+        }
         return a.track_span < b.track_span;
     });
 ```
 
-**Remaining:** Separate processing for items crossing flex vs non-flex tracks.
-
-### 5.2 Alignment Gutter Adjustment
+### 5.2 Alignment Gutter Adjustment ✅ COMPLETE
 
 When estimating track sizes during intrinsic sizing, Taffy accounts for `justify-content`/`align-content`:
 
@@ -1040,18 +1075,59 @@ fn compute_alignment_gutter_adjustment(
 
 This improves accuracy when `space-between`, `space-around`, `space-evenly` are used.
 
-**Recommendation:** Add this to `grid_sizing_algorithm.hpp`
+**Implementation in `grid_sizing_algorithm.hpp`:**
 
-### 5.3 Grid Item Baseline Support
+Added helper functions for alignment gutter adjustment:
+- `compute_alignment_start_offset()` - computes offset for `justify-content`/`align-content`
+- `apply_alignment_to_tracks()` - distributes alignment space to track positions
+
+### 5.3 Grid Item Baseline Support ✅ COMPLETE
 
 Taffy's `resolve_item_baselines()` handles baseline alignment in grids:
 - Groups items by row
 - Computes baseline within each row
 - Calculates `baseline_shim` for alignment
 
-**Current Radiant State:** Limited baseline support in grid
+**Implementation:**
 
-**Recommendation:** Port baseline logic from Taffy to `layout_grid.cpp`
+Full baseline support exists in `grid_baseline.hpp` with:
+- `RowBaselineGroup` struct for grouping items by row
+- `ItemBaselineInfo` struct for per-item baseline data
+- `resolve_grid_item_baselines()` function
+
+Additional helpers added to `grid_sizing_algorithm.hpp`:
+- `item_participates_in_row_baseline()` - determines if item contributes to row baseline
+- `compute_baseline_adjustment_for_track()` - calculates baseline shim for track alignment
+
+### 5.4 Space Distribution Fix ✅ COMPLETE
+
+Fixed `increase_sizes_for_spanning_item()` to distribute space correctly per CSS Grid spec:
+
+**Problem:** Equal distribution was giving space to tracks that had already satisfied their needs.
+
+**Solution:** Implemented "leveling" algorithm that prioritizes tracks with smaller base_size:
+1. Find tracks at minimum base_size
+2. Grow them toward the next-smallest track's size
+3. Repeat until space is exhausted
+
+This ensures tracks that need growth get it first, matching browser behavior.
+
+### 5.5 0fr Track Handling ✅ COMPLETE
+
+Fixed edge case where `0fr` tracks weren't being sized correctly:
+
+**Problem:** `0fr` tracks have fr unit but don't actually flex (flex_factor = 0). They were being skipped during intrinsic sizing.
+
+**Solution:**
+- Updated `item_crosses_flexible_track()` to only consider tracks with **non-zero** fr as truly flexible
+- Updated `increase_sizes_for_spanning_item()` to include `0fr` tracks in eligible tracks
+- Items spanning only `0fr` tracks are now processed normally in §11.5
+
+```cpp
+// Only consider tracks with non-zero fr as truly flexible
+bool is_truly_flexible = track.is_flexible() &&
+                         track.max_track_sizing_function.flex_factor() > 0;
+```
 
 ---
 
