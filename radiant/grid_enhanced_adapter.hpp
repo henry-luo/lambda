@@ -313,14 +313,21 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
     int col_start = gi->grid_column_start;
     int col_end = gi->grid_column_end;
     bool col_end_is_span = gi->grid_column_end_is_span;
+    bool col_start_is_span = gi->grid_column_start_is_span;
 
-    if (col_start > 0 && col_end < 0 && !col_end_is_span) {
+    if (col_start < 0 && col_end < 0 && !col_end_is_span && !col_start_is_span) {
+        // "-N / -M" - both start and end are negative line numbers
+        // Defer resolution until we know the grid size
+        info.column = GridPlacement::FromNegativeLines(
+            static_cast<int16_t>(col_start),
+            static_cast<int16_t>(col_end));
+    } else if (col_start > 0 && col_end < 0 && !col_end_is_span) {
         // "N / -M" - explicit start, negative line number end
         // Defer resolution until we know the grid size
         info.column = GridPlacement::FromStartNegativeEnd(
             static_cast<int16_t>(col_start),
             static_cast<int16_t>(col_end));
-    } else if (col_start != 0) {
+    } else if (col_start != 0 && !col_start_is_span) {
         // Definite start position (positive line number)
         int col_span = get_span_value_ex(col_start, col_end, col_end_is_span, explicit_col_count);
         info.column = GridPlacement::FromStartSpan(static_cast<int16_t>(col_start),
@@ -336,14 +343,21 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
     int row_start = gi->grid_row_start;
     int row_end = gi->grid_row_end;
     bool row_end_is_span = gi->grid_row_end_is_span;
+    bool row_start_is_span = gi->grid_row_start_is_span;
 
-    if (row_start > 0 && row_end < 0 && !row_end_is_span) {
+    if (row_start < 0 && row_end < 0 && !row_end_is_span && !row_start_is_span) {
+        // "-N / -M" - both start and end are negative line numbers
+        // Defer resolution until we know the grid size
+        info.row = GridPlacement::FromNegativeLines(
+            static_cast<int16_t>(row_start),
+            static_cast<int16_t>(row_end));
+    } else if (row_start > 0 && row_end < 0 && !row_end_is_span) {
         // "N / -M" - explicit start, negative line number end
         // Defer resolution until we know the grid size
         info.row = GridPlacement::FromStartNegativeEnd(
             static_cast<int16_t>(row_start),
             static_cast<int16_t>(row_end));
-    } else if (row_start != 0) {
+    } else if (row_start != 0 && !row_start_is_span) {
         // Definite start position (positive line number)
         int row_span = get_span_value_ex(row_start, row_end, row_end_is_span, explicit_row_count);
         info.row = GridPlacement::FromStartSpan(static_cast<int16_t>(row_start),
@@ -407,7 +421,20 @@ inline void resolve_negative_lines_in_items(
 {
     for (auto& item : items) {
         // Resolve column negative lines
-        if (item.column.has_negative_end && item.column.start > 0) {
+        if (item.column.has_negative_start && item.column.has_negative_end) {
+            // Both start and end are negative: "-N / -M"
+            int resolved_start = resolve_negative_line(item.column.start, total_col_count);
+            int resolved_end = resolve_negative_line(item.column.end, total_col_count);
+            int span = resolved_end - resolved_start;
+            if (span < 1) span = 1;
+            item.column.start = static_cast<int16_t>(resolved_start);
+            item.column.end = static_cast<int16_t>(resolved_end);
+            item.column.span = static_cast<uint16_t>(span);
+            item.column.has_negative_start = false;
+            item.column.has_negative_end = false;
+            item.column.is_definite = true;
+        } else if (item.column.has_negative_end && item.column.start > 0) {
+            // Only end is negative: "N / -M"
             int resolved_end = resolve_negative_line(item.column.end, total_col_count);
             int span = resolved_end - item.column.start;
             if (span < 1) span = 1;
@@ -417,7 +444,20 @@ inline void resolve_negative_lines_in_items(
         }
 
         // Resolve row negative lines
-        if (item.row.has_negative_end && item.row.start > 0) {
+        if (item.row.has_negative_start && item.row.has_negative_end) {
+            // Both start and end are negative: "-N / -M"
+            int resolved_start = resolve_negative_line(item.row.start, total_row_count);
+            int resolved_end = resolve_negative_line(item.row.end, total_row_count);
+            int span = resolved_end - resolved_start;
+            if (span < 1) span = 1;
+            item.row.start = static_cast<int16_t>(resolved_start);
+            item.row.end = static_cast<int16_t>(resolved_end);
+            item.row.span = static_cast<uint16_t>(span);
+            item.row.has_negative_start = false;
+            item.row.has_negative_end = false;
+            item.row.is_definite = true;
+        } else if (item.row.has_negative_end && item.row.start > 0) {
+            // Only end is negative: "N / -M"
             int resolved_end = resolve_negative_line(item.row.end, total_row_count);
             int span = resolved_end - item.row.start;
             if (span < 1) span = 1;
@@ -446,14 +486,29 @@ inline std::pair<int, int> calculate_initial_grid_extent(
     int max_row = explicit_row_count > 0 ? explicit_row_count : 1;
 
     for (const auto& item : items) {
-        // Only consider definite positive positions (not negative lines)
-        if (item.column.start > 0 && !item.column.has_negative_end) {
-            int col_end = item.column.start + item.column.span;
-            if (col_end > max_col + 1) max_col = col_end - 1;
+        // Items with positive definite start contribute their start position
+        // Items with has_negative_start will be resolved after we know the grid size
+        if (item.column.start > 0 && !item.column.has_negative_start) {
+            // This item needs at least this column to exist
+            if (item.column.start > max_col) {
+                max_col = item.column.start;
+            }
+            // If we also know the span (no negative end), add full extent
+            if (!item.column.has_negative_end) {
+                int col_end = item.column.start + item.column.span;
+                if (col_end > max_col + 1) max_col = col_end - 1;
+            }
         }
-        if (item.row.start > 0 && !item.row.has_negative_end) {
-            int row_end = item.row.start + item.row.span;
-            if (row_end > max_row + 1) max_row = row_end - 1;
+        if (item.row.start > 0 && !item.row.has_negative_start) {
+            // This item needs at least this row to exist
+            if (item.row.start > max_row) {
+                max_row = item.row.start;
+            }
+            // If we also know the span (no negative end), add full extent
+            if (!item.row.has_negative_end) {
+                int row_end = item.row.start + item.row.span;
+                if (row_end > max_row + 1) max_row = row_end - 1;
+            }
         }
     }
 
