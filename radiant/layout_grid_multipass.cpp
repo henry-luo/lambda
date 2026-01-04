@@ -721,14 +721,156 @@ bool grid_item_is_nested_container(ViewBlock* item) {
             item->display.inner == CSS_VALUE_FLEX);
 }
 
+// ============================================================================
+// Grid Absolute Positioning Helpers
+// ============================================================================
+
+// Calculate track positions for a given axis
+// Returns an array of (track_count + 1) positions representing grid line positions
+// Caller must free the returned array
+static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, bool is_row_axis,
+                                            float container_offset, int* out_line_count) {
+    int track_count = is_row_axis ? grid_layout->computed_row_count : grid_layout->computed_column_count;
+    GridTrack* tracks = is_row_axis ? grid_layout->computed_rows : grid_layout->computed_columns;
+    float gap = is_row_axis ? grid_layout->row_gap : grid_layout->column_gap;
+
+    // We need (track_count + 1) positions for grid lines
+    int line_count = track_count + 1;
+    float* positions = (float*)calloc(line_count, sizeof(float));
+    if (!positions) return nullptr;
+
+    float current_pos = container_offset;
+    for (int i = 0; i <= track_count; i++) {
+        positions[i] = current_pos;
+        if (i < track_count) {
+            current_pos += tracks[i].computed_size;
+            if (i < track_count - 1) {
+                current_pos += gap;
+            }
+        }
+    }
+
+    *out_line_count = line_count;
+    return positions;
+}
+
+// Compute the containing block for an absolutely positioned grid item
+// Based on its grid-column and grid-row properties
+// Returns true if grid area was computed, false if should use normal containing block
+static bool compute_grid_area_for_absolute(
+    GridContainerLayout* grid_layout,
+    ViewBlock* container,
+    ViewBlock* item,
+    float* out_x, float* out_y, float* out_width, float* out_height
+) {
+    if (!grid_layout || !container || !item) return false;
+
+    // Get grid item properties (if any)
+    GridItemProp* gi = item->gi;
+
+    // Check if item has any grid placement
+    bool has_col_start = gi && gi->has_explicit_grid_column_start && gi->grid_column_start != 0;
+    bool has_col_end = gi && gi->has_explicit_grid_column_end && gi->grid_column_end != 0;
+    bool has_row_start = gi && gi->has_explicit_grid_row_start && gi->grid_row_start != 0;
+    bool has_row_end = gi && gi->has_explicit_grid_row_end && gi->grid_row_end != 0;
+
+    // If no explicit grid placement, use normal containing block (whole grid padding box)
+    if (!has_col_start && !has_col_end && !has_row_start && !has_row_end) {
+        log_debug("Absolute item has no grid placement, using full grid padding box");
+        return false;
+    }
+
+    // Calculate container offsets (padding + border)
+    float container_offset_x = 0, container_offset_y = 0;
+    if (container->bound) {
+        container_offset_x += container->bound->padding.left;
+        container_offset_y += container->bound->padding.top;
+        if (container->bound->border) {
+            container_offset_x += container->bound->border->width.left;
+            container_offset_y += container->bound->border->width.top;
+        }
+    }
+
+    // Calculate grid line positions
+    int col_line_count = 0, row_line_count = 0;
+    float* col_positions = calculate_grid_line_positions(grid_layout, false, container_offset_x, &col_line_count);
+    float* row_positions = calculate_grid_line_positions(grid_layout, true, container_offset_y, &row_line_count);
+
+    if (!col_positions || !row_positions) {
+        free(col_positions);
+        free(row_positions);
+        return false;
+    }
+
+    // Resolve grid lines (convert from 1-based CSS to 0-based indices)
+    // For auto lines, use the grid edges (line 1 or last line)
+    int col_start_line = has_col_start ? gi->grid_column_start : 1;
+    int col_end_line = has_col_end ? gi->grid_column_end : col_line_count;
+    int row_start_line = has_row_start ? gi->grid_row_start : 1;
+    int row_end_line = has_row_end ? gi->grid_row_end : row_line_count;
+
+    // Handle negative line numbers (count from end)
+    if (col_start_line < 0) col_start_line = col_line_count + col_start_line + 1;
+    if (col_end_line < 0) col_end_line = col_line_count + col_end_line + 1;
+    if (row_start_line < 0) row_start_line = row_line_count + row_start_line + 1;
+    if (row_end_line < 0) row_end_line = row_line_count + row_end_line + 1;
+
+    // Clamp to valid range and convert to 0-based index
+    int col_start_idx = (col_start_line >= 1 && col_start_line <= col_line_count) ?
+                        col_start_line - 1 : 0;
+    int col_end_idx = (col_end_line >= 1 && col_end_line <= col_line_count) ?
+                      col_end_line - 1 : col_line_count - 1;
+    int row_start_idx = (row_start_line >= 1 && row_start_line <= row_line_count) ?
+                        row_start_line - 1 : 0;
+    int row_end_idx = (row_end_line >= 1 && row_end_line <= row_line_count) ?
+                      row_end_line - 1 : row_line_count - 1;
+
+    // Ensure start < end
+    if (col_start_idx > col_end_idx) { int t = col_start_idx; col_start_idx = col_end_idx; col_end_idx = t; }
+    if (row_start_idx > row_end_idx) { int t = row_start_idx; row_start_idx = row_end_idx; row_end_idx = t; }
+
+    // Calculate grid area rectangle
+    *out_x = col_positions[col_start_idx];
+    *out_y = row_positions[row_start_idx];
+    *out_width = col_positions[col_end_idx] - col_positions[col_start_idx];
+    *out_height = row_positions[row_end_idx] - row_positions[row_start_idx];
+
+    log_debug("Grid area for absolute item: lines col %d-%d, row %d-%d => pos (%.1f, %.1f) size %.1fx%.1f",
+              col_start_line, col_end_line, row_start_line, row_end_line,
+              *out_x, *out_y, *out_width, *out_height);
+
+    free(col_positions);
+    free(row_positions);
+    return true;
+}
+
 void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
     log_enter();
-    log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN ===");
+    log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN for container=%s ===", container->node_name());
+
+    // Get grid layout for computing grid area containing blocks
+    GridContainerLayout* grid_layout = lycon->grid_container;
+
+    // For grid absolute positioning, the static position should be at the
+    // padding box edge (border offset), not the content box edge (border + padding).
+    // Calculate border offset for use in static position correction.
+    float border_offset_x = 0, border_offset_y = 0;
+    if (container->bound && container->bound->border) {
+        border_offset_x = container->bound->border->width.left;
+        border_offset_y = container->bound->border->width.top;
+    }
+    log_debug("Grid absolute: border_offset=(%f, %f)", border_offset_x, border_offset_y);
 
     DomNode* child = container->first_child;
+    int child_count = 0;
     while (child) {
+        child_count++;
         if (child->is_element()) {
             ViewBlock* child_block = (ViewBlock*)child->as_element();
+            log_debug("Checking child %d: tag=%s, has_position=%d, position_type=%d",
+                      child_count, child->node_name(),
+                      child_block->position != nullptr,
+                      child_block->position ? child_block->position->position : -1);
 
             // Check if this child is absolute or fixed positioned
             if (child_block->position &&
@@ -737,9 +879,24 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
 
                 log_debug("Found absolute positioned child: %s", child->node_name());
 
+                // Check if this absolute item has grid placement properties
+                float grid_area_x, grid_area_y, grid_area_width, grid_area_height;
+                bool has_grid_area = compute_grid_area_for_absolute(
+                    grid_layout, container, child_block,
+                    &grid_area_x, &grid_area_y, &grid_area_width, &grid_area_height
+                );
+
                 // Save parent context
                 BlockContext pa_block = lycon->block;
                 Linebox pa_line = lycon->line;
+
+                // For grid containers, static position should be at the padding box edge
+                // (where grid content starts), not at the content box edge.
+                // The pa_line.left and pa_block.advance_y include padding, so we need
+                // to subtract padding and only keep border offset for static position.
+                // This ensures absolute items with auto insets are placed at the padding edge.
+                pa_line.left = border_offset_x;
+                pa_block.advance_y = border_offset_y;
 
                 // Set up lycon->block dimensions from the child's CSS
                 if (child_block->blk) {
@@ -752,6 +909,91 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
 
                 // Lay out the absolute positioned block
                 layout_abs_block(lycon, child, child_block, &pa_block, &pa_line);
+
+                // If item has grid area, adjust position relative to grid area
+                // The layout_abs_block uses the grid container as containing block,
+                // but we need to adjust for the grid area offset
+                if (has_grid_area) {
+                    // Position is now relative to grid container padding box
+                    // For grid-placed absolutes, need to adjust based on grid area
+                    log_debug("Adjusting absolute item position for grid area");
+
+                    // The insets (top/left/right/bottom) should be relative to grid area
+                    // layout_abs_block already computed position relative to container
+                    // We need to add grid area offset if item doesn't have explicit insets
+                    // Actually, for CSS Grid, the containing block IS the grid area
+
+                    // Recalculate position based on grid area as containing block
+                    // This requires reimplementing some of the absolute positioning logic
+                    // For now, just adjust the base position to start from grid area
+                    float old_x = child_block->x;
+                    float old_y = child_block->y;
+
+                    // Get container padding/border offset (already in grid_area coords)
+                    float cb_x = grid_area_x;
+                    float cb_y = grid_area_y;
+                    float cb_width = grid_area_width;
+                    float cb_height = grid_area_height;
+
+                    // Recompute position with grid area as containing block
+                    PositionProp* pos = child_block->position;
+                    float new_x = old_x, new_y = old_y;
+
+                    // Handle horizontal positioning
+                    if (pos->has_left) {
+                        new_x = cb_x + pos->left;
+                        if (child_block->bound && child_block->bound->margin.left > 0) {
+                            new_x += child_block->bound->margin.left;
+                        }
+                    } else if (pos->has_right) {
+                        new_x = cb_x + cb_width - pos->right - child_block->width;
+                        if (child_block->bound && child_block->bound->margin.right > 0) {
+                            new_x -= child_block->bound->margin.right;
+                        }
+                    } else {
+                        // auto positioning - use static position within grid area
+                        new_x = cb_x;
+                    }
+
+                    // Handle vertical positioning
+                    if (pos->has_top) {
+                        new_y = cb_y + pos->top;
+                        if (child_block->bound && child_block->bound->margin.top > 0) {
+                            new_y += child_block->bound->margin.top;
+                        }
+                    } else if (pos->has_bottom) {
+                        new_y = cb_y + cb_height - pos->bottom - child_block->height;
+                        if (child_block->bound && child_block->bound->margin.bottom > 0) {
+                            new_y -= child_block->bound->margin.bottom;
+                        }
+                    } else {
+                        // auto positioning - use static position within grid area
+                        new_y = cb_y;
+                    }
+
+                    // Handle percentage width/height relative to grid area
+                    if (pos->has_left && pos->has_right) {
+                        // Stretch to grid area (left to right)
+                        float margin_left = (child_block->bound) ? child_block->bound->margin.left : 0;
+                        float margin_right = (child_block->bound) ? child_block->bound->margin.right : 0;
+                        child_block->width = cb_width - pos->left - pos->right - margin_left - margin_right;
+                        new_x = cb_x + pos->left + margin_left;
+                    }
+
+                    if (pos->has_top && pos->has_bottom) {
+                        // Stretch to grid area (top to bottom)
+                        float margin_top = (child_block->bound) ? child_block->bound->margin.top : 0;
+                        float margin_bottom = (child_block->bound) ? child_block->bound->margin.bottom : 0;
+                        child_block->height = cb_height - pos->top - pos->bottom - margin_top - margin_bottom;
+                        new_y = cb_y + pos->top + margin_top;
+                    }
+
+                    child_block->x = new_x;
+                    child_block->y = new_y;
+
+                    log_debug("Grid area adjusted position: (%.1f, %.1f) -> (%.1f, %.1f)",
+                              old_x, old_y, new_x, new_y);
+                }
 
                 // Restore parent context
                 lycon->block = pa_block;
