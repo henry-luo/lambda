@@ -30,6 +30,11 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
 static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
 static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, String* text);
 static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
+static void handle_do_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, const char* xobject_name);
+static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Map* image_dict, const char* name);
+static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Map* form_dict, const char* name);
+static ImageSurface* decode_raw_image_data(Map* image_dict, String* data, int width, int height, int bpc, Pool* pool);
+static ImageSurface* decode_image_data(const uint8_t* data, size_t length, ImageFormat format_hint);
 
 // Path paint operation types
 typedef enum {
@@ -419,7 +424,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
     size_t content_len = stream_data->len;
     char* decompressed_data = nullptr;
 
-    // Get stream dictionary (contains Length, Filter, etc.)
+    // Get stream dictionary (contains Length, Filter, DecodeParms, etc.)
     String* dict_key = input_create_string(input, "dictionary");
     Item dict_item = {.item = map_get(stream_map, {.item = s2it(dict_key)}).item};
     Map* stream_dict = (dict_item.item != ITEM_NULL) ? dict_item.map : nullptr;
@@ -430,6 +435,79 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
         Item filter_item = {.item = map_get(stream_dict, {.item = s2it(filter_key)}).item};
 
         if (filter_item.item != ITEM_NULL) {
+            // Get decode parameters if present
+            String* decode_key = input_create_string(input, "DecodeParms");
+            Item decode_item = {.item = map_get(stream_dict, {.item = s2it(decode_key)}).item};
+            
+            // Helper lambda to extract decode params from a dict
+            auto extract_decode_params = [input](Map* params_dict, PDFDecodeParams* params) {
+                pdf_decode_params_init(params);
+                if (!params_dict) return;
+                
+                // Extract Predictor
+                String* pred_key = input_create_string(input, "Predictor");
+                Item pred_item = {.item = map_get(params_dict, {.item = s2it(pred_key)}).item};
+                if (pred_item.item != ITEM_NULL) {
+                    TypeId pred_type = get_type_id(pred_item);
+                    if (pred_type == LMD_TYPE_FLOAT) {
+                        params->predictor = (int)pred_item.get_double();
+                    } else if (pred_type == LMD_TYPE_INT) {
+                        params->predictor = pred_item.int_val;
+                    }
+                }
+                
+                // Extract Colors
+                String* colors_key = input_create_string(input, "Colors");
+                Item colors_item = {.item = map_get(params_dict, {.item = s2it(colors_key)}).item};
+                if (colors_item.item != ITEM_NULL) {
+                    TypeId colors_type = get_type_id(colors_item);
+                    if (colors_type == LMD_TYPE_FLOAT) {
+                        params->colors = (int)colors_item.get_double();
+                    } else if (colors_type == LMD_TYPE_INT) {
+                        params->colors = colors_item.int_val;
+                    }
+                }
+                
+                // Extract BitsPerComponent
+                String* bpc_key = input_create_string(input, "BitsPerComponent");
+                Item bpc_item = {.item = map_get(params_dict, {.item = s2it(bpc_key)}).item};
+                if (bpc_item.item != ITEM_NULL) {
+                    TypeId bpc_type = get_type_id(bpc_item);
+                    if (bpc_type == LMD_TYPE_FLOAT) {
+                        params->bits = (int)bpc_item.get_double();
+                    } else if (bpc_type == LMD_TYPE_INT) {
+                        params->bits = bpc_item.int_val;
+                    }
+                }
+                
+                // Extract Columns
+                String* cols_key = input_create_string(input, "Columns");
+                Item cols_item = {.item = map_get(params_dict, {.item = s2it(cols_key)}).item};
+                if (cols_item.item != ITEM_NULL) {
+                    TypeId cols_type = get_type_id(cols_item);
+                    if (cols_type == LMD_TYPE_FLOAT) {
+                        params->columns = (int)cols_item.get_double();
+                    } else if (cols_type == LMD_TYPE_INT) {
+                        params->columns = cols_item.int_val;
+                    }
+                }
+                
+                // Extract EarlyChange (for LZW)
+                String* ec_key = input_create_string(input, "EarlyChange");
+                Item ec_item = {.item = map_get(params_dict, {.item = s2it(ec_key)}).item};
+                if (ec_item.item != ITEM_NULL) {
+                    TypeId ec_type = get_type_id(ec_item);
+                    if (ec_type == LMD_TYPE_FLOAT) {
+                        params->early_change = (int)ec_item.get_double();
+                    } else if (ec_type == LMD_TYPE_INT) {
+                        params->early_change = ec_item.int_val;
+                    }
+                }
+                
+                log_debug("Decode params: predictor=%d, colors=%d, bits=%d, columns=%d", 
+                         params->predictor, params->colors, params->bits, params->columns);
+            };
+            
             // Get filter(s) - can be a single name or an array
             TypeId filter_type = get_type_id(filter_item);
 
@@ -437,18 +515,41 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                 // Multiple filters
                 Array* filter_array = filter_item.array;
                 const char** filters = (const char**)malloc(sizeof(char*) * filter_array->length);
-                if (filters) {
+                PDFDecodeParams* decode_params = (PDFDecodeParams*)calloc(filter_array->length, sizeof(PDFDecodeParams));
+                
+                if (filters && decode_params) {
                     for (int i = 0; i < filter_array->length; i++) {
                         Item filter_name_item = array_get(filter_array, i);
                         String* filter_name = filter_name_item.get_string();
                         filters[i] = filter_name->chars;
+                        
+                        // Initialize with defaults
+                        pdf_decode_params_init(&decode_params[i]);
+                        
+                        // Get decode params if available (may be array or dict)
+                        if (decode_item.item != ITEM_NULL) {
+                            TypeId decode_type = get_type_id(decode_item);
+                            if (decode_type == LMD_TYPE_ARRAY) {
+                                Array* decode_array = decode_item.array;
+                                if (i < decode_array->length) {
+                                    Item param_item = array_get(decode_array, i);
+                                    if (param_item.item != ITEM_NULL && get_type_id(param_item) == LMD_TYPE_MAP) {
+                                        extract_decode_params(param_item.map, &decode_params[i]);
+                                    }
+                                }
+                            } else if (decode_type == LMD_TYPE_MAP && i == 0) {
+                                // Single decode params dict applies to first filter
+                                extract_decode_params(decode_item.map, &decode_params[i]);
+                            }
+                        }
                     }
 
                     size_t decompressed_len = 0;
-                    decompressed_data = pdf_decompress_stream(content_data, content_len,
+                    decompressed_data = pdf_decompress_stream_with_params(content_data, content_len,
                                                               filters, filter_array->length,
-                                                              &decompressed_len);
+                                                              decode_params, &decompressed_len);
                     free(filters);
+                    free(decode_params);
 
                     if (decompressed_data) {
                         content_data = decompressed_data;
@@ -458,16 +559,27 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                         log_error("Failed to decompress stream with multiple filters");
                         return;
                     }
+                } else {
+                    if (filters) free(filters);
+                    if (decode_params) free(decode_params);
+                    return;
                 }
             } else if (filter_type == LMD_TYPE_STRING) {
                 // Single filter
                 String* filter_name = filter_item.get_string();
                 const char* filters[1] = { filter_name->chars };
+                PDFDecodeParams decode_params[1];
+                pdf_decode_params_init(&decode_params[0]);
+                
+                // Get decode params if present
+                if (decode_item.item != ITEM_NULL && get_type_id(decode_item) == LMD_TYPE_MAP) {
+                    extract_decode_params(decode_item.map, &decode_params[0]);
+                }
 
                 size_t decompressed_len = 0;
-                decompressed_data = pdf_decompress_stream(content_data, content_len,
+                decompressed_data = pdf_decompress_stream_with_params(content_data, content_len,
                                                           filters, 1,
-                                                          &decompressed_len);
+                                                          decode_params, &decompressed_len);
 
                 if (decompressed_data) {
                     content_data = decompressed_data;
@@ -816,6 +928,15 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
                 } else {
                     log_debug("No ExtGState dictionary in resources");
                 }
+            }
+            break;
+
+        case PDF_OP_Do:
+            // Invoke XObject (image or form)
+            if (op->operands.show_text.text && parser->resources) {
+                const char* xobject_name = op->operands.show_text.text->chars;
+                log_debug("Do operator: invoking XObject '%s'", xobject_name);
+                handle_do_operator(input, view_pool, parent, parser, xobject_name);
             }
             break;
 
@@ -1512,4 +1633,365 @@ static void append_child_view(View* parent, View* child) {
         }
         last->next_sibling = child;
     }
+}
+
+/**
+ * Handle the Do operator - invoke an XObject (image or form)
+ *
+ * XObjects are external objects referenced by name from the Resources dictionary.
+ * They can be:
+ * - Image XObjects: embedded images (JPEG, JPEG2000, etc.)
+ * - Form XObjects: reusable content streams (like nested PDF pages)
+ */
+static void handle_do_operator(Input* input, Pool* view_pool, ViewBlock* parent,
+                               PDFStreamParser* parser, const char* xobject_name) {
+    if (!parser->resources) {
+        log_warn("handle_do_operator: No resources available");
+        return;
+    }
+
+    // Look up XObject dictionary in resources
+    ConstItem xobject_dict_item = ((Map*)parser->resources)->get("XObject");
+    if (xobject_dict_item.item == ITEM_NULL || xobject_dict_item.type_id() != LMD_TYPE_MAP) {
+        log_debug("No XObject dictionary in resources");
+        return;
+    }
+
+    Map* xobject_dict = (Map*)xobject_dict_item.map;
+
+    // Look up the specific XObject by name
+    ConstItem xobj_item = xobject_dict->get(xobject_name);
+    if (xobj_item.item == ITEM_NULL) {
+        log_warn("XObject '%s' not found in resources", xobject_name);
+        return;
+    }
+
+    // XObject should be a stream (map with stream_data key)
+    if (xobj_item.type_id() != LMD_TYPE_MAP) {
+        log_warn("XObject '%s' is not a dictionary", xobject_name);
+        return;
+    }
+
+    Map* xobj = (Map*)xobj_item.map;
+
+    // Get the XObject subtype to determine if it's an Image or Form
+    ConstItem subtype_item = xobj->get("Subtype");
+    if (subtype_item.item == ITEM_NULL) {
+        log_warn("XObject '%s' has no Subtype", xobject_name);
+        return;
+    }
+
+    const char* subtype = nullptr;
+    if (subtype_item.type_id() == LMD_TYPE_STRING) {
+        String* subtype_str = subtype_item.string();
+        if (subtype_str) subtype = subtype_str->chars;
+    }
+
+    if (!subtype) {
+        log_warn("XObject '%s' has invalid Subtype", xobject_name);
+        return;
+    }
+
+    log_debug("XObject '%s' subtype: %s", xobject_name, subtype);
+
+    if (strcmp(subtype, "Image") == 0) {
+        // Handle Image XObject
+        handle_image_xobject(input, view_pool, parent, parser, xobj, xobject_name);
+    } else if (strcmp(subtype, "Form") == 0) {
+        // Handle Form XObject (nested content stream)
+        handle_form_xobject(input, view_pool, parent, parser, xobj, xobject_name);
+    } else {
+        log_debug("Unsupported XObject subtype: %s", subtype);
+    }
+}
+
+/**
+ * Handle Image XObject - extract and render embedded image
+ */
+static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* parent,
+                                  PDFStreamParser* parser, Map* image_dict, const char* name) {
+    // Get image dimensions
+    ConstItem width_item = image_dict->get("Width");
+    ConstItem height_item = image_dict->get("Height");
+
+    if (width_item.item == ITEM_NULL || height_item.item == ITEM_NULL) {
+        log_warn("Image '%s' missing Width/Height", name);
+        return;
+    }
+
+    int img_width = 0, img_height = 0;
+    Item w_mut = *(Item*)&width_item;
+    Item h_mut = *(Item*)&height_item;
+
+    if (w_mut.type_id() == LMD_TYPE_INT) img_width = w_mut.int_val;
+    else if (w_mut.type_id() == LMD_TYPE_FLOAT) img_width = (int)w_mut.get_double();
+
+    if (h_mut.type_id() == LMD_TYPE_INT) img_height = h_mut.int_val;
+    else if (h_mut.type_id() == LMD_TYPE_FLOAT) img_height = (int)h_mut.get_double();
+
+    log_debug("Image '%s': %dx%d", name, img_width, img_height);
+
+    // Get image data stream
+    ConstItem stream_data_item = image_dict->get("stream_data");
+    if (stream_data_item.item == ITEM_NULL) {
+        log_warn("Image '%s' has no stream_data", name);
+        return;
+    }
+
+    // Get bits per component and color space
+    int bits_per_component = 8;
+    ConstItem bpc_item = image_dict->get("BitsPerComponent");
+    if (bpc_item.item != ITEM_NULL) {
+        Item bpc_mut = *(Item*)&bpc_item;
+        if (bpc_mut.type_id() == LMD_TYPE_INT) bits_per_component = bpc_mut.int_val;
+    }
+
+    // Check filter to determine image format
+    ConstItem filter_item = image_dict->get("Filter");
+    const char* filter = nullptr;
+    if (filter_item.item != ITEM_NULL && filter_item.type_id() == LMD_TYPE_STRING) {
+        String* filter_str = filter_item.string();
+        if (filter_str) filter = filter_str->chars;
+    }
+
+    log_debug("Image '%s': filter=%s, bpc=%d", name, filter ? filter : "none", bits_per_component);
+
+    // Get stream data as binary (Binary is typedef of String in Lambda)
+    String* stream_data = nullptr;
+    if (stream_data_item.type_id() == LMD_TYPE_BINARY || stream_data_item.type_id() == LMD_TYPE_STRING) {
+        stream_data = stream_data_item.string();
+    }
+
+    if (!stream_data || stream_data->len == 0) {
+        log_warn("Image '%s' has empty stream data", name);
+        return;
+    }
+
+    // Create image view at current CTM position
+    // The CTM contains the image placement and scaling:
+    // [sx 0 0 sy tx ty] where sx, sy are width/height in user units
+    double ctm_width = parser->state.ctm[0];   // x-scale (image width in user units)
+    double ctm_height = parser->state.ctm[3];  // y-scale (image height in user units)
+    double ctm_x = parser->state.ctm[4];       // x-position
+    double ctm_y = parser->state.ctm[5];       // y-position
+
+    // For PDF, y increases upward but we render with y increasing downward
+    // Also, the CTM y-scale is typically positive for upward-increasing
+    // We need to flip the image position
+
+    log_debug("Image CTM: width=%.2f, height=%.2f, x=%.2f, y=%.2f",
+              ctm_width, ctm_height, ctm_x, ctm_y);
+
+    // Check if this is a pass-through format (DCT/JPEG or JPX/JPEG2000)
+    bool is_jpeg = filter && (strcmp(filter, "DCTDecode") == 0);
+    bool is_jpeg2k = filter && (strcmp(filter, "JPXDecode") == 0);
+
+    ImageSurface* img_surface = nullptr;
+
+    if (is_jpeg || is_jpeg2k) {
+        // Decode JPEG/JPEG2000 using platform decoder
+        img_surface = decode_image_data((const uint8_t*)stream_data->chars, stream_data->len,
+                                         is_jpeg ? IMAGE_FORMAT_JPEG : IMAGE_FORMAT_UNKNOWN);
+    } else {
+        // Raw image data - need to convert to RGBA
+        img_surface = decode_raw_image_data(image_dict, stream_data, img_width, img_height,
+                                             bits_per_component, input->pool);
+    }
+
+    if (!img_surface) {
+        log_warn("Failed to decode image '%s'", name);
+        return;
+    }
+
+    // Create a ViewBlock for the image
+    ViewBlock* img_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    if (!img_view) return;
+
+    img_view->view_type = RDT_VIEW_BLOCK;
+    img_view->node_type = DOM_NODE_ELEMENT;
+    img_view->tag_id = HTM_TAG_IMG;
+
+    // Allocate EmbedProp to hold the image
+    EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
+    embed->img = img_surface;
+    img_view->embed = embed;
+
+    // Set position based on CTM (convert PDF coordinates to screen)
+    // PDF origin is bottom-left, we need top-left
+    // Use absolute positioning
+    img_view->x = (float)ctm_x;
+    img_view->y = (float)ctm_y;  // Will be flipped by page height later
+    img_view->width = (float)fabs(ctm_width);
+    img_view->height = (float)fabs(ctm_height);
+
+    log_debug("Created image view: pos=(%.2f, %.2f), size=(%.2f, %.2f)",
+              img_view->x, img_view->y, img_view->width, img_view->height);
+
+    append_child_view((View*)parent, (View*)img_view);
+}
+
+/**
+ * Handle Form XObject - process nested content stream
+ */
+static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent,
+                                 PDFStreamParser* parser, Map* form_dict, const char* name) {
+    // Form XObjects are essentially embedded content streams with their own resources
+    // They have: /BBox, /Matrix (optional), /Resources (optional), stream content
+
+    // Get form resources (may inherit from parent)
+    Map* form_resources = nullptr;
+    ConstItem res_item = form_dict->get("Resources");
+    if (res_item.item != ITEM_NULL && res_item.type_id() == LMD_TYPE_MAP) {
+        form_resources = (Map*)res_item.map;
+    } else {
+        // Inherit parent resources
+        form_resources = (Map*)parser->resources;
+    }
+
+    // Get stream data
+    ConstItem stream_data_item = form_dict->get("stream_data");
+    if (stream_data_item.item == ITEM_NULL) {
+        log_warn("Form XObject '%s' has no stream_data", name);
+        return;
+    }
+
+    log_debug("Processing Form XObject '%s'", name);
+
+    // TODO: Apply form matrix and save/restore graphics state
+    // For now, just process the form content stream recursively
+    process_pdf_stream(input, view_pool, parent, form_dict, form_resources);
+}
+
+/**
+ * Decode raw image data to RGBA ImageSurface
+ * Handles various color spaces and bit depths
+ */
+static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
+                                            int width, int height, int bpc, Pool* pool) {
+    (void)pool; // unused for now
+    // Get color space
+    ConstItem cs_item = image_dict->get("ColorSpace");
+    const char* colorspace = "DeviceRGB";  // Default
+    if (cs_item.item != ITEM_NULL && cs_item.type_id() == LMD_TYPE_STRING) {
+        String* cs_str = cs_item.string();
+        if (cs_str) colorspace = cs_str->chars;
+    }
+
+    int components = 3;  // Default RGB
+    if (strcmp(colorspace, "DeviceGray") == 0 || strcmp(colorspace, "G") == 0) {
+        components = 1;
+    } else if (strcmp(colorspace, "DeviceCMYK") == 0 || strcmp(colorspace, "CMYK") == 0) {
+        components = 4;
+    } else if (strcmp(colorspace, "DeviceRGB") == 0 || strcmp(colorspace, "RGB") == 0) {
+        components = 3;
+    }
+
+    log_debug("decode_raw_image: colorspace=%s, components=%d, bpc=%d", colorspace, components, bpc);
+
+    // Calculate expected data size
+    int row_bytes = (width * components * bpc + 7) / 8;
+    int expected_size = row_bytes * height;
+
+    if ((int)data->len < expected_size) {
+        log_warn("Image data too short: got %d, expected %d", (int)data->len, expected_size);
+        // Proceed anyway with available data
+    }
+
+    // Create RGBA surface
+    ImageSurface* surface = image_surface_create(width, height);
+    if (!surface) return nullptr;
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    const uint8_t* src = (const uint8_t*)data->chars;
+
+    // Convert to RGBA based on color space and bit depth
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            uint8_t r = 0, g = 0, b = 0, a = 255;
+
+            if (bpc == 8) {
+                if (components == 1) {
+                    // Grayscale
+                    int idx = y * width + x;
+                    if (idx < (int)data->len) {
+                        r = g = b = src[idx];
+                    }
+                } else if (components == 3) {
+                    // RGB
+                    int idx = (y * width + x) * 3;
+                    if (idx + 2 < (int)data->len) {
+                        r = src[idx];
+                        g = src[idx + 1];
+                        b = src[idx + 2];
+                    }
+                } else if (components == 4) {
+                    // CMYK - convert to RGB
+                    int idx = (y * width + x) * 4;
+                    if (idx + 3 < (int)data->len) {
+                        float c = src[idx] / 255.0f;
+                        float m = src[idx + 1] / 255.0f;
+                        float yy = src[idx + 2] / 255.0f;
+                        float k = src[idx + 3] / 255.0f;
+                        r = (uint8_t)((1.0f - c) * (1.0f - k) * 255);
+                        g = (uint8_t)((1.0f - m) * (1.0f - k) * 255);
+                        b = (uint8_t)((1.0f - yy) * (1.0f - k) * 255);
+                    }
+                }
+            } else if (bpc == 1) {
+                // 1-bit image (black and white)
+                int bit_idx = y * width + x;
+                int byte_idx = bit_idx / 8;
+                int bit_offset = 7 - (bit_idx % 8);
+                if (byte_idx < (int)data->len) {
+                    uint8_t val = (src[byte_idx] >> bit_offset) & 1;
+                    r = g = b = val ? 255 : 0;
+                }
+            } else if (bpc == 4) {
+                // 4-bit grayscale
+                int nibble_idx = y * width + x;
+                int byte_idx = nibble_idx / 2;
+                bool high_nibble = (nibble_idx % 2) == 0;
+                if (byte_idx < (int)data->len) {
+                    uint8_t val = high_nibble ? (src[byte_idx] >> 4) : (src[byte_idx] & 0x0F);
+                    r = g = b = val * 17;  // Scale 0-15 to 0-255
+                }
+            }
+
+            // Store as ABGR format (alpha in high byte)
+            pixels[y * width + x] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+
+    return surface;
+}
+
+// Include image library header
+extern "C" {
+    #include "../../lib/image.h"
+}
+
+/**
+ * Decode JPEG/JPEG2000 image data using platform decoder
+ */
+static ImageSurface* decode_image_data(const uint8_t* data, size_t length, ImageFormat format_hint) {
+    (void)format_hint; // Currently auto-detected
+
+    int width, height, channels;
+    unsigned char* pixels = image_load_from_memory(data, length, &width, &height, &channels);
+
+    if (!pixels) {
+        log_warn("Failed to decode image data (%zu bytes)", length);
+        return nullptr;
+    }
+
+    // Create ImageSurface from decoded pixels
+    ImageSurface* surface = image_surface_create_from(width, height, pixels);
+    if (surface) {
+        log_debug("Successfully decoded image: %dx%d", surface->width, surface->height);
+    } else {
+        image_free(pixels);
+        log_warn("Failed to create image surface");
+    }
+
+    return surface;
 }
