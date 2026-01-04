@@ -233,7 +233,7 @@ static bool is_inline_level_element(DomElement* element) {
                 return true;
             }
             // Explicit block display
-            if (display_value == CSS_VALUE_BLOCK || 
+            if (display_value == CSS_VALUE_BLOCK ||
                 display_value == CSS_VALUE_FLEX ||
                 display_value == CSS_VALUE_GRID ||
                 display_value == CSS_VALUE_TABLE) {
@@ -241,7 +241,7 @@ static bool is_inline_level_element(DomElement* element) {
             }
         }
     }
-    
+
     // Fall back to HTML default display for common inline elements
     // These elements are inline by default in HTML
     const char* tag = element->node_name();
@@ -289,7 +289,7 @@ static CssEnum get_element_text_transform(DomElement* element) {
             DomElement* elem = node->as_element();
             // First check resolved blk property
             ViewBlock* view = (ViewBlock*)elem;
-            if (view->blk && view->blk->text_transform != 0 && 
+            if (view->blk && view->blk->text_transform != 0 &&
                 view->blk->text_transform != CSS_VALUE_INHERIT) {
                 return view->blk->text_transform;
             }
@@ -321,7 +321,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     FontBox saved_font = lycon->font;  // Save parent font context
     bool font_changed = false;
     ViewBlock* view_block_font = (ViewBlock*)element;
-    
+
     // First check if element has resolved font
     if (view_block_font->font && lycon->ui_context) {
         setup_font(lycon->ui_context, &lycon->font, view_block_font->font);
@@ -330,12 +330,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // Element has CSS styles but font not yet resolved - extract font-family from CSS
         CssDeclaration* font_family_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_FAMILY);
-        
+
         if (font_family_decl && font_family_decl->value) {
             // Create temporary FontProp from CSS using alloc_font_prop for stable memory
             FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
             const char* css_family = NULL;
-            
+
             // Extract font-family from CSS value
             if (font_family_decl->value->type == CSS_VALUE_TYPE_STRING) {
                 css_family = font_family_decl->value->data.string;
@@ -356,10 +356,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
             }
-            
+
             if (css_family && css_family != lycon->font.style->family) {
                 temp_font_prop->family = (char*)css_family;
-                
+
                 // Also check for font-size
                 CssDeclaration* font_size_decl = style_tree_get_declaration(
                     element->specified_style, CSS_PROPERTY_FONT_SIZE);
@@ -368,7 +368,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     temp_font_prop->font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
                                                                      font_size_decl->value);
                 }
-                
+
                 setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
                 font_changed = true;
             }
@@ -429,7 +429,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // If element has height and aspect-ratio, width = height * aspect-ratio
     ViewBlock* view_block_for_aspect = (ViewBlock*)element;
     float aspect_ratio = 0;
-    
+
     // First check fi for resolved aspect-ratio
     if (view_block_for_aspect->fi && view_block_for_aspect->fi->aspect_ratio > 0) {
         aspect_ratio = view_block_for_aspect->fi->aspect_ratio;
@@ -461,7 +461,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
     }
-    
+
     if (aspect_ratio > 0) {
         float height = -1;
 
@@ -469,7 +469,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (view_block_for_aspect->blk && view_block_for_aspect->blk->given_height > 0) {
             height = view_block_for_aspect->blk->given_height;
         }
-        
+
         // If no explicit height, check for percentage height that can resolve
         // against a parent with definite height
         if (height <= 0 && element->specified_style) {
@@ -603,15 +603,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     BlockContext* saved_parent = lycon->block.parent;
     BlockContext temp_parent = {};
     bool need_restore_parent = false;
-    
+
     // Determine if this element has a definite height to propagate
     float element_definite_height = -1;
-    
+
     log_debug("  -> checking height for %s: blk=%p, given_height=%.1f",
-              element->node_name(), 
-              (void*)(view_block->blk), 
+              element->node_name(),
+              (void*)(view_block->blk),
               view_block->blk ? view_block->blk->given_height : -999);
-    
+
     // First check for explicit height from CSS (length value)
     if (view_block->blk && view_block->blk->given_height > 0) {
         element_definite_height = view_block->blk->given_height;
@@ -646,7 +646,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
     }
-    
+
     // If this element has a definite height, propagate it to children
     if (element_definite_height > 0) {
         temp_parent.content_height = element_definite_height;
@@ -672,8 +672,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Only trim leading whitespace if this is the first child or preceded only by whitespace.
                 // If there's inline content before this text node, leading whitespace should
                 // collapse to a single space (which contributes to intrinsic width).
-                bool has_inline_before = (child->prev_sibling != nullptr && 
-                                          has_inline_content && 
+                bool has_inline_before = (child->prev_sibling != nullptr &&
+                                          has_inline_content &&
                                           inline_max_sum > 0);
                 bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
                 for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
@@ -728,12 +728,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
                 // Get text-transform from parent element (text inherits from parent)
                 CssEnum text_transform = get_element_text_transform(element);
-                
+
                 TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
                     lycon, normalized_buffer, out_pos, text_transform);
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
-                
+
                 // In flex containers, text nodes become anonymous flex items
                 if (is_flex_container) {
                     log_debug("  flex text child: min=%.1f, max=%.1f, normalized_len=%zu, text='%.30s...'",
@@ -964,7 +964,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         // Check if text is whitespace-only (shouldn't contribute to height in block context)
         const char* text = (const char*)node->text_data();
         if (!text || *text == '\0') return 0;
-        
+
         bool is_whitespace_only = true;
         for (const char* p = text; *p; p++) {
             if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
@@ -975,13 +975,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         if (is_whitespace_only) {
             return 0;  // Whitespace-only text doesn't contribute to height
         }
-        
+
         // Calculate line height
         float line_height = 20.0f;  // Default
         if (lycon->font.style && lycon->font.style->font_size > 0) {
             line_height = lycon->font.style->font_size * 1.2f;  // Typical line-height
         }
-        
+
         // Estimate how many lines the text will take based on available width
         if (width > 0) {
             size_t text_len = strlen(text);
@@ -993,19 +993,19 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // Measure text width using intrinsic sizing
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len, text_transform);
             float text_width = widths.max_content;
-            
+
             // Calculate number of lines (rounded up)
             int num_lines = 1;
             if (text_width > width) {
                 num_lines = (int)ceil(text_width / width);
             }
-            
+
             log_debug("calculate_max_content_height: text len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
                       text_len, text_width, width, num_lines);
-            
+
             return line_height * num_lines;
         }
-        
+
         return line_height;
     }
 
@@ -1021,11 +1021,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     if (view->blk && view->blk->given_height > 0) {
         // Element has explicit height specified in CSS
         float explicit_height = view->blk->given_height;
-        
+
         // Check box-sizing: if border-box, the height already includes padding/border
         // Only add padding/border for content-box (default)
         bool is_border_box = (view->blk->box_sizing == CSS_VALUE_BORDER_BOX);
-        
+
         if (!is_border_box && view->bound) {
             // content-box: height is content only, add padding and border
             if (view->bound->padding.top >= 0) explicit_height += view->bound->padding.top;
@@ -1036,21 +1036,21 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
         // For border-box, given_height already includes padding/border, return as-is
-        
-        log_debug("calculate_max_content_height: %s has explicit height=%.1f (box_sizing=%s)", 
+
+        log_debug("calculate_max_content_height: %s has explicit height=%.1f (box_sizing=%s)",
                   element->node_name(), explicit_height, is_border_box ? "border-box" : "content-box");
         return explicit_height;
     }
-    
+
     // Also check specified_style for height declaration if not yet resolved
     if (element->specified_style) {
         CssDeclaration* height_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_HEIGHT);
-        if (height_decl && height_decl->value && 
+        if (height_decl && height_decl->value &&
             height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
             float explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
             if (explicit_height > 0) {
-                log_debug("calculate_max_content_height: %s has specified height=%.1f", 
+                log_debug("calculate_max_content_height: %s has specified height=%.1f",
                           element->node_name(), explicit_height);
                 return explicit_height;
             }
@@ -1061,7 +1061,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     bool is_grid_container = false;
     int grid_column_count = 1;  // Default: single column = vertical stacking
     float grid_row_gap = 0;
-    
+
     if (view->display.inner == CSS_VALUE_GRID) {
         is_grid_container = true;
     }
@@ -1077,7 +1077,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
     }
-    
+
     if (is_grid_container) {
         // Get column count from grid-template-columns
         if (view->embed && view->embed->grid && view->embed->grid->grid_template_columns) {
@@ -1177,7 +1177,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     float flex_row_gap = 0;
     float flex_column_gap = 0;
     bool is_flex_container = (view->display.inner == CSS_VALUE_FLEX);
-    
+
     // Also check specified_style for unresolved display
     if (!is_flex_container && element->specified_style) {
         CssDeclaration* display_decl = style_tree_get_declaration(
@@ -1190,12 +1190,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
     }
-    
+
     if (is_flex_container) {
         // Default flex direction is row, wrap is nowrap
         is_flex_row = true;
         is_flex_wrap = false;
-        
+
         if (view->embed && view->embed->flex) {
             if (view->embed->flex->direction == DIR_ROW ||
                 view->embed->flex->direction == DIR_ROW_REVERSE) {
@@ -1253,14 +1253,14 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // Check if this block element has only inline content (text and inline elements).
     // In that case, children flow inline on the same line(s), not stacked vertically.
     bool has_only_inline_content = false;
-    
+
     // First check if display is resolved; if not, try to resolve it
     CssEnum display_inner = view->display.inner;
     if (display_inner == 0 && element->specified_style) {
         // Display not resolved yet, try to get from CSS
         CssDeclaration* display_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (display_decl && display_decl->value && 
+        if (display_decl && display_decl->value &&
             display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
             display_inner = display_decl->value->data.keyword;
             // block => flow layout
@@ -1272,7 +1272,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             display_inner = CSS_VALUE_FLOW;
         }
     }
-    
+
     if (!is_grid_container && !is_flex_row && display_inner == CSS_VALUE_FLOW) {
         // Block element with flow layout - check if all children are inline
         has_only_inline_content = true;
@@ -1320,11 +1320,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         for (DomNode* c = element->first_child; c; c = c->next_sibling) {
             if (c->is_element()) child_count++;
         }
-        
+
         if (child_count > 0) {
             // Calculate number of rows
             int row_count = (child_count + grid_column_count - 1) / grid_column_count;
-            
+
             // Collect heights and compute row-by-row max
             float* child_heights = (float*)alloca(child_count * sizeof(float));
             int idx = 0;
@@ -1333,7 +1333,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     child_heights[idx++] = calculate_max_content_height(lycon, c, width / grid_column_count);
                 }
             }
-            
+
             // Sum up max height of each row
             for (int row = 0; row < row_count; row++) {
                 float row_max_height = 0;
@@ -1356,23 +1356,23 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         // Simulate how items wrap based on available width
         log_debug("calculate_max_content_height: wrapping flex row %s, available_width=%.1f, row_gap=%.1f, col_gap=%.1f",
                   element->node_name(), width, flex_row_gap, flex_column_gap);
-        
+
         // Collect child widths and heights
         float current_line_width = 0;
         float current_line_height = 0;
         float total_height = 0;
         int line_count = 0;
         bool first_on_line = true;
-        
+
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             if (!child->is_element()) continue;
-            
+
             // Get child's intrinsic width
             DomElement* child_elem = child->as_element();
             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
             float child_width = child_sizes.max_content;  // Use max-content width for flex items
             float child_height = calculate_max_content_height(lycon, child, width);
-            
+
             // Check if we need to wrap to a new line
             float width_with_gap = first_on_line ? child_width : (flex_column_gap + child_width);
             if (!first_on_line && current_line_width + width_with_gap > width) {
@@ -1392,7 +1392,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 first_on_line = false;
             }
         }
-        
+
         // Add the last line
         if (current_line_height > 0) {
             total_height += current_line_height;
@@ -1401,7 +1401,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
             line_count++;
         }
-        
+
         height = total_height;
         log_debug("calculate_max_content_height: wrapping flex %s, lines=%d, height=%.1f",
                   element->node_name(), line_count, height);
@@ -1466,11 +1466,97 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
 }
 
 // ============================================================================
+// Unified Intrinsic Sizing API Implementation (Section 4.2)
+// ============================================================================
+
+IntrinsicSizesBidirectional measure_intrinsic_sizes(
+    LayoutContext* lycon,
+    ViewBlock* element,
+    AvailableSpace available_space
+) {
+    IntrinsicSizesBidirectional result = {0, 0, 0, 0};
+
+    if (!lycon || !element) {
+        return result;
+    }
+
+    DomNode* node = (DomNode*)element;
+
+    // Step 1: Measure width intrinsic sizes
+    // Width measurement doesn't depend on available width
+    result.min_content_width = calculate_min_content_width(lycon, node);
+    result.max_content_width = calculate_max_content_width(lycon, node);
+
+    // Step 2: Determine the width to use for height measurement
+    // Height depends on width due to text wrapping
+    float width_for_height;
+
+    if (available_space.width.is_definite()) {
+        // Use the definite available width for BOTH height measurements
+        // This is critical for grid row sizing where the column width is known
+        width_for_height = available_space.width.value;
+    } else if (available_space.width.is_min_content()) {
+        // Use min-content width for height calculation
+        width_for_height = result.min_content_width;
+    } else {
+        // MaxContent or Indefinite: use max-content width
+        width_for_height = result.max_content_width;
+    }
+    
+    // Step 3: Measure height intrinsic sizes at the determined width
+    // IMPORTANT: When a definite width is available, use it for BOTH min and max height
+    // This matches the original grid behavior where both heights are computed at the same width
+    result.min_content_height = calculate_min_content_height(lycon, node, width_for_height);
+    result.max_content_height = calculate_max_content_height(lycon, node, width_for_height);
+    
+    log_debug("measure_intrinsic_sizes: %s -> width(min=%.1f, max=%.1f), height(min=%.1f, max=%.1f) at width=%.1f",
+              element->node_name(),
+              result.min_content_width, result.max_content_width,
+              result.min_content_height, result.max_content_height,
+              width_for_height);
+
+    return result;
+}
+
+// ============================================================================
 // Table Cell Intrinsic Width Measurement
-// Note: This wrapper is designed for table layout integration.
-// The actual implementation uses the table's existing measure_cell_intrinsic_width
-// and measure_cell_minimum_width functions until full integration is complete.
+// ============================================================================
+
+CellIntrinsicWidths measure_table_cell_intrinsic_widths(
+    LayoutContext* lycon,
+    ViewBlock* cell
+) {
+    CellIntrinsicWidths result = {0, 0};
+    
+    if (!lycon || !cell) {
+        return result;
+    }
+    
+    // Use unified API with max-content available space
+    AvailableSpace available = AvailableSpace::make_max_content();
+    
+    IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, cell, available);
+    
+    result.min_width = sizes.min_content_width;
+    result.max_width = sizes.max_content_width;
+    
+    // Apply minimum usable width per CSS 2.1
+    if (result.min_width < 16.0f) result.min_width = 16.0f;
+    if (result.max_width < 16.0f) result.max_width = 16.0f;
+    
+    return result;
+}
+
+// ============================================================================
+// Backward Compatibility Notes
+// ============================================================================
 //
-// TODO: Refactor layout_table.cpp to use the unified text measurement functions
-// (measure_text_intrinsic_widths) from this module for consistency.
+// The following functions are now wrappers or remain for backward compatibility:
+// - calculate_min_content_width() - use measure_intrinsic_sizes().min_content_width
+// - calculate_max_content_width() - use measure_intrinsic_sizes().max_content_width
+// - calculate_min_content_height() - use measure_intrinsic_sizes().min_content_height
+// - calculate_max_content_height() - use measure_intrinsic_sizes().max_content_height
+// - measure_element_intrinsic_widths() - use measure_intrinsic_sizes() for width
+//
+// These will be gradually deprecated in favor of the unified API.
 // ============================================================================
