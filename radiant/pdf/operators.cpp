@@ -275,8 +275,16 @@ void pdf_graphics_state_init(PDFGraphicsState* state, Pool* pool) {
     state->fill_color[1] = 0.0;
     state->fill_color[2] = 0.0;
 
-    state->stroke_color_space = 0;  // RGB
-    state->fill_color_space = 0;    // RGB
+    // Initialize full color components
+    for (int i = 0; i < 4; i++) {
+        state->stroke_color_components[i] = 0.0;
+        state->fill_color_components[i] = 0.0;
+    }
+
+    state->stroke_color_space = PDF_CS_DEVICE_RGB;  // Default to DeviceRGB
+    state->fill_color_space = PDF_CS_DEVICE_RGB;    // Default to DeviceRGB
+    state->stroke_cs_info = nullptr;
+    state->fill_cs_info = nullptr;
 
     // Default alpha (fully opaque)
     state->fill_alpha = 1.0;
@@ -366,8 +374,12 @@ void pdf_graphics_state_save(PDFGraphicsState* state) {
 
     memcpy(saved->stroke_color, state->stroke_color, sizeof(state->stroke_color));
     memcpy(saved->fill_color, state->fill_color, sizeof(state->fill_color));
+    memcpy(saved->stroke_color_components, state->stroke_color_components, sizeof(state->stroke_color_components));
+    memcpy(saved->fill_color_components, state->fill_color_components, sizeof(state->fill_color_components));
     saved->stroke_color_space = state->stroke_color_space;
     saved->fill_color_space = state->fill_color_space;
+    saved->stroke_cs_info = state->stroke_cs_info;
+    saved->fill_cs_info = state->fill_cs_info;
     saved->fill_alpha = state->fill_alpha;
     saved->stroke_alpha = state->stroke_alpha;
 
@@ -411,8 +423,12 @@ void pdf_graphics_state_restore(PDFGraphicsState* state) {
 
     memcpy(state->stroke_color, saved->stroke_color, sizeof(state->stroke_color));
     memcpy(state->fill_color, saved->fill_color, sizeof(state->fill_color));
+    memcpy(state->stroke_color_components, saved->stroke_color_components, sizeof(state->stroke_color_components));
+    memcpy(state->fill_color_components, saved->fill_color_components, sizeof(state->fill_color_components));
     state->stroke_color_space = saved->stroke_color_space;
     state->fill_color_space = saved->fill_color_space;
+    state->stroke_cs_info = saved->stroke_cs_info;
+    state->fill_cs_info = saved->fill_cs_info;
     state->fill_alpha = saved->fill_alpha;
     state->stroke_alpha = saved->stroke_alpha;
 
@@ -487,16 +503,20 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             break;
         }
 
-        // Parse operand
+        // Parse operand - always parse to advance stream, even if we discard the value
+        const char* prev_stream = parser->stream;
+        
         if (c == '(' || c == '<') {
             // String
+            String* str = parse_string(parser);
             if (str_count < 16) {
-                strings[str_count++] = parse_string(parser);
+                strings[str_count++] = str;
             }
         } else if (c == '/') {
             // Name
+            String* name = parse_name(parser);
             if (str_count < 16) {
-                strings[str_count++] = parse_name(parser);
+                strings[str_count++] = name;
             }
         } else if (c == '[') {
             // Array - TODO: handle arrays properly
@@ -507,10 +527,16 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             skip_whitespace(parser);
         } else if (isdigit(c) || c == '-' || c == '+' || c == '.') {
             // Number
+            double num = parse_number(parser);
             if (num_count < 16) {
-                numbers[num_count++] = parse_number(parser);
+                numbers[num_count++] = num;
             }
         } else {
+            parser->stream++;
+        }
+        
+        // Safety: ensure stream advances to prevent infinite loop
+        if (parser->stream == prev_stream) {
             parser->stream++;
         }
     }
@@ -588,7 +614,11 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.fill_color[0] = numbers[0];
             parser->state.fill_color[1] = numbers[1];
             parser->state.fill_color[2] = numbers[2];
-            parser->state.fill_color_space = 0;  // RGB
+            parser->state.fill_color_components[0] = numbers[0];
+            parser->state.fill_color_components[1] = numbers[1];
+            parser->state.fill_color_components[2] = numbers[2];
+            parser->state.fill_color_space = PDF_CS_DEVICE_RGB;
+            parser->state.fill_cs_info = nullptr;
         }
     } else if (strcmp(op_name, "RG") == 0) {
         op->type = PDF_OP_RG;
@@ -599,7 +629,11 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.stroke_color[0] = numbers[0];
             parser->state.stroke_color[1] = numbers[1];
             parser->state.stroke_color[2] = numbers[2];
-            parser->state.stroke_color_space = 0;  // RGB
+            parser->state.stroke_color_components[0] = numbers[0];
+            parser->state.stroke_color_components[1] = numbers[1];
+            parser->state.stroke_color_components[2] = numbers[2];
+            parser->state.stroke_color_space = PDF_CS_DEVICE_RGB;
+            parser->state.stroke_cs_info = nullptr;
         }
     }
     // CMYK color operators
@@ -610,12 +644,18 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             op->operands.cmyk_color.m = numbers[1];
             op->operands.cmyk_color.y = numbers[2];
             op->operands.cmyk_color.k = numbers[3];
+            // Store raw CMYK components
+            parser->state.fill_color_components[0] = numbers[0];
+            parser->state.fill_color_components[1] = numbers[1];
+            parser->state.fill_color_components[2] = numbers[2];
+            parser->state.fill_color_components[3] = numbers[3];
             // Convert CMYK to RGB: R = (1-C)(1-K), G = (1-M)(1-K), B = (1-Y)(1-K)
             double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
             parser->state.fill_color[0] = (1.0 - c) * (1.0 - k);  // R
             parser->state.fill_color[1] = (1.0 - m) * (1.0 - k);  // G
             parser->state.fill_color[2] = (1.0 - y) * (1.0 - k);  // B
-            parser->state.fill_color_space = 1;  // CMYK
+            parser->state.fill_color_space = PDF_CS_DEVICE_CMYK;
+            parser->state.fill_cs_info = nullptr;
             log_debug("CMYK fill: C=%.2f M=%.2f Y=%.2f K=%.2f -> RGB(%.2f, %.2f, %.2f)",
                      c, m, y, k, parser->state.fill_color[0],
                      parser->state.fill_color[1], parser->state.fill_color[2]);
@@ -627,12 +667,18 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             op->operands.cmyk_color.m = numbers[1];
             op->operands.cmyk_color.y = numbers[2];
             op->operands.cmyk_color.k = numbers[3];
+            // Store raw CMYK components
+            parser->state.stroke_color_components[0] = numbers[0];
+            parser->state.stroke_color_components[1] = numbers[1];
+            parser->state.stroke_color_components[2] = numbers[2];
+            parser->state.stroke_color_components[3] = numbers[3];
             // Convert CMYK to RGB
             double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
             parser->state.stroke_color[0] = (1.0 - c) * (1.0 - k);  // R
             parser->state.stroke_color[1] = (1.0 - m) * (1.0 - k);  // G
             parser->state.stroke_color[2] = (1.0 - y) * (1.0 - k);  // B
-            parser->state.stroke_color_space = 1;  // CMYK
+            parser->state.stroke_color_space = PDF_CS_DEVICE_CMYK;
+            parser->state.stroke_cs_info = nullptr;
             log_debug("CMYK stroke: C=%.2f M=%.2f Y=%.2f K=%.2f -> RGB(%.2f, %.2f, %.2f)",
                      c, m, y, k, parser->state.stroke_color[0],
                      parser->state.stroke_color[1], parser->state.stroke_color[2]);
@@ -646,7 +692,9 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.fill_color[0] = gray;
             parser->state.fill_color[1] = gray;
             parser->state.fill_color[2] = gray;
-            parser->state.fill_color_space = 2;  // Gray
+            parser->state.fill_color_components[0] = gray;
+            parser->state.fill_color_space = PDF_CS_DEVICE_GRAY;
+            parser->state.fill_cs_info = nullptr;
         }
     } else if (strcmp(op_name, "G") == 0) {
         op->type = PDF_OP_G;
@@ -655,7 +703,156 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.stroke_color[0] = gray;
             parser->state.stroke_color[1] = gray;
             parser->state.stroke_color[2] = gray;
-            parser->state.stroke_color_space = 2;  // Gray
+            parser->state.stroke_color_components[0] = gray;
+            parser->state.stroke_color_space = PDF_CS_DEVICE_GRAY;
+            parser->state.stroke_cs_info = nullptr;
+        }
+    }
+    // Color space operators (CS/cs set the current color space, SC/sc/SCN/scn set colors)
+    // NOTE: Full color space handling is done in pdf_to_view.cpp where resources are available
+    else if (strcmp(op_name, "cs") == 0) {
+        op->type = PDF_OP_cs;
+        // cs takes a color space name - store it for later lookup
+        if (str_count >= 1 && strings[0]) {
+            op->operands.show_text.text = strings[0];  // Reuse show_text.text for CS name
+            const char* cs_name = strings[0]->chars;
+            log_debug("cs operator: set fill color space to '%s'", cs_name);
+            // Device color spaces can be handled directly
+            if (strcmp(cs_name, "DeviceRGB") == 0) {
+                parser->state.fill_color_space = PDF_CS_DEVICE_RGB;
+                parser->state.fill_cs_info = nullptr;
+            } else if (strcmp(cs_name, "DeviceGray") == 0) {
+                parser->state.fill_color_space = PDF_CS_DEVICE_GRAY;
+                parser->state.fill_cs_info = nullptr;
+            } else if (strcmp(cs_name, "DeviceCMYK") == 0) {
+                parser->state.fill_color_space = PDF_CS_DEVICE_CMYK;
+                parser->state.fill_cs_info = nullptr;
+            }
+            // Named color spaces (e.g., "CS1", "Indexed") are looked up in resources later
+        }
+    } else if (strcmp(op_name, "CS") == 0) {
+        op->type = PDF_OP_CS;
+        // CS takes a color space name for stroking
+        if (str_count >= 1 && strings[0]) {
+            op->operands.show_text.text = strings[0];
+            const char* cs_name = strings[0]->chars;
+            log_debug("CS operator: set stroke color space to '%s'", cs_name);
+            if (strcmp(cs_name, "DeviceRGB") == 0) {
+                parser->state.stroke_color_space = PDF_CS_DEVICE_RGB;
+                parser->state.stroke_cs_info = nullptr;
+            } else if (strcmp(cs_name, "DeviceGray") == 0) {
+                parser->state.stroke_color_space = PDF_CS_DEVICE_GRAY;
+                parser->state.stroke_cs_info = nullptr;
+            } else if (strcmp(cs_name, "DeviceCMYK") == 0) {
+                parser->state.stroke_color_space = PDF_CS_DEVICE_CMYK;
+                parser->state.stroke_cs_info = nullptr;
+            }
+        }
+    } else if (strcmp(op_name, "sc") == 0) {
+        op->type = PDF_OP_sc;
+        // sc sets fill color components based on current color space
+        log_debug("sc operator: %d color components", num_count);
+        if (num_count >= 1) {
+            // Store color components
+            for (int i = 0; i < num_count && i < 4; i++) {
+                parser->state.fill_color_components[i] = numbers[i];
+            }
+            // Convert to RGB based on current color space
+            int cs = parser->state.fill_color_space;
+            if (cs == PDF_CS_DEVICE_RGB && num_count >= 3) {
+                parser->state.fill_color[0] = numbers[0];
+                parser->state.fill_color[1] = numbers[1];
+                parser->state.fill_color[2] = numbers[2];
+            } else if (cs == PDF_CS_DEVICE_GRAY && num_count >= 1) {
+                parser->state.fill_color[0] = numbers[0];
+                parser->state.fill_color[1] = numbers[0];
+                parser->state.fill_color[2] = numbers[0];
+            } else if (cs == PDF_CS_DEVICE_CMYK && num_count >= 4) {
+                double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
+                parser->state.fill_color[0] = (1.0 - c) * (1.0 - k);
+                parser->state.fill_color[1] = (1.0 - m) * (1.0 - k);
+                parser->state.fill_color[2] = (1.0 - y) * (1.0 - k);
+            }
+            // Indexed/ICCBased/Cal color spaces handled in pdf_to_view.cpp
+        }
+    } else if (strcmp(op_name, "SC") == 0) {
+        op->type = PDF_OP_SC;
+        // SC sets stroke color components based on current color space
+        log_debug("SC operator: %d color components", num_count);
+        if (num_count >= 1) {
+            for (int i = 0; i < num_count && i < 4; i++) {
+                parser->state.stroke_color_components[i] = numbers[i];
+            }
+            int cs = parser->state.stroke_color_space;
+            if (cs == PDF_CS_DEVICE_RGB && num_count >= 3) {
+                parser->state.stroke_color[0] = numbers[0];
+                parser->state.stroke_color[1] = numbers[1];
+                parser->state.stroke_color[2] = numbers[2];
+            } else if (cs == PDF_CS_DEVICE_GRAY && num_count >= 1) {
+                parser->state.stroke_color[0] = numbers[0];
+                parser->state.stroke_color[1] = numbers[0];
+                parser->state.stroke_color[2] = numbers[0];
+            } else if (cs == PDF_CS_DEVICE_CMYK && num_count >= 4) {
+                double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
+                parser->state.stroke_color[0] = (1.0 - c) * (1.0 - k);
+                parser->state.stroke_color[1] = (1.0 - m) * (1.0 - k);
+                parser->state.stroke_color[2] = (1.0 - y) * (1.0 - k);
+            }
+        }
+    } else if (strcmp(op_name, "scn") == 0) {
+        op->type = PDF_OP_scn;
+        // scn is like sc but can also have a pattern name
+        log_debug("scn operator: %d numbers, %d strings", num_count, str_count);
+        if (num_count >= 1) {
+            for (int i = 0; i < num_count && i < 4; i++) {
+                parser->state.fill_color_components[i] = numbers[i];
+            }
+            // Basic device color space conversion (same as sc)
+            int cs = parser->state.fill_color_space;
+            if (cs == PDF_CS_DEVICE_RGB && num_count >= 3) {
+                parser->state.fill_color[0] = numbers[0];
+                parser->state.fill_color[1] = numbers[1];
+                parser->state.fill_color[2] = numbers[2];
+            } else if (cs == PDF_CS_DEVICE_GRAY && num_count >= 1) {
+                parser->state.fill_color[0] = numbers[0];
+                parser->state.fill_color[1] = numbers[0];
+                parser->state.fill_color[2] = numbers[0];
+            } else if (cs == PDF_CS_DEVICE_CMYK && num_count >= 4) {
+                double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
+                parser->state.fill_color[0] = (1.0 - c) * (1.0 - k);
+                parser->state.fill_color[1] = (1.0 - m) * (1.0 - k);
+                parser->state.fill_color[2] = (1.0 - y) * (1.0 - k);
+            }
+        }
+        if (str_count >= 1 && strings[0]) {
+            op->operands.show_text.text = strings[0];  // Pattern name if present
+        }
+    } else if (strcmp(op_name, "SCN") == 0) {
+        op->type = PDF_OP_SCN;
+        // SCN is like SC but can also have a pattern name
+        log_debug("SCN operator: %d numbers, %d strings", num_count, str_count);
+        if (num_count >= 1) {
+            for (int i = 0; i < num_count && i < 4; i++) {
+                parser->state.stroke_color_components[i] = numbers[i];
+            }
+            int cs = parser->state.stroke_color_space;
+            if (cs == PDF_CS_DEVICE_RGB && num_count >= 3) {
+                parser->state.stroke_color[0] = numbers[0];
+                parser->state.stroke_color[1] = numbers[1];
+                parser->state.stroke_color[2] = numbers[2];
+            } else if (cs == PDF_CS_DEVICE_GRAY && num_count >= 1) {
+                parser->state.stroke_color[0] = numbers[0];
+                parser->state.stroke_color[1] = numbers[0];
+                parser->state.stroke_color[2] = numbers[0];
+            } else if (cs == PDF_CS_DEVICE_CMYK && num_count >= 4) {
+                double c = numbers[0], m = numbers[1], y = numbers[2], k = numbers[3];
+                parser->state.stroke_color[0] = (1.0 - c) * (1.0 - k);
+                parser->state.stroke_color[1] = (1.0 - m) * (1.0 - k);
+                parser->state.stroke_color[2] = (1.0 - y) * (1.0 - k);
+            }
+        }
+        if (str_count >= 1 && strings[0]) {
+            op->operands.show_text.text = strings[0];
         }
     }
     // Line state operators
@@ -819,6 +1016,15 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
         if (str_count >= 1 && strings[0]) {
             op->operands.show_text.text = strings[0];  // Reuse show_text.text for gs name
             log_debug("gs operator: graphics state name = %s", strings[0]->chars);
+        }
+    }
+    // XObject operators
+    else if (strcmp(op_name, "Do") == 0) {
+        op->type = PDF_OP_Do;
+        // The Do operator takes a name operand - the XObject name (e.g., "/Im1", "/Fm1")
+        if (str_count >= 1 && strings[0]) {
+            op->operands.show_text.text = strings[0];  // Reuse show_text.text for XObject name
+            log_debug("Do operator: XObject name = %s", strings[0]->chars);
         }
     }
 

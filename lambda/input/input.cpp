@@ -23,7 +23,7 @@ void parse_xml(Input* input, const char* xml_string);
 Element* html5_parse(Input* input, const char* html);  // HTML5 compliant parser
 extern "C" void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser (default)
 void parse_rtf(Input* input, const char* rtf_string);
-void parse_pdf(Input* input, const char* pdf_string);
+void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);
 void parse_asciidoc(Input* input, const char* asciidoc_string);
 void parse_man(Input* input, const char* man_string);
 void parse_eml(Input* input, const char* eml_string);
@@ -604,7 +604,9 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_rtf(input, source);
         }
         else if (strcmp(effective_type, "pdf") == 0) {
-            parse_pdf(input, source);
+            // Note: PDF parsing with strlen may fail on binary content with null bytes
+            // For proper PDF handling, use read_binary_file and parse_pdf with explicit size
+            parse_pdf(input, source, strlen(source));
         }
         else if (strcmp(effective_type, "wiki") == 0) {
             input->root = input_markup(input, source);
