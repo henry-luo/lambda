@@ -22,9 +22,9 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
  */
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name) {
     if (!lycon || !lycon->view || !var_name) return nullptr;
-    
+
     DomElement* element = (DomElement*)lycon->view;
-    
+
     // Search up the DOM tree (CSS variables inherit)
     while (element) {
         // Check if this element has CSS variables
@@ -37,7 +37,7 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
                 var = var->next;
             }
         }
-        
+
         // Move to parent element
         if (element->parent && element->parent->is_element()) {
             element = (DomElement*)element->parent;
@@ -45,7 +45,7 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
             break;
         }
     }
-    
+
     return nullptr;
 }
 
@@ -89,12 +89,12 @@ const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION) {
         return value;  // Not a function, return as-is
     }
-    
+
     const CssFunction* func = value->data.function;
     if (!func || !func->name || strcmp(func->name, "var") != 0) {
         return value;  // Not a var() function, return as-is
     }
-    
+
     // Extract variable name
     const char* var_name = nullptr;
     if (func->args && func->arg_count >= 1 && func->args[0]) {
@@ -105,7 +105,7 @@ const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value
             var_name = first_arg->data.string;
         }
     }
-    
+
     if (!var_name) {
         // No variable name found, try fallback
         if (func->arg_count >= 2 && func->args[1]) {
@@ -113,19 +113,19 @@ const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value
         }
         return nullptr;  // No value found
     }
-    
+
     // Look up the variable
     const CssValue* var_value = lookup_css_variable(lycon, var_name);
     if (var_value) {
         // Recursively resolve in case the variable value is also a var()
         return resolve_var_function(lycon, var_value);
     }
-    
+
     // Variable not found, try fallback
     if (func->arg_count >= 2 && func->args[1]) {
         return resolve_var_function(lycon, func->args[1]);
     }
-    
+
     return nullptr;  // No value found
 }
 
@@ -154,11 +154,11 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
     result.a = 255; // default black, opaque
 
     if (!value) return result;
-    
+
     // Resolve var() if present
     value = resolve_var_function(lycon, value);
     if (!value) return result;
-    
+
     switch (value->type) {
     case CSS_VALUE_TYPE_COLOR: {
         // Access color data from CssValue anonymous struct
@@ -570,7 +570,7 @@ DisplayValue resolve_display_value(void* child) {
         uintptr_t tag_id = dom_elem ? dom_elem->tag_id : HTM_TAG__UNDEF;
 
         log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->node_name());
-        
+
         // CSS 2.1 §9.7: Check for float - floated elements get blockified
         CssEnum float_value = get_float_value_from_style(dom_elem);
         bool is_floated = (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT);
@@ -901,7 +901,7 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
     if (decl && decl->value) {
         // resolve font size from declaration
         const CssValue* value = decl->value;
-        
+
         // Resolve var() if present
         value = resolve_var_function(lycon, value);
         if (!value) {
@@ -1147,11 +1147,11 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (strcmp(func->name, "calc") == 0) {
             // calc() expression - evaluate the expression
             // For now, handle simple cases like "calc(100% - 2rem)"
-            
+
             // Use negative property to enable raw number mode (no line-height multiplication)
             // while preserving the property ID for correct percentage base selection
             uintptr_t raw_prop = (uintptr_t)(-(intptr_t)property);
-            
+
             if (func->arg_count >= 1 && func->args && func->args[0]) {
                 // Check for simple binary operations in a list value
                 CssValue* arg = func->args[0];
@@ -1262,12 +1262,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                 log_warn("calc() with no arguments");
                 result = NAN;
             }
-            
+
             // Note: We do NOT apply line-height unitless multiplier here because:
             // 1. calc() results lose type information - we can't distinguish calc(1.2) from calc(10px + 8px)
             // 2. The heuristic (< 10 means unitless) is too fragile for complex CSS with variables
             // 3. If the result is truly unitless for line-height, the caller should handle it
-            // This matches browser behavior where calc(1.5) returns a dimensionless value, 
+            // This matches browser behavior where calc(1.5) returns a dimensionless value,
             // and calc(10px + 8px) returns a length value.
         } else if (strcmp(func->name, "min") == 0 || strcmp(func->name, "max") == 0 ||
                    strcmp(func->name, "clamp") == 0) {
@@ -1277,11 +1277,11 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         } else if (strcmp(func->name, "var") == 0) {
             // var(--custom-property-name) or var(--custom-property-name, fallback)
             const char* var_name = nullptr;
-            
+
             // Safety checks for arguments
             if (func->args && func->arg_count >= 1 && func->args[0]) {
                 CssValue* first_arg = func->args[0];
-                
+
                 // Extract variable name based on argument type
                 if (first_arg->type == CSS_VALUE_TYPE_CUSTOM && first_arg->data.custom_property.name) {
                     var_name = first_arg->data.custom_property.name;
@@ -1289,7 +1289,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     var_name = first_arg->data.string;
                 }
             }
-            
+
             if (var_name) {
                 // Look up the variable value
                 const CssValue* var_value = lookup_css_variable(lycon, var_name);
@@ -2172,7 +2172,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
     if (decl->property_name && decl->property_name[0] == '-' && decl->property_name[1] == '-') {
         // This is a CSS custom property, store it
         DomElement* element = (DomElement*)lycon->view;
-        
+
         // Create new custom property entry
         CssCustomProp* new_var = (CssCustomProp*)pool_calloc(lycon->doc->view_tree->pool, sizeof(CssCustomProp));
         if (new_var) {
@@ -4146,6 +4146,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->top = resolve_length_value(lycon, CSS_PROPERTY_TOP, value);
                 block->position->has_top = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->top_percent = value->data.percentage.value;
+                }
             }
             break;
         }
@@ -4160,6 +4164,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->left = resolve_length_value(lycon, CSS_PROPERTY_LEFT, value);
                 block->position->has_left = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->left_percent = value->data.percentage.value;
+                }
             }
             break;
         }
@@ -4174,6 +4182,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->right = resolve_length_value(lycon, CSS_PROPERTY_RIGHT, value);
                 block->position->has_right = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->right_percent = value->data.percentage.value;
+                }
             }
             break;
         }
@@ -4188,6 +4200,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->bottom = resolve_length_value(lycon, CSS_PROPERTY_BOTTOM, value);
                 block->position->has_bottom = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->bottom_percent = value->data.percentage.value;
+                }
             }
             break;
         }
@@ -4395,8 +4411,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_ASPECT_RATIO: {
             log_debug("[CSS] Processing aspect-ratio property");
             // aspect-ratio can apply to block-level and flex/grid items
-            // It's stored in FlexItemProp for flex/grid item sizing
+            // For grid items, aspect-ratio is read from specified_style during layout
+            // (fi and gi are in a union, so we can't store aspect_ratio in fi for grid items)
             if (!span) break;
+
+            // Don't allocate fi for grid items - it would overwrite gi in the union!
+            // Grid layout reads aspect-ratio from specified_style instead
+            if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
+                log_debug("[CSS] aspect-ratio: skipping fi allocation for grid item (will read from specified_style)");
+                break;
+            }
+
             if (!span->fi) { alloc_flex_item_prop(lycon, span); }
             if (!span->fi) break;
 
@@ -4970,6 +4995,147 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_GRID_TEMPLATE_AREAS: {
+            log_debug("[CSS] Processing grid-template-areas property");
+            if (!block) {
+                log_debug("[CSS] grid-template-areas: Cannot apply to non-block element");
+                break;
+            }
+
+            alloc_grid_prop(lycon, block);
+            GridProp* grid = block->embed->grid;
+
+            // Handle "none" keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                log_debug("[CSS] grid-template-areas: none");
+                // Clear existing areas
+                for (int i = 0; i < grid->area_count; i++) {
+                    if (grid->grid_areas && grid->grid_areas[i].name) {
+                        free(grid->grid_areas[i].name);
+                    }
+                }
+                grid->area_count = 0;
+                break;
+            }
+
+            // Handle string value containing area definitions
+            // CSS format: "header header header" "sidebar main aside" "footer footer footer"
+            if (value->type == CSS_VALUE_TYPE_STRING) {
+                log_debug("[CSS] grid-template-areas: string value '%s'", value->data.string);
+                parse_grid_template_areas(grid, value->data.string);
+                log_debug("[CSS] grid-template-areas: parsed %d areas", grid->area_count);
+            }
+            // Handle list of strings (each row is a separate string)
+            else if (value->type == CSS_VALUE_TYPE_LIST) {
+                log_debug("[CSS] grid-template-areas: list of %d strings", value->data.list.count);
+                // Concatenate all strings with quotes to form complete areas string
+                // Each string needs to be wrapped in quotes for the parser
+                size_t total_len = 0;
+                for (int i = 0; i < value->data.list.count; i++) {
+                    if (value->data.list.values[i]->type == CSS_VALUE_TYPE_STRING) {
+                        // +3 for: quote, space/null, quote
+                        total_len += strlen(value->data.list.values[i]->data.string) + 4;
+                    }
+                }
+                if (total_len > 0) {
+                    char* combined = (char*)malloc(total_len + 1);
+                    combined[0] = '\0';
+                    for (int i = 0; i < value->data.list.count; i++) {
+                        if (value->data.list.values[i]->type == CSS_VALUE_TYPE_STRING) {
+                            if (combined[0] != '\0') strcat(combined, " ");
+                            // Wrap each row in quotes
+                            strcat(combined, "\"");
+                            strcat(combined, value->data.list.values[i]->data.string);
+                            strcat(combined, "\"");
+                        }
+                    }
+                    log_debug("[CSS] grid-template-areas: combined string '%s'", combined);
+                    parse_grid_template_areas(grid, combined);
+                    free(combined);
+                    log_debug("[CSS] grid-template-areas: parsed %d areas", grid->area_count);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_AREA: {
+            log_debug("[CSS] Processing grid-area property");
+            alloc_grid_item_prop(lycon, span);
+
+            // grid-area can be:
+            // 1. A named area: grid-area: header
+            // 2. A shorthand for row-start / column-start / row-end / column-end
+            if (value->type == CSS_VALUE_TYPE_STRING) {
+                // Named area (quoted string)
+                if (span->gi->grid_area) free(span->gi->grid_area);
+                span->gi->grid_area = strdup(value->data.string);
+                log_debug("[CSS] grid-area: named area (string) '%s'", span->gi->grid_area);
+            }
+            else if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+                // Named area (unquoted identifier like "header")
+                // Stored as custom property reference when not a known keyword
+                if (value->data.custom_property.name) {
+                    if (span->gi->grid_area) free(span->gi->grid_area);
+                    span->gi->grid_area = strdup(value->data.custom_property.name);
+                    log_debug("[CSS] grid-area: named area (custom) '%s'", span->gi->grid_area);
+                }
+            }
+            else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // Can be "auto" or an identifier (area name)
+                const char* name = css_enum_info(value->data.keyword)->name;
+                if (value->data.keyword != CSS_VALUE_AUTO) {
+                    if (span->gi->grid_area) free(span->gi->grid_area);
+                    span->gi->grid_area = strdup(name);
+                    log_debug("[CSS] grid-area: named area (keyword) '%s'", span->gi->grid_area);
+                }
+            }
+            else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Shorthand: row-start / column-start / row-end / column-end
+                // Values separated by /
+                int count = value->data.list.count;
+                log_debug("[CSS] grid-area: shorthand with %d values", count);
+
+                auto parse_line = [](const CssValue* v, int* line, bool* has_explicit, bool* is_span) {
+                    *has_explicit = false;
+                    *is_span = false;
+                    if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                        *line = (int)v->data.number.value;
+                        *has_explicit = true;
+                    } else if (v->type == CSS_VALUE_TYPE_KEYWORD && v->data.keyword == CSS_VALUE_AUTO) {
+                        *line = 0;
+                        *has_explicit = false;
+                    } else if (v->type == CSS_VALUE_TYPE_FUNCTION && v->data.function) {
+                        // span N - function named "span"
+                        CssFunction* func = v->data.function;
+                        if (strcmp(func->name, "span") == 0 && func->arg_count > 0 &&
+                            func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
+                            *line = -(int)func->args[0]->data.number.value;
+                            *has_explicit = true;
+                            *is_span = true;
+                        }
+                    }
+                };
+
+                if (count >= 1) {
+                    parse_line(value->data.list.values[0], &span->gi->grid_row_start,
+                              &span->gi->has_explicit_grid_row_start, &span->gi->grid_row_start_is_span);
+                }
+                if (count >= 2) {
+                    parse_line(value->data.list.values[1], &span->gi->grid_column_start,
+                              &span->gi->has_explicit_grid_column_start, &span->gi->grid_column_start_is_span);
+                }
+                if (count >= 3) {
+                    parse_line(value->data.list.values[2], &span->gi->grid_row_end,
+                              &span->gi->has_explicit_grid_row_end, &span->gi->grid_row_end_is_span);
+                }
+                if (count >= 4) {
+                    parse_line(value->data.list.values[3], &span->gi->grid_column_end,
+                              &span->gi->has_explicit_grid_column_end, &span->gi->grid_column_end_is_span);
+                }
+            }
+            break;
+        }
+
         // Grid Item Placement Properties
         case CSS_PROPERTY_GRID_COLUMN_START: {
             log_debug("[CSS] Processing grid-column-start property");
@@ -5152,8 +5318,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-column: %d / %d",
-                          span->gi->grid_column_start, span->gi->grid_column_end);
+                log_debug("[CSS] grid-column: %d / %d (has_start=%d, has_end=%d, end_is_span=%d)",
+                          span->gi->grid_column_start, span->gi->grid_column_end,
+                          span->gi->has_explicit_grid_column_start, span->gi->has_explicit_grid_column_end,
+                          span->gi->grid_column_end_is_span);
             } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Single line number
                 int line = (int)value->data.number.value;
@@ -6394,14 +6562,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
        case CSS_PROPERTY_BACKGROUND: {
             // background shorthand can set background-color, background-image, etc.
-            
+
             // Handle multiple background layers (comma-separated list)
             // CSS stacks backgrounds bottom-to-top, so last item is base layer
             if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 1) {
                 log_debug("[Lambda CSS Background] Multiple background layers: %d", value->data.list.count);
                 CssValue** layers = value->data.list.values;
                 int count = value->data.list.count;
-                
+
                 // Ensure background prop exists
                 if (!span->bound) {
                     span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
@@ -6410,7 +6578,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
                 }
                 BackgroundProp* bg = span->bound->background;
-                
+
                 // First, look for a solid color in the last layer (base background)
                 CssValue* last_layer = layers[count - 1];
                 if (last_layer) {
@@ -6426,7 +6594,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             bg->color.r, bg->color.g, bg->color.b, bg->color.a);
                     }
                 }
-                
+
                 // Count radial-gradient layers
                 int radial_count = 0;
                 for (int i = 0; i < count - 1; i++) {  // exclude last layer (base color)
@@ -6438,19 +6606,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         radial_count++;
                     }
                 }
-                
+
                 // Allocate array for radial gradient layers if we have multiple
                 if (radial_count > 0) {
                     bg->radial_layers = (RadialGradient**)alloc_prop(lycon, sizeof(RadialGradient*) * radial_count);
                     bg->radial_layer_count = 0;  // will be incremented as we parse each one
-                    
+
                     // Process all gradient layers (from bottom to top visually, i.e., last-to-first in CSS)
                     for (int i = count - 2; i >= 0; i--) {
                         CssValue* layer = layers[i];
                         if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
                             layer->data.function && layer->data.function->name) {
                             const char* func_name = layer->data.function->name;
-                            
+
                             if (strcasecmp(func_name, "radial-gradient") == 0 ||
                                 strcasecmp(func_name, "repeating-radial-gradient") == 0) {
                                 // Parse this radial gradient into a new layer
@@ -6458,7 +6626,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 gradient_decl.value = layer;
                                 log_debug("[Lambda CSS Background] Processing radial gradient layer %d: %s", i, func_name);
                                 resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
-                                
+
                                 // After parsing, the radial_gradient is set on bg
                                 // Move it to the layers array
                                 if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
@@ -6477,7 +6645,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             }
                         }
                     }
-                    
+
                     log_debug("[Lambda CSS Background] Parsed %d radial gradient layers", bg->radial_layer_count);
                 } else {
                     // No radial gradients, process first gradient layer as before
@@ -6493,7 +6661,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
                 return;
             }
-            
+
             // simple case: single color value (e.g., "background: green;")
             if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssDeclaration color_decl = *decl;
@@ -6679,7 +6847,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Format can be: "circle", "circle at top", "circle at top left", etc.
                     if (func->arg_count > 0 && func->args[0]) {
                         CssValue* first_arg = func->args[0];
-                        
+
                         // Check for keyword indicating shape/position
                         if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum kw = first_arg->data.keyword;
@@ -6701,11 +6869,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             CssValue** items = first_arg->data.list.values;
                             int count = first_arg->data.list.count;
                             int at_idx = -1;
-                            
+
                             for (int i = 0; i < count; i++) {
                                 if (!items[i]) continue;
                                 log_debug("[CSS Radial] list item %d: type=%d", i, items[i]->type);
-                                
+
                                 // Get keyword name from keyword or custom type
                                 const char* kw_name = nullptr;
                                 if (items[i]->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6714,10 +6882,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 } else if (items[i]->type == CSS_VALUE_TYPE_CUSTOM) {
                                     kw_name = items[i]->data.custom_property.name;
                                 }
-                                
+
                                 if (kw_name) {
                                     log_debug("[CSS Radial] keyword: %s, at_idx=%d", kw_name, at_idx);
-                                    
+
                                     if (strcmp(kw_name, "circle") == 0) {
                                         rg->shape = RADIAL_SHAPE_CIRCLE;
                                     } else if (strcmp(kw_name, "ellipse") == 0) {
@@ -6834,16 +7002,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     if (func->arg_count > 0 && func->args[0]) {
                         CssValue* first_arg = func->args[0];
                         log_debug("[CSS Conic] first_arg type=%d", first_arg->type);
-                        
+
                         if (first_arg->type == CSS_VALUE_TYPE_LIST) {
                             CssValue** items = first_arg->data.list.values;
                             int count = first_arg->data.list.count;
                             log_debug("[CSS Conic] first_arg is list with %d items", count);
-                            
+
                             for (int i = 0; i < count; i++) {
                                 if (!items[i]) continue;
                                 log_debug("[CSS Conic] list item %d: type=%d", i, items[i]->type);
-                                
+
                                 // Check for "from" keyword (may be keyword or custom type with name)
                                 bool is_from_keyword = false;
                                 if (items[i]->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6856,7 +7024,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     log_debug("[CSS Conic] custom property: %s", custom_name ? custom_name : "(null)");
                                     is_from_keyword = (custom_name && strcmp(custom_name, "from") == 0);
                                 }
-                                
+
                                 if (is_from_keyword) {
                                     // Next item should be angle
                                     if (i + 1 < count && items[i + 1]) {

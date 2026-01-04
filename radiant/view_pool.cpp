@@ -187,6 +187,7 @@ PositionProp* alloc_position_prop(LayoutContext* lycon) {
     // set defaults using actual Lexbor constants
     prop->position = CSS_VALUE_STATIC;  // default position
     prop->top = prop->right = prop->bottom = prop->left = 0;  // default offsets
+    prop->top_percent = prop->right_percent = prop->bottom_percent = prop->left_percent = NAN;  // NAN means not percentage
     prop->z_index = 0;  // default z-index
     prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;  // no offsets set
     prop->clear = CSS_VALUE_NONE;  // default clear
@@ -221,7 +222,10 @@ void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
         log_debug("alloc_flex_item_prop: skipping form control");
         return;  // Preserve form control properties
     }
-    if (!span->fi) {
+    // IMPORTANT: fi and gi are in a union, so we must check item_prop_type
+    // not just whether fi is NULL. If gi was allocated, fi will be non-NULL
+    // but pointing to GridItemProp memory, which is wrong for flex items.
+    if (span->item_prop_type != DomElement::ITEM_PROP_FLEX) {
         FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
         span->fi = prop;
         span->item_prop_type = DomElement::ITEM_PROP_FLEX;
@@ -252,7 +256,10 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
-    if (!span->gi) {
+    // IMPORTANT: fi and gi are in a union, so we must check item_prop_type
+    // not just whether gi is NULL. If fi was allocated, gi will be non-NULL
+    // but pointing to FlexItemProp memory, which is wrong for grid items.
+    if (span->item_prop_type != DomElement::ITEM_PROP_GRID) {
         GridItemProp* prop = (GridItemProp*)alloc_prop(lycon, sizeof(GridItemProp));
         span->gi = prop;
         span->item_prop_type = DomElement::ITEM_PROP_GRID;
@@ -676,12 +683,12 @@ void append_json_string(StrBuf* buf, const char* str) {
 void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, TextRect* rect = nullptr) {
     // calculate absolute position for view
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
-    
+
     // Check if this is a fixed or absolute positioned element
     bool is_fixed = false;
     bool is_absolute = false;
     ViewBlock* containing_block = nullptr;
-    
+
     if (view->is_block()) {
         ViewBlock* block = (ViewBlock*)view;
         if (block->position) {
@@ -689,7 +696,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
             is_absolute = (block->position->position == CSS_VALUE_ABSOLUTE);
         }
     }
-    
+
     // Calculate absolute position by traversing up the parent chain
     // For fixed elements: position is already relative to viewport (root at 0,0)
     //   so we don't add any parent positions
@@ -701,15 +708,15 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
     } else if (is_absolute) {
         // Absolute: position is relative to containing block
         // Need to get the containing block's absolute position
-        
+
         // Find the containing block (nearest positioned ancestor)
         ViewElement* ancestor = view->parent_view();
         ViewBlock* cb = nullptr;
-        
+
         while (ancestor) {
             if (ancestor->is_block()) {
                 ViewBlock* ancestor_block = (ViewBlock*)ancestor;
-                if (ancestor_block->position && 
+                if (ancestor_block->position &&
                     ancestor_block->position->position != CSS_VALUE_STATIC) {
                     cb = ancestor_block;
                     break;
@@ -717,12 +724,12 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
             }
             ancestor = ancestor->parent_view();
         }
-        
+
         if (cb) {
             // Add containing block's position
             abs_x += cb->x;
             abs_y += cb->y;
-            
+
             // Now get containing block's absolute position based on its positioning
             if (cb->position->position == CSS_VALUE_FIXED) {
                 // Fixed: already relative to viewport, done
@@ -732,11 +739,11 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
                 while (true) {
                     ViewElement* cb_ancestor = current->parent_view();
                     ViewBlock* cb_cb = nullptr;
-                    
+
                     while (cb_ancestor) {
                         if (cb_ancestor->is_block()) {
                             ViewBlock* cb_ancestor_block = (ViewBlock*)cb_ancestor;
-                            if (cb_ancestor_block->position && 
+                            if (cb_ancestor_block->position &&
                                 cb_ancestor_block->position->position != CSS_VALUE_STATIC) {
                                 cb_cb = cb_ancestor_block;
                                 break;
@@ -744,12 +751,12 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
                         }
                         cb_ancestor = cb_ancestor->parent_view();
                     }
-                    
+
                     if (!cb_cb) break;  // Reached root
-                    
+
                     abs_x += cb_cb->x;
                     abs_y += cb_cb->y;
-                    
+
                     if (cb_cb->position->position == CSS_VALUE_FIXED) break;
                     if (cb_cb->position->position != CSS_VALUE_ABSOLUTE) {
                         // Relative: continue with normal DOM walk
@@ -788,24 +795,24 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
             if (parent->is_block()) {
                 ViewBlock* parent_block = (ViewBlock*)parent;
                 abs_x += parent->x;  abs_y += parent->y;
-                
+
                 // If parent is fixed, its position is relative to viewport (root at 0,0)
                 // so we can stop here
-                if (parent_block->position && 
+                if (parent_block->position &&
                     parent_block->position->position == CSS_VALUE_FIXED) {
                     break;
                 }
-                
+
                 // If parent is absolute, its position is relative to its containing block
                 // We need to find that containing block and continue from there
-                if (parent_block->position && 
+                if (parent_block->position &&
                     parent_block->position->position == CSS_VALUE_ABSOLUTE) {
                     // Find the containing block (nearest positioned ancestor)
                     ViewElement* ancestor = parent_block->parent_view();
                     while (ancestor) {
                         if (ancestor->is_block()) {
                             ViewBlock* ancestor_block = (ViewBlock*)ancestor;
-                            if (ancestor_block->position && 
+                            if (ancestor_block->position &&
                                 ancestor_block->position->position != CSS_VALUE_STATIC) {
                                 // This is the containing block - continue from here
                                 parent = ancestor;

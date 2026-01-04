@@ -306,6 +306,7 @@ project "lambda"
         "lib/mime-detect.c",
         "lib/mime-types.c",
         "lib/font_config.c",
+        "lib/base64.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
@@ -364,6 +365,7 @@ project "lambda"
         "radiant/grid_positioning.cpp",
         "radiant/grid_advanced.cpp",
         "radiant/intrinsic_sizing.cpp",
+        "radiant/layout_alignment.cpp",
         "radiant/symbol_resolver.cpp",
         "radiant/layout_counters.cpp",
         "radiant/resolve_htm_style.cpp",
@@ -517,6 +519,7 @@ project "lambda"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -558,6 +561,8 @@ project "lambda"
     -- Dynamic libraries
     filter "platforms:native"
         links {
+            "woff2dec",
+            "woff2common",
         }
     
         linkoptions {
@@ -624,6 +629,7 @@ project "test_strbuf_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -686,6 +692,7 @@ project "test_stringbuf_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -749,6 +756,7 @@ project "test_strview_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -811,6 +819,7 @@ project "test_num_stack_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -873,6 +882,7 @@ project "test_datetime_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -940,6 +950,7 @@ project "test_font_config_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1003,6 +1014,7 @@ project "test_url_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1065,6 +1077,7 @@ project "test_url_extra_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1127,6 +1140,7 @@ project "test_cmdedit_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1195,6 +1209,7 @@ project "test_mempool_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1260,6 +1275,7 @@ project "test_avl_tree"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1322,6 +1338,7 @@ project "test_arena_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1350,6 +1367,8 @@ project "test_arena_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -1419,6 +1438,7 @@ project "test_pdf_writer_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1485,6 +1505,7 @@ project "test_avl_tree_perf"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1547,6 +1568,7 @@ project "test_mime_detect_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1574,6 +1596,8 @@ project "test_mime_detect_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -1643,6 +1667,7 @@ project "test_mark_builder_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1671,6 +1696,8 @@ project "test_mark_builder_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -1740,6 +1767,7 @@ project "test_mark_builder_deepcopy_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1768,6 +1796,8 @@ project "test_mark_builder_deepcopy_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -1837,6 +1867,7 @@ project "test_mark_editor_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1865,6 +1896,8 @@ project "test_mark_editor_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -1934,6 +1967,7 @@ project "test_name_pool_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -1962,6 +1996,8 @@ project "test_name_pool_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2031,6 +2067,7 @@ project "test_mark_reader_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2059,6 +2096,8 @@ project "test_mark_reader_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2128,6 +2167,7 @@ project "test_error_tracking"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2156,6 +2196,8 @@ project "test_error_tracking"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2225,6 +2267,7 @@ project "test_math_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2253,6 +2296,8 @@ project "test_math_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2322,6 +2367,7 @@ project "test_math_ascii_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2350,6 +2396,8 @@ project "test_math_ascii_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2419,6 +2467,7 @@ project "test_markup_roundtrip_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2447,6 +2496,8 @@ project "test_markup_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2516,6 +2567,7 @@ project "test_entity_emoji_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2544,6 +2596,8 @@ project "test_entity_emoji_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2613,6 +2667,7 @@ project "test_input_roundtrip_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2641,6 +2696,8 @@ project "test_input_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2710,6 +2767,7 @@ project "test_wpt_html_parser_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2738,6 +2796,8 @@ project "test_wpt_html_parser_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2807,6 +2867,7 @@ project "test_latex_ts_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2836,6 +2897,8 @@ project "test_latex_ts_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -2905,6 +2968,7 @@ project "test_html_roundtrip_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -2933,6 +2997,8 @@ project "test_html_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3002,6 +3068,7 @@ project "test_html_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3030,6 +3097,8 @@ project "test_html_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3099,6 +3168,7 @@ project "test_html_negative_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3127,6 +3197,8 @@ project "test_html_negative_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3202,6 +3274,7 @@ project "test_lambda_domnode_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3230,6 +3303,8 @@ project "test_lambda_domnode_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3299,6 +3374,7 @@ project "test_dir_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3326,6 +3402,8 @@ project "test_dir_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3395,6 +3473,7 @@ project "test_graph_parser_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3423,6 +3502,8 @@ project "test_graph_parser_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3492,6 +3573,7 @@ project "test_validator_input_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3520,6 +3602,8 @@ project "test_validator_input_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3589,6 +3673,7 @@ project "test_validator_features_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3617,6 +3702,8 @@ project "test_validator_features_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3686,6 +3773,7 @@ project "test_null_vs_missing_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3714,6 +3802,8 @@ project "test_null_vs_missing_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3783,6 +3873,7 @@ project "test_enhanced_errors"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3811,6 +3902,8 @@ project "test_enhanced_errors"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3880,6 +3973,7 @@ project "test_validation_options"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -3908,6 +4002,8 @@ project "test_validation_options"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -3977,6 +4073,7 @@ project "test_format_validation"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4005,6 +4102,8 @@ project "test_format_validation"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4074,6 +4173,7 @@ project "test_validator_integration"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4102,6 +4202,8 @@ project "test_validator_integration"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4171,6 +4273,7 @@ project "test_type_references_simple"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4199,6 +4302,8 @@ project "test_type_references_simple"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4268,6 +4373,7 @@ project "test_graph_formatter_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4296,6 +4402,8 @@ project "test_graph_formatter_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4365,6 +4473,7 @@ project "test_sysinfo_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4393,6 +4502,8 @@ project "test_sysinfo_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4462,6 +4573,7 @@ project "test_jsx_roundtrip_new_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4490,6 +4602,8 @@ project "test_jsx_roundtrip_new_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4559,6 +4673,7 @@ project "test_mdx_roundtrip_new_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4586,6 +4701,8 @@ project "test_mdx_roundtrip_new_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4664,6 +4781,7 @@ project "test_css_style_node"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4736,6 +4854,7 @@ project "test_css_system"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4810,6 +4929,7 @@ project "test_css_dom_integration"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4838,6 +4958,8 @@ project "test_css_dom_integration"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -4919,6 +5041,7 @@ project "test_css_dom_crud"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -4947,6 +5070,8 @@ project "test_css_dom_crud"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5028,6 +5153,7 @@ project "test_css_style_application_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5056,6 +5182,8 @@ project "test_css_style_application_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5130,6 +5258,7 @@ project "test_html_css_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5158,6 +5287,8 @@ project "test_html_css_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5227,6 +5358,7 @@ project "test_css_tokenizer_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5255,6 +5387,8 @@ project "test_css_tokenizer_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5324,6 +5458,7 @@ project "test_css_tokenizer_unit"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5352,6 +5487,8 @@ project "test_css_tokenizer_unit"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5421,6 +5558,7 @@ project "test_css_parser_unit"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5449,6 +5587,8 @@ project "test_css_parser_unit"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5518,6 +5658,7 @@ project "test_css_engine_unit"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5546,6 +5687,8 @@ project "test_css_engine_unit"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5615,6 +5758,7 @@ project "test_css_engine_negative"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5643,6 +5787,8 @@ project "test_css_engine_negative"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5712,6 +5858,7 @@ project "test_css_formatter_unit"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5740,6 +5887,8 @@ project "test_css_formatter_unit"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5809,6 +5958,7 @@ project "test_css_roundtrip_unit"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5837,6 +5987,8 @@ project "test_css_roundtrip_unit"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -5906,6 +6058,7 @@ project "test_compound_descendant_selectors"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -5934,6 +6087,8 @@ project "test_compound_descendant_selectors"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6003,6 +6158,7 @@ project "test_selector_groups"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6031,6 +6187,8 @@ project "test_selector_groups"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6100,6 +6258,7 @@ project "test_css_parser_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6128,6 +6287,8 @@ project "test_css_parser_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6197,6 +6358,7 @@ project "test_css_integration_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6225,6 +6387,8 @@ project "test_css_integration_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6294,6 +6458,7 @@ project "test_css_files_safe_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6322,6 +6487,8 @@ project "test_css_files_safe_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6391,6 +6558,7 @@ project "test_css_frameworks_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6419,6 +6587,8 @@ project "test_css_frameworks_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6488,6 +6658,7 @@ project "test_css_to_mark_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6516,6 +6687,8 @@ project "test_css_to_mark_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6585,6 +6758,7 @@ project "test_mdx_roundtrip_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6612,6 +6786,8 @@ project "test_mdx_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6681,6 +6857,7 @@ project "test_jsx_roundtrip_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6708,6 +6885,8 @@ project "test_jsx_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6777,6 +6956,7 @@ project "test_latex_parser_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6804,6 +6984,8 @@ project "test_latex_parser_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6873,6 +7055,7 @@ project "test_latex_treesitter"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -6900,6 +7083,8 @@ project "test_latex_treesitter"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -6970,6 +7155,7 @@ project "test_html_encoder_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7033,6 +7219,7 @@ project "test_latex_html_v2_baseline"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7061,6 +7248,8 @@ project "test_latex_html_v2_baseline"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7132,6 +7321,7 @@ project "test_latex_html_v2_lists_envs"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7159,6 +7349,8 @@ project "test_latex_html_v2_lists_envs"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7228,6 +7420,7 @@ project "test_latex_html_v2_tables"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7255,6 +7448,8 @@ project "test_latex_html_v2_tables"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7324,6 +7519,7 @@ project "test_latex_html_v2_floats"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7351,6 +7547,8 @@ project "test_latex_html_v2_floats"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7420,6 +7618,7 @@ project "test_latex_html_v2_special_chars"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7447,6 +7646,8 @@ project "test_latex_html_v2_special_chars"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7516,6 +7717,7 @@ project "test_latex_html_v2_bibliography"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7543,6 +7745,8 @@ project "test_latex_html_v2_bibliography"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7612,6 +7816,7 @@ project "test_latex_html_v2_graphics_color"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7639,6 +7844,8 @@ project "test_latex_html_v2_graphics_color"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7708,6 +7915,7 @@ project "test_latex_html_v2_macros"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7735,6 +7943,8 @@ project "test_latex_html_v2_macros"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7804,6 +8014,7 @@ project "test_latex_html_v2_new_commands"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7831,6 +8042,8 @@ project "test_latex_html_v2_new_commands"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7900,6 +8113,7 @@ project "test_validator_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -7927,6 +8141,8 @@ project "test_validator_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -7996,6 +8212,7 @@ project "test_ast_validator_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8024,6 +8241,8 @@ project "test_ast_validator_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -8093,6 +8312,7 @@ project "test_validator_path_reporting"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8121,6 +8341,8 @@ project "test_validator_path_reporting"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -8190,6 +8412,7 @@ project "test_lambda_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8251,6 +8474,7 @@ project "test_lambda_repl_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8312,6 +8536,7 @@ project "test_lambda_proc_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8373,6 +8598,7 @@ project "test_js_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8434,6 +8660,7 @@ project "test_mir_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8495,6 +8722,7 @@ project "test_http_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -8522,6 +8750,8 @@ project "test_http_gtest"
     
     -- Add dynamic libraries
     links {
+        "woff2dec",
+        "woff2common",
         "ncurses",
     }
     
@@ -8591,6 +8821,7 @@ project "test_lambda_proc_extended_gtest"
         "mac-deps/curl-8.10.1/include",
         "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
+        "/opt/homebrew/include/woff2",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
