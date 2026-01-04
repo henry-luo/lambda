@@ -5302,8 +5302,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 span->gi->is_grid_auto_placed = false;
-                log_debug("[CSS] grid-column: %d / %d",
-                          span->gi->grid_column_start, span->gi->grid_column_end);
+                log_debug("[CSS] grid-column: %d / %d (has_start=%d, has_end=%d, end_is_span=%d)",
+                          span->gi->grid_column_start, span->gi->grid_column_end,
+                          span->gi->has_explicit_grid_column_start, span->gi->has_explicit_grid_column_end,
+                          span->gi->grid_column_end_is_span);
             } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Single line number
                 int line = (int)value->data.number.value;
