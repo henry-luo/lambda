@@ -11,6 +11,7 @@
 #include "../render.hpp"  // For RenderContext and ThorVG access
 #include <thorvg_capi.h>  // ThorVG C API
 #include <string.h>
+#include <math.h>         // For pow() in color space gamma correction
 
 // PDF stream decompression
 extern "C" {
@@ -35,6 +36,11 @@ static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* paren
 static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Map* form_dict, const char* name);
 static ImageSurface* decode_raw_image_data(Map* image_dict, String* data, int width, int height, int bpc, Pool* pool);
 static ImageSurface* decode_image_data(const uint8_t* data, size_t length, ImageFormat format_hint);
+
+// Color space handling forward declarations
+static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_item, Map* resources);
+static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* components, double* rgb_out);
+static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Pool* pool, const char* cs_name, Map* resources);
 
 // Path paint operation types
 typedef enum {
@@ -350,6 +356,385 @@ static ViewBlock* create_document_view(Pool* pool) {
     log_debug("Created document view: %.0fx%.0f", root->width, root->height);
 
     return root;
+}
+
+// ============================================================================
+// Color Space Handling
+// ============================================================================
+
+/**
+ * Parse a color space definition from a PDF item
+ * Color spaces can be:
+ *   - Name: "DeviceRGB", "DeviceGray", "DeviceCMYK"
+ *   - Array: [/Indexed /DeviceRGB 255 <lookup_data>]
+ *            [/ICCBased <stream_ref>]
+ *            [/CalGray {WhitePoint [...] Gamma 1.0}]
+ *            [/CalRGB {WhitePoint [...] Gamma [...]}]
+ */
+static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_item, Map* resources) {
+    if (cs_item.item == ITEM_NULL) return nullptr;
+    
+    PDFColorSpaceInfo* info = (PDFColorSpaceInfo*)pool_calloc(pool, sizeof(PDFColorSpaceInfo));
+    if (!info) return nullptr;
+    
+    // Default values
+    info->gamma[0] = info->gamma[1] = info->gamma[2] = 1.0;
+    info->white_point[0] = 0.9505; // D65 white point X
+    info->white_point[1] = 1.0;    // D65 white point Y
+    info->white_point[2] = 1.0890; // D65 white point Z
+    
+    TypeId type = get_type_id(cs_item);
+    
+    // Simple name color space (e.g., "DeviceRGB")
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+        String* cs_name = cs_item.get_string();
+        if (!cs_name) return nullptr;
+        
+        info->name = cs_name;
+        
+        if (strcmp(cs_name->chars, "DeviceRGB") == 0 || strcmp(cs_name->chars, "RGB") == 0) {
+            info->type = PDF_CS_DEVICE_RGB;
+            info->num_components = 3;
+        } else if (strcmp(cs_name->chars, "DeviceGray") == 0 || strcmp(cs_name->chars, "G") == 0) {
+            info->type = PDF_CS_DEVICE_GRAY;
+            info->num_components = 1;
+        } else if (strcmp(cs_name->chars, "DeviceCMYK") == 0 || strcmp(cs_name->chars, "CMYK") == 0) {
+            info->type = PDF_CS_DEVICE_CMYK;
+            info->num_components = 4;
+        } else {
+            // Might be a named color space reference - look up in resources
+            PDFColorSpaceInfo* resolved = lookup_named_colorspace(input, pool, cs_name->chars, resources);
+            if (resolved) {
+                return resolved;
+            }
+            log_debug("Unknown color space name: %s, defaulting to DeviceRGB", cs_name->chars);
+            info->type = PDF_CS_DEVICE_RGB;
+            info->num_components = 3;
+        }
+        return info;
+    }
+    
+    // Array color space (e.g., [/Indexed /DeviceRGB 255 <data>])
+    if (type == LMD_TYPE_ARRAY) {
+        Array* cs_array = cs_item.array;
+        if (!cs_array || cs_array->length < 1) return nullptr;
+        
+        // First element is the color space type name
+        Item type_item = cs_array->items[0];
+        String* type_name = type_item.get_string();
+        if (!type_name) return nullptr;
+        
+        log_debug("Parsing array color space: %s", type_name->chars);
+        
+        if (strcmp(type_name->chars, "Indexed") == 0 || strcmp(type_name->chars, "I") == 0) {
+            // [/Indexed base hival lookup]
+            info->type = PDF_CS_INDEXED;
+            info->num_components = 1;  // Indexed uses single index value
+            
+            if (cs_array->length >= 4) {
+                // Base color space
+                Item base_item = cs_array->items[1];
+                PDFColorSpaceInfo* base_info = parse_color_space(input, pool, base_item, resources);
+                if (base_info) {
+                    info->base_type = base_info->type;
+                } else {
+                    info->base_type = PDF_CS_DEVICE_RGB;  // Default
+                }
+                
+                // hival (max index)
+                Item hival_item = cs_array->items[2];
+                if (get_type_id(hival_item) == LMD_TYPE_INT) {
+                    info->hival = hival_item.int_val;
+                } else if (get_type_id(hival_item) == LMD_TYPE_FLOAT) {
+                    info->hival = (int)hival_item.get_double();
+                }
+                
+                // Lookup table
+                Item lookup_item = cs_array->items[3];
+                TypeId lookup_type = get_type_id(lookup_item);
+                if (lookup_type == LMD_TYPE_STRING || lookup_type == LMD_TYPE_BINARY) {
+                    String* lookup_data = lookup_item.get_string();
+                    if (lookup_data) {
+                        info->lookup_table = (uint8_t*)lookup_data->chars;
+                        info->lookup_table_size = lookup_data->len;
+                        log_debug("Indexed color space: hival=%d, lookup_size=%d, base=%d",
+                                 info->hival, info->lookup_table_size, info->base_type);
+                    }
+                }
+            }
+            return info;
+        }
+        
+        if (strcmp(type_name->chars, "ICCBased") == 0) {
+            // [/ICCBased stream]
+            info->type = PDF_CS_ICCBASED;
+            
+            // The stream contains ICC profile data and N (number of components)
+            if (cs_array->length >= 2) {
+                Item stream_item = cs_array->items[1];
+                if (get_type_id(stream_item) == LMD_TYPE_MAP) {
+                    Map* stream_dict = stream_item.map;
+                    
+                    // Get N (number of components)
+                    String* n_key = input_create_string(input, "N");
+                    Item n_item = {.item = map_get(stream_dict, {.item = s2it(n_key)}).item};
+                    if (n_item.item != ITEM_NULL) {
+                        if (get_type_id(n_item) == LMD_TYPE_INT) {
+                            info->icc_n = n_item.int_val;
+                        } else if (get_type_id(n_item) == LMD_TYPE_FLOAT) {
+                            info->icc_n = (int)n_item.get_double();
+                        }
+                    } else {
+                        info->icc_n = 3;  // Default to 3 (RGB)
+                    }
+                    info->num_components = info->icc_n;
+                    log_debug("ICCBased color space: N=%d", info->icc_n);
+                }
+            }
+            return info;
+        }
+        
+        if (strcmp(type_name->chars, "CalGray") == 0) {
+            // [/CalGray <<dict>>]
+            info->type = PDF_CS_CAL_GRAY;
+            info->num_components = 1;
+            
+            if (cs_array->length >= 2) {
+                Item dict_item = cs_array->items[1];
+                if (get_type_id(dict_item) == LMD_TYPE_MAP) {
+                    Map* dict = dict_item.map;
+                    
+                    // Gamma (optional, default 1)
+                    String* gamma_key = input_create_string(input, "Gamma");
+                    Item gamma_item = {.item = map_get(dict, {.item = s2it(gamma_key)}).item};
+                    if (gamma_item.item != ITEM_NULL) {
+                        if (get_type_id(gamma_item) == LMD_TYPE_FLOAT) {
+                            info->gamma[0] = gamma_item.get_double();
+                        } else if (get_type_id(gamma_item) == LMD_TYPE_INT) {
+                            info->gamma[0] = (double)gamma_item.int_val;
+                        }
+                    }
+                    log_debug("CalGray color space: gamma=%.3f", info->gamma[0]);
+                }
+            }
+            return info;
+        }
+        
+        if (strcmp(type_name->chars, "CalRGB") == 0) {
+            // [/CalRGB <<dict>>]
+            info->type = PDF_CS_CAL_RGB;
+            info->num_components = 3;
+            
+            if (cs_array->length >= 2) {
+                Item dict_item = cs_array->items[1];
+                if (get_type_id(dict_item) == LMD_TYPE_MAP) {
+                    Map* dict = dict_item.map;
+                    
+                    // Gamma array (optional, default [1 1 1])
+                    String* gamma_key = input_create_string(input, "Gamma");
+                    Item gamma_item = {.item = map_get(dict, {.item = s2it(gamma_key)}).item};
+                    if (gamma_item.item != ITEM_NULL && get_type_id(gamma_item) == LMD_TYPE_ARRAY) {
+                        Array* gamma_arr = gamma_item.array;
+                        for (int i = 0; i < 3 && i < gamma_arr->length; i++) {
+                            Item g = gamma_arr->items[i];
+                            if (get_type_id(g) == LMD_TYPE_FLOAT) {
+                                info->gamma[i] = g.get_double();
+                            } else if (get_type_id(g) == LMD_TYPE_INT) {
+                                info->gamma[i] = (double)g.int_val;
+                            }
+                        }
+                    }
+                    log_debug("CalRGB color space: gamma=[%.3f, %.3f, %.3f]",
+                             info->gamma[0], info->gamma[1], info->gamma[2]);
+                }
+            }
+            return info;
+        }
+        
+        if (strcmp(type_name->chars, "Lab") == 0) {
+            info->type = PDF_CS_LAB;
+            info->num_components = 3;
+            log_debug("Lab color space (limited support)");
+            return info;
+        }
+        
+        if (strcmp(type_name->chars, "Separation") == 0 ||
+            strcmp(type_name->chars, "DeviceN") == 0) {
+            // Separation and DeviceN require tint transform functions
+            // For now, fall back to the alternate space or CMYK
+            info->type = (strcmp(type_name->chars, "Separation") == 0) ?
+                         PDF_CS_SEPARATION : PDF_CS_DEVICEN;
+            info->num_components = 1;  // Separation has 1, DeviceN varies
+            log_debug("%s color space (fallback to RGB)", type_name->chars);
+            return info;
+        }
+    }
+    
+    // Default to DeviceRGB
+    log_debug("Defaulting to DeviceRGB color space");
+    info->type = PDF_CS_DEVICE_RGB;
+    info->num_components = 3;
+    return info;
+}
+
+/**
+ * Look up a named color space from the resources dictionary
+ */
+static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Pool* pool,
+                                                   const char* cs_name, Map* resources) {
+    if (!resources || !cs_name) return nullptr;
+    
+    // Look in /ColorSpace dictionary of resources
+    String* cs_key = input_create_string(input, "ColorSpace");
+    Item cs_dict_item = {.item = map_get(resources, {.item = s2it(cs_key)}).item};
+    
+    if (cs_dict_item.item == ITEM_NULL || get_type_id(cs_dict_item) != LMD_TYPE_MAP) {
+        return nullptr;
+    }
+    
+    Map* cs_dict = cs_dict_item.map;
+    
+    // Look up the named color space
+    String* name_key = input_create_string(input, cs_name);
+    Item cs_item = {.item = map_get(cs_dict, {.item = s2it(name_key)}).item};
+    
+    if (cs_item.item == ITEM_NULL) {
+        log_debug("Named color space '%s' not found in resources", cs_name);
+        return nullptr;
+    }
+    
+    log_debug("Found named color space '%s' in resources", cs_name);
+    return parse_color_space(input, pool, cs_item, resources);
+}
+
+/**
+ * Convert color components to RGB based on color space info
+ */
+static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* components, double* rgb_out) {
+    if (!cs_info || !components || !rgb_out) {
+        rgb_out[0] = rgb_out[1] = rgb_out[2] = 0.0;
+        return;
+    }
+    
+    switch (cs_info->type) {
+        case PDF_CS_DEVICE_RGB:
+            rgb_out[0] = components[0];
+            rgb_out[1] = components[1];
+            rgb_out[2] = components[2];
+            break;
+            
+        case PDF_CS_DEVICE_GRAY:
+            rgb_out[0] = rgb_out[1] = rgb_out[2] = components[0];
+            break;
+            
+        case PDF_CS_DEVICE_CMYK: {
+            double c = components[0], m = components[1], y = components[2], k = components[3];
+            rgb_out[0] = (1.0 - c) * (1.0 - k);
+            rgb_out[1] = (1.0 - m) * (1.0 - k);
+            rgb_out[2] = (1.0 - y) * (1.0 - k);
+            break;
+        }
+            
+        case PDF_CS_INDEXED: {
+            // Look up index in palette
+            int idx = (int)components[0];
+            if (idx < 0) idx = 0;
+            if (idx > cs_info->hival) idx = cs_info->hival;
+            
+            if (cs_info->lookup_table) {
+                int base_components = 3;  // RGB default
+                if (cs_info->base_type == PDF_CS_DEVICE_GRAY) base_components = 1;
+                else if (cs_info->base_type == PDF_CS_DEVICE_CMYK) base_components = 4;
+                
+                int offset = idx * base_components;
+                if (offset + base_components <= cs_info->lookup_table_size) {
+                    if (cs_info->base_type == PDF_CS_DEVICE_RGB) {
+                        rgb_out[0] = cs_info->lookup_table[offset] / 255.0;
+                        rgb_out[1] = cs_info->lookup_table[offset + 1] / 255.0;
+                        rgb_out[2] = cs_info->lookup_table[offset + 2] / 255.0;
+                    } else if (cs_info->base_type == PDF_CS_DEVICE_GRAY) {
+                        rgb_out[0] = rgb_out[1] = rgb_out[2] =
+                            cs_info->lookup_table[offset] / 255.0;
+                    } else if (cs_info->base_type == PDF_CS_DEVICE_CMYK) {
+                        double c = cs_info->lookup_table[offset] / 255.0;
+                        double m = cs_info->lookup_table[offset + 1] / 255.0;
+                        double y = cs_info->lookup_table[offset + 2] / 255.0;
+                        double k = cs_info->lookup_table[offset + 3] / 255.0;
+                        rgb_out[0] = (1.0 - c) * (1.0 - k);
+                        rgb_out[1] = (1.0 - m) * (1.0 - k);
+                        rgb_out[2] = (1.0 - y) * (1.0 - k);
+                    }
+                }
+            }
+            break;
+        }
+            
+        case PDF_CS_ICCBASED:
+            // Simplified: treat as RGB, Gray, or CMYK based on N
+            if (cs_info->icc_n == 1) {
+                rgb_out[0] = rgb_out[1] = rgb_out[2] = components[0];
+            } else if (cs_info->icc_n == 3) {
+                rgb_out[0] = components[0];
+                rgb_out[1] = components[1];
+                rgb_out[2] = components[2];
+            } else if (cs_info->icc_n == 4) {
+                double c = components[0], m = components[1], y = components[2], k = components[3];
+                rgb_out[0] = (1.0 - c) * (1.0 - k);
+                rgb_out[1] = (1.0 - m) * (1.0 - k);
+                rgb_out[2] = (1.0 - y) * (1.0 - k);
+            } else {
+                rgb_out[0] = rgb_out[1] = rgb_out[2] = 0.0;
+            }
+            break;
+            
+        case PDF_CS_CAL_GRAY: {
+            // Apply gamma correction: out = in^gamma
+            double gray = components[0];
+            if (cs_info->gamma[0] != 1.0 && gray > 0) {
+                gray = pow(gray, cs_info->gamma[0]);
+            }
+            rgb_out[0] = rgb_out[1] = rgb_out[2] = gray;
+            break;
+        }
+            
+        case PDF_CS_CAL_RGB: {
+            // Apply gamma correction to each channel
+            for (int i = 0; i < 3; i++) {
+                double val = components[i];
+                if (cs_info->gamma[i] != 1.0 && val > 0) {
+                    val = pow(val, cs_info->gamma[i]);
+                }
+                rgb_out[i] = val;
+            }
+            break;
+        }
+            
+        case PDF_CS_LAB:
+            // Simplified Lab to RGB (approximate)
+            // L* is in [0, 100], a* and b* are approximately [-128, 127]
+            // For now, just use a simple approximation
+            rgb_out[0] = components[0] / 100.0;  // Approximate
+            rgb_out[1] = (components[1] + 128.0) / 255.0;
+            rgb_out[2] = (components[2] + 128.0) / 255.0;
+            break;
+            
+        case PDF_CS_SEPARATION:
+        case PDF_CS_DEVICEN:
+            // Simplified: treat as grayscale tint
+            rgb_out[0] = rgb_out[1] = rgb_out[2] = 1.0 - components[0];
+            break;
+            
+        case PDF_CS_PATTERN:
+        default:
+            rgb_out[0] = rgb_out[1] = rgb_out[2] = 0.0;
+            break;
+    }
+    
+    // Clamp values to [0, 1]
+    for (int i = 0; i < 3; i++) {
+        if (rgb_out[i] < 0.0) rgb_out[i] = 0.0;
+        if (rgb_out[i] > 1.0) rgb_out[i] = 1.0;
+    }
 }
 
 /**
@@ -937,6 +1322,78 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
                 const char* xobject_name = op->operands.show_text.text->chars;
                 log_debug("Do operator: invoking XObject '%s'", xobject_name);
                 handle_do_operator(input, view_pool, parent, parser, xobject_name);
+            }
+            break;
+
+        // Color space operators
+        case PDF_OP_cs:
+            // Set fill color space
+            if (op->operands.show_text.text && parser->resources) {
+                const char* cs_name = op->operands.show_text.text->chars;
+                log_debug("cs operator: setting fill color space to '%s'", cs_name);
+                
+                // Look up named color space if not a device color space
+                if (strcmp(cs_name, "DeviceRGB") != 0 &&
+                    strcmp(cs_name, "DeviceGray") != 0 &&
+                    strcmp(cs_name, "DeviceCMYK") != 0) {
+                    PDFColorSpaceInfo* cs_info = lookup_named_colorspace(
+                        input, input->pool, cs_name, (Map*)parser->resources);
+                    if (cs_info) {
+                        parser->state.fill_cs_info = cs_info;
+                        parser->state.fill_color_space = cs_info->type;
+                        log_debug("Resolved fill color space '%s' to type %d", cs_name, cs_info->type);
+                    }
+                }
+            }
+            break;
+
+        case PDF_OP_CS:
+            // Set stroke color space
+            if (op->operands.show_text.text && parser->resources) {
+                const char* cs_name = op->operands.show_text.text->chars;
+                log_debug("CS operator: setting stroke color space to '%s'", cs_name);
+                
+                if (strcmp(cs_name, "DeviceRGB") != 0 &&
+                    strcmp(cs_name, "DeviceGray") != 0 &&
+                    strcmp(cs_name, "DeviceCMYK") != 0) {
+                    PDFColorSpaceInfo* cs_info = lookup_named_colorspace(
+                        input, input->pool, cs_name, (Map*)parser->resources);
+                    if (cs_info) {
+                        parser->state.stroke_cs_info = cs_info;
+                        parser->state.stroke_color_space = cs_info->type;
+                        log_debug("Resolved stroke color space '%s' to type %d", cs_name, cs_info->type);
+                    }
+                }
+            }
+            break;
+
+        case PDF_OP_sc:
+        case PDF_OP_scn:
+            // Set fill color (components depend on current color space)
+            if (parser->state.fill_cs_info) {
+                // Use extended color space conversion
+                double rgb[3];
+                apply_color_space_to_rgb(parser->state.fill_cs_info,
+                                        parser->state.fill_color_components, rgb);
+                parser->state.fill_color[0] = rgb[0];
+                parser->state.fill_color[1] = rgb[1];
+                parser->state.fill_color[2] = rgb[2];
+                log_debug("sc/scn: converted to RGB [%.3f, %.3f, %.3f]", rgb[0], rgb[1], rgb[2]);
+            }
+            // For device color spaces, conversion is already done in operators.cpp
+            break;
+
+        case PDF_OP_SC:
+        case PDF_OP_SCN:
+            // Set stroke color (components depend on current color space)
+            if (parser->state.stroke_cs_info) {
+                double rgb[3];
+                apply_color_space_to_rgb(parser->state.stroke_cs_info,
+                                        parser->state.stroke_color_components, rgb);
+                parser->state.stroke_color[0] = rgb[0];
+                parser->state.stroke_color[1] = rgb[1];
+                parser->state.stroke_color[2] = rgb[2];
+                log_debug("SC/SCN: converted to RGB [%.3f, %.3f, %.3f]", rgb[0], rgb[1], rgb[2]);
             }
             break;
 
@@ -1868,25 +2325,118 @@ static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent
  */
 static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
                                             int width, int height, int bpc, Pool* pool) {
-    (void)pool; // unused for now
     // Get color space
     ConstItem cs_item = image_dict->get("ColorSpace");
-    const char* colorspace = "DeviceRGB";  // Default
-    if (cs_item.item != ITEM_NULL && cs_item.type_id() == LMD_TYPE_STRING) {
-        String* cs_str = cs_item.string();
-        if (cs_str) colorspace = cs_str->chars;
-    }
-
+    PDFColorSpaceType cs_type = PDF_CS_DEVICE_RGB;  // Default
     int components = 3;  // Default RGB
-    if (strcmp(colorspace, "DeviceGray") == 0 || strcmp(colorspace, "G") == 0) {
-        components = 1;
-    } else if (strcmp(colorspace, "DeviceCMYK") == 0 || strcmp(colorspace, "CMYK") == 0) {
-        components = 4;
-    } else if (strcmp(colorspace, "DeviceRGB") == 0 || strcmp(colorspace, "RGB") == 0) {
-        components = 3;
+    
+    // Variables for indexed color space
+    uint8_t* indexed_lookup = nullptr;
+    int indexed_hival = 0;
+    PDFColorSpaceType indexed_base = PDF_CS_DEVICE_RGB;
+    int indexed_base_components = 3;
+    
+    if (cs_item.item != ITEM_NULL) {
+        TypeId item_type = cs_item.type_id();
+        
+        if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+            // Simple named color space
+            String* cs_str = cs_item.string();
+            if (cs_str) {
+                if (strcmp(cs_str->chars, "DeviceGray") == 0 || strcmp(cs_str->chars, "G") == 0) {
+                    cs_type = PDF_CS_DEVICE_GRAY;
+                    components = 1;
+                } else if (strcmp(cs_str->chars, "DeviceCMYK") == 0 || strcmp(cs_str->chars, "CMYK") == 0) {
+                    cs_type = PDF_CS_DEVICE_CMYK;
+                    components = 4;
+                } else if (strcmp(cs_str->chars, "DeviceRGB") == 0 || strcmp(cs_str->chars, "RGB") == 0) {
+                    cs_type = PDF_CS_DEVICE_RGB;
+                    components = 3;
+                }
+                log_debug("decode_raw_image: colorspace=%s, components=%d, bpc=%d", cs_str->chars, components, bpc);
+            }
+        } else if (item_type == LMD_TYPE_ARRAY) {
+            // Array-based color space (Indexed, ICCBased, etc.)
+            Array* cs_array = ((Item*)&cs_item)->array;
+            if (cs_array && cs_array->length >= 1) {
+                Item type_item = cs_array->items[0];
+                String* type_name = type_item.get_string();
+                
+                if (type_name) {
+                    log_debug("decode_raw_image: array colorspace type=%s", type_name->chars);
+                    
+                    if (strcmp(type_name->chars, "Indexed") == 0 || strcmp(type_name->chars, "I") == 0) {
+                        cs_type = PDF_CS_INDEXED;
+                        components = 1;  // Indexed uses single index value
+                        
+                        if (cs_array->length >= 4) {
+                            // Parse base color space
+                            Item base_item = cs_array->items[1];
+                            String* base_name = base_item.get_string();
+                            if (base_name) {
+                                if (strcmp(base_name->chars, "DeviceGray") == 0) {
+                                    indexed_base = PDF_CS_DEVICE_GRAY;
+                                    indexed_base_components = 1;
+                                } else if (strcmp(base_name->chars, "DeviceCMYK") == 0) {
+                                    indexed_base = PDF_CS_DEVICE_CMYK;
+                                    indexed_base_components = 4;
+                                } else {
+                                    indexed_base = PDF_CS_DEVICE_RGB;
+                                    indexed_base_components = 3;
+                                }
+                            }
+                            
+                            // Parse hival
+                            Item hival_item = cs_array->items[2];
+                            if (get_type_id(hival_item) == LMD_TYPE_INT) {
+                                indexed_hival = hival_item.int_val;
+                            } else if (get_type_id(hival_item) == LMD_TYPE_FLOAT) {
+                                indexed_hival = (int)hival_item.get_double();
+                            }
+                            
+                            // Parse lookup table
+                            Item lookup_item = cs_array->items[3];
+                            TypeId lookup_type = get_type_id(lookup_item);
+                            if (lookup_type == LMD_TYPE_STRING || lookup_type == LMD_TYPE_BINARY) {
+                                String* lookup_str = lookup_item.get_string();
+                                if (lookup_str) {
+                                    indexed_lookup = (uint8_t*)lookup_str->chars;
+                                    log_debug("Indexed image: hival=%d, base=%d, lookup_size=%d",
+                                             indexed_hival, indexed_base, (int)lookup_str->len);
+                                }
+                            }
+                        }
+                    } else if (strcmp(type_name->chars, "ICCBased") == 0) {
+                        cs_type = PDF_CS_ICCBASED;
+                        // Try to get N from the stream dictionary
+                        if (cs_array->length >= 2) {
+                            Item stream_item = cs_array->items[1];
+                            if (get_type_id(stream_item) == LMD_TYPE_MAP) {
+                                Map* stream_dict = stream_item.map;
+                                ConstItem n_item = stream_dict->get("N");
+                                if (n_item.item != ITEM_NULL) {
+                                    Item n_mut = *(Item*)&n_item;
+                                    if (n_mut.type_id() == LMD_TYPE_INT) {
+                                        components = n_mut.int_val;
+                                    } else if (n_mut.type_id() == LMD_TYPE_FLOAT) {
+                                        components = (int)n_mut.get_double();
+                                    }
+                                }
+                            }
+                        }
+                        if (components <= 0) components = 3;  // Default to RGB
+                        log_debug("ICCBased image: N=%d", components);
+                    } else if (strcmp(type_name->chars, "CalGray") == 0) {
+                        cs_type = PDF_CS_CAL_GRAY;
+                        components = 1;
+                    } else if (strcmp(type_name->chars, "CalRGB") == 0) {
+                        cs_type = PDF_CS_CAL_RGB;
+                        components = 3;
+                    }
+                }
+            }
+        }
     }
-
-    log_debug("decode_raw_image: colorspace=%s, components=%d, bpc=%d", colorspace, components, bpc);
 
     // Calculate expected data size
     int row_bytes = (width * components * bpc + 7) / 8;
@@ -1909,7 +2459,49 @@ static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
         for (int x = 0; x < width; x++) {
             uint8_t r = 0, g = 0, b = 0, a = 255;
 
-            if (bpc == 8) {
+            if (cs_type == PDF_CS_INDEXED && indexed_lookup) {
+                // Indexed color space - look up color in palette
+                int idx = 0;
+                if (bpc == 8) {
+                    int src_idx = y * width + x;
+                    if (src_idx < (int)data->len) {
+                        idx = src[src_idx];
+                    }
+                } else if (bpc == 4) {
+                    int nibble_idx = y * width + x;
+                    int byte_idx = nibble_idx / 2;
+                    bool high_nibble = (nibble_idx % 2) == 0;
+                    if (byte_idx < (int)data->len) {
+                        idx = high_nibble ? (src[byte_idx] >> 4) : (src[byte_idx] & 0x0F);
+                    }
+                } else if (bpc == 1) {
+                    int bit_idx = y * width + x;
+                    int byte_idx = bit_idx / 8;
+                    int bit_offset = 7 - (bit_idx % 8);
+                    if (byte_idx < (int)data->len) {
+                        idx = (src[byte_idx] >> bit_offset) & 1;
+                    }
+                }
+                
+                if (idx > indexed_hival) idx = indexed_hival;
+                int offset = idx * indexed_base_components;
+                
+                if (indexed_base == PDF_CS_DEVICE_RGB) {
+                    r = indexed_lookup[offset];
+                    g = indexed_lookup[offset + 1];
+                    b = indexed_lookup[offset + 2];
+                } else if (indexed_base == PDF_CS_DEVICE_GRAY) {
+                    r = g = b = indexed_lookup[offset];
+                } else if (indexed_base == PDF_CS_DEVICE_CMYK) {
+                    float c = indexed_lookup[offset] / 255.0f;
+                    float m = indexed_lookup[offset + 1] / 255.0f;
+                    float yy = indexed_lookup[offset + 2] / 255.0f;
+                    float k = indexed_lookup[offset + 3] / 255.0f;
+                    r = (uint8_t)((1.0f - c) * (1.0f - k) * 255);
+                    g = (uint8_t)((1.0f - m) * (1.0f - k) * 255);
+                    b = (uint8_t)((1.0f - yy) * (1.0f - k) * 255);
+                }
+            } else if (bpc == 8) {
                 if (components == 1) {
                     // Grayscale
                     int idx = y * width + x;
