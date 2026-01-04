@@ -503,16 +503,20 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             break;
         }
 
-        // Parse operand
+        // Parse operand - always parse to advance stream, even if we discard the value
+        const char* prev_stream = parser->stream;
+        
         if (c == '(' || c == '<') {
             // String
+            String* str = parse_string(parser);
             if (str_count < 16) {
-                strings[str_count++] = parse_string(parser);
+                strings[str_count++] = str;
             }
         } else if (c == '/') {
             // Name
+            String* name = parse_name(parser);
             if (str_count < 16) {
-                strings[str_count++] = parse_name(parser);
+                strings[str_count++] = name;
             }
         } else if (c == '[') {
             // Array - TODO: handle arrays properly
@@ -523,10 +527,16 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             skip_whitespace(parser);
         } else if (isdigit(c) || c == '-' || c == '+' || c == '.') {
             // Number
+            double num = parse_number(parser);
             if (num_count < 16) {
-                numbers[num_count++] = parse_number(parser);
+                numbers[num_count++] = num;
             }
         } else {
+            parser->stream++;
+        }
+        
+        // Safety: ensure stream advances to prevent infinite loop
+        if (parser->stream == prev_stream) {
             parser->stream++;
         }
     }

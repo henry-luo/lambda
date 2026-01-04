@@ -12,7 +12,7 @@ static String* parse_pdf_name(InputContext& ctx, const char **pdf);
 static String* parse_pdf_string(InputContext& ctx, const char **pdf);
 static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf);
 static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf);
-static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict);
+static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, size_t bytes_remaining = 1000000);
 static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf);
 static Item parse_pdf_trailer(InputContext& ctx, const char **pdf);
 static Item analyze_pdf_content_stream(Input *input, const char *stream_data, int length);
@@ -581,19 +581,36 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     return {.item = (uint64_t)obj_map};
 }
 
-static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict) {
+static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, size_t bytes_remaining) {
     // expects stream data after dictionary
     if (strncmp(*pdf, "stream", 6) != 0) return {.item = ITEM_ERROR};
 
     *pdf += 6; // skip stream
-    skip_pdf_whitespace_and_comments(pdf);
+    
+    // Skip to start of actual stream data (skip newline after "stream")
+    if (**pdf == '\r') (*pdf)++;
+    if (**pdf == '\n') (*pdf)++;
 
-    // find end of stream
-    const char* end_stream = strstr(*pdf, "endstream");
+    // Binary-safe search for "endstream" - don't rely on null termination
+    // since stream data can contain null bytes
+    const char* end_stream = nullptr;
+    const char* search_start = *pdf;
+    size_t max_search = bytes_remaining > 100000 ? 100000 : bytes_remaining;
+    for (size_t i = 0; i + 9 <= max_search; i++) {
+        if (strncmp(search_start + i, "endstream", 9) == 0) {
+            end_stream = search_start + i;
+            break;
+        }
+    }
+    
     if (!end_stream) return {.item = ITEM_ERROR};
 
     // calculate data length
     int data_length = end_stream - *pdf;
+    // Trim trailing whitespace from data
+    while (data_length > 0 && ((*pdf)[data_length-1] == '\r' || (*pdf)[data_length-1] == '\n')) {
+        data_length--;
+    }
     if (data_length > 1000) { // Safety limit for stream size
         data_length = 1000;
     }
@@ -686,13 +703,13 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
         }
     }
 
-    // Parse xref entries (limit for safety)
+    // Parse xref entries - we need to scan past all entries to find trailer
     Array* entries = array_pooled(ctx.input()->pool);
     if (entries) {
         int entry_count = 0;
-        int max_entries = 20; // Conservative limit
+        int max_stored_entries = 50; // How many entries we actually store in the map
 
-        while (*pdf && entry_count < max_entries) {
+        while (**pdf) {
             skip_pdf_whitespace_and_comments(pdf);
 
             // Check if we've hit the trailer
@@ -707,11 +724,8 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                     int count = strtol(*pdf, (char**)pdf, 10);
                     skip_pdf_whitespace_and_comments(pdf);
 
-                    // Limit the number of entries we process
-                    if (count > 10) count = 10;
-
-                    // Parse individual entries
-                    for (int i = 0; i < count && entry_count < max_entries; i++) {
+                    // Parse individual entries - parse all but only store up to limit
+                    for (int i = 0; i < count; i++) {
                         skip_pdf_whitespace_and_comments(pdf);
 
                         // Parse entry: offset generation flag
@@ -728,53 +742,56 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                 if (flag == 'n' || flag == 'f') {
                                     (*pdf)++;
 
-                                    // Create entry map
-                                    Map* entry_map = map_pooled(ctx.input()->pool);
-                                    if (entry_map) {
-                                        if (entry_map->data) {
-                                            // Store object number
-                                            String* obj_key = ctx.builder.createString("object");
-                                            if (obj_key) {
-                                                double* obj_val;
-                                                obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
-                                                if (obj_val) {
-                                                    *obj_val = (double)(start_num + i);
-                                                    Item obj_item = {.item = d2it(obj_val)};
-                                                    ctx.builder.putToMap(entry_map, obj_key, obj_item);
+                                    // Only store entries up to limit
+                                    if (entry_count < max_stored_entries) {
+                                        // Create entry map
+                                        Map* entry_map = map_pooled(ctx.input()->pool);
+                                        if (entry_map) {
+                                            if (entry_map->data) {
+                                                // Store object number
+                                                String* obj_key = ctx.builder.createString("object");
+                                                if (obj_key) {
+                                                    double* obj_val;
+                                                    obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
+                                                    if (obj_val) {
+                                                        *obj_val = (double)(start_num + i);
+                                                        Item obj_item = {.item = d2it(obj_val)};
+                                                        ctx.builder.putToMap(entry_map, obj_key, obj_item);
+                                                    }
                                                 }
-                                            }
 
-                                            // Store offset
-                                            String* offset_key = ctx.builder.createString("offset");
-                                            if (offset_key) {
-                                                double* offset_val;
-                                                offset_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
-                                                if (offset_val) {
-                                                    *offset_val = (double)offset;
-                                                    Item offset_item = {.item = d2it(offset_val)};
-                                                    ctx.builder.putToMap(entry_map, offset_key, offset_item);
+                                                // Store offset
+                                                String* offset_key = ctx.builder.createString("offset");
+                                                if (offset_key) {
+                                                    double* offset_val;
+                                                    offset_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
+                                                    if (offset_val) {
+                                                        *offset_val = (double)offset;
+                                                        Item offset_item = {.item = d2it(offset_val)};
+                                                        ctx.builder.putToMap(entry_map, offset_key, offset_item);
+                                                    }
                                                 }
-                                            }
 
-                                            // Store flag
-                                            String* flag_key = ctx.builder.createString("flag");
-                                            if (flag_key) {
-                                                String* flag_val;
-                                                flag_val = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 2);
-                                                if (flag_val) {
-                                                    flag_val->chars[0] = flag;
-                                                    flag_val->chars[1] = '\0';
-                                                    flag_val->len = 1;
-                                                    flag_val->ref_cnt = 0;
-                                                    Item flag_item = {.item = s2it(flag_val)};
-                                                    ctx.builder.putToMap(entry_map, flag_key, flag_item);
+                                                // Store flag
+                                                String* flag_key = ctx.builder.createString("flag");
+                                                if (flag_key) {
+                                                    String* flag_val;
+                                                    flag_val = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 2);
+                                                    if (flag_val) {
+                                                        flag_val->chars[0] = flag;
+                                                        flag_val->chars[1] = '\0';
+                                                        flag_val->len = 1;
+                                                        flag_val->ref_cnt = 0;
+                                                        Item flag_item = {.item = s2it(flag_val)};
+                                                        ctx.builder.putToMap(entry_map, flag_key, flag_item);
+                                                    }
                                                 }
-                                            }
 
-                                            Item entry_item = {.item = (uint64_t)entry_map};
-                                            array_append(entries, entry_item, ctx.input()->pool);
-                                            entry_count++;
+                                                Item entry_item = {.item = (uint64_t)entry_map};
+                                                array_append(entries, entry_item, ctx.input()->pool);
+                                            }
                                         }
+                                        entry_count++;
                                     }
                                 }
                             }
@@ -960,18 +977,19 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
     return {.item = (uint64_t)page_analysis};
 }
 
-void parse_pdf(Input* input, const char* pdf_string) {
+void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
     log_debug("pdf_parse\n");
 
     // create unified InputContext with source tracking
-    InputContext ctx(input, pdf_string, strlen(pdf_string));
+    InputContext ctx(input, pdf_string, pdf_length);
 
     MarkBuilder& builder = ctx.builder;
 
     const char* pdf = pdf_string;
+    const char* pdf_file_end = pdf_string + pdf_length; // track actual end of binary content
 
     // Validate input
-    if (!pdf_string || !*pdf_string) {
+    if (!pdf_string || pdf_length == 0) {
         ctx.addError(ctx.tracker.location(), "Empty PDF content");
         log_debug("Error: Empty PDF content\n");
         input->root = {.item = ITEM_ERROR};
@@ -1084,78 +1102,65 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
         // Always scan for xref and trailer sections, even if we've hit the object limit
         if (xref_table .item == ITEM_NULL || trailer .item == ITEM_NULL) {
-            // Scan ahead for xref/trailer sections - start from current position if we haven't exceeded object limit,
-            // or from the beginning if we need to do a more thorough search
-            const char* scan_pdf = (obj_count >= max_objects) ? pdf_string : pdf;
-            int scan_limit = 10000; // Increased limit to handle larger PDFs
-            int scanned = 0;
-
-            while (*scan_pdf && scanned < scan_limit) {
-                // Skip whitespace but be more careful about advancement
-                if (isspace(*scan_pdf) || *scan_pdf == '%') {
-                    skip_pdf_whitespace_and_comments(&scan_pdf);
-                    if (!*scan_pdf) break;
-                    scanned += 10; // Count whitespace skipping as progress
-                    continue;
+            // Strategy: Scan backwards from end of file for "startxref", then use offset to find xref/trailer
+            // This avoids issues with binary stream content in the middle of the PDF
+            
+            // First, search backwards for "startxref" (typically in last ~100 bytes)
+            const char* scan_back = pdf_file_end - 1;
+            const char* startxref_pos = nullptr;
+            int search_limit = 1024; // search last 1KB for startxref
+            
+            while (scan_back >= pdf_string && search_limit > 0) {
+                if (*scan_back == 's' && (size_t)(pdf_file_end - scan_back) >= 9 && 
+                    strncmp(scan_back, "startxref", 9) == 0) {
+                    startxref_pos = scan_back;
+                    break;
                 }
-
-                if (xref_table .item == ITEM_NULL && strncmp(scan_pdf, "xref", 4) == 0) {
-                    // Check that it's a standalone keyword (not part of another word)
-                    if (scan_pdf == pdf_string || isspace(*(scan_pdf - 1)) || *(scan_pdf - 1) == '\n' || *(scan_pdf - 1) == '\r') {
-                        const char* xref_start = scan_pdf;
-                        xref_table = parse_pdf_xref_table(ctx, &scan_pdf);
-                        if (xref_table .item != ITEM_ERROR) {
-                            log_debug("Found and parsed xref table at offset %lld\n", (long long)(xref_start - pdf_string));
-                        }
-                        continue;
-                    }
-                }
-
-                if (trailer .item == ITEM_NULL && strncmp(scan_pdf, "trailer", 7) == 0) {
-                    // Check that it's a standalone keyword
-                    if (scan_pdf == pdf_string || isspace(*(scan_pdf - 1)) || *(scan_pdf - 1) == '\n' || *(scan_pdf - 1) == '\r') {
-                        const char* trailer_start = scan_pdf;
-                        trailer = parse_pdf_trailer(ctx, &scan_pdf);
-                        if (trailer .item != ITEM_ERROR) {
-                            log_debug("Found and parsed trailer at offset %lld\n", (long long)(trailer_start - pdf_string));
-                        }
-                        if (trailer .item != ITEM_ERROR) break; // Done after finding trailer
-                    }
-                }
-
-                // Check for startxref (PDF pointer to xref table)
-                if (strncmp(scan_pdf, "startxref", 9) == 0) {
-                    scan_pdf += 9;
-                    skip_pdf_whitespace_and_comments(&scan_pdf);
-                    // Try to parse the xref offset number
-                    if (isdigit(*scan_pdf)) {
-                        long xref_offset = strtol(scan_pdf, (char**)&scan_pdf, 10);
-                        log_debug("Found startxref pointing to offset %ld\n", xref_offset);
-                        // If we haven't found xref yet, try looking at that specific offset
-                        if (xref_table .item == ITEM_NULL && xref_offset > 0 && xref_offset < scan_limit) {
-                            const char* xref_pos = pdf_string + xref_offset;
-                            if (strncmp(xref_pos, "xref", 4) == 0) {
-                                const char* xref_parse_pos = xref_pos;
-                                xref_table = parse_pdf_xref_table(ctx, &xref_parse_pos);
-                                if (xref_table .item != ITEM_ERROR) {
-                                    log_debug("Successfully parsed xref table from startxref offset\n");
+                scan_back--;
+                search_limit--;
+            }
+            
+            if (startxref_pos) {
+                // Parse the xref offset
+                const char* offset_ptr = startxref_pos + 9; // skip "startxref"
+                while (offset_ptr < pdf_file_end && isspace(*offset_ptr)) offset_ptr++;
+                if (offset_ptr < pdf_file_end && isdigit(*offset_ptr)) {
+                    long xref_offset = strtol(offset_ptr, nullptr, 10);
+                    log_debug("Found startxref at offset %lld, pointing to xref at %ld\n", 
+                              (long long)(startxref_pos - pdf_string), xref_offset);
+                    
+                    // Jump to xref position
+                    if (xref_offset >= 0 && xref_offset < (long)pdf_length) {
+                        const char* xref_pos = pdf_string + xref_offset;
+                        
+                        // Parse xref table
+                        if (strncmp(xref_pos, "xref", 4) == 0) {
+                            const char* xref_parse_pos = xref_pos;
+                            xref_table = parse_pdf_xref_table(ctx, &xref_parse_pos);
+                            if (xref_table .item != ITEM_ERROR) {
+                                log_debug("Successfully parsed xref table at offset %ld\n", xref_offset);
+                                
+                                // Look for trailer right after xref
+                                while (xref_parse_pos < pdf_file_end && isspace(*xref_parse_pos)) xref_parse_pos++;
+                                log_debug("After xref, looking for trailer at offset %lld, first chars: '%.20s'\n", 
+                                          (long long)(xref_parse_pos - pdf_string), xref_parse_pos);
+                                if ((size_t)(pdf_file_end - xref_parse_pos) >= 7 && 
+                                    strncmp(xref_parse_pos, "trailer", 7) == 0) {
+                                    trailer = parse_pdf_trailer(ctx, &xref_parse_pos);
+                                    if (trailer .item != ITEM_ERROR) {
+                                        log_debug("Successfully parsed trailer\n");
+                                    } else {
+                                        log_debug("Trailer parsing returned error\n");
+                                    }
+                                } else {
+                                    log_debug("Trailer keyword not found at expected position\n");
                                 }
                             }
                         }
                     }
-                    continue;
                 }
-
-                // Check for linearization hint (for information only)
-                if (strncmp(scan_pdf, "%%EOF", 5) == 0) {
-                    // Found end of file marker - continue scanning a bit more in case there's more after
-                    scan_pdf += 5;
-                    scanned += 5;
-                    continue;
-                }
-
-                scan_pdf++;
-                scanned++;
+            } else {
+                log_debug("Could not find startxref - PDF may be malformed\n");
             }
         }
 
