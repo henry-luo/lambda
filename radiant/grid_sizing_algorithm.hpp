@@ -339,6 +339,10 @@ inline void increase_sizes_for_spanning_item(
     // Per CSS Grid spec §11.5, flexible (fr) tracks with non-zero fr are NOT grown
     // during intrinsic sizing - they're sized in §11.7 (Expand Flexible Tracks).
     // However, 0fr tracks don't flex and should participate in intrinsic sizing.
+    //
+    // IMPORTANT: For max-content contributions (Phase 2), only tracks with max-content
+    // or auto max sizing should receive space. min-content tracks are already fully
+    // sized by Phase 1 and should NOT grow further.
     std::vector<size_t> eligible_indices;
     for (size_t i = start_index; i < end; ++i) {
         const auto& track = tracks[i];
@@ -348,6 +352,21 @@ inline void increase_sizes_for_spanning_item(
         bool is_truly_flexible = track.is_flexible() && track.max_track_sizing_function.flex_factor() > 0;
         if (is_truly_flexible) {
             continue;
+        }
+
+        // For max-content contributions, check if the track's max sizing function
+        // actually wants max-content sizing. min-content tracks should be skipped.
+        if (contribution_type == IntrinsicContributionType::Maximum) {
+            auto max_type = track.max_track_sizing_function.type;
+            // Only include tracks where max sizing is max-content, auto, or fit-content
+            bool wants_max_content = (max_type == SizingFunctionType::MaxContent ||
+                                      max_type == SizingFunctionType::Auto ||
+                                      max_type == SizingFunctionType::FitContentPx ||
+                                      max_type == SizingFunctionType::FitContentPercent);
+            if (!wants_max_content) {
+                // This track (e.g., min-content) doesn't want max-content sizing
+                continue;
+            }
         }
 
         // Include tracks with intrinsic min or max sizing, 0fr tracks, or auto max sizing
@@ -554,13 +573,35 @@ inline void resolve_intrinsic_track_sizes(
     // Flush planned increases to base sizes
     flush_planned_base_size_increases(tracks);
 
-    // Phase 2: Size tracks to max-content contributions (for tracks with max-content sizing)
+    // Phase 2: Size tracks to max-content contributions (for tracks with max-content/auto sizing)
     // NOTE: Items crossing flexible tracks are skipped here too
+    // IMPORTANT: min-content tracks should NOT receive max-content contributions
     for (const auto& contrib : contributions) {
         if (contrib.track_span == 0) continue;
 
         // Skip items that cross flexible tracks
         if (contrib.crosses_flexible_track) continue;
+
+        // Check if ANY track in the span has max-content or auto max sizing
+        // If all tracks are min-content, skip this contribution (min-content tracks are already sized)
+        size_t end = std::min(contrib.track_start + contrib.track_span, tracks.size());
+        bool has_max_content_track = false;
+        for (size_t i = contrib.track_start; i < end; ++i) {
+            // Check if track's max sizing function is max-content or auto (which becomes max-content)
+            auto max_type = tracks[i].max_track_sizing_function.type;
+            if (max_type == SizingFunctionType::MaxContent ||
+                max_type == SizingFunctionType::Auto ||
+                max_type == SizingFunctionType::FitContentPx ||
+                max_type == SizingFunctionType::FitContentPercent) {
+                has_max_content_track = true;
+                break;
+            }
+        }
+
+        if (!has_max_content_track) {
+            // All tracks are min-content sized, skip max-content contribution
+            continue;
+        }
 
         float current_size = spanned_tracks_size(tracks, contrib.track_start, contrib.track_span, gap);
         float extra_space = contrib.max_content_contribution - current_size;
