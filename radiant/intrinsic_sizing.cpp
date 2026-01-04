@@ -1502,13 +1502,13 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
         // MaxContent or Indefinite: use max-content width
         width_for_height = result.max_content_width;
     }
-    
+
     // Step 3: Measure height intrinsic sizes at the determined width
     // IMPORTANT: When a definite width is available, use it for BOTH min and max height
     // This matches the original grid behavior where both heights are computed at the same width
     result.min_content_height = calculate_min_content_height(lycon, node, width_for_height);
     result.max_content_height = calculate_max_content_height(lycon, node, width_for_height);
-    
+
     log_debug("measure_intrinsic_sizes: %s -> width(min=%.1f, max=%.1f), height(min=%.1f, max=%.1f) at width=%.1f",
               element->node_name(),
               result.min_content_width, result.max_content_width,
@@ -1527,23 +1527,23 @@ CellIntrinsicWidths measure_table_cell_intrinsic_widths(
     ViewBlock* cell
 ) {
     CellIntrinsicWidths result = {0, 0};
-    
+
     if (!lycon || !cell) {
         return result;
     }
-    
+
     // Use unified API with max-content available space
     AvailableSpace available = AvailableSpace::make_max_content();
-    
+
     IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, cell, available);
-    
+
     result.min_width = sizes.min_content_width;
     result.max_width = sizes.max_content_width;
-    
+
     // Apply minimum usable width per CSS 2.1
     if (result.min_width < 16.0f) result.min_width = 16.0f;
     if (result.max_width < 16.0f) result.max_width = 16.0f;
-    
+
     return result;
 }
 
