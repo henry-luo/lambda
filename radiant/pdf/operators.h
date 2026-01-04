@@ -13,6 +13,43 @@
 extern "C" {
 #endif
 
+// Color space types
+typedef enum {
+    PDF_CS_DEVICE_RGB = 0,      // DeviceRGB
+    PDF_CS_DEVICE_GRAY = 1,     // DeviceGray
+    PDF_CS_DEVICE_CMYK = 2,     // DeviceCMYK
+    PDF_CS_INDEXED = 3,         // Indexed (palette-based)
+    PDF_CS_ICCBASED = 4,        // ICCBased (ICC profile)
+    PDF_CS_CAL_GRAY = 5,        // CalGray (calibrated gray)
+    PDF_CS_CAL_RGB = 6,         // CalRGB (calibrated RGB)
+    PDF_CS_LAB = 7,             // Lab color space
+    PDF_CS_SEPARATION = 8,      // Separation (spot colors)
+    PDF_CS_DEVICEN = 9,         // DeviceN (multiple spot colors)
+    PDF_CS_PATTERN = 10         // Pattern color space
+} PDFColorSpaceType;
+
+// Extended color space info for complex color spaces
+typedef struct {
+    PDFColorSpaceType type;     // Color space type
+    String* name;               // Color space name (e.g., "CS1", "Indexed")
+    int num_components;         // Number of color components
+    
+    // For Indexed color space
+    PDFColorSpaceType base_type;    // Base color space type
+    int hival;                      // Max index value (0 to hival)
+    uint8_t* lookup_table;          // Color lookup table (hival+1) * base_components bytes
+    int lookup_table_size;          // Size of lookup table
+    
+    // For ICCBased color space
+    int icc_n;                      // Number of components from ICC profile
+    
+    // For CalGray/CalRGB color space
+    double gamma[3];                // Gamma values (1 for CalGray, 3 for CalRGB)
+    double white_point[3];          // White point XYZ
+    double black_point[3];          // Black point XYZ (optional)
+    double matrix[9];               // CalRGB matrix (optional)
+} PDFColorSpaceInfo;
+
 // Path segment types for storing path commands
 typedef enum {
     PATH_SEG_MOVETO,    // m - move to
@@ -187,8 +224,12 @@ typedef struct PDFSavedState {
     double text_rise;
     double stroke_color[3];
     double fill_color[3];
+    double stroke_color_components[4]; // Full color components (up to 4 for CMYK)
+    double fill_color_components[4];   // Full color components (up to 4 for CMYK)
     int stroke_color_space;
     int fill_color_space;
+    PDFColorSpaceInfo* stroke_cs_info; // Extended color space info for stroke
+    PDFColorSpaceInfo* fill_cs_info;   // Extended color space info for fill
     double fill_alpha;
     double stroke_alpha;
     double line_width;
@@ -223,10 +264,14 @@ typedef struct {
     double ctm[6];
 
     // Color state
-    double stroke_color[3];    // RGB
-    double fill_color[3];      // RGB
-    int stroke_color_space;    // 0=RGB, 1=CMYK, 2=Gray
-    int fill_color_space;      // 0=RGB, 1=CMYK, 2=Gray
+    double stroke_color[3];    // RGB (converted from any color space)
+    double fill_color[3];      // RGB (converted from any color space)
+    double stroke_color_components[4]; // Full color components (up to 4 for CMYK)
+    double fill_color_components[4];   // Full color components (up to 4 for CMYK)
+    int stroke_color_space;    // PDFColorSpaceType enum value
+    int fill_color_space;      // PDFColorSpaceType enum value
+    PDFColorSpaceInfo* stroke_cs_info; // Extended color space info for stroke
+    PDFColorSpaceInfo* fill_cs_info;   // Extended color space info for fill
     double fill_alpha;         // ca operator (0.0-1.0, default 1.0)
     double stroke_alpha;       // CA operator (0.0-1.0, default 1.0)
 
