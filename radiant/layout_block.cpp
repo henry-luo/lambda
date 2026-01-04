@@ -5,6 +5,7 @@
 #include "layout_grid_multipass.hpp"
 #include "layout_positioned.hpp"
 #include "intrinsic_sizing.hpp"
+#include "layout_cache.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
 
@@ -430,7 +431,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         if (!has_flex) {
             // Apply min-height/max-height constraints to auto height
             float final_height = adjust_min_max_height(block, flow_height);
-            log_debug("finalize block flow, set block height to flow height: %f (after min/max: %f)", 
+            log_debug("finalize block flow, set block height to flow height: %f (after min/max: %f)",
                       flow_height, final_height);
             block->height = final_height;
         } else {
@@ -522,18 +523,18 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                     DomDocument* parent_doc = lycon->ui_context->document;
                     float saved_window_width = lycon->ui_context->window_width;
                     float saved_window_height = lycon->ui_context->window_height;
-                    
+
                     // Temporarily set window dimensions to iframe size
                     // This ensures layout_html_doc uses iframe dimensions for layout
                     lycon->ui_context->document = doc;
                     lycon->ui_context->window_width = (float)iframe_width;
                     lycon->ui_context->window_height = (float)iframe_height;
-                    
+
                     // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
                     process_document_font_faces(lycon->ui_context, doc);
-                    
+
                     layout_html_doc(lycon->ui_context, doc, false);
-                    
+
                     // Restore parent document and window dimensions
                     lycon->ui_context->document = parent_doc;
                     lycon->ui_context->window_width = saved_window_width;
@@ -916,7 +917,7 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
         if (display.outer == CSS_VALUE_NONE) continue;
 
         CssEnum float_value = get_element_float_value(elem);
-        
+
         // If this is a non-floated block, stop pre-scanning
         // Subsequent floats must be laid out in normal flow order
         if (float_value != CSS_VALUE_LEFT && float_value != CSS_VALUE_RIGHT) {
@@ -1081,7 +1082,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             // CSS 2.1 §17.2.1: Orphaned table-internal elements (table-row, table-cell, etc.)
             // inside non-table contexts should be treated as block+flow for layout purposes.
             // This handles cases like floated table-row-group containing table-row/table-cell.
-            bool is_orphaned_table_internal = 
+            bool is_orphaned_table_internal =
                 block->display.inner == CSS_VALUE_TABLE_ROW ||
                 block->display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
                 block->display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
@@ -1090,7 +1091,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 block->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
                 block->display.inner == CSS_VALUE_TABLE_CELL ||
                 block->display.inner == CSS_VALUE_TABLE_CAPTION;
-            
+
             if (block->display.inner == CSS_VALUE_FLOW || is_orphaned_table_internal) {
                 // Pre-scan and layout floats BEFORE laying out inline content
                 // This ensures floats are positioned and affect line bounds correctly
@@ -1354,11 +1355,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Block-level replaced elements (like <img display:block>) must also avoid floats.
     bool is_block_level_replaced = (block->display.outer == CSS_VALUE_BLOCK &&
                                     block->display.inner == RDT_DISPLAY_REPLACED);
-    
+
     bool is_normal_flow = !is_float &&
         (!block->position || (block->position->position != CSS_VALUE_ABSOLUTE &&
                               block->position->position != CSS_VALUE_FIXED));
-    
+
     // Elements that must avoid floats: BFC roots, block-level replaced elements
     bool should_avoid_floats = (establishes_bfc || is_block_level_replaced) && is_normal_flow;
 
@@ -1389,7 +1390,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // For elements with explicit CSS width, use that; otherwise use parent width
             float element_required_width = pa_block->content_width;
             bool has_explicit_width = false;
-            
+
             // Check block->blk for CSS width (resolved by dom_node_resolve_style)
             if (block->blk) {
                 if (block->blk->given_width > 0) {
@@ -1402,7 +1403,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     has_explicit_width = true;
                 }
             }
-            
+
             // Add margins if they're explicitly set (not auto)
             if (has_explicit_width && block->bound) {
                 if (block->bound->margin.left_type != CSS_VALUE_AUTO)
@@ -1417,34 +1418,34 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // For elements WITHOUT explicit width, they can shrink to fit - no need to shift down
             // For elements WITH explicit width, shift down if they don't fit
             float current_y = y_in_bfc;
-            
+
             if (has_explicit_width) {
                 // Check if element fits at current Y position
                 // If not, shift down like floats do
                 int max_iterations = 100;
-                
+
                 while (max_iterations-- > 0) {
                     FloatAvailableSpace space = block_context_space_at_y(parent_bfc, current_y, 1.0f);
-                    
+
                     // Calculate how much space is available in the PARENT's content area
                     // (not the BFC's full width, which may be much larger)
                     float local_left = space.left - x_in_bfc;  // Float edge in local coords
                     float local_right = space.right - x_in_bfc;  // Right edge in local coords
-                    
+
                     // Clamp to parent's content area bounds
                     float parent_left_bound = 0;
                     float parent_right_bound = pa_block->content_width;
-                    
+
                     float effective_left = max(local_left, parent_left_bound);
                     float effective_right = min(local_right, parent_right_bound);
                     float available_width = max(0.0f, effective_right - effective_left);
-                    
+
                     log_debug("[BFC Float Avoid] Checking y=%.1f: space=(%.1f,%.1f), local=(%.1f,%.1f), parent_width=%.1f, available=%.1f, needed=%.1f",
-                              current_y, space.left, space.right, local_left, local_right, 
+                              current_y, space.left, space.right, local_left, local_right,
                               pa_block->content_width, available_width, element_required_width);
-                    
+
                     // Check if element fits
-                    if (available_width >= element_required_width || 
+                    if (available_width >= element_required_width ||
                         (!space.has_left_float && !space.has_right_float)) {
                         // Element fits here - calculate offset
                         float float_intrusion_left = max(0.0f, local_left);
@@ -1456,7 +1457,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
                         break;
                     }
-                    
+
                     // Element doesn't fit - find next float boundary to try
                     float next_y = FLT_MAX;
                     for (FloatBox* fb = parent_bfc->left_floats; fb; fb = fb->next) {
@@ -1469,12 +1470,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                             next_y = fb->margin_box_bottom;
                         }
                     }
-                    
+
                     if (next_y == FLT_MAX || next_y <= current_y) {
                         // No more floats below - use current position
                         break;
                     }
-                    
+
                     log_debug("[BFC Float Avoid] Element doesn't fit, shifting from y=%.1f to y=%.1f",
                               current_y, next_y);
                     current_y = next_y;
@@ -1491,11 +1492,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     bfc_float_offset_x = float_intrusion_left;
                 }
                 bfc_available_width_reduction = float_intrusion_left + float_intrusion_right;
-                
+
                 log_debug("[BFC Float Avoid] Auto-width element: offset_x=%.1f, width_reduction=%.1f",
                           bfc_float_offset_x, bfc_available_width_reduction);
             }
-            
+
             // Calculate total shift needed in local coordinates
             bfc_shift_down = current_y - y_in_bfc;
             if (bfc_shift_down > 0) {
@@ -1603,6 +1604,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         block->node_name(), lycon->block.given_width, lycon->block.given_height, (void*)block->blk,
         block->blk ? block->blk->given_width_type : -1);
 
+    // Check if parent is measuring intrinsic sizes (propagated via available_space)
+    // This allows intrinsic sizing mode to flow down through nested blocks
+    bool parent_is_intrinsic_sizing = lycon->available_space.is_intrinsic_sizing();
+    if (parent_is_intrinsic_sizing) {
+        log_debug("Block '%s': parent is in intrinsic sizing mode (width=%s)",
+            block->node_name(),
+            lycon->available_space.width.is_min_content() ? "min-content" : "max-content");
+    }
+
     // Check if this is a floated element with auto width
     // CSS 2.2 Section 10.3.5: Floats with auto width use shrink-to-fit width
     // We'll do a post-layout adjustment after content is laid out
@@ -1613,8 +1623,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && width_is_auto;
 
     // Check for width: max-content or min-content (intrinsic sizing keywords)
-    bool is_max_content_width = block->blk && block->blk->given_width_type == CSS_VALUE_MAX_CONTENT;
-    bool is_min_content_width = block->blk && block->blk->given_width_type == CSS_VALUE_MIN_CONTENT;
+    // Either from CSS property OR propagated from parent's intrinsic sizing mode
+    bool is_max_content_width = (block->blk && block->blk->given_width_type == CSS_VALUE_MAX_CONTENT) ||
+                                (parent_is_intrinsic_sizing && lycon->available_space.is_width_max_content());
+    bool is_min_content_width = (block->blk && block->blk->given_width_type == CSS_VALUE_MIN_CONTENT) ||
+                                (parent_is_intrinsic_sizing && lycon->available_space.is_width_min_content());
 
     if (is_max_content_width || is_min_content_width) {
         // For max-content/min-content width, use shrink-to-fit behavior
@@ -1747,7 +1760,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
         log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
-        
+
         // CSS 2.1 §10.3.5: For floats, if margin-left/right is 'auto', its used value is 0
         // CSS 2.1 §10.3.3: For normal flow blocks, auto margins center the element
         if (is_float) {
@@ -2162,6 +2175,70 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
+
+    // =========================================================================
+    // LAYOUT CACHE INTEGRATION (Phase 3: Run Mode Integration)
+    // Try cache lookup for early bailout when dimensions already computed
+    // =========================================================================
+    DomElement* dom_elem = elmt->is_element() ? elmt->as_element() : nullptr;
+    radiant::LayoutCache* cache = dom_elem ? dom_elem->layout_cache : nullptr;
+
+    // Build known dimensions from current constraints
+    radiant::KnownDimensions known_dims = radiant::known_dimensions_none();
+    if (block->blk && block->blk->given_width > 0) {
+        known_dims.width = block->blk->given_width;
+        known_dims.has_width = true;
+    }
+    if (block->blk && block->blk->given_height > 0) {
+        known_dims.height = block->blk->given_height;
+        known_dims.has_height = true;
+    }
+
+    // Try cache lookup
+    if (cache) {
+        radiant::SizeF cached_size;
+        if (radiant::layout_cache_get(cache, known_dims, lycon->available_space,
+                                       lycon->run_mode, &cached_size)) {
+            // Cache hit! Use cached dimensions
+            block->width = cached_size.width;
+            block->height = cached_size.height;
+            g_layout_cache_hits++;
+            log_info("BLOCK CACHE HIT: element=%s, size=(%.1f x %.1f), mode=%d",
+                     elmt->node_name(), cached_size.width, cached_size.height, (int)lycon->run_mode);
+            // Restore parent context and return early
+            lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+            log_leave();
+            auto t_block_end = high_resolution_clock::now();
+            g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
+            g_block_layout_count++;
+            return;
+        }
+        g_layout_cache_misses++;
+        log_debug("BLOCK CACHE MISS: element=%s, mode=%d", elmt->node_name(), (int)lycon->run_mode);
+    }
+
+    // Early bailout for ComputeSize mode when both dimensions are known
+    if (lycon->run_mode == radiant::RunMode::ComputeSize) {
+        bool has_definite_width = (block->blk && block->blk->given_width > 0);
+        bool has_definite_height = (block->blk && block->blk->given_height > 0);
+
+        if (has_definite_width && has_definite_height) {
+            // Both dimensions known - can skip full layout
+            block->width = block->blk->given_width;
+            block->height = block->blk->given_height;
+            log_info("BLOCK EARLY BAILOUT: Both dimensions known (%.1fx%.1f), skipping full layout",
+                     block->width, block->height);
+            // Restore parent context and return early
+            lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+            log_leave();
+            auto t_block_end = high_resolution_clock::now();
+            g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
+            g_block_layout_count++;
+            return;
+        }
+        log_debug("BLOCK: ComputeSize mode but dimensions not fully known (w=%d, h=%d)",
+                  has_definite_width, has_definite_height);
+    }
 
     // CSS Counter handling (CSS 2.1 Section 12.4)
     // Push a new counter scope for this element
@@ -2645,6 +2722,18 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Pop counter scope when leaving this block
     if (lycon->counter_context) {
         counter_pop_scope(lycon->counter_context);
+    }
+
+    // =========================================================================
+    // CACHE STORE: Save computed dimensions for future lookups
+    // =========================================================================
+    if (cache) {
+        radiant::SizeF result = radiant::size_f(block->width, block->height);
+        radiant::layout_cache_store(cache, known_dims, lycon->available_space,
+                                    lycon->run_mode, result);
+        g_layout_cache_stores++;
+        log_debug("BLOCK CACHE STORE: element=%s, size=(%.1f x %.1f), mode=%d",
+                  elmt->node_name(), block->width, block->height, (int)lycon->run_mode);
     }
 
     log_leave();

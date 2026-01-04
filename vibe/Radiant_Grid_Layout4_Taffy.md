@@ -21,8 +21,9 @@ This proposal documents learnings from analyzing Taffy (a Rust CSS layout librar
 | Phase 1d | Grid-Specific Taffy Enhancements | ✅ **COMPLETE** | ItemBatcher, space distribution fix, 0fr handling, alignment/baseline helpers |
 | Phase 2 | Unified Alignment | ✅ **COMPLETE** | `layout_alignment.hpp/cpp` - unified alignment for flex/grid |
 | Phase 4.2 | Unified Intrinsic Sizing API | ✅ **COMPLETE** | `measure_intrinsic_sizes()` unified entry point |
-| Phase 3 | Run Mode Integration | ⏳ Planned | |
-| Phase 4 | Layout Cache Integration | ⏳ Planned | |
+| Phase 4.2b | AvailableSpace Consistency | ✅ **COMPLETE** | Block and table layout now use `lycon->available_space` |
+| Phase 3 | Run Mode Integration | ✅ **COMPLETE** | Cache lookup + early bailout in `layout_block()` |
+| Phase 4 | Layout Cache Integration | ✅ **COMPLETE** | 9-slot cache in block/flex/grid layout |
 | Phase 5-6 | FlexGridItem/Context Unification | ⏳ Planned | |
 
 **Current Test Status:** 1665/1665 baseline layout tests passing (100%)
@@ -897,40 +898,70 @@ int alignment_fallback_for_overflow(int alignment, float free_space);
 
 **Risk Assessment:** Medium - Successfully tested, no regressions
 
-### Phase 3: Run Mode Integration (Week 3)
+### Phase 3: Run Mode Integration ✅ COMPLETE
 
 **Goal:** Add early bailout optimization
 
-1. Add `RunMode run_mode` to `LayoutContext`
-2. Update `layout_block()` to check run_mode and short-circuit
-3. Update `layout_flex_content()` with early bailout
-4. Update `layout_grid_content()` with early bailout
-5. Add measurement mode support (ComputeSize)
+**Implementation (January 2026):**
 
-**Expected Performance Gain:** 10-30% reduction in layout time for complex nested layouts
+1. ✅ `RunMode run_mode` already in `LayoutContext` (from Phase 1)
+2. ✅ Updated `layout_block()` with cache lookup and early bailout
+3. ✅ `layout_flex_content()` already had early bailout
+4. ✅ `layout_grid_content()` already had early bailout
+5. ✅ ComputeSize mode short-circuits when both dimensions known
 
-**Files affected:**
-- `radiant/layout.hpp` - add RunMode to LayoutContext
-- `radiant/layout_block.cpp`
-- `radiant/layout_flex_multipass.cpp`
-- `radiant/layout_grid_multipass.cpp`
+**Key Changes to `layout_block.cpp`:**
 
-### Phase 4: Layout Cache Integration (Week 4)
+```cpp
+// After style resolution - try cache lookup
+if (cache) {
+    radiant::SizeF cached_size;
+    if (radiant::layout_cache_get(cache, known_dims, lycon->available_space,
+                                   lycon->run_mode, &cached_size)) {
+        // Cache hit! Use cached dimensions and return early
+        block->width = cached_size.width;
+        block->height = cached_size.height;
+        return;
+    }
+}
+
+// Early bailout for ComputeSize mode
+if (lycon->run_mode == radiant::RunMode::ComputeSize) {
+    if (has_definite_width && has_definite_height) {
+        block->width = block->blk->given_width;
+        block->height = block->blk->given_height;
+        return;  // Skip full layout
+    }
+}
+
+// ... perform full layout ...
+
+// Store result in cache
+if (cache) {
+    radiant::layout_cache_store(cache, known_dims, lycon->available_space,
+                                lycon->run_mode, result);
+}
+```
+
+**Files modified:**
+- `radiant/layout_block.cpp` - cache lookup, early bailout, cache store
+
+### Phase 4: Layout Cache Integration ✅ COMPLETE
 
 **Goal:** Enable caching for repeated measurements
 
-1. Initialize cache in `DomElement` during style resolution
-2. Add cache lookup in `layout_block()` entry point
-3. Add cache storage after layout completes
-4. Invalidate cache on style changes
-5. Add cache statistics for debugging
+**Implementation (January 2026):**
 
-**Expected Performance Gain:** 20-50% for deeply nested flex/grid layouts
+1. ✅ Cache in `DomElement::layout_cache` (from Phase 1)
+2. ✅ Cache lookup in `layout_block()`, `layout_flex_content()`, `layout_grid_content()`
+3. ✅ Cache storage after layout completes in all three
+4. ⚠️ Cache invalidation on style changes (TODO: add to resolve_css_style.cpp)
+5. ✅ Cache statistics via `g_layout_cache_hits/misses/stores`
 
-**Files affected:**
-- `radiant/view.hpp` - add cache field
-- `radiant/layout.cpp`
-- `radiant/resolve_css_style.cpp` - invalidate on style change
+**Files modified:**
+- `radiant/layout_block.cpp` - integrated 9-slot cache
+- `radiant/layout_flex_multipass.cpp` - already had cache integration
+- `radiant/layout_grid_multipass.cpp` - already had cache integration
 
 ### Phase 5: FlexGridItem/FlexGridContext Unification (Week 5-6)
 
