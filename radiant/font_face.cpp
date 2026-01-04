@@ -5,6 +5,7 @@
 #include "../lambda/input/css/css_font_face.hpp"
 extern "C" {
 #include "../lib/url.h"
+#include "../lib/base64.h"
 }
 #include <string.h>
 #include <strings.h>  // for strcasecmp
@@ -402,11 +403,178 @@ int get_cached_char_width(FontFaceDescriptor* descriptor, uint32_t codepoint) {
     return -1; // Cache miss
 }
 
-// Font loading with @font-face support (local fonts only)
+// Data URI font cache entry - stores decoded font data for FT_New_Memory_Face
+// Note: FreeType does NOT copy the font data, so we must keep it alive
+typedef struct DataUriFontCacheEntry {
+    char* uri_hash;           // hash key for the data URI (we hash because full URI can be huge)
+    uint8_t* font_data;       // decoded font data buffer
+    size_t font_data_size;    // size of font data
+    FT_Face face;             // loaded FT_Face (optional, may load multiple sizes)
+} DataUriFontCacheEntry;
+
+// Global data URI font cache (using hashmap)
+static struct hashmap* data_uri_font_cache = NULL;
+
+static int data_uri_font_compare(const void *a, const void *b, void *udata) {
+    (void)udata;
+    const DataUriFontCacheEntry *fa = (const DataUriFontCacheEntry*)a;
+    const DataUriFontCacheEntry *fb = (const DataUriFontCacheEntry*)b;
+    if (!fa || !fb || !fa->uri_hash || !fb->uri_hash) return (fa == fb) ? 0 : -1;
+    return strcmp(fa->uri_hash, fb->uri_hash);
+}
+
+static uint64_t data_uri_font_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const DataUriFontCacheEntry *entry = (const DataUriFontCacheEntry*)item;
+    if (!entry || !entry->uri_hash) return 0;
+    return hashmap_xxhash3(entry->uri_hash, strlen(entry->uri_hash), seed0, seed1);
+}
+
+// Create a short hash key from data URI (first 64 chars of base64 portion)
+static char* create_data_uri_hash_key(const char* data_uri) {
+    if (!data_uri) return NULL;
+
+    // Find the comma separator (start of data portion)
+    const char* comma = strchr(data_uri, ',');
+    if (!comma) {
+        // No comma - use first 64 chars of whole URI
+        size_t len = strlen(data_uri);
+        if (len > 64) len = 64;
+        char* key = (char*)malloc(len + 1);
+        if (key) {
+            strncpy(key, data_uri, len);
+            key[len] = '\0';
+        }
+        return key;
+    }
+
+    // Use prefix + first 64 chars of data portion for uniqueness
+    const char* data = comma + 1;
+    size_t prefix_len = comma - data_uri + 1; // include comma
+    size_t data_len = strlen(data);
+    if (data_len > 64) data_len = 64;
+
+    char* key = (char*)malloc(prefix_len + data_len + 1);
+    if (key) {
+        memcpy(key, data_uri, prefix_len);
+        memcpy(key + prefix_len, data, data_len);
+        key[prefix_len + data_len] = '\0';
+    }
+    return key;
+}
+
+// Load font from data URI - decodes base64 and uses FT_New_Memory_Face
+// Caches the decoded font data to avoid re-decoding
+FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp* style) {
+    if (!uicon || !data_uri) {
+        clog_error(font_log, "Invalid parameters for load_font_from_data_uri");
+        return NULL;
+    }
+
+    if (!is_data_uri(data_uri)) {
+        clog_error(font_log, "Not a data URI: %.60s...", data_uri);
+        return NULL;
+    }
+
+    log_debug("load_font_from_data_uri: attempting to load from data URI");
+
+    // Initialize cache if needed
+    if (!data_uri_font_cache) {
+        data_uri_font_cache = hashmap_new(sizeof(DataUriFontCacheEntry), 16, 0, 0,
+            data_uri_font_hash, data_uri_font_compare, NULL, NULL);
+        if (!data_uri_font_cache) {
+            clog_error(font_log, "Failed to create data URI font cache");
+            return NULL;
+        }
+    }
+
+    // Create hash key for cache lookup
+    char* hash_key = create_data_uri_hash_key(data_uri);
+    if (!hash_key) {
+        clog_error(font_log, "Failed to create hash key for data URI");
+        return NULL;
+    }
+
+    // Check cache first
+    DataUriFontCacheEntry search_key = {.uri_hash = hash_key, .font_data = NULL, .font_data_size = 0, .face = NULL};
+    DataUriFontCacheEntry* cached = (DataUriFontCacheEntry*)hashmap_get(data_uri_font_cache, &search_key);
+
+    uint8_t* font_data = NULL;
+    size_t font_data_size = 0;
+
+    if (cached && cached->font_data && cached->font_data_size > 0) {
+        // Cache hit - reuse decoded data
+        log_debug("load_font_from_data_uri: cache hit for data URI");
+        font_data = cached->font_data;
+        font_data_size = cached->font_data_size;
+        free(hash_key);
+        hash_key = NULL; // don't free twice
+    } else {
+        // Cache miss - decode the data URI
+        log_debug("load_font_from_data_uri: cache miss, decoding data URI");
+
+        char mime_type[128] = {0};
+        font_data = parse_data_uri(data_uri, mime_type, sizeof(mime_type), &font_data_size);
+
+        if (!font_data || font_data_size == 0) {
+            clog_error(font_log, "Failed to decode data URI font data");
+            free(hash_key);
+            return NULL;
+        }
+
+        log_debug("load_font_from_data_uri: decoded %zu bytes (mime: %s)", font_data_size, mime_type);
+
+        // Cache the decoded data for future use
+        // Note: We must keep font_data alive as long as FreeType might use it
+        DataUriFontCacheEntry new_entry = {
+            .uri_hash = hash_key,  // transfer ownership
+            .font_data = font_data,
+            .font_data_size = font_data_size,
+            .face = NULL  // will be set after loading
+        };
+        hashmap_set(data_uri_font_cache, &new_entry);
+        hash_key = NULL; // ownership transferred to cache
+    }
+
+    // Load font from memory using FT_New_Memory_Face
+    // IMPORTANT: FreeType does NOT copy the buffer, so font_data must stay alive
+    FT_Face face = NULL;
+    FT_Error error = FT_New_Memory_Face(uicon->ft_library, font_data, (FT_Long)font_data_size, 0, &face);
+
+    if (error) {
+        clog_error(font_log, "FT_New_Memory_Face failed: error=%d (data size=%zu)", error, font_data_size);
+        if (hash_key) free(hash_key);
+        return NULL;
+    }
+
+    // Set font size
+    float font_size = style ? style->font_size : 16;
+    error = FT_Set_Pixel_Sizes(face, 0, (FT_UInt)font_size);
+    if (error) {
+        clog_error(font_log, "FT_Set_Pixel_Sizes failed: error=%d, size=%f", error, font_size);
+        FT_Done_Face(face);
+        if (hash_key) free(hash_key);
+        return NULL;
+    }
+
+    clog_info(font_log, "Successfully loaded font from data URI: %s (size=%f, height=%f)",
+        face->family_name ? face->family_name : "(unknown)",
+        font_size, face->size->metrics.height / 64.0);
+
+    if (hash_key) free(hash_key);
+    return face;
+}
+
+// Font loading with @font-face support - handles both local files and data URIs
 FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* style) {
     if (!uicon || !font_path) {
         clog_error(font_log, "Invalid parameters for load_local_font_file");
         return NULL;
+    }
+
+    // Check if this is a data URI - route to memory-based loading
+    if (is_data_uri(font_path)) {
+        log_debug("load_local_font_file: detected data URI, using memory-based loading");
+        return load_font_from_data_uri(uicon, font_path, style);
     }
 
     log_font_loading_attempt("local font", font_path);
