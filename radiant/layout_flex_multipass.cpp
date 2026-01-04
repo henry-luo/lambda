@@ -21,6 +21,9 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 // External function for laying out absolute positioned children
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
+// External function for grid layout (from layout_grid_multipass.cpp)
+void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
+
 // External function for iframe layout (from layout_block.cpp)
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
 
@@ -588,6 +591,56 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         }
     }
 
+    // AUTO-WIDTH CALCULATION for column flex: width = max item width (cross-axis)
+    // This is symmetric to auto-height for row flex
+    // NOTE: Do NOT auto-size if this element is a flex item with explicit flex-basis
+    // (its width is determined by parent flex layout, not by its children)
+    bool has_explicit_width = flex_container->blk && flex_container->blk->given_width >= 0;
+    bool has_flex_basis_width = flex_container->fi && flex_container->fi->flex_basis >= 0;  // non-auto flex-basis
+    // Check if width was only set to padding (content_width is 0)
+    float current_content_width = flex_container->width;
+    if (flex_container->bound) {
+        current_content_width -= (flex_container->bound->padding.left + flex_container->bound->padding.right);
+    }
+    if (flex_layout && !is_main_axis_horizontal(flex_layout) && !has_explicit_width && !has_flex_basis_width && current_content_width <= 0) {
+        // Column flex with auto width: calculate width from widest flex item
+        log_debug("AUTO-WIDTH: column flex with auto-width, calculating from items");
+        int max_item_width = 0;
+        DomNode* child = flex_container->first_child;
+        while (child) {
+            if (child->is_element()) {
+                ViewElement* item = (ViewElement*)child->as_element();
+                if (item && item->fi && item->width > 0) {
+                    if ((int)item->width > max_item_width) {
+                        max_item_width = (int)item->width;
+                        log_debug("AUTO-WIDTH: column flex item width = %d, max = %d", (int)item->width, max_item_width);
+                    }
+                } else if (item) {
+                    // Try measured content width from cache
+                    MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+                    if (cached && cached->measured_width > max_item_width) {
+                        max_item_width = cached->measured_width;
+                        log_debug("AUTO-WIDTH: column flex item cached width = %d, max = %d", cached->measured_width, max_item_width);
+                    }
+                }
+            }
+            child = child->next_sibling;
+        }
+        if (max_item_width > 0) {
+            // Add padding to content width for final container width
+            int padding_left = 0, padding_right = 0;
+            if (flex_container->bound) {
+                padding_left = (int)flex_container->bound->padding.left;
+                padding_right = (int)flex_container->bound->padding.right;
+            }
+            int total_width = max_item_width + padding_left + padding_right;
+            flex_layout->cross_axis_size = (float)max_item_width;  // Content width
+            flex_container->width = (float)total_width;  // Total width including padding
+            log_debug("AUTO-WIDTH: column flex container width updated to %d (content=%d + padding=%d+%d)",
+                      total_width, max_item_width, padding_left, padding_right);
+        }
+    }
+
     // PASS 1: Run enhanced flex algorithm with measured content
     log_debug("Pass 1: Running enhanced flex algorithm with measured content");
 
@@ -913,6 +966,17 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
         log_leave();
         log_info(">>> NESTED FLEX COMPLETE: item=%p", flex_item);
+    } else if (flex_item->display.inner == CSS_VALUE_GRID) {
+        // Flex item is a grid container - call grid layout algorithm
+        log_info(">>> NESTED GRID DETECTED: item=%p (%s) has display.inner=GRID",
+                 flex_item, flex_item->node_name());
+        log_enter();
+
+        // Call the grid layout algorithm for this nested grid container
+        layout_grid_content(lycon, flex_item);
+
+        log_leave();
+        log_info(">>> NESTED GRID COMPLETE: item=%p", flex_item);
     } else if (flex_item->display.inner == RDT_DISPLAY_REPLACED) {
         // Replaced elements as flex items (iframe, img, etc.) need special handling
         // They don't have children to lay out - they need their embedded content loaded

@@ -4146,6 +4146,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->top = resolve_length_value(lycon, CSS_PROPERTY_TOP, value);
                 block->position->has_top = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->top_percent = value->data.percentage.value;
+                }
             }
             break;
         }
@@ -4160,6 +4164,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->left = resolve_length_value(lycon, CSS_PROPERTY_LEFT, value);
                 block->position->has_left = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->left_percent = value->data.percentage.value;
+                }
             }
             break;
         }
@@ -4174,6 +4182,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->right = resolve_length_value(lycon, CSS_PROPERTY_RIGHT, value);
                 block->position->has_right = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->right_percent = value->data.percentage.value;
+                }
             }
             break;
         }
@@ -4188,6 +4200,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 block->position->bottom = resolve_length_value(lycon, CSS_PROPERTY_BOTTOM, value);
                 block->position->has_bottom = true;
+                // store raw percentage for re-resolution during absolute positioning
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->position->bottom_percent = value->data.percentage.value;
+                }
             }
             break;
         }

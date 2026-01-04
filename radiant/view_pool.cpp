@@ -187,6 +187,7 @@ PositionProp* alloc_position_prop(LayoutContext* lycon) {
     // set defaults using actual Lexbor constants
     prop->position = CSS_VALUE_STATIC;  // default position
     prop->top = prop->right = prop->bottom = prop->left = 0;  // default offsets
+    prop->top_percent = prop->right_percent = prop->bottom_percent = prop->left_percent = NAN;  // NAN means not percentage
     prop->z_index = 0;  // default z-index
     prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;  // no offsets set
     prop->clear = CSS_VALUE_NONE;  // default clear

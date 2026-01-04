@@ -22,7 +22,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
 /**
  * Recursively offset all child views by the given amounts
  * Used for inline relative positioning where children have block-relative coordinates
- * 
+ *
  * Note: For block-level children, we offset the block itself but NOT its contents.
  * Block children break out of inline context and establish their own coordinate system,
  * so their internal content (text, nested elements) should not be affected by the
@@ -218,6 +218,36 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     log_debug("containing block padding box: (%d, %d) size (%d, %d), border_offset: (%f, %f)",
               (int)cb_x, (int)cb_y, (int)cb_width, (int)cb_height, border_offset_x, border_offset_y);
 
+    // re-resolve percentage position values against the actual containing block
+    // during CSS resolution, percentages were resolved against the wrong reference (parent at resolution time)
+    // for absolute positioned elements, percentages are relative to the containing block's padding box
+    if (block->position->has_left && !isnan(block->position->left_percent)) {
+        block->position->left = block->position->left_percent * cb_width / 100.0f;
+        log_debug("[ABS POS] re-resolved left: %.1f%% of %.1f = %.1f", block->position->left_percent, cb_width, block->position->left);
+    }
+    if (block->position->has_right && !isnan(block->position->right_percent)) {
+        block->position->right = block->position->right_percent * cb_width / 100.0f;
+        log_debug("[ABS POS] re-resolved right: %.1f%% of %.1f = %.1f", block->position->right_percent, cb_width, block->position->right);
+    }
+    if (block->position->has_top && !isnan(block->position->top_percent)) {
+        block->position->top = block->position->top_percent * cb_height / 100.0f;
+        log_debug("[ABS POS] re-resolved top: %.1f%% of %.1f = %.1f", block->position->top_percent, cb_height, block->position->top);
+    }
+    if (block->position->has_bottom && !isnan(block->position->bottom_percent)) {
+        block->position->bottom = block->position->bottom_percent * cb_height / 100.0f;
+        log_debug("[ABS POS] re-resolved bottom: %.1f%% of %.1f = %.1f", block->position->bottom_percent, cb_height, block->position->bottom);
+    }
+
+    // re-resolve percentage width/height against the actual containing block
+    if (block->blk && !isnan(block->blk->given_width_percent)) {
+        lycon->block.given_width = block->blk->given_width_percent * cb_width / 100.0f;
+        log_debug("[ABS POS] re-resolved width: %.1f%% of %.1f = %.1f", block->blk->given_width_percent, cb_width, lycon->block.given_width);
+    }
+    if (block->blk && !isnan(block->blk->given_height_percent)) {
+        lycon->block.given_height = block->blk->given_height_percent * cb_height / 100.0f;
+        log_debug("[ABS POS] re-resolved height: %.1f%% of %.1f = %.1f", block->blk->given_height_percent, cb_height, lycon->block.given_height);
+    }
+
     float content_width, content_height;
     // calculate horizontal position
     log_debug("given_width=%f, given_height=%f, width_type=%d", lycon->block.given_width, lycon->block.given_height,
@@ -377,7 +407,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             float h = img->height * lycon->ui_context->pixel_ratio;
             log_debug("[ABS IMG] image intrinsic dims: %.1f x %.1f, given: %.1f x %.1f",
                       w, h, lycon->block.given_width, lycon->block.given_height);
-            
+
             // Adjust dimensions based on CSS constraints
             if (lycon->block.given_width < 0 && lycon->block.given_height < 0) {
                 // Neither width nor height specified - use intrinsic dimensions
@@ -398,13 +428,13 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 lycon->block.given_width = lycon->block.given_height * w / h;
             }
             // else both are specified, use them as-is
-            
+
             // Update block dimensions
             block->width = lycon->block.given_width;
             block->height = lycon->block.given_height;
             lycon->block.content_width = lycon->block.given_width;
             lycon->block.content_height = lycon->block.given_height;
-            
+
             if (img->format == IMAGE_FORMAT_SVG) {
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
@@ -422,10 +452,10 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // use the "static position" - where the element would be in normal flow
     // The static position is relative to the parent element's content area, but we need
     // to express it relative to the containing block's padding box.
-    
+
     // Calculate offset from containing block to parent element
     // Walk from parent up to containing block, accumulating positions
-    // Note: pa_line->left and pa_block->advance_y are already relative to the parent's 
+    // Note: pa_line->left and pa_block->advance_y are already relative to the parent's
     // content area (they include padding/border offsets), so we only need to add
     // the parent's position relative to the containing block.
     float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
@@ -549,14 +579,14 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     log_debug("block position: x=%f, y=%f, width=%f, height=%f, advance_y=%f, max_width=%f, given_height=%f, has_top=%d, has_bottom=%d",
         block->x, block->y, block->width, block->height, lycon->block.advance_y, lycon->block.max_width,
         lycon->block.given_height, block->position->has_top, block->position->has_bottom);
-    
+
     // CRITICAL: Check if this is a flex/grid container that already calculated its dimensions
     bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
     bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);
     // Only grid containers explicitly calculate width post-layout (in layout_grid_multipass.cpp)
     // Flex containers handle shrink-to-fit within their algorithm
     bool has_grid_calculated_width = is_grid_container && block->width > 0;
-    
+
     // Width is auto-sized when no explicit width AND neither left+right constraints
     if (!(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
         // Don't override grid calculated width with flow-based auto-sizing
@@ -637,10 +667,10 @@ bool element_has_float(ViewBlock* block) {
 
 /**
  * Apply float layout to an element
- * 
+ *
  * CSS 2.2 Section 9.5.1: Float Positioning Rules
  * Rule 1: Left float's left outer edge may not be to the left of the containing block's left edge
- * Rule 2: Right float's right outer edge may not be to the right of the containing block's right edge  
+ * Rule 2: Right float's right outer edge may not be to the right of the containing block's right edge
  * Rule 3: Right float's right outer edge may not be to the right of any preceding right float's left outer edge
  * Rule 4: Float's outer top may not be higher than the top of its containing block
  * Rule 5: Float's outer top may not be higher than the outer top of any preceding float
@@ -736,23 +766,23 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     // Start at current Y and move down until we find space
     float final_y_bfc = current_y_bfc;
     int max_iterations = 100;  // Prevent infinite loops
-    
+
     // CSS 2.1 §9.5.1: Float's margin box must not exceed the containing block's content edge
     // Calculate the containing block's right edge in BFC coordinates
     float containing_block_right_bfc = parent_x_in_bfc + content_offset_x + parent_content_width;
     log_debug("[FLOAT_LAYOUT] Containing block right edge in BFC coords: %.1f", containing_block_right_bfc);
-    
+
     while (max_iterations-- > 0) {
         // Query available space at this Y position
         FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
-        
+
         // Constrain space.right by the containing block's right edge
         float effective_right = min(space.right, containing_block_right_bfc);
         float available_width = effective_right - space.left;
-        
+
         log_debug("[FLOAT_LAYOUT] Checking Y=%.1f: space=(%.1f, %.1f), effective_right=%.1f, available=%.1f, needed=%.1f",
                   final_y_bfc, space.left, space.right, effective_right, available_width, float_total_width);
-        
+
         // Check if float fits at this Y position
         if (available_width >= float_total_width) {
             // Float fits here - determine X position
@@ -782,35 +812,35 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             }
             break;  // Found a valid position
         }
-        
+
         // Float doesn't fit - need to shift down (CSS 2.2 §9.5.1 Rule 7)
         // Find the next float boundary to try
         float next_y = FLT_MAX;
-        
+
         // Check left floats for next boundary
         for (FloatBox* fb = bfc->left_floats; fb; fb = fb->next) {
             if (fb->margin_box_bottom > final_y_bfc && fb->margin_box_bottom < next_y) {
                 next_y = fb->margin_box_bottom;
             }
         }
-        
+
         // Check right floats for next boundary
         for (FloatBox* fb = bfc->right_floats; fb; fb = fb->next) {
             if (fb->margin_box_bottom > final_y_bfc && fb->margin_box_bottom < next_y) {
                 next_y = fb->margin_box_bottom;
             }
         }
-        
+
         if (next_y == FLT_MAX || next_y <= final_y_bfc) {
             // No more floats below - position at current Y anyway
             // (this shouldn't happen if there's enough container width)
             log_debug("[FLOAT_LAYOUT] No more float boundaries, positioning at Y=%.1f", final_y_bfc);
-            
+
             // Position float at the edge even if it doesn't fit perfectly
             if (block->position->float_prop == CSS_VALUE_LEFT) {
                 FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
-                float new_x = space.has_left_float ? 
-                    (space.left - parent_x_in_bfc + margin_left) : 
+                float new_x = space.has_left_float ?
+                    (space.left - parent_x_in_bfc + margin_left) :
                     (content_offset_x + margin_left);
                 block->x = new_x;
             } else {
@@ -822,16 +852,16 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             }
             break;
         }
-        
+
         log_debug("[FLOAT_LAYOUT] Float doesn't fit, shifting from Y=%.1f to Y=%.1f",
                   final_y_bfc, next_y);
         final_y_bfc = next_y;
     }
-    
+
     // Convert final Y position back to parent-relative coordinates and apply
     float final_y_local = final_y_bfc - parent_y_in_bfc;
     float new_y = final_y_local + margin_top;
-    
+
     if (new_y != block->y) {
         log_debug("[FLOAT_LAYOUT] Float Y shifted: old=%.1f, new=%.1f (delta=%.1f)",
                   block->y, new_y, new_y - block->y);
