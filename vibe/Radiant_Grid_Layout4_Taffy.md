@@ -20,6 +20,7 @@ This proposal documents learnings from analyzing Taffy (a Rust CSS layout librar
 | Phase 1c | Grid Shrink-to-Fit | ✅ **COMPLETE** | Absolutely positioned grids shrink-to-fit content |
 | Phase 1d | Grid-Specific Taffy Enhancements | ✅ **COMPLETE** | ItemBatcher, space distribution fix, 0fr handling, alignment/baseline helpers |
 | Phase 2 | Unified Alignment | ✅ **COMPLETE** | `layout_alignment.hpp/cpp` - unified alignment for flex/grid |
+| Phase 4.2 | Unified Intrinsic Sizing API | ✅ **COMPLETE** | `measure_intrinsic_sizes()` unified entry point |
 | Phase 3 | Run Mode Integration | ⏳ Planned | |
 | Phase 4 | Layout Cache Integration | ⏳ Planned | |
 | Phase 5-6 | FlexGridItem/Context Unification | ⏳ Planned | |
@@ -980,21 +981,42 @@ struct LayoutContext {
 };
 ```
 
-### 4.2 Intrinsic Sizing API
+### 4.2 Intrinsic Sizing API ✅ **COMPLETE**
+
+**Implemented unified API in `intrinsic_sizing.hpp/cpp`:**
 
 ```cpp
-// Current scattered API
-TextIntrinsicWidths measure_text_intrinsic_widths(...);
-IntrinsicSize compute_element_intrinsic_width(...);
-IntrinsicSize compute_element_intrinsic_height(...);
+// IntrinsicSizesBidirectional - Complete intrinsic sizes for both axes
+struct IntrinsicSizesBidirectional {
+    float min_content_width;   // Width of longest unbreakable segment
+    float max_content_width;   // Width without any wrapping
+    float min_content_height;  // Height at given width constraint
+    float max_content_height;  // Height at given width constraint
+};
 
-// Proposed unified API
-IntrinsicSizes measure_intrinsic_sizes(
+// Unified entry point - measures both width and height in a single call
+IntrinsicSizesBidirectional measure_intrinsic_sizes(
     LayoutContext* lycon,
     ViewBlock* element,
-    AvailableSize available_space
+    AvailableSpace available_space  // 2D constraints
 );
+
+// Helper functions for axis extraction
+IntrinsicSizes intrinsic_sizes_width(IntrinsicSizesBidirectional sizes);
+IntrinsicSizes intrinsic_sizes_height(IntrinsicSizesBidirectional sizes);
+IntrinsicSizes intrinsic_sizes_for_axis(IntrinsicSizesBidirectional sizes, bool is_row_axis);
+
+// Table-specific convenience wrapper
+struct CellIntrinsicWidths { float min_width; float max_width; };
+CellIntrinsicWidths measure_table_cell_intrinsic_widths(LayoutContext* lycon, ViewBlock* cell);
 ```
+
+**Integration:**
+- Grid: `calculate_grid_item_intrinsic_sizes()` now uses `measure_intrinsic_sizes()` internally
+- Flex: Uses `measure_element_intrinsic_widths()` which remains compatible
+- Table: Uses `measure_text_intrinsic_widths()`, added `measure_table_cell_intrinsic_widths()` wrapper
+
+**Test Status:** 1665/1665 baseline tests passing (100%)
 
 ### 4.3 Cache API
 
