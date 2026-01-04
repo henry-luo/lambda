@@ -821,6 +821,15 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             log_debug("gs operator: graphics state name = %s", strings[0]->chars);
         }
     }
+    // XObject operators
+    else if (strcmp(op_name, "Do") == 0) {
+        op->type = PDF_OP_Do;
+        // The Do operator takes a name operand - the XObject name (e.g., "/Im1", "/Fm1")
+        if (str_count >= 1 && strings[0]) {
+            op->operands.show_text.text = strings[0];  // Reuse show_text.text for XObject name
+            log_debug("Do operator: XObject name = %s", strings[0]->chars);
+        }
+    }
 
     // Debug: log operator parsing for troubleshooting
     if (op->type == PDF_OP_UNKNOWN && strlen(op_name) > 0) {
