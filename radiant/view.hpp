@@ -596,6 +596,7 @@ typedef struct VectorPathProp {
 typedef struct PositionProp {
     CssEnum position;     // static, relative, absolute, fixed, sticky
     float top, right, bottom, left;  // offset values in pixels
+    float top_percent, right_percent, bottom_percent, left_percent;  // raw percentage if percentage value (NaN if not percentage)
     int z_index;            // stacking order
     bool has_top, has_right, has_bottom, has_left;  // which offsets are set
     CssEnum clear;        // clear property for floats
