@@ -35,6 +35,7 @@
         "lib/mime-detect.c",
         "lib/mime-types.c",
         "lib/font_config.c",
+        "lib/base64.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
@@ -93,6 +94,7 @@
         "radiant/grid_positioning.cpp",
         "radiant/grid_advanced.cpp",
         "radiant/intrinsic_sizing.cpp",
+        "radiant/layout_alignment.cpp",
         "radiant/symbol_resolver.cpp",
         "radiant/layout_counters.cpp",
         "radiant/resolve_htm_style.cpp",
@@ -225,6 +227,21 @@
             "include": "/opt/homebrew/opt/freetype/include/freetype2",
             "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
             "link": "static"
+        },
+        {
+            "name": "woff2dec",
+            "description": "WOFF2 font decompression library",
+            "include": "/opt/homebrew/include/woff2",
+            "lib": "-lwoff2dec",
+            "libpath": "/opt/homebrew/lib",
+            "link": "dynamic"
+        },
+        {
+            "name": "woff2common",
+            "description": "WOFF2 common library",
+            "lib": "-lwoff2common",
+            "libpath": "/opt/homebrew/lib",
+            "link": "dynamic"
         },
         {
             "name": "ThorVG",

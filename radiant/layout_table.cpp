@@ -2269,23 +2269,23 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     // If floated, treat as a regular block element and skip table-specific handling
     if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
         log_debug("[TABLE] Floated element %s inside table - treating as block, not table internal", node->node_name());
-        
+
         // CSS 2.1 §9.7: Floated elements become block-level
         // Layout this element as a float, not as a table internal element
         DisplayValue float_display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
-        
+
         // Mark as pre-laid to prevent double processing
         elem->float_prelaid = true;
-        
+
         // Save and restore view context for the float
         View* saved_view = lycon->view;
-        
+
         // Layout the float as a block
         layout_block(lycon, node, float_display);
-        
+
         // Restore view context
         lycon->view = saved_view;
-        
+
         return;
     }
 
@@ -3284,6 +3284,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int explicit_table_width = 0;
     int table_content_width = 0; // Width available for cells
 
+    // Check if we're in intrinsic sizing mode (propagated via available_space)
+    bool is_intrinsic_sizing = lycon->available_space.is_intrinsic_sizing();
+    if (is_intrinsic_sizing) {
+        log_debug("Table '%s': in intrinsic sizing mode (width=%s)",
+            table->node_name(),
+            lycon->available_space.width.is_min_content() ? "min-content" : "max-content");
+    }
+
     // First check resolved style (from HTML width attribute or CSS)
     // The given_width is already resolved to absolute pixels during style resolution
     if (table->blk && table->blk->given_width > 0) {
@@ -3304,7 +3312,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     double percentage = width_decl->value->data.percentage.value;
                     // Calculate percentage relative to container width
-                    int container_width = lycon->block.content_width;
+                    // Use AvailableSpace if definite, otherwise fall back to BlockContext
+                    float container_width_f = lycon->available_space.width.is_definite()
+                        ? lycon->available_space.width.value
+                        : lycon->block.content_width;
+                    int container_width = (int)container_width_f;
                     if (container_width <= 0) {
                         container_width = lycon->line.right - lycon->line.left;
                     }
@@ -3515,7 +3527,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Handle percentage width
                     if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                         double percentage = width_decl->value->data.percentage.value;
-                        int container_width = lycon->block.content_width;
+                        // Use AvailableSpace if definite, otherwise fall back to BlockContext
+                        float container_width_f = lycon->available_space.width.is_definite()
+                            ? lycon->available_space.width.value
+                            : lycon->block.content_width;
+                        int container_width = (int)container_width_f;
                         if (container_width <= 0) {
                             container_width = lycon->line.right - lycon->line.left;
                         }
@@ -4921,7 +4937,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
                     // Track max extent within group for updating group height
                     float group_max_y = 0;
-                    
+
                     // Update rows within group
                     for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
                         if (row->view_type == RDT_VIEW_TABLE_ROW) {
@@ -4953,7 +4969,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             }
                         }
                     }
-                    
+
                     // Update group height to encompass all rows after height distribution
                     if (group_max_y > 0) {
                         float old_group_height = child->height;

@@ -3,6 +3,8 @@
 #pragma once
 #include "view.hpp"
 #include "available_space.hpp"
+#include "layout_mode.hpp"
+#include "layout_cache.hpp"
 #include "layout_counters.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -211,13 +213,57 @@ typedef struct LayoutContext {
     // - Normal layout (definite width/height)
     // - Intrinsic sizing (min-content/max-content measurement)
     AvailableSpace available_space;
-    // Measurement mode flag - when true, layout is for measuring intrinsic sizes
-    // and should not create permanent view structures or modify the main layout tree
+
+    // Run mode for layout optimization (Taffy-inspired)
+    // - ComputeSize: Only compute dimensions, skip positioning (for measurement)
+    // - PerformLayout: Full layout with final positioning
+    // - PerformHiddenLayout: Minimal layout for display:none
+    radiant::RunMode run_mode;
+
+    // Sizing mode for intrinsic size computation
+    // - InherentSize: Use element's own CSS size properties
+    // - ContentSize: Use content-based size (ignore CSS width/height)
+    radiant::SizingMode sizing_mode;
+
+    // Legacy measurement mode flag - kept for backward compatibility
+    // Prefer using run_mode == RunMode::ComputeSize instead
     bool is_measuring;
 
     // Counter tracking for CSS counters (counter-reset, counter-increment, counter(), counters())
     CounterContext* counter_context;
 } LayoutContext;
+
+// ============================================================================
+// LayoutContext Run Mode Helpers
+// ============================================================================
+
+/**
+ * Check if layout is in measurement mode (only computing sizes)
+ */
+inline bool layout_context_is_measuring(LayoutContext* lycon) {
+    return lycon->run_mode == radiant::RunMode::ComputeSize || lycon->is_measuring;
+}
+
+/**
+ * Check if layout should perform full positioning
+ */
+inline bool layout_context_should_position(LayoutContext* lycon) {
+    return lycon->run_mode == radiant::RunMode::PerformLayout && !lycon->is_measuring;
+}
+
+/**
+ * Check if layout is for a hidden element (display:none)
+ */
+inline bool layout_context_is_hidden(LayoutContext* lycon) {
+    return lycon->run_mode == radiant::RunMode::PerformHiddenLayout;
+}
+
+/**
+ * Check if layout should use content size (ignore CSS width/height)
+ */
+inline bool layout_context_use_content_size(LayoutContext* lycon) {
+    return lycon->sizing_mode == radiant::SizingMode::ContentSize;
+}
 
 // ============================================================================
 // BlockContext API - Unified Block Formatting Context Functions

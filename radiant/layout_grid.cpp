@@ -56,8 +56,16 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Initialize dynamic arrays
     grid->allocated_items = 8;
     grid->grid_items = (ViewBlock**)calloc(grid->allocated_items, sizeof(ViewBlock*));
-    grid->allocated_areas = 4;
-    grid->grid_areas = (GridArea*)calloc(grid->allocated_areas, sizeof(GridArea));
+
+    // Only allocate new areas array if not already copied from embed->grid
+    if (!grid->grid_areas || grid->area_count == 0) {
+        grid->allocated_areas = 4;
+        grid->grid_areas = (GridArea*)calloc(grid->allocated_areas, sizeof(GridArea));
+        grid->area_count = 0;  // Reset if we allocated new
+    }
+    // If grid_areas was copied from embed->grid, keep it as-is
+    log_debug("Grid areas after init: area_count=%d, grid_areas=%p", grid->area_count, (void*)grid->grid_areas);
+
     grid->allocated_line_names = 8;
     grid->line_names = (GridLineName*)calloc(grid->allocated_line_names, sizeof(GridLineName));
 
@@ -180,6 +188,21 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("GRID START - container: %dx%d at (%d,%d)",
         container->width, container->height, container->x, container->y);
 
+    // Check if container is shrink-to-fit (absolutely positioned with no explicit width)
+    // This affects how we determine available width for track sizing
+    bool is_shrink_to_fit_width = false;
+    if (container->position &&
+        (container->position->position == CSS_VALUE_ABSOLUTE ||
+         container->position->position == CSS_VALUE_FIXED)) {
+        bool has_explicit_width = container->blk && container->blk->given_width > 0;
+        bool has_left_right = container->position->has_left && container->position->has_right;
+        if (!has_explicit_width && !has_left_right) {
+            is_shrink_to_fit_width = true;
+        }
+    }
+    grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
+    log_debug("GRID: is_shrink_to_fit_width=%d", is_shrink_to_fit_width);
+
     // Set container dimensions
     grid_layout->container_width = container->width;
     grid_layout->container_height = container->height;
@@ -249,9 +272,29 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("DEBUG: Phase 5 - Updating grid size after placement");
     determine_grid_size(grid_layout);
 
-    // Phase 6: Resolve track sizes
+    // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     log_debug("DEBUG: Phase 6 - Resolving track sizes");
-    resolve_track_sizes(grid_layout, container);
+    resolve_track_sizes_enhanced(grid_layout, container);
+
+    // For shrink-to-fit containers, update container width based on resolved track sizes
+    if (grid_layout->is_shrink_to_fit_width && grid_layout->computed_column_count > 0) {
+        float total_column_width = grid_layout->content_width;
+
+        // Add padding and border back to get container width
+        float container_width = total_column_width;
+        if (container->bound) {
+            container_width += container->bound->padding.left + container->bound->padding.right;
+            if (container->bound->border) {
+                container_width += container->bound->border->width.left +
+                                   container->bound->border->width.right;
+            }
+        }
+
+        log_debug("GRID shrink-to-fit: updating container width from %d to %.1f",
+                  container->width, container_width);
+        container->width = (int)container_width;
+        grid_layout->container_width = container->width;
+    }
 
     // Phase 6: Position grid items
     log_debug("DEBUG: Phase 6 - Positioning grid items");
@@ -404,12 +447,17 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
 void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int item_count) {
     if (!grid_layout || !items || item_count == 0) return;
 
-    log_debug("Placing %d grid items\n", item_count);
+    log_debug("Placing %d grid items, area_count=%d\n", item_count, grid_layout->area_count);
 
     // Phase 1: Place items with explicit positions
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
         if (!item->gi) continue;  // Skip items without grid item properties
+
+        // Debug: log grid_area status
+        log_debug("Item %d: grid_area='%s', row_start=%d, col_start=%d",
+                  i, item->gi->grid_area ? item->gi->grid_area : "NULL",
+                  item->gi->grid_row_start, item->gi->grid_column_start);
 
         // Check if item has explicit grid positioning
         // Note: Negative values indicate span (e.g., -2 means "span 2")
@@ -420,12 +468,17 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
 
             if (item->gi->grid_area) {
                 // Resolve named grid area
+                log_debug("Looking up grid_area '%s' in %d areas", item->gi->grid_area, grid_layout->area_count);
                 for (int j = 0; j < grid_layout->area_count; j++) {
+                    log_debug("  Checking area[%d].name='%s'", j, grid_layout->grid_areas[j].name);
                     if (strcmp(grid_layout->grid_areas[j].name, item->gi->grid_area) == 0) {
                         item->gi->computed_grid_row_start = grid_layout->grid_areas[j].row_start;
                         item->gi->computed_grid_row_end = grid_layout->grid_areas[j].row_end;
                         item->gi->computed_grid_column_start = grid_layout->grid_areas[j].column_start;
                         item->gi->computed_grid_column_end = grid_layout->grid_areas[j].column_end;
+                        log_debug("  MATCH! Setting computed positions: rows %d-%d, cols %d-%d",
+                                  item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+                                  item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
                         break;
                     }
                 }
