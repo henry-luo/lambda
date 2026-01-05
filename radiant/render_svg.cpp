@@ -36,6 +36,7 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* view_block);
 void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span);
 void render_children_svg(SvgRenderContext* ctx, View* view);
 void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
+void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block);
 void calculate_content_bounds(View* view, int* max_x, int* max_y);
 
 // Helper functions for SVG output
@@ -321,6 +322,111 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     }
 }
 
+// Render multi-column rules (vertical lines between columns)
+void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
+    if (!block->multicol) return;
+
+    MultiColumnProp* mc = block->multicol;
+
+    // Only render if we have rules and multiple columns
+    if (mc->computed_column_count <= 1 || mc->rule_width <= 0 ||
+        mc->rule_style == CSS_VALUE_NONE) {
+        return;
+    }
+
+    float column_width = mc->computed_column_width;
+    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+
+    // Calculate block position
+    float block_x = ctx->block.x + block->x;
+    float block_y = ctx->block.y + block->y;
+
+    // Adjust for padding
+    if (block->bound) {
+        block_x += block->bound->padding.left;
+        block_y += block->bound->padding.top;
+    }
+
+    // Rule height is the content area height
+    float rule_height = block->height;
+    if (block->bound) {
+        rule_height -= block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            rule_height -= block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+    }
+
+    // Ensure minimum rule height - compute from children if needed
+    if (rule_height <= 0) {
+        View* child = (View*)block->first_child;
+        float max_bottom = 0;
+        while (child) {
+            if (child->is_element()) {
+                ViewBlock* child_block = (ViewBlock*)child;
+                float child_bottom = child_block->y + child_block->height;
+                if (child_bottom > max_bottom) max_bottom = child_bottom;
+            }
+            child = child->next();
+        }
+        rule_height = max_bottom;
+    }
+
+    if (rule_height <= 0) return;
+
+    // Convert color to string
+    char rule_color_str[32];
+    svg_color_to_string(mc->rule_color, rule_color_str);
+
+    log_debug("[MULTICOL SVG] Rendering %d column rules, width=%.1f, style=%d, height=%.1f",
+              mc->computed_column_count - 1, mc->rule_width, mc->rule_style, rule_height);
+
+    // Draw rule between each pair of columns
+    for (int i = 0; i < mc->computed_column_count - 1; i++) {
+        float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f;
+
+        svg_indent(ctx);
+
+        // Different stroke patterns for different styles
+        if (mc->rule_style == CSS_VALUE_DOTTED) {
+            strbuf_append_format(ctx->svg_content,
+                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
+                "stroke=\"%s\" stroke-width=\"%.2f\" stroke-dasharray=\"%.2f,%.2f\" />\n",
+                rule_x, block_y, rule_x, block_y + rule_height,
+                rule_color_str, mc->rule_width, mc->rule_width, mc->rule_width * 2);
+        } else if (mc->rule_style == CSS_VALUE_DASHED) {
+            strbuf_append_format(ctx->svg_content,
+                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
+                "stroke=\"%s\" stroke-width=\"%.2f\" stroke-dasharray=\"%.2f,%.2f\" />\n",
+                rule_x, block_y, rule_x, block_y + rule_height,
+                rule_color_str, mc->rule_width, mc->rule_width * 3, mc->rule_width * 2);
+        } else if (mc->rule_style == CSS_VALUE_DOUBLE) {
+            // Double: two lines
+            float thin_width = mc->rule_width / 3.0f;
+            float offset = mc->rule_width / 2.0f;
+            strbuf_append_format(ctx->svg_content,
+                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
+                "stroke=\"%s\" stroke-width=\"%.2f\" />\n",
+                rule_x - offset, block_y, rule_x - offset, block_y + rule_height,
+                rule_color_str, thin_width);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
+                "stroke=\"%s\" stroke-width=\"%.2f\" />\n",
+                rule_x + offset, block_y, rule_x + offset, block_y + rule_height,
+                rule_color_str, thin_width);
+        } else {
+            // Solid (default)
+            strbuf_append_format(ctx->svg_content,
+                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
+                "stroke=\"%s\" stroke-width=\"%.2f\" />\n",
+                rule_x, block_y, rule_x, block_y + rule_height,
+                rule_color_str, mc->rule_width);
+        }
+
+        log_debug("[MULTICOL SVG] Rule %d at x=%.1f, height=%.1f", i, rule_x, rule_height);
+    }
+}
+
 void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
     // Save parent context
     BlockBlot pa_block = ctx->block;
@@ -379,6 +485,11 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
+    }
+
+    // Render multi-column rules between columns
+    if (block->multicol && block->multicol->computed_column_count > 1) {
+        render_column_rules_svg(ctx, block);
     }
 
     // Restore context
