@@ -417,9 +417,71 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             int explicit_width = (int)resolve_length_value(lycon, CSS_PROPERTY_WIDTH,
                                                             width_decl->value);
             if (explicit_width > 0) {
+                // CSS width property sets content width by default (box-sizing: content-box)
+                // We need to add padding and border for the total intrinsic width
+                // Check box-sizing first
+                bool is_border_box = false;
+                ViewBlock* view_for_box = (ViewBlock*)element;
+                if (view_for_box->blk && view_for_box->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                    is_border_box = true;
+                } else {
+                    CssDeclaration* box_decl = style_tree_get_declaration(
+                        element->specified_style, CSS_PROPERTY_BOX_SIZING);
+                    if (box_decl && box_decl->value &&
+                        box_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                        box_decl->value->data.keyword == CSS_VALUE_BORDER_BOX) {
+                        is_border_box = true;
+                    }
+                }
+
+                if (!is_border_box) {
+                    // Add padding and border to content width
+                    float pad_left = 0, pad_right = 0, border_left = 0, border_right = 0;
+                    // Read padding from CSS
+                    CssDeclaration* pad_decl = style_tree_get_declaration(
+                        element->specified_style, CSS_PROPERTY_PADDING);
+                    if (pad_decl && pad_decl->value) {
+                        if (pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                            float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+                            pad_left = pad_right = pad;
+                        } else if (pad_decl->value->type == CSS_VALUE_TYPE_LIST) {
+                            int cnt = pad_decl->value->data.list.count;
+                            CssValue** vals = pad_decl->value->data.list.values;
+                            if (cnt == 1) {
+                                float p = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[0]);
+                                pad_left = pad_right = p;
+                            } else if (cnt >= 2) {
+                                float lr = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[1]);
+                                pad_left = pad_right = lr;
+                                if (cnt >= 4) {
+                                    pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[3]);
+                                }
+                            }
+                        }
+                    }
+                    // Read border from CSS
+                    CssDeclaration* border_decl = style_tree_get_declaration(
+                        element->specified_style, CSS_PROPERTY_BORDER);
+                    if (border_decl && border_decl->value) {
+                        // border shorthand: width style color
+                        if (border_decl->value->type == CSS_VALUE_TYPE_LIST &&
+                            border_decl->value->data.list.count >= 1) {
+                            CssValue* width_val = border_decl->value->data.list.values[0];
+                            if (width_val && width_val->type == CSS_VALUE_TYPE_LENGTH) {
+                                float bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, width_val);
+                                border_left = border_right = bw;
+                            }
+                        }
+                    }
+                    explicit_width += (int)(pad_left + pad_right + border_left + border_right);
+                    log_debug("  -> explicit width: %d (after adding padding=%.0f+%.0f, border=%.0f+%.0f)",
+                              explicit_width, pad_left, pad_right, border_left, border_right);
+                } else {
+                    log_debug("  -> explicit width: %d (border-box, no adjustment)", explicit_width);
+                }
+
                 sizes.min_content = explicit_width;
                 sizes.max_content = explicit_width;
-                log_debug("  -> explicit width: %d", explicit_width);
                 return sizes;
             }
         }
@@ -790,8 +852,94 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             inline_min_sum = max(inline_min_sum, child_sizes.min_content);
         } else {
             // For block-level children: take max of each
+            // Also include horizontal margins for proper shrink-to-fit calculation
+            // CSS 2.2 Section 10.3.5: floated/absolutely positioned elements use shrink-to-fit
+            // which includes the margin box of child floats
+            float child_width = child_sizes.max_content;
+            float margin_left = 0, margin_right = 0;
+            if (child->is_element()) {
+                DomElement* child_elem = child->as_element();
+                ViewBlock* child_view = (ViewBlock*)child_elem;
+                if (child_view->bound) {
+                    // Add margins to the child's width for proper shrink-to-fit
+                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO &&
+                        child_view->bound->margin.left >= 0) {
+                        margin_left = child_view->bound->margin.left;
+                        child_width += margin_left;
+                    }
+                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO &&
+                        child_view->bound->margin.right >= 0) {
+                        margin_right = child_view->bound->margin.right;
+                        child_width += margin_right;
+                    }
+                    log_debug("  block child %s: max=%.1f, margins=(%.1f,%.1f) from bound, total=%.1f",
+                              child_elem->node_name(), child_sizes.max_content, margin_left, margin_right, child_width);
+                } else if (child_elem->specified_style) {
+                    // Read margins directly from specified CSS style
+                    // This handles the case during intrinsic sizing when bound isn't allocated yet
+                    // First check for individual margin properties
+                    CssDeclaration* margin_left_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
+                    if (margin_left_decl && margin_left_decl->value &&
+                        margin_left_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                        margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT,
+                                                           margin_left_decl->value);
+                        child_width += margin_left;
+                    }
+                    CssDeclaration* margin_right_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
+                    if (margin_right_decl && margin_right_decl->value &&
+                        margin_right_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                        margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT,
+                                                            margin_right_decl->value);
+                        child_width += margin_right;
+                    }
+                    // If individual properties not found, check shorthand margin property
+                    if (margin_left == 0 && margin_right == 0) {
+                        CssDeclaration* margin_decl = style_tree_get_declaration(
+                            child_elem->specified_style, CSS_PROPERTY_MARGIN);
+                        if (margin_decl && margin_decl->value) {
+                            // Handle shorthand: margin: value or margin: v1 v2 v3 v4
+                            const CssValue* val = margin_decl->value;
+                            if (val->type == CSS_VALUE_TYPE_LENGTH) {
+                                // Single value applies to all sides
+                                float margin_val = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
+                                margin_left = margin_val;
+                                margin_right = margin_val;
+                                child_width += margin_left + margin_right;
+                            } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
+                                // Multi-value: 1=all, 2=TB LR, 3=T LR B, 4=T R B L
+                                int cnt = val->data.list.count;
+                                CssValue** vals = val->data.list.values;
+                                if (cnt == 1) {
+                                    float m = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[0]);
+                                    margin_left = margin_right = m;
+                                } else if (cnt == 2) {
+                                    // vals[1] = left/right
+                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                                    margin_left = margin_right = lr;
+                                } else if (cnt == 3) {
+                                    // vals[1] = left/right
+                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                                    margin_left = margin_right = lr;
+                                } else if (cnt >= 4) {
+                                    // vals[1] = right, vals[3] = left
+                                    margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                                    margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
+                                }
+                                child_width += margin_left + margin_right;
+                            }
+                        }
+                    }
+                    log_debug("  block child %s: max=%.1f, margins=(%.1f,%.1f) from CSS, total=%.1f",
+                              child_elem->node_name(), child_sizes.max_content, margin_left, margin_right, child_width);
+                } else {
+                    log_debug("  block child %s: max=%.1f, no bound or specified_style",
+                              child_elem->node_name(), child_sizes.max_content);
+                }
+            }
             sizes.min_content = max(sizes.min_content, child_sizes.min_content);
-            sizes.max_content = max(sizes.max_content, child_sizes.max_content);
+            sizes.max_content = max(sizes.max_content, child_width);
         }
     }
 
