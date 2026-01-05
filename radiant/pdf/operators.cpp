@@ -3,9 +3,11 @@
 
 #include "operators.h"
 #include "../../lib/log.h"
+#include "../../lambda/mark_builder.hpp"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <math.h>
 
 // Helper: skip whitespace and comments
 static void skip_whitespace(PDFStreamParser* parser) {
@@ -197,6 +199,56 @@ static String* parse_name(PDFStreamParser* parser) {
     name->chars[len] = '\0';
 
     return name;
+}
+
+// Helper: parse PDF array for TJ operator
+// Returns an Array* containing Items (strings and floats for kerning)
+static Array* parse_pdf_array(PDFStreamParser* parser) {
+    skip_whitespace(parser);
+
+    if (parser->stream >= parser->stream_end || *parser->stream != '[') {
+        return nullptr;
+    }
+
+    parser->stream++; // skip '['
+
+    // Use MarkBuilder to construct the Array
+    MarkBuilder builder(parser->input);
+    ArrayBuilder ab = builder.array();
+
+    while (parser->stream < parser->stream_end) {
+        skip_whitespace(parser);
+
+        if (parser->stream >= parser->stream_end) break;
+
+        char c = *parser->stream;
+
+        // End of array
+        if (c == ']') {
+            parser->stream++; // skip ']'
+            break;
+        }
+
+        // Parse element
+        if (c == '(' || c == '<') {
+            // String - use s2it macro to create proper tagged pointer Item
+            String* str = parse_string(parser);
+            if (str) {
+                Item str_item = {.item = s2it(str)};
+                ab.append(str_item);
+            }
+        } else if (isdigit(c) || c == '-' || c == '+' || c == '.') {
+            // Number (kerning adjustment)
+            double num = parse_number(parser);
+            ab.append(num);
+        } else {
+            // Skip unexpected characters
+            parser->stream++;
+        }
+    }
+
+    Item result = ab.final();
+    return result.array;
 }
 
 // Helper: parse operator name
@@ -488,8 +540,10 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
     // Store up to 16 operands (enough for most operators)
     double numbers[16];
     String* strings[16];
+    Array* arrays[4];  // For TJ operator - text array with positioning
     int num_count = 0;
     int str_count = 0;
+    int array_count = 0;
 
     while (parser->stream < parser->stream_end) {
         skip_whitespace(parser);
@@ -519,9 +573,11 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
                 strings[str_count++] = name;
             }
         } else if (c == '[') {
-            // Array - TODO: handle arrays properly
-            parser->stream++;
-            skip_whitespace(parser);
+            // Array - parse properly for TJ operator
+            Array* arr = parse_pdf_array(parser);
+            if (arr && array_count < 4) {
+                arrays[array_count++] = arr;
+            }
         } else if (c == ']') {
             parser->stream++;
             skip_whitespace(parser);
@@ -598,7 +654,10 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
         }
     } else if (strcmp(op_name, "TJ") == 0) {
         op->type = PDF_OP_TJ;
-        // Array parsing - simplified for now
+        // Use the parsed array containing strings and kerning values
+        if (array_count >= 1) {
+            op->operands.text_array.array = arrays[0];
+        }
     } else if (strcmp(op_name, "q") == 0) {
         op->type = PDF_OP_q;
         pdf_graphics_state_save(&parser->state);
