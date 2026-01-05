@@ -1,0 +1,1501 @@
+{
+  "file": "rotated.pdf",
+  "numPages": 1,
+  "generator": "pdf.js",
+  "exportedAt": "2026-01-05T01:34:47.085Z",
+  "pages": [
+    {
+      "pageNum": 1,
+      "viewport": {
+        "width": 612,
+        "height": 792,
+        "scale": 1
+      },
+      "operationCount": 140,
+      "operationSummary": {
+        "setLineWidth": 1,
+        "save": 18,
+        "constructPath": 4,
+        "eoClip": 4,
+        "endPath": 4,
+        "restore": 18,
+        "setFillRGBColor": 14,
+        "beginText": 14,
+        "endText": 14,
+        "moveText": 8,
+        "dependency": 1,
+        "setFont": 16,
+        "showText": 16,
+        "setTextMatrix": 8
+      },
+      "operations": [
+        {
+          "op": "setLineWidth",
+          "code": 2,
+          "args": [
+            0.1
+          ]
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "constructPath",
+          "code": 91,
+          "args": [
+            [
+              19
+            ],
+            [
+              0,
+              0,
+              612,
+              792
+            ],
+            [
+              0,
+              0,
+              612,
+              792
+            ]
+          ]
+        },
+        {
+          "op": "eoClip",
+          "code": 30,
+          "args": []
+        },
+        {
+          "op": "endPath",
+          "code": 28,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "constructPath",
+          "code": 91,
+          "args": [
+            [
+              19
+            ],
+            [
+              56.7,
+              721.1,
+              498.5,
+              14.1
+            ],
+            [
+              56.7,
+              721.1,
+              555.2,
+              735.2
+            ]
+          ]
+        },
+        {
+          "op": "eoClip",
+          "code": 30,
+          "args": []
+        },
+        {
+          "op": "endPath",
+          "code": 28,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            279,
+            724.8
+          ]
+        },
+        {
+          "op": "dependency",
+          "code": 1,
+          "args": [
+            "g_d0_f1"
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 1,
+                "fontChar": "",
+                "unicode": "R",
+                "accent": null,
+                "width": 722,
+                "isSpace": false,
+                "isInFont": true
+              },
+              2,
+              {
+                "originalCharCode": 2,
+                "fontChar": "",
+                "unicode": "o",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -2,
+              {
+                "originalCharCode": 4,
+                "fontChar": "",
+                "unicode": "a",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -2,
+              {
+                "originalCharCode": 5,
+                "fontChar": "",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 6,
+                "fontChar": "",
+                "unicode": "d",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 7,
+                "fontChar": "\u0007",
+                "unicode": " ",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": false
+              },
+              -2,
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -2,
+              {
+                "originalCharCode": 5,
+                "fontChar": "",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 8,
+                "fontChar": "",
+                "unicode": "x",
+                "accent": null,
+                "width": 500,
+                "isSpace": false,
+                "isInFont": true
+              },
+              10,
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "constructPath",
+          "code": 91,
+          "args": [
+            [
+              19
+            ],
+            [
+              56.7,
+              56.7,
+              498.5,
+              14.1
+            ],
+            [
+              56.7,
+              56.7,
+              555.2,
+              70.8
+            ]
+          ]
+        },
+        {
+          "op": "eoClip",
+          "code": 30,
+          "args": []
+        },
+        {
+          "op": "endPath",
+          "code": 28,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            290.1,
+            60.4
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 9,
+                "fontChar": "",
+                "unicode": "P",
+                "accent": null,
+                "width": 666,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 4,
+                "fontChar": "",
+                "unicode": "a",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 10,
+                "fontChar": "",
+                "unicode": "g",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              6,
+              {
+                "originalCharCode": 5,
+                "fontChar": "",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 7,
+                "fontChar": "\u0007",
+                "unicode": " ",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": false
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            316.3,
+            60.4
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 11,
+                "fontChar": "",
+                "unicode": "1",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            80.3,
+            677.4
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -2,
+              {
+                "originalCharCode": 5,
+                "fontChar": "",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              -3,
+              {
+                "originalCharCode": 12,
+                "fontChar": "",
+                "unicode": "s",
+                "accent": null,
+                "width": 500,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0,
+            -1,
+            1,
+            0,
+            85,
+            637.2
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0,
+            -1,
+            1,
+            0,
+            85,
+            634.4
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 5,
+                "fontChar": "",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0,
+            -1,
+            1,
+            0,
+            85,
+            628.8
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 12,
+                "fontChar": "",
+                "unicode": "s",
+                "accent": null,
+                "width": 500,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0,
+            -1,
+            1,
+            0,
+            85,
+            623.8
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            288.9,
+            656.9
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            287.5,
+            645.6
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 5,
+                "fontChar": "",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            287.8,
+            634.4
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 12,
+                "fontChar": "",
+                "unicode": "s",
+                "accent": null,
+                "width": 500,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            288.9,
+            623.2
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "constructPath",
+          "code": 91,
+          "args": [
+            [
+              19
+            ],
+            [
+              56.4,
+              620,
+              265.8,
+              53.2
+            ],
+            [
+              56.4,
+              620,
+              322.2,
+              673.2
+            ]
+          ]
+        },
+        {
+          "op": "eoClip",
+          "code": 30,
+          "args": []
+        },
+        {
+          "op": "endPath",
+          "code": 28,
+          "args": []
+        },
+        {
+          "op": "save",
+          "code": 10,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0.7071,
+            0.7071,
+            -0.7071,
+            0.7071,
+            195.7,
+            622.6
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0.7071,
+            0.7071,
+            -0.7071,
+            0.7071,
+            197.6,
+            624.5
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 5,
+                "fontChar": "",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0.7071,
+            0.7071,
+            -0.7071,
+            0.7071,
+            201.6,
+            628.5
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 12,
+                "fontChar": "",
+                "unicode": "s",
+                "accent": null,
+                "width": 500,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "setTextMatrix",
+          "code": 42,
+          "args": [
+            0.7071,
+            0.7071,
+            -0.7071,
+            0.7071,
+            205.1,
+            632
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            10
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 3,
+                "fontChar": "",
+                "unicode": "t",
+                "accent": null,
+                "width": 277,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        },
+        {
+          "op": "restore",
+          "code": 11,
+          "args": []
+        }
+      ],
+      "textItemCount": 10,
+      "textItems": [
+        {
+          "str": "Rotated text",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            279,
+            724.8
+          ],
+          "width": 53.97999999999983,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "Page",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            290.1,
+            60.4
+          ],
+          "width": 23.339999999999947,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "1",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            316.3,
+            60.4
+          ],
+          "width": 5.5600000000000005,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "test",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            80.3,
+            677.4
+          ],
+          "width": 16.15,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "test",
+          "transform": [
+            0,
+            -10,
+            10,
+            0,
+            85,
+            637.2
+          ],
+          "width": 16.170000000000165,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "t",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            288.9,
+            656.9
+          ],
+          "width": 2.77,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "e",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            287.5,
+            645.6
+          ],
+          "width": 5.5600000000000005,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "s",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            287.8,
+            634.4
+          ],
+          "width": 5,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "t",
+          "transform": [
+            10,
+            0,
+            0,
+            10,
+            288.9,
+            623.2
+          ],
+          "width": 2.77,
+          "height": 10,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "test",
+          "transform": [
+            7.071,
+            7.071,
+            -7.071,
+            7.071,
+            195.7,
+            622.6
+          ],
+          "width": 16.063580921879982,
+          "height": 9.999904099540155,
+          "fontName": "g_d0_f1"
+        }
+      ]
+    }
+  ]
+}

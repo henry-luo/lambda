@@ -127,6 +127,7 @@ test_output/
 test/venv/
 test/layout/data/css2.1
 test/wpt
+test/pdf/output
 
 analysis-results*/
 
