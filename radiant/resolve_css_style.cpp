@@ -5767,10 +5767,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             block->embed->grid->column_gap = gap_value;
 
             // Also apply to multi-column layout
-            if (block->multicol) {
-                block->multicol->column_gap = gap_value;
-                block->multicol->column_gap_is_normal = is_normal;
+            // Create multicol struct if it doesn't exist (column-gap may be processed before column-count)
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                block->multicol->column_count = 0;  // auto
+                block->multicol->column_width = 0;  // auto
+                block->multicol->column_gap = 16.0f;  // default 1em
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->rule_width = 0;
+                block->multicol->rule_style = CSS_VALUE_NONE;
+                block->multicol->rule_color.r = 0;
+                block->multicol->rule_color.g = 0;
+                block->multicol->rule_color.b = 0;
+                block->multicol->rule_color.a = 255;
+                block->multicol->span = COLUMN_SPAN_NONE;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
             }
+            block->multicol->column_gap = gap_value;
+            block->multicol->column_gap_is_normal = is_normal;
 
             log_debug("[CSS] column-gap applied: %.2f (stored in flex, grid, and multicol)", gap_value);
             break;
