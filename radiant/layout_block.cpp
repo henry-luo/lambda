@@ -33,6 +33,10 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
+// CSS 2.1 Section 17.2.1: Wrap orphaned table-internal children in anonymous table structures
+bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent);
+bool is_table_internal_display(CssEnum display);
+
 // Forward declarations for min/max constraint functions
 float adjust_min_max_height(ViewBlock* block, float height);
 
@@ -1093,6 +1097,17 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 block->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
                 block->display.inner == CSS_VALUE_TABLE_CELL ||
                 block->display.inner == CSS_VALUE_TABLE_CAPTION;
+
+            // CSS 2.1 §17.2.1: Before flow layout, check if any children are orphaned
+            // table-internal elements (table-cell, table-row, etc.) that need wrapping
+            // in anonymous table structures. This must happen before layout.
+            if (block->display.inner == CSS_VALUE_FLOW && !is_orphaned_table_internal) {
+                DomElement* block_elem = block->as_element();
+                if (block_elem && wrap_orphaned_table_children(lycon, block_elem)) {
+                    // Re-get first child after wrapping may have inserted anonymous elements
+                    child = block->first_child;
+                }
+            }
 
             if (block->display.inner == CSS_VALUE_FLOW || is_orphaned_table_internal) {
                 // Check for multi-column layout
