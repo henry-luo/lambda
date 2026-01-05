@@ -186,6 +186,12 @@ UiContext ui_context;
 DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height) {
     log_debug("Showing HTML document %s", doc_url);
     DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height);
+    if (!doc) return nullptr;
+
+    // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
+    doc->given_scale = 1.0f;
+    doc->scale = doc->given_scale * ui_context.pixel_ratio;
+
     ui_context.document = doc;
 
     // Process @font-face rules before layout
@@ -367,7 +373,7 @@ void render(GLFWwindow* window) {
         // This ensures vh/vw units and percentage heights use the correct window size
         ui_context.viewport_width = (int)(width / ui_context.pixel_ratio);
         ui_context.viewport_height = (int)(height / ui_context.pixel_ratio);
-        log_debug("render: updated viewport to %dx%d CSS pixels", 
+        log_debug("render: updated viewport to %dx%d CSS pixels",
                   (int)ui_context.viewport_width, (int)ui_context.viewport_height);
         // resize the surface
         ui_context_create_surface(&ui_context, width, height);
@@ -527,6 +533,15 @@ int view_doc_in_window(const char* doc_file) {
             ui_context_cleanup(&ui_context);
             return -1;
         }
+
+        // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
+        // For HTML documents, this updates the default; for PDF/SVG/Image, this was already set in loader
+        if (doc->html_root) {
+            // HTML documents need scale set for display (layout is in CSS pixels)
+            doc->given_scale = 1.0f;
+            doc->scale = doc->given_scale * ui_context.pixel_ratio;
+        }
+        // Note: PDF/SVG/Image documents already have scale set in their respective loaders
 
         ui_context.document = doc;
 

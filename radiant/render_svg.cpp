@@ -562,9 +562,13 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
 }
 
 // Main function to layout HTML and render to SVG
-int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width, int viewport_height) {
-    log_debug("render_html_to_svg called with html_file='%s', svg_file='%s', viewport=%dx%d",
-              html_file, svg_file, viewport_width, viewport_height);
+// scale: User-specified scale factor (default 1.0, use 2.0 for high-DPI output)
+int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width, int viewport_height, float scale) {
+    log_debug("render_html_to_svg called with html_file='%s', svg_file='%s', viewport=%dx%d, scale=%.2f",
+              html_file, svg_file, viewport_width, viewport_height, scale);
+
+    // Validate scale
+    if (scale <= 0) scale = 1.0f;
 
     // Remember if we need to auto-size (viewport was 0)
     bool auto_width = (viewport_width == 0);
@@ -608,14 +612,18 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
 
     ui_context.document = doc;
 
+    // Set document scale for rendering
+    doc->given_scale = scale;
+    doc->scale = scale;  // In headless mode, pixel_ratio is always 1.0
+
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
 
-    // Layout the document
+    // Layout the document (produces CSS logical pixels)
     log_debug("Performing layout...");
     layout_html_doc(&ui_context, doc, false);
 
-    // Calculate actual content dimensions
+    // Calculate actual content dimensions (in CSS logical pixels)
     int content_max_x = layout_width;
     int content_max_y = layout_height;
     if (doc->view_tree && doc->view_tree->root) {
@@ -644,11 +652,14 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
         }
     }
 
-    // Render to SVG
+    // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("Rendering view tree to SVG...");
+        // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
+        int svg_width = (int)(content_max_x * scale);
+        int svg_height = (int)(content_max_y * scale);
         char* svg_content = render_view_tree_to_svg(&ui_context, doc->view_tree->root,
-                                                   content_max_x, content_max_y);
+                                                   svg_width, svg_height);
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
                 printf("Successfully rendered HTML to SVG: %s\n", svg_file);
