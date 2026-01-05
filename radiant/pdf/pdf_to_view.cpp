@@ -4,6 +4,7 @@
 #include "pdf_to_view.hpp"
 #include "operators.h"
 #include "pages.hpp"
+#include "pdf_fonts.h"
 #include "../../lib/log.h"
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/mark_builder.hpp"
@@ -27,15 +28,17 @@ static inline String* input_create_string(Input* input, const char* str) {
 // Forward declarations
 static ViewBlock* create_document_view(Pool* pool);
 static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent, Item obj_item);
-static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources);
+static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources, Map* pdf_data);
 static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
 static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, String* text);
+static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, String* text);
 static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
 static void handle_do_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, const char* xobject_name);
 static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Map* image_dict, const char* name);
 static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Map* form_dict, const char* name);
 static ImageSurface* decode_raw_image_data(Map* image_dict, String* data, int width, int height, int bpc, Pool* pool);
 static ImageSurface* decode_image_data(const uint8_t* data, size_t length, ImageFormat format_hint);
+static void lookup_font_entry(PDFStreamParser* parser, const char* font_name);
 
 // Color space handling forward declarations
 static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_item, Map* resources);
@@ -300,7 +303,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, flo
             Map* stream_map = stream_item.map;
             log_debug("Processing content stream %d/%d for page %d",
                      i + 1, page_info->content_streams->length, page_index + 1);
-            process_pdf_stream(input, view_pool, root_view, stream_map, page_info->resources);
+            process_pdf_stream(input, view_pool, root_view, stream_map, page_info->resources, pdf_data);
         }
     }
 
@@ -808,7 +811,7 @@ static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Process stream objects
     if (strcmp(type_str->chars, "stream") == 0) {
-        process_pdf_stream(input, view_pool, parent, obj_map, nullptr);
+        process_pdf_stream(input, view_pool, parent, obj_map, nullptr, nullptr);
     }
     // Process indirect objects
     else if (strcmp(type_str->chars, "indirect_object") == 0) {
@@ -821,9 +824,78 @@ static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent,
 }
 
 /**
+ * Look up font entry from resources and cache it for ToUnicode decoding
+ * Called when Tf operator sets the current font
+ */
+static void lookup_font_entry(PDFStreamParser* parser, const char* font_name) {
+    if (!parser || !parser->font_cache || !parser->resources || !font_name) {
+        if (parser) parser->state.current_font_entry = nullptr;
+        return;
+    }
+    
+    // Check if already in cache
+    PDFFontEntry* entry = pdf_font_cache_get(parser->font_cache, font_name);
+    if (entry) {
+        parser->state.current_font_entry = entry;
+        log_debug("Using cached font entry for '%s' (tounicode=%d)", 
+                 font_name, entry->to_unicode_count);
+        return;
+    }
+    
+    Pool* pool = parser->input->pool;
+    
+    // Look up font dictionary from resources
+    MarkBuilder builder(parser->input);
+    String* font_key = builder.createString("Font");
+    Item fonts_item = {.item = map_get(parser->resources, {.item = s2it(font_key)}).item};
+    
+    // Resolve indirect reference if needed
+    if (fonts_item.item != ITEM_NULL && parser->pdf_data) {
+        fonts_item = pdf_resolve_reference(parser->pdf_data, fonts_item, pool);
+    }
+    
+    if (fonts_item.item == ITEM_NULL || get_type_id(fonts_item) != LMD_TYPE_MAP) {
+        log_debug("No Font dictionary in resources for '%s' (type=%d)", 
+                 font_name, fonts_item.item != ITEM_NULL ? get_type_id(fonts_item) : -1);
+        parser->state.current_font_entry = nullptr;
+        return;
+    }
+    
+    Map* fonts_dict = fonts_item.map;
+    log_debug("Found Font dictionary with font keys for lookup of '%s'", font_name);
+    
+    // Look up specific font (e.g., F1)
+    String* specific_font_key = builder.createString(font_name);
+    Item font_item = {.item = map_get(fonts_dict, {.item = s2it(specific_font_key)}).item};
+    
+    // Resolve indirect reference if needed
+    if (font_item.item != ITEM_NULL && parser->pdf_data) {
+        font_item = pdf_resolve_reference(parser->pdf_data, font_item, pool);
+    }
+    
+    if (font_item.item == ITEM_NULL || get_type_id(font_item) != LMD_TYPE_MAP) {
+        log_debug("Font '%s' not found in resources (type=%d)", 
+                 font_name, font_item.item != ITEM_NULL ? get_type_id(font_item) : -1);
+        parser->state.current_font_entry = nullptr;
+        return;
+    }
+    
+    log_debug("Found font '%s' dictionary, adding to cache", font_name);
+    
+    // Add to cache (this will parse ToUnicode CMap)
+    entry = pdf_font_cache_add(parser->font_cache, font_name, font_item.map, parser->input, parser->pdf_data);
+    parser->state.current_font_entry = entry;
+    
+    if (entry) {
+        log_info("Cached font '%s' with ToUnicode mapping (%d entries)", 
+                font_name, entry->to_unicode_count);
+    }
+}
+
+/**
  * Process a PDF content stream
  */
-static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources) {
+static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources, Map* pdf_data) {
     log_debug("Processing PDF stream");
 
     // Get stream data
@@ -1027,6 +1099,12 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Set page resources for ExtGState lookup
     parser->resources = resources;
+    
+    // Set pdf_data for resolving indirect references
+    parser->pdf_data = pdf_data;
+    
+    // Create font cache for ToUnicode decoding
+    parser->font_cache = pdf_font_cache_create(input->pool);
 
     // Process operators
     PDFOperator* op;
@@ -1077,6 +1155,8 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
                      op->operands.set_font.size);
             parser->state.font_name = op->operands.set_font.font_name;
             parser->state.font_size = op->operands.set_font.size;
+            // Look up font entry for ToUnicode decoding
+            lookup_font_entry(parser, op->operands.set_font.font_name->chars);
             break;
 
         case PDF_OP_Tm:
@@ -1978,6 +2058,29 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
                             PDFStreamParser* parser, String* text) {
     if (!text || text->len == 0) return;
 
+    // Decode text using ToUnicode CMap or font encoding if available
+    const char* display_text = text->chars;
+    int display_len = text->len;
+    char* decoded_text = nullptr;
+    
+    if (parser->state.current_font_entry && 
+        pdf_font_needs_decoding(parser->state.current_font_entry)) {
+        // Allocate buffer for decoded text (UTF-8 can be up to 4x the length)
+        decoded_text = (char*)pool_calloc(view_pool, text->len * 4 + 1);
+        if (decoded_text) {
+            int decoded_len = pdf_font_decode_text(
+                parser->state.current_font_entry,
+                text->chars, text->len,
+                decoded_text, text->len * 4 + 1);
+            if (decoded_len > 0) {
+                display_text = decoded_text;
+                display_len = decoded_len;
+                log_debug("Decoded text: '%s' -> '%s'", 
+                         text->chars, decoded_text);
+            }
+        }
+    }
+
     // Calculate position from text matrix
     double x = parser->state.tm[4];  // e component (x translation)
     double y = parser->state.tm[5];  // f component (y translation)
@@ -2022,9 +2125,9 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Set DomText fields directly on ViewText (since ViewText extends DomText)
     text_view->node_type = DOM_NODE_TEXT;
-    text_view->text = text->chars;
-    text_view->length = text->len;
-    text_view->native_string = text;  // Reference the Lambda String
+    text_view->text = display_text;  // Use decoded text
+    text_view->length = display_len;
+    text_view->native_string = decoded_text ? nullptr : text;  // Only reference original if not decoded
     text_view->content_type = DOM_TEXT_STRING;
 
     // Create TextRect for unified rendering with HTML text
@@ -2036,13 +2139,13 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
         rect->width = 0;   // Width will be calculated during rendering
         rect->height = (float)effective_font_size;
         rect->start_index = 0;
-        rect->length = text->len;
+        rect->length = display_len;  // Use decoded length
         rect->next = nullptr;
         text_view->rect = rect;
     }
 
     log_debug("Created text view at PDF(%.2f, %.2f) -> screen(%.2f, %.2f) font_size=%.2f: '%s'",
-             x, y, (float)x, (float)screen_y, effective_font_size, text->chars);
+             x, y, (float)x, (float)screen_y, effective_font_size, display_text);
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
@@ -2070,59 +2173,224 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
 }
 
 /**
+ * Create a ViewText node from pre-decoded text (already UTF-8)
+ * This is used when text has already been decoded by the caller (e.g., from TJ array combining)
+ */
+static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* parent,
+                                 PDFStreamParser* parser, String* text) {
+    if (!text || text->len == 0) return;
+
+    // Text is already decoded - use directly
+    const char* display_text = text->chars;
+    int display_len = text->len;
+
+    // Calculate position from text matrix
+    double x = parser->state.tm[4];  // e component (x translation)
+    double y = parser->state.tm[5];  // f component (y translation)
+
+    // Calculate effective font size from text matrix
+    double tm_scale = sqrt(parser->state.tm[0] * parser->state.tm[0] +
+                          parser->state.tm[1] * parser->state.tm[1]);
+    double effective_font_size = parser->state.font_size * tm_scale;
+    if (effective_font_size < 1.0) effective_font_size = 12.0;
+
+    // Convert PDF coordinates to screen coordinates
+    double screen_y;
+    if (parser->state.tm[3] < 0) {
+        screen_y = y;
+    } else {
+        screen_y = parent->height - y;
+    }
+
+    // Create ViewText
+    ViewText* text_view = (ViewText*)pool_calloc(view_pool, sizeof(ViewText));
+    if (!text_view) {
+        log_error("Failed to allocate text view");
+        return;
+    }
+
+    text_view->view_type = RDT_VIEW_TEXT;
+    text_view->x = 0;
+    text_view->y = 0;
+    text_view->width = 0;
+    text_view->height = (float)effective_font_size;
+
+    // Set DomText fields
+    text_view->node_type = DOM_NODE_TEXT;
+    text_view->text = display_text;
+    text_view->length = display_len;
+    text_view->native_string = nullptr;  // Text is pool-allocated
+    text_view->content_type = DOM_TEXT_STRING;
+
+    // Create TextRect
+    TextRect* rect = (TextRect*)pool_calloc(view_pool, sizeof(TextRect));
+    if (rect) {
+        rect->x = (float)x;
+        rect->y = (float)screen_y;
+        rect->width = 0;
+        rect->height = (float)effective_font_size;
+        rect->start_index = 0;
+        rect->length = display_len;
+        rect->next = nullptr;
+        text_view->rect = rect;
+    }
+
+    log_debug("Created text view at PDF(%.2f, %.2f) -> screen(%.2f, %.2f) font_size=%.2f: '%s'",
+             x, y, (float)x, (float)screen_y, effective_font_size, display_text);
+
+    // Create font property
+    if (parser->state.font_name) {
+        FontProp* font = create_font_from_pdf(view_pool,
+                                              parser->state.font_name->chars,
+                                              effective_font_size);
+        if (font) {
+            text_view->font = font;
+        }
+    }
+
+    // Apply text color
+    text_view->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
+    text_view->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
+    text_view->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
+    text_view->color.a = 255;
+
+    // Add to parent
+    append_child_view((View*)parent, (View*)text_view);
+}
+
+/**
  * Create ViewText nodes from TJ operator text array
  * TJ array format: [(string) num (string) num ...] where num is horizontal displacement in 1/1000 em
+ * 
+ * Strategy: Combine adjacent strings with small kerning adjustments.
+ * When a large spacing adjustment is encountered (word boundary), flush the current
+ * accumulated text as a view and start a new accumulation.
+ * 
+ * Threshold: -1000 (1 em) is typically used for word spacing in justified text.
+ * Adjustments smaller than this threshold are considered intra-word kerning.
  */
 static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent,
                                     PDFStreamParser* parser, Array* text_array) {
     if (!text_array || text_array->length == 0) return;
 
-    // TJ array contains alternating strings and numbers
-    // Strings are text to show, numbers are kerning/spacing adjustments
-    // Numbers are in thousandths of an em unit (1/1000 of font size)
-    // Positive numbers move LEFT (reduce spacing), negative move RIGHT (increase spacing)
-    
     // Calculate effective font size from text matrix for scaling
     double tm_scale = sqrt(parser->state.tm[0] * parser->state.tm[0] +
                           parser->state.tm[1] * parser->state.tm[1]);
     double effective_font_size = parser->state.font_size * tm_scale;
     if (effective_font_size < 1.0) effective_font_size = 12.0;
 
+    // Threshold for word boundary detection (in 1/1000 em)
+    // pdf.js seems to use a higher threshold, only breaking at very large gaps
+    // Typical justified text uses around -300 to -500 for word spacing
+    // Only break when gap is very large (e.g., column separation or manual spacing)
+    const double WORD_BOUNDARY_THRESHOLD = -600.0;  // Negative = rightward spacing
+
+    // Buffer for accumulating text
+    size_t buffer_capacity = 4096;
+    char* buffer = (char*)pool_calloc(view_pool, buffer_capacity);
+    if (!buffer) return;
+    size_t buffer_pos = 0;
+    
+    // Track starting position for the current text segment
+    double segment_start_x = parser->state.tm[4];
+    double segment_start_y = parser->state.tm[5];
+    bool has_content = false;
+
+    auto flush_buffer = [&]() {
+        if (buffer_pos > 0) {
+            // Trim trailing spaces
+            while (buffer_pos > 0 && (buffer[buffer_pos - 1] == ' ' || 
+                                       buffer[buffer_pos - 1] == '\t')) {
+                buffer_pos--;
+            }
+            
+            if (buffer_pos > 0) {
+                buffer[buffer_pos] = '\0';
+                String* str = create_string(view_pool, buffer);
+                if (str) {
+                    // Temporarily set position to segment start
+                    double saved_x = parser->state.tm[4];
+                    double saved_y = parser->state.tm[5];
+                    parser->state.tm[4] = segment_start_x;
+                    parser->state.tm[5] = segment_start_y;
+                    
+                    create_text_view_raw(input, view_pool, parent, parser, str);
+                    
+                    parser->state.tm[4] = saved_x;
+                    parser->state.tm[5] = saved_y;
+                }
+            }
+            buffer_pos = 0;
+            has_content = false;
+        }
+    };
+
     for (int i = 0; i < text_array->length; i++) {
         Item item = text_array->items[i];
         TypeId type = item.type_id();
 
-        // Check if it's a string (text to show)
         if (type == LMD_TYPE_STRING) {
             String* text = item.get_string();
             if (text && text->len > 0) {
-                create_text_view(input, view_pool, parent, parser, text);
+                // Start new segment if this is first content
+                if (!has_content) {
+                    segment_start_x = parser->state.tm[4];
+                    segment_start_y = parser->state.tm[5];
+                    has_content = true;
+                }
+                
+                // Decode and add to buffer
+                if (parser->state.current_font_entry && 
+                    pdf_font_needs_decoding(parser->state.current_font_entry)) {
+                    char* decode_buf = (char*)pool_calloc(view_pool, text->len * 4 + 1);
+                    if (decode_buf) {
+                        int decoded_len = pdf_font_decode_text(
+                            parser->state.current_font_entry,
+                            text->chars, text->len,
+                            decode_buf, text->len * 4 + 1);
+                        if (decoded_len > 0 && buffer_pos + decoded_len < buffer_capacity - 1) {
+                            memcpy(buffer + buffer_pos, decode_buf, decoded_len);
+                            buffer_pos += decoded_len;
+                        }
+                    }
+                } else {
+                    // No decoding needed
+                    if (buffer_pos + text->len < buffer_capacity - 1) {
+                        memcpy(buffer + buffer_pos, text->chars, text->len);
+                        buffer_pos += text->len;
+                    }
+                }
 
-                // Advance text position by approximate text width
-                // This is a rough estimate - proper implementation would use glyph widths from font
-                // Average character width is roughly 0.5-0.6 em for proportional fonts
+                // Advance text position
                 double text_width = text->len * effective_font_size * 0.5;
                 parser->state.tm[4] += text_width;
             }
         }
-        // Check if it's a number (kerning/spacing adjustment)
         else if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
-            // Adjustment is in 1/1000 of an em
-            // Positive values move LEFT (subtract from position)
-            // Negative values move RIGHT (add to position)
+            // Kerning adjustment in 1/1000 em
             double adjustment = 0.0;
             if (type == LMD_TYPE_INT) {
                 adjustment = (double)item.int_val;
             } else {
                 adjustment = item.get_double();
             }
-            // Convert from 1/1000 em to user space units and apply
-            // Positive = move left, so we subtract
+            
+            // Check if this is a word boundary
+            if (adjustment < WORD_BOUNDARY_THRESHOLD) {
+                // Flush current buffer and start new segment
+                flush_buffer();
+            }
+            
+            // Apply position adjustment
             double displacement = -adjustment / 1000.0 * effective_font_size;
             parser->state.tm[4] += displacement;
         }
     }
-    log_debug("Processed text array with %lld elements", text_array->length);
+    
+    // Flush remaining content
+    flush_buffer();
+    
+    log_debug("Processed TJ array with %lld elements", text_array->length);
 }
 
 /**
@@ -2372,7 +2640,7 @@ static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent
 
     // TODO: Apply form matrix and save/restore graphics state
     // For now, just process the form content stream recursively
-    process_pdf_stream(input, view_pool, parent, form_dict, form_resources);
+    process_pdf_stream(input, view_pool, parent, form_dict, form_resources, parser->pdf_data);
 }
 
 /**
