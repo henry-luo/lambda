@@ -149,6 +149,11 @@ const char* map_pdf_font_to_system(const char* pdf_font) {
     return "Arial";
 }
 
+// TODO: Implement font resolution from PDF resources
+// The resolve_font_from_resources function was disabled due to crashes
+// when looking up indirect object references. For now, we use hardcoded
+// font mappings which work for most PDFs.
+
 /**
  * Extract font weight from PDF font name
  *
@@ -178,6 +183,7 @@ CssEnum get_font_style_from_name(const char* pdf_font) {
     return CSS_VALUE_NORMAL;
 }
 
+
 /**
  * Create font property from PDF font descriptor
  *
@@ -193,25 +199,23 @@ FontProp* create_font_from_pdf(Pool* pool, const char* font_name, double font_si
         return nullptr;
     }
 
-    // Handle font references (F1, F2, F1.0, F2.0 etc.) - common pattern in PDFs
-    // Standard PDF Type1 fonts mapping (based on typical ReportLab output):
-    // F1 = Helvetica, F2 = Times-Roman, F3 = Courier, F4 = Helvetica-Bold
-    // TODO: Properly resolve font references from PDF Resources dictionary
+    // Resolve font reference from hardcoded mapping
     const char* resolved_font_name = font_name;
+    
+    // Check if this is a font reference (F1, F2, F1.0, F2.0 etc.)
     if (font_name && font_name[0] == 'F' && font_name[1] >= '1' && font_name[1] <= '9') {
-        // Check for "Fn" or "Fn.0" patterns
+        // Use hardcoded mapping for common PDF font references
         if (font_name[2] == '\0' || (font_name[2] == '.' && font_name[3] == '0')) {
-            // Map common font references based on standard PDF conventions
             switch (font_name[1]) {
                 case '1': resolved_font_name = "Helvetica"; break;
                 case '2': resolved_font_name = "Times-Roman"; break;
-                case '3': resolved_font_name = "Courier"; break;  // Monospace font
+                case '3': resolved_font_name = "Helvetica"; break;  // Changed from Courier - most PDFs use proportional fonts
                 case '4': resolved_font_name = "Helvetica-Bold"; break;
                 case '5': resolved_font_name = "Times-Bold"; break;
                 case '6': resolved_font_name = "Courier-Bold"; break;
                 default: resolved_font_name = "Helvetica"; break;
             }
-            log_debug("Font reference '%s' mapped to '%s'", font_name, resolved_font_name);
+            log_debug("Font reference '%s' using fallback mapping to '%s'", font_name, resolved_font_name);
         }
     }
 
