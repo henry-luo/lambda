@@ -8,6 +8,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/stringbuf.h"
 #include "../../lambda/lambda-data.hpp"
+#include "pdf_fonts.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -255,6 +256,7 @@ typedef struct {
     double font_size;          // Current font size
     int text_rendering_mode;   // Tr (0-7)
     double text_rise;          // Ts
+    PDFFontEntry* current_font_entry; // Current font cache entry (for ToUnicode decoding)
 
     // Text matrix and line matrix
     double tm[6];              // Text matrix [a b c d e f]
@@ -321,6 +323,8 @@ typedef struct {
     PDFGraphicsState state;    // Current graphics state
     Input* input;              // Input context for string allocation
     struct Map* resources;     // Page resources dictionary (for ExtGState lookup)
+    struct Map* pdf_data;      // Root PDF data for resolving indirect references
+    PDFFontCache* font_cache;  // Font cache for ToUnicode decoding
 } PDFStreamParser;
 
 // Function declarations
