@@ -24,6 +24,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 // External function for grid layout (from layout_grid_multipass.cpp)
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 
+// External functions for pseudo-element handling (from layout_block.cpp)
+extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
+extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
+extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
+
 // External function for iframe layout (from layout_block.cpp)
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
 
@@ -1091,6 +1096,27 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         // Layout all nested content using standard flow algorithm
         // This handles: text nodes, nested blocks, inline elements, images, etc.
         log_debug("*** PASS3 TRACE: About to layout children of flex item %p", flex_item);
+
+        // CRITICAL FIX: Generate pseudo-element content for flex items with ::before/::after
+        // This ensures icons (e.g., FontAwesome) and other CSS-generated content are created
+        // before the child layout loop. Without this, empty inline elements like <i class="fa">
+        // would have no children to lay out, resulting in 0x0 dimensions.
+        if (flex_item->is_element()) {
+            flex_item->pseudo = alloc_pseudo_content_prop(lycon, flex_item);
+            if (flex_item->pseudo) {
+                generate_pseudo_element_content(lycon, flex_item, true);   // ::before
+                generate_pseudo_element_content(lycon, flex_item, false);  // ::after
+
+                // Insert pseudo-elements into DOM tree for proper view tree linking
+                if (flex_item->pseudo->before) {
+                    insert_pseudo_into_dom((DomElement*)flex_item, flex_item->pseudo->before, true);
+                }
+                if (flex_item->pseudo->after) {
+                    insert_pseudo_into_dom((DomElement*)flex_item, flex_item->pseudo->after, false);
+                }
+            }
+        }
+
         DomNode* child = flex_item->first_child;
         if (child) {
             do {

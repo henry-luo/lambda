@@ -1708,7 +1708,16 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
             }
         }
 
-        return item->blk->given_width;
+        // For content-box, given_width is content width - need to add padding/border for flex basis
+        float basis = item->blk->given_width;
+        if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+            basis += item->bound->padding.left + item->bound->padding.right;
+            if (item->bound->border) {
+                basis += item->bound->border->width.left + item->bound->border->width.right;
+            }
+            log_debug("calculate_flex_basis - content-box: added padding/border to get border-box: %f", basis);
+        }
+        return basis;
     }
     if (!is_horizontal && item->blk && item->blk->given_height > 0) {
         log_debug("calculate_flex_basis - using explicit height: %f", item->blk->given_height);
@@ -1735,7 +1744,16 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
             }
         }
 
-        return item->blk->given_height;
+        // For content-box, given_height is content height - need to add padding/border for flex basis
+        float basis = item->blk->given_height;
+        if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+            basis += item->bound->padding.top + item->bound->padding.bottom;
+            if (item->bound->border) {
+                basis += item->bound->border->width.top + item->bound->border->width.bottom;
+            }
+            log_debug("calculate_flex_basis - content-box: added padding/border to get border-box: %f", basis);
+        }
+        return basis;
     }
 
     // Case 2b: aspect-ratio with explicit cross-axis size
@@ -3253,7 +3271,11 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                                   item->blk ? item->blk->given_width_type : -1);
 
                         if (has_explicit_cross_size) {
-                            // Item has explicit size - for wrap-reverse, position at end of line
+                            // Item has explicit size - set item dimension to border-box value
+                            // item_cross_size is already the border-box size (from get_cross_axis_size)
+                            set_cross_axis_size(item, item_cross_size, flex_layout);
+
+                            // For wrap-reverse, position at end of line
                             if (is_wrap_reverse) {
                                 cross_pos = available_cross_size - item_cross_size;
                             } else {
@@ -3455,16 +3477,19 @@ void align_content(FlexContainerLayout* flex_layout) {
 // These functions properly handle content vs border-box dimensions like block layout
 
 float get_border_box_width(ViewElement* item) {
-    // FIXED: Now that we have proper box-sizing implementation in layout_block.cpp,
-    // the item->width already represents the correct dimensions based on box-sizing property.
-    // No need to subtract padding again - that would cause double-subtraction!
-
-    // DEBUG: get_border_box_width - using item->width directly
-
-    // For border-box items: item->width is already the border-box width (includes padding/border)
-    // For content-box items: item->width is the content width (excludes padding/border)
-    // The flex algorithm should work with these dimensions as-is
+    // For flex items, item->width is ALWAYS the border-box width after flex layout completes,
+    // regardless of the CSS box-sizing property. Flex layout computes border-box dimensions.
+    // So we simply return item->width - no need to add padding/border.
+    //
+    // For non-flex items with content-box, item->width is the content width, but that case
+    // doesn't use this function (block layout has its own dimension handling).
     return item->width;
+}
+
+float get_border_box_height(ViewElement* item) {
+    // For flex items, item->height is ALWAYS the border-box height after flex layout completes,
+    // regardless of the CSS box-sizing property. Flex layout computes border-box dimensions.
+    return item->height;
 }
 
 float get_content_width(ViewBlock* item) {
@@ -3517,16 +3542,16 @@ float get_border_offset_top(ViewBlock* item) {
 
 // Utility functions for axis-agnostic positioning
 float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    // Returns the CONTENT SIZE (border-box) of the item, WITHOUT margins
+    // Returns the BORDER-BOX size of the item, WITHOUT margins
     // Margins are handled separately in free space and positioning calculations
-    // This matches CSS Flexbox spec: flex-grow/shrink operates on content sizes
-    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
+    // This matches CSS Flexbox spec: flex-grow/shrink operates on border-box sizes
+    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : get_border_box_height(item);
     return base_size;
 }
 
 // Get the outer size including margins - used for justify-content calculations
 float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
+    float base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : get_border_box_height(item);
 
     // defensive check: if base_size is NaN, use 0
     if (std::isnan(base_size)) {
@@ -3556,6 +3581,15 @@ float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
         // CRITICAL FIX: Check CSS height first and clamp against max-height
         if (item->blk && item->blk->given_height > 0) {
             float height = item->blk->given_height;
+
+            // For content-box, given_height is content height - add padding/border for border-box
+            if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                height += item->bound->padding.top + item->bound->padding.bottom;
+                if (item->bound->border) {
+                    height += item->bound->border->width.top + item->bound->border->width.bottom;
+                }
+                log_debug("get_cross_axis_size: content-box, added padding/border to height: %.1f", height);
+            }
 
             // Clamp against max-height constraint if present
             if (item->blk->given_max_height > 0 && height > item->blk->given_max_height) {
@@ -3591,6 +3625,15 @@ float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
         // CRITICAL FIX: Check CSS width first and clamp against max-width
         if (item->blk && item->blk->given_width > 0) {
             float width = item->blk->given_width;
+
+            // For content-box, given_width is content width - add padding/border for border-box
+            if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                width += item->bound->padding.left + item->bound->padding.right;
+                if (item->bound->border) {
+                    width += item->bound->border->width.left + item->bound->border->width.right;
+                }
+                log_debug("get_cross_axis_size: content-box, added padding/border to width: %.1f", width);
+            }
 
             // Clamp against max-width constraint if present
             if (item->blk->given_max_width > 0 && width > item->blk->given_max_width) {
@@ -4060,7 +4103,14 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                 // check for explicit cross-axis size (CSS height)
                 if (item->blk && item->blk->given_height > 0) {
                     hypothetical_cross = item->blk->given_height;
-                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit height=%.1f",
+                    // For content-box, given_height is content height - add padding/border
+                    if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                        hypothetical_cross += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border) {
+                            hypothetical_cross += item->bound->border->width.top + item->bound->border->width.bottom;
+                        }
+                    }
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit height=%.1f (border-box)",
                               i, j, hypothetical_cross);
                 } else {
                     // FIX: For items without explicit height, use recursive measurement
@@ -4093,7 +4143,14 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                 // check for explicit cross-axis size (CSS width)
                 if (item->blk && item->blk->given_width > 0) {
                     hypothetical_cross = item->blk->given_width;
-                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit width=%.1f",
+                    // For content-box, given_width is content width - add padding/border
+                    if (item->blk->box_sizing != CSS_VALUE_BORDER_BOX && item->bound) {
+                        hypothetical_cross += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border) {
+                            hypothetical_cross += item->bound->border->width.left + item->bound->border->width.right;
+                        }
+                    }
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit width=%.1f (border-box)",
                               i, j, hypothetical_cross);
                 } else {
                     // use measured/content width
