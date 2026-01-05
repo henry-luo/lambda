@@ -3271,29 +3271,56 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                 TransformFunction* tf = (TransformFunction*)alloc_prop(lycon, sizeof(TransformFunction));
                 memset(tf, 0, sizeof(TransformFunction));
+                // Initialize percentage fields to NaN (not percentage)
+                tf->translate_x_percent = NAN;
+                tf->translate_y_percent = NAN;
 
                 // Parse function name and arguments
                 if (strcasecmp(func->name, "translate") == 0) {
                     tf->type = TRANSFORM_TRANSLATE;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.translate.x = resolve_length_value(lycon, prop_id, func->args[0]);
+                        // Check if X is a percentage (needs deferred resolution)
+                        if (func->args[0]->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            tf->translate_x_percent = func->args[0]->data.percentage.value;
+                            tf->params.translate.x = 0;  // Will be resolved later
+                            log_debug("[CSS] transform: translate X is percentage: %g%%", tf->translate_x_percent);
+                        } else {
+                            tf->params.translate.x = resolve_length_value(lycon, prop_id, func->args[0]);
+                        }
                     }
                     if (func->arg_count >= 2 && func->args[1]) {
-                        tf->params.translate.y = resolve_length_value(lycon, prop_id, func->args[1]);
+                        // Check if Y is a percentage
+                        if (func->args[1]->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            tf->translate_y_percent = func->args[1]->data.percentage.value;
+                            tf->params.translate.y = 0;  // Will be resolved later
+                            log_debug("[CSS] transform: translate Y is percentage: %g%%", tf->translate_y_percent);
+                        } else {
+                            tf->params.translate.y = resolve_length_value(lycon, prop_id, func->args[1]);
+                        }
                     }
                     log_debug("[CSS] transform: translate(%g, %g)", tf->params.translate.x, tf->params.translate.y);
                 }
                 else if (strcasecmp(func->name, "translateX") == 0) {
                     tf->type = TRANSFORM_TRANSLATEX;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.translate.x = resolve_length_value(lycon, prop_id, func->args[0]);
+                        if (func->args[0]->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            tf->translate_x_percent = func->args[0]->data.percentage.value;
+                            tf->params.translate.x = 0;
+                        } else {
+                            tf->params.translate.x = resolve_length_value(lycon, prop_id, func->args[0]);
+                        }
                     }
                     log_debug("[CSS] transform: translateX(%g)", tf->params.translate.x);
                 }
                 else if (strcasecmp(func->name, "translateY") == 0) {
                     tf->type = TRANSFORM_TRANSLATEY;
                     if (func->arg_count >= 1 && func->args[0]) {
-                        tf->params.translate.y = resolve_length_value(lycon, prop_id, func->args[0]);
+                        if (func->args[0]->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            tf->translate_y_percent = func->args[0]->data.percentage.value;
+                            tf->params.translate.y = 0;
+                        } else {
+                            tf->params.translate.y = resolve_length_value(lycon, prop_id, func->args[0]);
+                        }
                     }
                     log_debug("[CSS] transform: translateY(%g)", tf->params.translate.y);
                 }
