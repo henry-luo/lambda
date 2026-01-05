@@ -1,5 +1,6 @@
 #pragma once
 #include "view.hpp"
+#include <thorvg_capi.h>
 
 // format to SDL_PIXELFORMAT_ARGB8888
 #define RDT_PIXELFORMAT_RGB(r, g, b)    ((uint32_t)((r << 16) | (g << 8) | b))
@@ -12,6 +13,10 @@ typedef struct {
     Tvg_Canvas* canvas;  // ThorVG canvas pointer (opaque handle)
 
     UiContext* ui_context;
+
+    // Transform state
+    Tvg_Matrix transform;          // Current combined transform matrix
+    bool has_transform;            // True if non-identity transform is active
 } RenderContext;
 
 // Function declarations
