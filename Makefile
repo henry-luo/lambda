@@ -332,7 +332,8 @@ clean-tree-sitter-minimal:
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
 	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal \
-	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile
+	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
+	    test-pdf test-pdf-export setup-pdf-tests
 
 # Help target - shows available commands
 help:
@@ -381,6 +382,9 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-input-baseline - Run LIBRARY and INPUT baseline test suites only"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline test suite only (alias for test-layout-baseline)"
+	@echo "  test-pdf      - Run PDF rendering test suite (compare vs pdf.js)"
+	@echo "  test-pdf-export - Export pdf.js operator lists as JSON references"
+	@echo "  setup-pdf-tests - Set up PDF test fixtures and dependencies"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
@@ -739,6 +743,30 @@ test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
 	@echo "=============================================================="
 	@node test/layout/test_radiant_layout.js -c baseline
+
+# PDF Testing targets
+test-pdf: build
+	@echo "Running Radiant PDF test suite..."
+	@echo "=============================================================="
+	@cd test/pdf && npm test
+
+test-pdf-export:
+	@echo "Exporting pdf.js operator lists as JSON references..."
+	@cd test/pdf && npm run export
+
+setup-pdf-tests:
+	@echo "Setting up PDF test fixtures..."
+	@mkdir -p test/pdf/data/basic test/pdf/reference test/pdf/output
+	@echo "Copying test PDFs from pdf-js..."
+	@for pdf in tracemonkey.pdf standard_fonts.pdf colors.pdf empty.pdf rotated.pdf rotation.pdf basicapi.pdf canvas.pdf; do \
+		if [ -f "pdf-js/test/pdfs/$$pdf" ]; then \
+			cp "pdf-js/test/pdfs/$$pdf" test/pdf/data/basic/; \
+			echo "  Copied: $$pdf"; \
+		fi; \
+	done
+	@echo "Installing npm dependencies..."
+	@cd test/pdf && npm install
+	@echo "PDF test setup complete. Run 'make test-pdf-export' to generate references."
 
 test-extended: build-test
 	@echo "Clearing HTTP cache for clean test runs..."

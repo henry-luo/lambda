@@ -1,0 +1,20 @@
+{
+    "name": "pdf-test-tools",
+    "version": "1.0.0",
+    "description": "Automated PDF testing tools for Radiant engine",
+    "main": "test_radiant_pdf.js",
+    "scripts": {
+        "test": "node test_radiant_pdf.js",
+        "test:basic": "node test_radiant_pdf.js --suite=basic",
+        "test:verbose": "node test_radiant_pdf.js --suite=basic -v",
+        "export": "node export_pdfjs_oplist.js --suite=basic",
+        "export:all": "node export_pdfjs_oplist.js --all",
+        "compare": "node compare_pdf_output.js"
+    },
+    "dependencies": {
+        "glob": "^10.0.0",
+        "pdfjs-dist": "^4.0.0"
+    },
+    "author": "Lambda Project",
+    "license": "MIT"
+}
