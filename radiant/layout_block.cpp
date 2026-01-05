@@ -3,6 +3,7 @@
 #include "layout_flex_measurement.hpp"
 #include "layout_flex_multipass.hpp"
 #include "layout_grid_multipass.hpp"
+#include "layout_multicol.hpp"
 #include "layout_positioned.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_cache.hpp"
@@ -782,7 +783,7 @@ static CssEnum get_element_float_value(DomElement* elem) {
  *   <span>Filler Text</span><float/>  -> float at (0,0), text at (96,0) ✓
  *   <span>Long text...</span><float/> -> float at (0,0) - WRONG, should be (0, line2)
  */
-static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewBlock* parent_block) {
+void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewBlock* parent_block) {
     if (!first_child) return;
 
     // Check if there are any floats in the content
@@ -1094,18 +1095,27 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 block->display.inner == CSS_VALUE_TABLE_CAPTION;
 
             if (block->display.inner == CSS_VALUE_FLOW || is_orphaned_table_internal) {
-                // Pre-scan and layout floats BEFORE laying out inline content
-                // This ensures floats are positioned and affect line bounds correctly
-                prescan_and_layout_floats(lycon, child, block);
+                // Check for multi-column layout
+                bool is_multicol = is_multicol_container(block);
 
-                // inline content flow
-                do {
-                    layout_flow_node(lycon, child);
-                    child = child->next_sibling;
-                } while (child);
-                // handle last line
-                if (!lycon->line.is_line_start) {
-                    line_break(lycon);
+                if (is_multicol) {
+                    log_debug("[MULTICOL] Container detected: %s", block->node_name());
+                    // Multi-column layout handles its own content distribution
+                    layout_multicol_content(lycon, block);
+                } else {
+                    // Pre-scan and layout floats BEFORE laying out inline content
+                    // This ensures floats are positioned and affect line bounds correctly
+                    prescan_and_layout_floats(lycon, child, block);
+
+                    // inline content flow
+                    do {
+                        layout_flow_node(lycon, child);
+                        child = child->next_sibling;
+                    } while (child);
+                    // handle last line
+                    if (!lycon->line.is_line_start) {
+                        line_break(lycon);
+                    }
                 }
             }
             else if (block->display.inner == CSS_VALUE_FLEX) {
