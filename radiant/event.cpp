@@ -477,23 +477,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             block->content_width = 0;  block->content_height = 0;
                         }
                         // load the new document
-                        // Use iframe dimensions as viewport, not window dimensions
-                        float iframe_width = block->width;
-                        float iframe_height = block->height;
-                        int css_vw = (int)(iframe_width / evcon.ui_context->pixel_ratio);
-                        int css_vh = (int)(iframe_height / evcon.ui_context->pixel_ratio);
+                        // Use iframe dimensions as viewport (already in CSS logical pixels)
+                        int css_vw = (int)block->width;
+                        int css_vh = (int)block->height;
                         DomDocument* old_doc = block->embed->doc;
                         DomDocument* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
-                                          evcon.ui_context->pixel_ratio);
+                                          1.0f);  // Layout uses CSS pixels, pixel_ratio not needed
                         if (new_doc) {
+                            // Set scale for nested document
+                            // Iframe content uses default scale (1.0), combined with display pixel_ratio
+                            new_doc->given_scale = 1.0f;
+                            new_doc->scale = new_doc->given_scale * evcon.ui_context->pixel_ratio;
+
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout
-                                // Temporarily set window dimensions to iframe dimensions for layout
+                                // Temporarily set window dimensions to iframe dimensions (CSS pixels) for layout
                                 float saved_window_width = evcon.ui_context->window_width;
                                 float saved_window_height = evcon.ui_context->window_height;
-                                evcon.ui_context->window_width = iframe_width;
-                                evcon.ui_context->window_height = iframe_height;
+                                // iframe dimensions are now in CSS pixels
+                                evcon.ui_context->window_width = (float)css_vw;
+                                evcon.ui_context->window_height = (float)css_vh;
                                 // Process @font-face rules before layout (critical for custom fonts)
                                 process_document_font_faces(evcon.ui_context, new_doc);
                                 layout_html_doc(evcon.ui_context, new_doc, false);
@@ -524,9 +528,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             else {
                 DomDocument* old_doc = evcon.ui_context->document;
                 // load the new document
-                // CSS media queries should use CSS pixels (logical pixels), not physical pixels
-                int css_vw = (int)(evcon.ui_context->window_width / evcon.ui_context->pixel_ratio);
-                int css_vh = (int)(evcon.ui_context->window_height / evcon.ui_context->pixel_ratio);
+                // Use viewport dimensions (already in CSS logical pixels)
+                int css_vw = evcon.ui_context->viewport_width;
+                int css_vh = evcon.ui_context->viewport_height;
                 evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url,
                     css_vw, css_vh);
                 free_document(old_doc);
