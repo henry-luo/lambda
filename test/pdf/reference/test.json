@@ -1,0 +1,40 @@
+{
+  "file": "test.pdf",
+  "numPages": 1,
+  "generator": "pdf.js",
+  "exportedAt": "2026-01-05T01:34:47.596Z",
+  "pages": [
+    {
+      "pageNum": 1,
+      "viewport": {
+        "width": 612,
+        "height": 792,
+        "scale": 1
+      },
+      "operationCount": 1,
+      "operationSummary": {
+        "constructPath": 1
+      },
+      "operations": [
+        {
+          "op": "constructPath",
+          "code": 91,
+          "args": [
+            [
+              18
+            ],
+            [],
+            [
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "textItemCount": 0,
+      "textItems": []
+    }
+  ]
+}
