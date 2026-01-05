@@ -889,7 +889,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         ViewText* text = first_text;
         TextRect* rect = text->rect;
         unsigned char* text_data = text->text_data();
-        
+
         if (rect) {
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "{\n");
@@ -901,7 +901,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             strbuf_append_str(buf, "\"selector\": \"text\",\n");
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "\"content\": ");
-            
+
             if (text_data && rect->length > 0) {
                 char content[2048];
                 int len = rect->length;
@@ -917,7 +917,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
                 append_json_string(buf, "[empty]");
             }
             strbuf_append_str(buf, ",\n");
-            
+
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "\"layout\": {\n");
             print_bounds_json(text, buf, indent, rect);
@@ -926,10 +926,10 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "}");
         }
-        
+
         return (View*)first_text;  // Return this text node only
     }
-    
+
     // Collect all consecutive text nodes
     struct TextNodeInfo {
         ViewText* text;
@@ -1129,12 +1129,30 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 }
 
 // Helper to check if an element is an anonymous table element (e.g., ::anon-tbody, ::anon-tr)
-// Anonymous elements are created by the layout engine and don't exist in the browser's DOM
+// Anonymous elements are created by the layout engine and don't exist in the browser's DOM.
+// Detection methods (any one being true indicates anonymous):
+// 1. No backing Lambda Element (native_element == nullptr) - most reliable
+// 2. Tag name starts with "::" (e.g., "::anon-tbody", "::anon-tr") - naming convention
 static bool is_anonymous_element(ViewBlock* block) {
     if (!block) return false;
-    const char* name = block->node_name();
+
+    // Method 1: Check for missing backing Lambda Element
+    // True DOM elements always have a native_element pointer to the backing Lambda Element.
+    // Anonymous elements created by layout engine (e.g., in create_anonymous_table_element)
+    // don't set native_element, so it remains nullptr.
+    DomElement* dom_elem = block->as_element();
+    if (dom_elem && dom_elem->native_element == nullptr) {
+        return true;
+    }
+
+    // Method 2: Check for anonymous naming convention (fallback)
     // Anonymous elements have tag names starting with "::" (e.g., "::anon-tbody", "::anon-tr")
-    return name && name[0] == ':' && name[1] == ':';
+    const char* name = block->node_name();
+    if (name && name[0] == ':' && name[1] == ':') {
+        return true;
+    }
+
+    return false;
 }
 
 // Forward declaration for recursive calls
