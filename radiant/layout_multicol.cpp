@@ -267,6 +267,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     int current_column = 0;
     float column_y = 0;
     float max_column_height = 0;
+    bool first_block_in_col0 = true;  // Track first block in column 0
 
     for (size_t i = 0; i < blocks.size(); i++) {
         BlockInfo& info = blocks[i];
@@ -310,7 +311,20 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // Position block in current column
         float column_x = current_column * (column_width + gap);
         child_block->x = column_x;
-        child_block->y = column_y;
+
+        // For the first block in column 0, preserve its original margin-top offset
+        // This matches browser behavior where margins are NOT collapsed at the start of column 0
+        // but ARE collapsed at the start of subsequent columns
+        if (first_block_in_col0 && current_column == 0) {
+            // Use the original Y position which includes margin-top
+            // The orig_y is relative to content area, so we use it directly
+            float margin_top = child_block->bound ? child_block->bound->margin.top : 0;
+            child_block->y = margin_top;
+            column_y = margin_top;  // Start subsequent blocks after this margin
+            first_block_in_col0 = false;
+        } else {
+            child_block->y = column_y;
+        }
 
         // Ensure width fits column
         if (child_block->width > column_width) {
@@ -326,9 +340,31 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     // Final column height
     max_column_height = std::max(max_column_height, column_y);
 
-    // Update layout context's advance_y to reflect actual height
-    lycon->block.advance_y = max_column_height;
+    // Calculate total height including padding
+    float content_start_y = 0;
+    if (block->bound) {
+        if (block->bound->border) {
+            content_start_y += block->bound->border->width.top;
+        }
+        content_start_y += block->bound->padding.top;
+    }
 
-    log_debug("[MULTICOL] Final layout: %d columns, max height=%.1f",
-              column_count, max_column_height);
+    // Set block height directly (like flex layout does)
+    // Height = padding.top + border.top + content_height + padding.bottom + border.bottom
+    float total_height = max_column_height;
+    if (block->bound) {
+        total_height += block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            total_height += block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+    }
+    block->height = total_height;
+    block->content_height = max_column_height + (block->bound ? block->bound->padding.bottom : 0);
+
+    // Update layout context's advance_y to reflect actual height
+    // advance_y should be content_start_y + content_height (so finalize can add padding.bottom)
+    lycon->block.advance_y = content_start_y + max_column_height;
+
+    log_debug("[MULTICOL] Final layout: %d columns, max height=%.1f, block height=%.1f",
+              column_count, max_column_height, block->height);
 }
