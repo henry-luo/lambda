@@ -1,0 +1,694 @@
+{
+  "file": "simple_test.pdf",
+  "numPages": 1,
+  "generator": "pdf.js",
+  "exportedAt": "2026-01-05T01:34:47.434Z",
+  "pages": [
+    {
+      "pageNum": 1,
+      "viewport": {
+        "width": 612,
+        "height": 792,
+        "scale": 1
+      },
+      "operationCount": 25,
+      "operationSummary": {
+        "beginText": 3,
+        "dependency": 2,
+        "setFont": 3,
+        "moveText": 3,
+        "showText": 3,
+        "endText": 3,
+        "setFillRGBColor": 2,
+        "constructPath": 2,
+        "fill": 1,
+        "setStrokeRGBColor": 1,
+        "setLineWidth": 1,
+        "stroke": 1
+      },
+      "operations": [
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "dependency",
+          "code": 1,
+          "args": [
+            "g_d0_f1"
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            12
+          ]
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            50,
+            700
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 72,
+                "fontChar": "H",
+                "unicode": "H",
+                "accent": null,
+                "width": 722,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 101,
+                "fontChar": "e",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 108,
+                "fontChar": "l",
+                "unicode": "l",
+                "accent": null,
+                "width": 222,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 108,
+                "fontChar": "l",
+                "unicode": "l",
+                "accent": null,
+                "width": 222,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 111,
+                "fontChar": "o",
+                "unicode": "o",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 44,
+                "fontChar": ",",
+                "unicode": ",",
+                "accent": null,
+                "width": 278,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 32,
+                "fontChar": " ",
+                "unicode": " ",
+                "accent": null,
+                "width": 278,
+                "isSpace": true,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 80,
+                "fontChar": "P",
+                "unicode": "P",
+                "accent": null,
+                "width": 667,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 68,
+                "fontChar": "D",
+                "unicode": "D",
+                "accent": null,
+                "width": 722,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 70,
+                "fontChar": "F",
+                "unicode": "F",
+                "accent": null,
+                "width": 611,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 32,
+                "fontChar": " ",
+                "unicode": " ",
+                "accent": null,
+                "width": 278,
+                "isSpace": true,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 87,
+                "fontChar": "W",
+                "unicode": "W",
+                "accent": null,
+                "width": 944,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 111,
+                "fontChar": "o",
+                "unicode": "o",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 114,
+                "fontChar": "r",
+                "unicode": "r",
+                "accent": null,
+                "width": 333,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 108,
+                "fontChar": "l",
+                "unicode": "l",
+                "accent": null,
+                "width": 222,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 100,
+                "fontChar": "d",
+                "unicode": "d",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 33,
+                "fontChar": "!",
+                "unicode": "!",
+                "accent": null,
+                "width": 278,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "dependency",
+          "code": 1,
+          "args": [
+            "g_d0_f2"
+          ]
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f2",
+            18
+          ]
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            50,
+            650
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 84,
+                "fontChar": "T",
+                "unicode": "T",
+                "accent": null,
+                "width": 611,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 104,
+                "fontChar": "h",
+                "unicode": "h",
+                "accent": null,
+                "width": 611,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 105,
+                "fontChar": "i",
+                "unicode": "i",
+                "accent": null,
+                "width": 278,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 115,
+                "fontChar": "s",
+                "unicode": "s",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 32,
+                "fontChar": " ",
+                "unicode": " ",
+                "accent": null,
+                "width": 278,
+                "isSpace": true,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 105,
+                "fontChar": "i",
+                "unicode": "i",
+                "accent": null,
+                "width": 278,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 115,
+                "fontChar": "s",
+                "unicode": "s",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 32,
+                "fontChar": " ",
+                "unicode": " ",
+                "accent": null,
+                "width": 278,
+                "isSpace": true,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 98,
+                "fontChar": "b",
+                "unicode": "b",
+                "accent": null,
+                "width": 611,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 111,
+                "fontChar": "o",
+                "unicode": "o",
+                "accent": null,
+                "width": 611,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 108,
+                "fontChar": "l",
+                "unicode": "l",
+                "accent": null,
+                "width": 278,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 100,
+                "fontChar": "d",
+                "unicode": "d",
+                "accent": null,
+                "width": 611,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 32,
+                "fontChar": " ",
+                "unicode": " ",
+                "accent": null,
+                "width": 278,
+                "isSpace": true,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 116,
+                "fontChar": "t",
+                "unicode": "t",
+                "accent": null,
+                "width": 333,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 101,
+                "fontChar": "e",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 120,
+                "fontChar": "x",
+                "unicode": "x",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 116,
+                "fontChar": "t",
+                "unicode": "t",
+                "accent": null,
+                "width": 333,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 255,
+            "1": 0,
+            "2": 0
+          }
+        },
+        {
+          "op": "constructPath",
+          "code": 91,
+          "args": [
+            [
+              19
+            ],
+            [
+              100,
+              600,
+              100,
+              50
+            ],
+            [
+              100,
+              600,
+              200,
+              650
+            ]
+          ]
+        },
+        {
+          "op": "fill",
+          "code": 22,
+          "args": []
+        },
+        {
+          "op": "setStrokeRGBColor",
+          "code": 58,
+          "args": {
+            "0": 0,
+            "1": 0,
+            "2": 255
+          }
+        },
+        {
+          "op": "setLineWidth",
+          "code": 2,
+          "args": [
+            2
+          ]
+        },
+        {
+          "op": "constructPath",
+          "code": 91,
+          "args": [
+            [
+              19
+            ],
+            [
+              100,
+              500,
+              100,
+              50
+            ],
+            [
+              100,
+              500,
+              200,
+              550
+            ]
+          ]
+        },
+        {
+          "op": "stroke",
+          "code": 20,
+          "args": []
+        },
+        {
+          "op": "setFillRGBColor",
+          "code": 59,
+          "args": {
+            "0": 0,
+            "1": 255,
+            "2": 0
+          }
+        },
+        {
+          "op": "beginText",
+          "code": 31,
+          "args": []
+        },
+        {
+          "op": "setFont",
+          "code": 37,
+          "args": [
+            "g_d0_f1",
+            14
+          ]
+        },
+        {
+          "op": "moveText",
+          "code": 40,
+          "args": [
+            250,
+            600
+          ]
+        },
+        {
+          "op": "showText",
+          "code": 44,
+          "args": [
+            [
+              {
+                "originalCharCode": 67,
+                "fontChar": "C",
+                "unicode": "C",
+                "accent": null,
+                "width": 722,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 111,
+                "fontChar": "o",
+                "unicode": "o",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 108,
+                "fontChar": "l",
+                "unicode": "l",
+                "accent": null,
+                "width": 222,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 111,
+                "fontChar": "o",
+                "unicode": "o",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 114,
+                "fontChar": "r",
+                "unicode": "r",
+                "accent": null,
+                "width": 333,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 101,
+                "fontChar": "e",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 100,
+                "fontChar": "d",
+                "unicode": "d",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 32,
+                "fontChar": " ",
+                "unicode": " ",
+                "accent": null,
+                "width": 278,
+                "isSpace": true,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 84,
+                "fontChar": "T",
+                "unicode": "T",
+                "accent": null,
+                "width": 611,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 101,
+                "fontChar": "e",
+                "unicode": "e",
+                "accent": null,
+                "width": 556,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 120,
+                "fontChar": "x",
+                "unicode": "x",
+                "accent": null,
+                "width": 500,
+                "isSpace": false,
+                "isInFont": true
+              },
+              {
+                "originalCharCode": 116,
+                "fontChar": "t",
+                "unicode": "t",
+                "accent": null,
+                "width": 278,
+                "isSpace": false,
+                "isInFont": true
+              }
+            ]
+          ]
+        },
+        {
+          "op": "endText",
+          "code": 32,
+          "args": []
+        }
+      ],
+      "textItemCount": 3,
+      "textItems": [
+        {
+          "str": "Hello, PDF World!",
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            50,
+            700
+          ],
+          "width": 96.01199999999999,
+          "height": 12,
+          "fontName": "g_d0_f1"
+        },
+        {
+          "str": "This is bold text",
+          "transform": [
+            18,
+            0,
+            0,
+            18,
+            50,
+            650
+          ],
+          "width": 137.03400000000002,
+          "height": 18,
+          "fontName": "g_d0_f2"
+        },
+        {
+          "str": "Colored Text",
+          "transform": [
+            14,
+            0,
+            0,
+            14,
+            250,
+            600
+          ],
+          "width": 80.136,
+          "height": 14,
+          "fontName": "g_d0_f1"
+        }
+      ]
+    }
+  ]
+}
