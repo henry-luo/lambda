@@ -510,6 +510,11 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent);
 void print_br_json(View* br, StrBuf* buf, int indent);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);
 
+// Text combination control for view tree output
+// When false, consecutive text nodes are output separately (useful for PDF testing)
+void set_combine_text_nodes(bool combine);
+bool get_combine_text_nodes();
+
 // HTML version detection functions
 int detect_html_version_lambda_css(DomDocument* doc);
 HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* input);
