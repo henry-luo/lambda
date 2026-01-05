@@ -22,4 +22,12 @@ void adjust_table_text_positions_final(struct ViewTable* table);
 void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row, int table_abs_x, int cell_border, int cell_padding);
 void adjust_cell_text_positions_final(struct ViewBlock* cell, int text_abs_x);
 
+// CSS 2.1 Section 17.2.1: Wrap orphaned table-internal children in anonymous table structures
+// This handles cases like <div><span style="display:table-cell">...</span></div>
+// Returns true if any wrapping was performed
+bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
+
+// Helper to check if a display value is table-internal (cell, row, row-group, etc.)
+bool is_table_internal_display(CssEnum display);
+
 #endif // LAYOUT_TABLE_HPP
