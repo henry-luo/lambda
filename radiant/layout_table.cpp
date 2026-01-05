@@ -3027,7 +3027,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
                             StrView width_view = strview_init(width_attr, value_len);
                             float width = strview_to_int(&width_view);
                             if (width > 0) {
-                                float attr_width = width * lycon->ui_context->pixel_ratio;
+                                float attr_width = width;  // CSS logical pixels
                                 child_max = child_min = attr_width; // Both use attribute width
                                 log_debug("Cell widths: using HTML width attribute: %.1fpx for %s",
                                     attr_width, child->node_name());
