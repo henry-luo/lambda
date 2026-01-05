@@ -567,11 +567,170 @@ typedef struct {
     int radial_layer_count;
 } BackgroundProp;
 
+/**
+ * BoxShadow - CSS box-shadow property
+ * Supports multiple shadows via linked list (shadows render bottom-to-top)
+ * Syntax: box-shadow: [inset] <offset-x> <offset-y> [blur-radius] [spread-radius] [color]
+ */
+typedef struct BoxShadow {
+    float offset_x;              // Horizontal offset (positive = right)
+    float offset_y;              // Vertical offset (positive = down)
+    float blur_radius;           // Blur amount (0 = sharp edge)
+    float spread_radius;         // Spread amount (positive = expand, negative = contract)
+    Color color;                 // Shadow color (default: currentColor)
+    bool inset;                  // True for inset shadow (inside the box)
+    struct BoxShadow* next;      // Next shadow in list (for multiple shadows)
+} BoxShadow;
+
+/**
+ * TransformFunction - Individual CSS transform function
+ * Forms a linked list for transform: translate() rotate() scale() etc.
+ */
+typedef enum TransformFunctionType {
+    TRANSFORM_NONE = 0,
+    // 2D Transforms
+    TRANSFORM_TRANSLATE,        // translate(x, y) or translate(x)
+    TRANSFORM_TRANSLATEX,       // translateX(x)
+    TRANSFORM_TRANSLATEY,       // translateY(y)
+    TRANSFORM_SCALE,            // scale(x, y) or scale(s)
+    TRANSFORM_SCALEX,           // scaleX(x)
+    TRANSFORM_SCALEY,           // scaleY(y)
+    TRANSFORM_ROTATE,           // rotate(angle)
+    TRANSFORM_SKEW,             // skew(x-angle, y-angle)
+    TRANSFORM_SKEWX,            // skewX(angle)
+    TRANSFORM_SKEWY,            // skewY(angle)
+    TRANSFORM_MATRIX,           // matrix(a, b, c, d, e, f)
+    // 3D Transforms
+    TRANSFORM_TRANSLATE3D,      // translate3d(x, y, z)
+    TRANSFORM_TRANSLATEZ,       // translateZ(z)
+    TRANSFORM_SCALE3D,          // scale3d(x, y, z)
+    TRANSFORM_SCALEZ,           // scaleZ(z)
+    TRANSFORM_ROTATEX,          // rotateX(angle)
+    TRANSFORM_ROTATEY,          // rotateY(angle)
+    TRANSFORM_ROTATEZ,          // rotateZ(angle) - same as rotate()
+    TRANSFORM_ROTATE3D,         // rotate3d(x, y, z, angle)
+    TRANSFORM_PERSPECTIVE,      // perspective(d)
+    TRANSFORM_MATRIX3D,         // matrix3d(16 values)
+} TransformFunctionType;
+
+typedef struct TransformFunction {
+    TransformFunctionType type;
+    union {
+        struct { float x, y; } translate;           // translate, translateX, translateY
+        struct { float x, y, z; } translate3d;      // translate3d, translateZ
+        struct { float x, y; } scale;               // scale, scaleX, scaleY
+        struct { float x, y, z; } scale3d;          // scale3d, scaleZ
+        float angle;                                 // rotate, skewX, skewY
+        struct { float x, y; } skew;                // skew
+        struct { float a, b, c, d, e, f; } matrix;  // matrix (2D)
+        struct { float x, y, z; float angle; } rotate3d;  // rotate3d
+        float perspective;                           // perspective
+        float matrix3d[16];                          // matrix3d (4x4)
+    } params;
+    struct TransformFunction* next;                  // Next transform in chain
+} TransformFunction;
+
+/**
+ * TransformProp - CSS transform properties
+ * Contains transform origin and list of transform functions
+ */
+typedef struct TransformProp {
+    TransformFunction* functions;    // Linked list of transform functions (applied in order)
+    float origin_x;                  // transform-origin X (default: 50%)
+    float origin_y;                  // transform-origin Y (default: 50%)
+    float origin_z;                  // transform-origin Z (default: 0)
+    bool origin_x_percent;           // true if origin_x is percentage
+    bool origin_y_percent;           // true if origin_y is percentage
+    float perspective;               // perspective distance (from parent)
+    float perspective_origin_x;      // perspective-origin X (default: 50%)
+    float perspective_origin_y;      // perspective-origin Y (default: 50%)
+    CssEnum transform_style;         // flat or preserve-3d
+    CssEnum backface_visibility;     // visible or hidden
+} TransformProp;
+
+/**
+ * FilterFunction - Individual CSS filter function
+ * Forms a linked list for filter: blur() brightness() grayscale() etc.
+ */
+typedef enum FilterFunctionType {
+    FILTER_NONE = 0,
+    FILTER_BLUR,              // blur(<length>)
+    FILTER_BRIGHTNESS,        // brightness(<number>|<percentage>)
+    FILTER_CONTRAST,          // contrast(<number>|<percentage>)
+    FILTER_GRAYSCALE,         // grayscale(<number>|<percentage>)
+    FILTER_HUE_ROTATE,        // hue-rotate(<angle>)
+    FILTER_INVERT,            // invert(<number>|<percentage>)
+    FILTER_OPACITY,           // opacity(<number>|<percentage>)
+    FILTER_SATURATE,          // saturate(<number>|<percentage>)
+    FILTER_SEPIA,             // sepia(<number>|<percentage>)
+    FILTER_DROP_SHADOW,       // drop-shadow(<offset-x> <offset-y> <blur-radius>? <color>?)
+    FILTER_URL,               // url(<string>) - SVG filter reference
+} FilterFunctionType;
+
+typedef struct FilterFunction {
+    FilterFunctionType type;
+    union {
+        float blur_radius;           // blur() - in pixels
+        float amount;                // brightness, contrast, grayscale, invert, opacity, saturate, sepia (0-1 or 1 = 100%)
+        float angle;                 // hue-rotate - in radians
+        struct {
+            float offset_x, offset_y;
+            float blur_radius;
+            Color color;
+        } drop_shadow;
+        const char* url;             // url() - SVG filter reference
+    } params;
+    struct FilterFunction* next;     // Next filter in chain
+} FilterFunction;
+
+/**
+ * FilterProp - CSS filter properties
+ */
+typedef struct FilterProp {
+    FilterFunction* functions;       // Linked list of filter functions (applied in order)
+} FilterProp;
+
+/**
+ * MultiColumnProp - CSS Multi-column layout properties
+ * column-count, column-width, column-gap, column-rule, column-span, column-fill
+ */
+typedef enum ColumnSpan {
+    COLUMN_SPAN_NONE = 0,    // Default: element stays in its column
+    COLUMN_SPAN_ALL,         // Element spans all columns
+} ColumnSpan;
+
+typedef enum ColumnFill {
+    COLUMN_FILL_BALANCE = 0, // Default: balance content across columns
+    COLUMN_FILL_AUTO,        // Fill columns sequentially
+} ColumnFill;
+
+typedef struct MultiColumnProp {
+    // Column sizing
+    int column_count;            // Number of columns (0 = auto)
+    float column_width;          // Ideal column width (0 = auto)
+    float column_gap;            // Gap between columns (default: 1em)
+    bool column_gap_is_normal;   // Use normal (1em) gap
+
+    // Column rule (divider between columns)
+    float rule_width;            // Rule width in pixels
+    CssEnum rule_style;          // solid, dotted, dashed, etc.
+    Color rule_color;            // Rule color
+
+    // Column behavior
+    ColumnSpan span;             // column-span: none | all
+    ColumnFill fill;             // column-fill: balance | auto
+
+    // Computed values (set during layout)
+    int computed_column_count;   // Actual number of columns after layout
+    float computed_column_width; // Actual column width after layout
+} MultiColumnProp;
+
 typedef struct BoundaryProp {
     Margin margin;
     Spacing padding;
     BorderProp* border;
     BackgroundProp* background;
+    BoxShadow* box_shadow;       // Linked list of box shadows
 } BoundaryProp;
 
 // Vector path segment for PDF/SVG path rendering
