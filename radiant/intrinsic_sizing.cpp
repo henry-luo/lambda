@@ -851,6 +851,20 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             inline_max_sum += child_sizes.max_content;
             inline_min_sum = max(inline_min_sum, child_sizes.min_content);
         } else {
+            // Block-level child encountered
+            // CSS 2.1: Block children break inline flow (block-in-inline)
+            // First, flush any accumulated inline content before the block
+            if (inline_max_sum > 0) {
+                sizes.min_content = max(sizes.min_content, inline_min_sum);
+                sizes.max_content = max(sizes.max_content, inline_max_sum);
+                log_debug("  block-in-inline: flushing inline run max=%.1f, min=%.1f before block %s",
+                          inline_max_sum, inline_min_sum,
+                          child->is_element() ? child->as_element()->node_name() : "?");
+                // Reset for next inline run after the block
+                inline_max_sum = 0;
+                inline_min_sum = 0;
+            }
+
             // For block-level children: take max of each
             // Also include horizontal margins for proper shrink-to-fit calculation
             // CSS 2.2 Section 10.3.5: floated/absolutely positioned elements use shrink-to-fit
