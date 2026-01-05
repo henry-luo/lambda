@@ -86,10 +86,20 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
         switch (tf->type) {
             case TRANSFORM_TRANSLATE:
             case TRANSFORM_TRANSLATEX:
-            case TRANSFORM_TRANSLATEY:
-                m.e13 = tf->params.translate.x;
-                m.e23 = tf->params.translate.y;
+            case TRANSFORM_TRANSLATEY: {
+                // Handle percentage values: resolve against element's own dimensions
+                float tx = tf->params.translate.x;
+                float ty = tf->params.translate.y;
+                if (!std::isnan(tf->translate_x_percent)) {
+                    tx = tf->translate_x_percent * width / 100.0f;
+                }
+                if (!std::isnan(tf->translate_y_percent)) {
+                    ty = tf->translate_y_percent * height / 100.0f;
+                }
+                m.e13 = tx;
+                m.e23 = ty;
                 break;
+            }
 
             case TRANSFORM_TRANSLATE3D:
             case TRANSFORM_TRANSLATEZ:

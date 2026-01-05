@@ -2,6 +2,7 @@
 #include "layout_positioned.hpp"
 #include "layout_flex.hpp"
 #include "grid.hpp"
+#include "transform.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include <time.h>
 #include <cmath>  // for INFINITY
@@ -704,11 +705,76 @@ void append_json_string(StrBuf* buf, const char* str) {
     strbuf_append_char(buf, '"');
 }
 
+/**
+ * Calculate the CSS transform translation offset for a view element.
+ * This extracts the translate() portion from CSS transforms to apply to layout coordinates.
+ *
+ * Per CSS spec, transform: translate(-50%, -50%) shifts the element by half its own width/height.
+ * We need to apply this to layout coordinates so they match browser getBoundingClientRect().
+ *
+ * @param view The view element to calculate transform for
+ * @param out_dx Output: horizontal translation offset
+ * @param out_dy Output: vertical translation offset
+ * @return true if a transform offset was calculated, false otherwise
+ */
+static bool calculate_transform_offset(View* view, float* out_dx, float* out_dy) {
+    *out_dx = 0;
+    *out_dy = 0;
+
+    if (!view->is_block()) return false;
+
+    ViewBlock* block = (ViewBlock*)view;
+    if (!block->transform || !block->transform->functions) return false;
+
+    // Walk through transform functions and accumulate translation
+    // Note: For accurate results, we'd need full matrix multiplication,
+    // but for common cases (translate only), we can just sum translations
+    float dx = 0, dy = 0;
+    float width = block->width;
+    float height = block->height;
+
+    for (TransformFunction* tf = block->transform->functions; tf; tf = tf->next) {
+        switch (tf->type) {
+            case TRANSFORM_TRANSLATE:
+            case TRANSFORM_TRANSLATEX:
+            case TRANSFORM_TRANSLATEY: {
+                // Handle percentage values: resolve against element's own dimensions
+                // CSS spec: translate percentages are relative to element's own width/height
+                float tx = tf->params.translate.x;
+                float ty = tf->params.translate.y;
+                if (!std::isnan(tf->translate_x_percent)) {
+                    tx = tf->translate_x_percent * width / 100.0f;
+                }
+                if (!std::isnan(tf->translate_y_percent)) {
+                    ty = tf->translate_y_percent * height / 100.0f;
+                }
+                dx += tx;
+                dy += ty;
+                break;
+            }
+
+            case TRANSFORM_TRANSLATE3D:
+            case TRANSFORM_TRANSLATEZ:
+                dx += tf->params.translate3d.x;
+                dy += tf->params.translate3d.y;
+                break;
+
+            default:
+                // Other transforms (scale, rotate, etc.) don't affect position
+                // in a simple additive way. For full accuracy we'd need matrix math.
+                break;
+        }
+    }
+
+    *out_dx = dx;
+    *out_dy = dy;
+    return (dx != 0 || dy != 0);
+}
+
 void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr) {
     // calculate absolute position for view (already in CSS logical pixels)
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
 
-    // Check if this is a fixed or absolute positioned element
     bool is_fixed = false;
     bool is_absolute = false;
     ViewBlock* containing_block = nullptr;
@@ -717,6 +783,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         ViewBlock* block = (ViewBlock*)view;
         if (block->position) {
             is_fixed = (block->position->position == CSS_VALUE_FIXED);
+
             is_absolute = (block->position->position == CSS_VALUE_ABSOLUTE);
         }
     }
@@ -854,6 +921,26 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
             }
             parent = parent->parent_view();
         }
+    }
+
+    // Apply CSS transform translation to coordinates
+    // This makes layout coordinates match browser getBoundingClientRect() which includes transforms
+    float transform_dx = 0, transform_dy = 0;
+    if (calculate_transform_offset(view, &transform_dx, &transform_dy)) {
+        abs_x += transform_dx;
+        abs_y += transform_dy;
+    }
+
+    // Also apply transforms from ancestor elements
+    // (transforms are cumulative down the tree)
+    ViewElement* ancestor = view->parent_view();
+    while (ancestor) {
+        float ancestor_dx = 0, ancestor_dy = 0;
+        if (calculate_transform_offset((View*)ancestor, &ancestor_dx, &ancestor_dy)) {
+            abs_x += ancestor_dx;
+            abs_y += ancestor_dy;
+        }
+        ancestor = ancestor->parent_view();
     }
 
     // Output dimensions directly (already in CSS logical pixels)

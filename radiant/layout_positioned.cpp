@@ -5,6 +5,7 @@
 #include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
 #include <cfloat>
+#include <cmath>
 #include <algorithm>
 
 using std::min;
@@ -601,6 +602,47 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             float padding_right = block->bound ? block->bound->padding.right : 0;
             float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
             block->width = flow_width + padding_right + border_right;
+
+            // CRITICAL FIX: Re-align text after shrink-to-fit width calculation
+            // Text alignment during layout used the large initial width, so rect->x may have
+            // a large offset from centering. We need to correct it now that we know final width.
+            if (lycon->block.text_align == CSS_VALUE_CENTER || lycon->block.text_align == CSS_VALUE_RIGHT) {
+                float final_content_width = block->width;
+                if (block->bound) {
+                    final_content_width -= (block->bound->padding.left + block->bound->padding.right);
+                    if (block->bound->border) {
+                        final_content_width -= (block->bound->border->width.left + block->bound->border->width.right);
+                    }
+                }
+
+                View* child = block->first_child;
+                while (child) {
+                    if (child->view_type == RDT_VIEW_TEXT) {
+                        ViewText* text = (ViewText*)child;
+                        TextRect* rect = text->rect;
+                        while (rect) {
+                            float line_width = rect->width;
+                            float padding_left = block->bound ? block->bound->padding.left : 0;
+                            float current_offset_in_content = rect->x - padding_left;
+                            float target_offset_in_content;
+                            if (lycon->block.text_align == CSS_VALUE_CENTER) {
+                                target_offset_in_content = (final_content_width - line_width) / 2;
+                            } else { // RIGHT
+                                target_offset_in_content = final_content_width - line_width;
+                            }
+                            float offset = target_offset_in_content - current_offset_in_content;
+                            if (fabs(offset) > 0.5f) {
+                                rect->x += offset;
+                                text->x = rect->x;  // Also update text bounds
+                                log_debug("abs shrink-to-fit text align: rect->x adjusted by %.1f to %.1f (content_width=%.1f)",
+                                          offset, rect->x, final_content_width);
+                            }
+                            rect = rect->next;
+                        }
+                    }
+                    child = child->next();
+                }
+            }
         }
     }
     // Height is auto-sized when no explicit height AND neither top+bottom constraints

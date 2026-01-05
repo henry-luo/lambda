@@ -627,6 +627,10 @@ typedef struct TransformFunction {
         float perspective;                           // perspective
         float matrix3d[16];                          // matrix3d (4x4)
     } params;
+    // Percentage values for translate (to be resolved against element's own dimensions)
+    // CSS transform translate percentages are relative to element's own width/height
+    float translate_x_percent;  // NaN if not percentage, otherwise percentage value (e.g. -50 for -50%)
+    float translate_y_percent;  // NaN if not percentage, otherwise percentage value
     struct TransformFunction* next;                  // Next transform in chain
 } TransformFunction;
 
