@@ -283,7 +283,8 @@ if (type == LMD_TYPE_STRING) {
 3. Run with debugger: `lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- extra CLI arguments`
 
 ## Notes & Constraints
-- C++17 standard
+- C++17 standard.
+- Don't use std::string or std::* containers. Use ./lib equivalents.
 - Grammar regeneration is automatic - don't manually edit `parser.c`
 - Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
 - **Token limit**: 10,000,000 tokens per session. So don't worry about running short of tokens.
