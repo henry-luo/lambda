@@ -71,12 +71,25 @@ struct DomDocument {
     float given_scale;           // User-specified scale factor (default 1.0), from CLI --scale
     float scale;                 // Final render scale = given_scale × pixel_ratio
 
+    // Viewport meta tag values (from <meta name="viewport" content="...">)
+    float viewport_initial_scale;  // initial-scale from viewport meta (default 1.0)
+    float viewport_min_scale;      // minimum-scale from viewport meta (default 0.0 = not set)
+    float viewport_max_scale;      // maximum-scale from viewport meta (default 0.0 = not set)
+    int viewport_width;            // viewport width (0 = device-width, >0 = explicit pixels)
+    int viewport_height;           // viewport height (0 = device-height, >0 = explicit pixels)
+
+    // Body transform scale (from CSS transform: scale() on body element)
+    float body_transform_scale;    // transform: scale() value from body CSS (default 1.0)
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     view_tree(nullptr), state(nullptr),
-                    given_scale(1.0f), scale(1.0f) {}
+                    given_scale(1.0f), scale(1.0f),
+                    viewport_initial_scale(1.0f), viewport_min_scale(0.0f), viewport_max_scale(0.0f),
+                    viewport_width(0), viewport_height(0),
+                    body_transform_scale(1.0f) {}
 };
 
 typedef struct {
