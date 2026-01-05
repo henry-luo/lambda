@@ -5190,6 +5190,268 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 }
 
 // =============================================================================
+// ORPHANED TABLE-INTERNAL ELEMENT HANDLING (CSS 2.1 Section 17.2.1)
+// =============================================================================
+
+/**
+ * Check if a display value is a table-internal type (cell, row, row-group, etc.)
+ * This does NOT include table/inline-table.
+ */
+bool is_table_internal_display(CssEnum display) {
+    return display == CSS_VALUE_TABLE_CELL ||
+           display == CSS_VALUE_TABLE_ROW ||
+           display == CSS_VALUE_TABLE_ROW_GROUP ||
+           display == CSS_VALUE_TABLE_HEADER_GROUP ||
+           display == CSS_VALUE_TABLE_FOOTER_GROUP ||
+           display == CSS_VALUE_TABLE_COLUMN ||
+           display == CSS_VALUE_TABLE_COLUMN_GROUP ||
+           display == CSS_VALUE_TABLE_CAPTION;
+}
+
+/**
+ * CSS 2.1 Section 17.2.1: Wrap orphaned table-internal children in anonymous table structures.
+ *
+ * This handles cases like:
+ *   <div><span style="display:table-cell">...</span></div>
+ *
+ * Per CSS 2.1:
+ * - If table-cell is not in table-row → wrap in anonymous table-row
+ * - If table-row is not in table → wrap in anonymous table
+ * - If table-row-group is not in table → wrap in anonymous table
+ *
+ * @param lycon Layout context
+ * @param parent Parent element containing orphaned table-internal children
+ * @return true if any wrapping was performed
+ */
+bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
+    if (!lycon || !parent || !parent->first_child) return false;
+
+    Pool* pool = lycon->doc->view_tree->pool;
+    if (!pool) return false;
+
+    // First pass: check if any children have table-internal display
+    // Note: We use resolve_display_value() directly because DomElement->display
+    // is only set later during layout (on ViewBlock), so we need to read from
+    // specified_style directly.
+    bool has_table_internal = false;
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+
+        // Use resolve_display_value to get display from specified_style
+        DisplayValue child_display = resolve_display_value((void*)child);
+
+        if (is_table_internal_display(child_display.inner)) {
+            has_table_internal = true;
+            break;
+        }
+    }
+
+    if (!has_table_internal) {
+        return false;
+    }
+
+    log_debug("[ORPHAN-TABLE] Found orphaned table-internal children in <%s>, creating anonymous wrappers",
+              parent->tag_name ? parent->tag_name : "unknown");
+
+    // Collect runs of consecutive table-internal elements and wrap them
+    DomNode* child = parent->first_child;
+    bool wrapped_any = false;
+
+    while (child) {
+        // Skip non-elements and non-table-internal elements
+        if (!child->is_element()) {
+            child = child->next_sibling;
+            continue;
+        }
+
+        // Use resolve_display_value to get display from specified_style
+        DisplayValue child_display = resolve_display_value((void*)child);
+
+        if (!is_table_internal_display(child_display.inner)) {
+            child = child->next_sibling;
+            continue;
+        }
+
+        // Found a table-internal element - collect consecutive run
+        DomNode* run_start = child;
+        DomNode* run_end = child;
+
+        // Collect consecutive table-internal siblings (and any text/whitespace between them)
+        while (run_end->next_sibling) {
+            DomNode* next = run_end->next_sibling;
+            if (next->is_element()) {
+                DisplayValue next_display = resolve_display_value((void*)next);
+                if (is_table_internal_display(next_display.inner)) {
+                    run_end = next;
+                } else {
+                    break;
+                }
+            } else if (next->is_text()) {
+                // Include text nodes between table-internal elements
+                run_end = next;
+            } else {
+                break;
+            }
+        }
+
+        // Determine what wrapper we need based on the child display types
+        // CSS 2.1: cells need row, rows need table
+        bool needs_row = false;
+        bool needs_table = false;
+
+        for (DomNode* n = run_start; n; n = n->next_sibling) {
+            if (n->is_element()) {
+                DisplayValue n_display = resolve_display_value((void*)n);
+                CssEnum disp = n_display.inner;
+
+                if (disp == CSS_VALUE_TABLE_CELL) {
+                    needs_row = true;
+                    needs_table = true;
+                } else if (disp == CSS_VALUE_TABLE_ROW) {
+                    needs_table = true;
+                } else if (disp == CSS_VALUE_TABLE_ROW_GROUP ||
+                           disp == CSS_VALUE_TABLE_HEADER_GROUP ||
+                           disp == CSS_VALUE_TABLE_FOOTER_GROUP) {
+                    needs_table = true;
+                }
+            }
+            if (n == run_end) break;
+        }
+
+        // Create anonymous wrappers
+        DomElement* table_wrapper = nullptr;
+        DomElement* row_wrapper = nullptr;
+        DomElement* insertion_parent = nullptr;
+
+        if (needs_table) {
+            // Create anonymous table
+            // CSS Display Level 3: 'display: table' is shorthand for 'display: block table'
+            // outer = BLOCK (how it participates in flow), inner = TABLE (how children are laid out)
+            table_wrapper = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+            if (table_wrapper) {
+                table_wrapper->node_type = DOM_NODE_ELEMENT;
+                table_wrapper->tag_name = "::anon-table";
+                table_wrapper->doc = parent->doc;
+                table_wrapper->display.outer = CSS_VALUE_BLOCK;  // Tables are block-level
+                table_wrapper->display.inner = CSS_VALUE_TABLE;  // Inner is table layout
+                table_wrapper->styles_resolved = true;
+
+                // Inherit font from parent
+                if (parent->font) {
+                    table_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
+                    if (table_wrapper->font) {
+                        memcpy(table_wrapper->font, parent->font, sizeof(FontProp));
+                    }
+                }
+                if (parent->in_line) {
+                    table_wrapper->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
+                    if (table_wrapper->in_line) {
+                        table_wrapper->in_line->color = parent->in_line->color;
+                        table_wrapper->in_line->visibility = parent->in_line->visibility;
+                        table_wrapper->in_line->opacity = 1.0f;
+                    }
+                }
+
+                insertion_parent = table_wrapper;
+                log_debug("[ORPHAN-TABLE] Created anonymous table wrapper");
+            }
+        }
+
+        if (needs_row && table_wrapper) {
+            // Create anonymous table-row inside the table
+            // CSS Display Level 3: table-row has implicit block-level outer
+            row_wrapper = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+            if (row_wrapper) {
+                row_wrapper->node_type = DOM_NODE_ELEMENT;
+                row_wrapper->tag_name = "::anon-tr";
+                row_wrapper->doc = parent->doc;
+                row_wrapper->parent = table_wrapper;
+                row_wrapper->display.outer = CSS_VALUE_BLOCK;     // Block-level for layout purposes
+                row_wrapper->display.inner = CSS_VALUE_TABLE_ROW; // Inner is table-row
+                row_wrapper->styles_resolved = true;
+
+                // Inherit font from table wrapper
+                if (table_wrapper->font) {
+                    row_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
+                    if (row_wrapper->font) {
+                        memcpy(row_wrapper->font, table_wrapper->font, sizeof(FontProp));
+                    }
+                }
+                if (table_wrapper->in_line) {
+                    row_wrapper->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
+                    if (row_wrapper->in_line) {
+                        row_wrapper->in_line->color = table_wrapper->in_line->color;
+                        row_wrapper->in_line->visibility = table_wrapper->in_line->visibility;
+                        row_wrapper->in_line->opacity = 1.0f;
+                    }
+                }
+
+                // Add row to table
+                table_wrapper->first_child = row_wrapper;
+                table_wrapper->last_child = row_wrapper;
+
+                insertion_parent = row_wrapper;
+                log_debug("[ORPHAN-TABLE] Created anonymous table-row wrapper");
+            }
+        }
+
+        if (insertion_parent) {
+            // Insert the anonymous table at run_start's position
+            DomNode* prev = run_start->prev_sibling;
+            DomNode* next_after_run = run_end->next_sibling;
+
+            // Link table_wrapper into parent's child list
+            table_wrapper->parent = parent;
+            table_wrapper->prev_sibling = prev;
+            table_wrapper->next_sibling = next_after_run;
+
+            if (prev) {
+                prev->next_sibling = table_wrapper;
+            } else {
+                parent->first_child = table_wrapper;
+            }
+
+            if (next_after_run) {
+                next_after_run->prev_sibling = table_wrapper;
+            } else {
+                parent->last_child = table_wrapper;
+            }
+
+            // Move the run of children into the appropriate wrapper
+            DomNode* move_node = run_start;
+            while (move_node) {
+                DomNode* next_to_move = move_node->next_sibling;
+                bool is_last = (move_node == run_end);
+
+                // Reparent this node
+                move_node->parent = insertion_parent;
+                move_node->prev_sibling = insertion_parent->last_child;
+                move_node->next_sibling = nullptr;
+
+                if (insertion_parent->last_child) {
+                    insertion_parent->last_child->next_sibling = move_node;
+                } else {
+                    insertion_parent->first_child = move_node;
+                }
+                insertion_parent->last_child = move_node;
+
+                if (is_last) break;
+                move_node = next_to_move;
+            }
+
+            wrapped_any = true;
+
+            // Continue from after the wrapper
+            child = table_wrapper->next_sibling;
+        } else {
+            child = run_end->next_sibling;
+        }
+    }
+
+    return wrapped_any;
+}
+
+// =============================================================================
 // MAIN ENTRY POINT
 // =============================================================================
 
