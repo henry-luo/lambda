@@ -1283,14 +1283,88 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                 min_width = widths.min_content;
                 max_width = widths.max_content;
-                // BUGFIX: Use line height instead of font size for text height
-                // This matches browser behavior where text takes up line-height space
-                if (lycon->font.ft_face) {
+
+                // Calculate height using CSS line-height if available, otherwise font metrics
+                // Line-height is inherited, so walk up the parent chain to find it
+                float resolved_line_height = 0;
+                DomNode* lh_node = item;
+                while (lh_node) {
+                    if (lh_node->is_element()) {
+                        DomElement* lh_elem = lh_node->as_element();
+                        ViewBlock* lh_view = (ViewBlock*)lh_elem;
+
+                        // Check blk->line_height first (resolved CSS property)
+                        if (lh_view->blk && lh_view->blk->line_height) {
+                            const CssValue* lh_val = lh_view->blk->line_height;
+                            // Skip 'inherit' keyword - continue to parent
+                            if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                                lh_val->data.keyword == CSS_VALUE_INHERIT) {
+                                lh_node = lh_node->parent;
+                                continue;
+                            }
+                            // Resolve the line-height value
+                            if (lh_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                // Unitless number: multiply by font-size
+                                resolved_line_height = lh_val->data.number.value * lycon->font.current_font_size;
+                            } else if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                                       lh_val->data.keyword == CSS_VALUE_NORMAL) {
+                                // 'normal' - use font metrics
+                                if (lycon->font.ft_face) {
+                                    resolved_line_height = calc_normal_line_height(lycon->font.ft_face);
+                                }
+                            } else {
+                                // Length or percentage
+                                resolved_line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_val);
+                            }
+                            if (resolved_line_height > 0) {
+                                log_debug("calculate_item_intrinsic_sizes: using CSS line-height=%.1f from %s",
+                                          resolved_line_height, lh_node->node_name());
+                                break;
+                            }
+                        }
+
+                        // Also check specified_style for line-height declaration
+                        if (lh_elem->specified_style) {
+                            CssDeclaration* lh_decl = style_tree_get_declaration(
+                                lh_elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+                            if (lh_decl && lh_decl->value) {
+                                const CssValue* lh_val = lh_decl->value;
+                                // Skip 'inherit' keyword
+                                if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                                    lh_val->data.keyword == CSS_VALUE_INHERIT) {
+                                    lh_node = lh_node->parent;
+                                    continue;
+                                }
+                                if (lh_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                    resolved_line_height = lh_val->data.number.value * lycon->font.current_font_size;
+                                } else if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                                           lh_val->data.keyword == CSS_VALUE_NORMAL) {
+                                    if (lycon->font.ft_face) {
+                                        resolved_line_height = calc_normal_line_height(lycon->font.ft_face);
+                                    }
+                                } else {
+                                    resolved_line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_val);
+                                }
+                                if (resolved_line_height > 0) {
+                                    log_debug("calculate_item_intrinsic_sizes: using CSS line-height=%.1f from specified_style of %s",
+                                              resolved_line_height, lh_node->node_name());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    lh_node = lh_node->parent;
+                }
+
+                // Use resolved line-height, or fallback to font metrics
+                if (resolved_line_height > 0) {
+                    min_height = max_height = resolved_line_height;
+                } else if (lycon->font.ft_face) {
                     min_height = max_height = calc_normal_line_height(lycon->font.ft_face);
                 } else if (lycon->font.style && lycon->font.style->font_size > 0) {
-                    min_height = max_height = lycon->font.style->font_size;  // Fallback to font-size
+                    min_height = max_height = lycon->font.style->font_size;
                 } else {
-                    min_height = max_height = 20.0f;  // Ultimate fallback
+                    min_height = max_height = 20.0f;
                 }
             } else {
                 // Fallback: rough estimation when no layout context
