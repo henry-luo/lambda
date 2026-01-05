@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Multi-column Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 40px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #333;
+        }
+
+        /* Two column layout */
+        .two-columns {
+            column-count: 2;
+            column-gap: 30px;
+        }
+
+        /* Three column layout */
+        .three-columns {
+            column-count: 3;
+            column-gap: 20px;
+        }
+
+        /* Column width based */
+        .auto-columns {
+            column-width: 200px;
+            column-gap: 25px;
+        }
+
+        /* With column rules */
+        .with-rules {
+            column-count: 2;
+            column-gap: 40px;
+            column-rule-width: 2px;
+            column-rule-style: solid;
+            column-rule-color: #ccc;
+        }
+
+        /* Dotted rules */
+        .dotted-rules {
+            column-count: 3;
+            column-gap: 30px;
+            column-rule-width: 1px;
+            column-rule-style: dotted;
+            column-rule-color: #999;
+        }
+
+        /* Column span test */
+        .with-spanning h3 {
+            column-span: all;
+            text-align: center;
+            background: #ddd;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        .with-spanning {
+            column-count: 2;
+            column-gap: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSS Multi-column Layout Test</h1>
+
+    <div class="section">
+        <h2>Two Columns (column-count: 2)</h2>
+        <div class="two-columns">
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+            <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+            <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Three Columns (column-count: 3)</h2>
+        <div class="three-columns">
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+            <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+            <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+            <p>Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Auto Columns (column-width: 200px)</h2>
+        <div class="auto-columns">
+            <p>This container will create as many columns as can fit based on the column-width setting. The actual number depends on the container width.</p>
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+            <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>With Column Rules (Solid)</h2>
+        <div class="with-rules">
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.</p>
+            <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>With Column Rules (Dotted)</h2>
+        <div class="dotted-rules">
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+            <p>Sed do eiusmod tempor incididunt ut labore et dolore.</p>
+            <p>Ut enim ad minim veniam, quis nostrud exercitation.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>With Column Spanning</h2>
+        <div class="with-spanning">
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+            <h3>Spanning Header</h3>
+            <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+            <p>Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+        </div>
+    </div>
+</body>
+</html>

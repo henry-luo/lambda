@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Filter Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .box {
+            width: 150px;
+            height: 100px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            text-align: center;
+            font-size: 12px;
+        }
+        .original {
+            filter: none;
+        }
+        .blur {
+            filter: blur(3px);
+        }
+        .brightness-up {
+            filter: brightness(1.5);
+        }
+        .brightness-down {
+            filter: brightness(0.5);
+        }
+        .contrast-up {
+            filter: contrast(150%);
+        }
+        .contrast-down {
+            filter: contrast(50%);
+        }
+        .grayscale {
+            filter: grayscale(100%);
+        }
+        .grayscale-partial {
+            filter: grayscale(50%);
+        }
+        .invert {
+            filter: invert(100%);
+        }
+        .opacity-filter {
+            filter: opacity(50%);
+        }
+        .saturate-up {
+            filter: saturate(200%);
+        }
+        .saturate-down {
+            filter: saturate(25%);
+        }
+        .sepia {
+            filter: sepia(100%);
+        }
+        .hue-rotate {
+            filter: hue-rotate(90deg);
+        }
+        .hue-rotate-180 {
+            filter: hue-rotate(180deg);
+        }
+        .drop-shadow {
+            filter: drop-shadow(4px 4px 8px rgba(0,0,0,0.5));
+        }
+        .combined {
+            filter: brightness(1.2) contrast(110%) saturate(120%);
+        }
+    </style>
+</head>
+<body>
+    <h1>CSS Filter Test</h1>
+    <div class="container">
+        <div class="box original">Original</div>
+        <div class="box blur">blur(3px)</div>
+        <div class="box brightness-up">brightness(1.5)</div>
+        <div class="box brightness-down">brightness(0.5)</div>
+        <div class="box contrast-up">contrast(150%)</div>
+        <div class="box contrast-down">contrast(50%)</div>
+        <div class="box grayscale">grayscale(100%)</div>
+        <div class="box grayscale-partial">grayscale(50%)</div>
+        <div class="box invert">invert(100%)</div>
+        <div class="box opacity-filter">opacity(50%)</div>
+        <div class="box saturate-up">saturate(200%)</div>
+        <div class="box saturate-down">saturate(25%)</div>
+        <div class="box sepia">sepia(100%)</div>
+        <div class="box hue-rotate">hue-rotate(90deg)</div>
+        <div class="box hue-rotate-180">hue-rotate(180deg)</div>
+        <div class="box drop-shadow">drop-shadow()</div>
+        <div class="box combined">Combined Filters</div>
+    </div>
+</body>
+</html>

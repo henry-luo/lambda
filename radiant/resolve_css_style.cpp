@@ -2035,6 +2035,21 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             DomElement* ancestor = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
             CssDeclaration* inherited_decl = NULL;
 
+            // Special handling for font-family: also check ancestor's computed font->family
+            // This handles cases where font shorthand was used (sets font->family without
+            // creating a CSS_PROPERTY_FONT_FAMILY declaration)
+            if (prop_id == CSS_PROPERTY_FONT_FAMILY && ancestor && ancestor->font && ancestor->font->family) {
+                log_debug("[FONT INHERIT] Found computed font-family in parent <%s>: %s",
+                    ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->family);
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (!span->font) {
+                    span->font = alloc_font_prop(lycon);
+                }
+                // Copy font-family from parent's computed font
+                span->font->family = ancestor->font->family;
+                continue;  // Move to next property
+            }
+
             while (ancestor && !inherited_decl) {
                 if (ancestor->specified_style) {
                     inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);
@@ -3105,6 +3120,945 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Values: normal, multiply, screen, overlay, darken, lighten, etc.
                 log_debug("[CSS] background-blend-mode: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store blend mode when BackgroundProp is extended
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BOX_SHADOW: {
+            log_debug("[CSS] Processing box-shadow property (value type=%d)", value->type);
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            // Handle 'none' keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->bound->box_shadow = nullptr;
+                log_debug("[CSS] box-shadow: none");
+                break;
+            }
+
+            // Box-shadow can be a list of shadows (comma-separated)
+            // Each shadow: [inset] <offset-x> <offset-y> [blur-radius] [spread-radius] [color]
+            BoxShadow* shadow_list_head = nullptr;
+            BoxShadow* shadow_list_tail = nullptr;
+
+            // Helper lambda to parse a single shadow from a value list
+            auto parse_single_shadow = [&](const CssValue* shadow_value) -> BoxShadow* {
+                BoxShadow* shadow = (BoxShadow*)alloc_prop(lycon, sizeof(BoxShadow));
+                memset(shadow, 0, sizeof(BoxShadow));
+                // Default color: black with full opacity
+                shadow->color.r = 0;
+                shadow->color.g = 0;
+                shadow->color.b = 0;
+                shadow->color.a = 255;
+
+                if (shadow_value->type == CSS_VALUE_TYPE_LIST) {
+                    const CssValue* list = shadow_value;
+                    int length_count = 0;
+                    for (size_t i = 0; i < list->data.list.count; i++) {
+                        const CssValue* v = list->data.list.values[i];
+                        if (!v) continue;
+
+                        if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                            if (v->data.keyword == CSS_VALUE_INSET) {
+                                shadow->inset = true;
+                            } else {
+                                // Could be a color keyword
+                                shadow->color = color_name_to_rgb(v->data.keyword);
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
+                            float val = (v->type == CSS_VALUE_TYPE_LENGTH)
+                                ? resolve_length_value(lycon, prop_id, v)
+                                : v->data.number.value;
+                            switch (length_count) {
+                                case 0: shadow->offset_x = val; break;
+                                case 1: shadow->offset_y = val; break;
+                                case 2: shadow->blur_radius = val; break;
+                                case 3: shadow->spread_radius = val; break;
+                            }
+                            length_count++;
+                        } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
+                            shadow->color = resolve_color_value(lycon, v);
+                        }
+                    }
+                } else if (shadow_value->type == CSS_VALUE_TYPE_LENGTH || shadow_value->type == CSS_VALUE_TYPE_NUMBER) {
+                    // Single length value - just offset-x (unlikely but valid syntax)
+                    shadow->offset_x = (shadow_value->type == CSS_VALUE_TYPE_LENGTH)
+                        ? resolve_length_value(lycon, prop_id, shadow_value)
+                        : shadow_value->data.number.value;
+                }
+                return shadow;
+            };
+
+            // Check if this is a list of shadows (comma-separated)
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Could be a single shadow's components OR multiple shadows
+                // Look for nested lists (multiple shadows) vs flat list (single shadow)
+                const CssValue* list = value;
+                bool is_multi_shadow = false;
+
+                // Check if any child is itself a list (indicates multiple shadows)
+                for (size_t i = 0; i < list->data.list.count && !is_multi_shadow; i++) {
+                    if (list->data.list.values[i] &&
+                        list->data.list.values[i]->type == CSS_VALUE_TYPE_LIST) {
+                        is_multi_shadow = true;
+                    }
+                }
+
+                if (is_multi_shadow) {
+                    // Multiple shadows - each child is a shadow
+                    for (size_t i = 0; i < list->data.list.count; i++) {
+                        const CssValue* shadow_val = list->data.list.values[i];
+                        if (!shadow_val) continue;
+                        BoxShadow* shadow = parse_single_shadow(shadow_val);
+                        if (shadow) {
+                            if (!shadow_list_head) {
+                                shadow_list_head = shadow;
+                                shadow_list_tail = shadow;
+                            } else {
+                                shadow_list_tail->next = shadow;
+                                shadow_list_tail = shadow;
+                            }
+                        }
+                    }
+                } else {
+                    // Single shadow - parse the flat list directly
+                    BoxShadow* shadow = parse_single_shadow(value);
+                    if (shadow) {
+                        shadow_list_head = shadow;
+                    }
+                }
+            }
+
+            span->bound->box_shadow = shadow_list_head;
+            log_debug("[CSS] box-shadow parsed: %s", shadow_list_head ? "shadow(s) set" : "none");
+            break;
+        }
+
+        // ============================================================================
+        // CSS Transforms
+        // ============================================================================
+        case CSS_PROPERTY_TRANSFORM: {
+            log_debug("[CSS] Processing transform property (value type=%d)", value->type);
+
+            // Handle 'none' keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->transform = nullptr;
+                log_debug("[CSS] transform: none");
+                break;
+            }
+
+            // Allocate transform property
+            if (!span->transform) {
+                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
+                memset(span->transform, 0, sizeof(TransformProp));
+                // Default origin: center (50% 50%)
+                span->transform->origin_x = 50.0f;
+                span->transform->origin_y = 50.0f;
+                span->transform->origin_x_percent = true;
+                span->transform->origin_y_percent = true;
+            }
+
+            TransformFunction* func_list_head = nullptr;
+            TransformFunction* func_list_tail = nullptr;
+
+            // Helper lambda to parse a single transform function
+            auto parse_transform_function = [&](const CssValue* func_value) -> TransformFunction* {
+                if (func_value->type != CSS_VALUE_TYPE_FUNCTION) return nullptr;
+
+                const CssFunction* func = func_value->data.function;
+                if (!func || !func->name) return nullptr;
+
+                TransformFunction* tf = (TransformFunction*)alloc_prop(lycon, sizeof(TransformFunction));
+                memset(tf, 0, sizeof(TransformFunction));
+
+                // Parse function name and arguments
+                if (strcasecmp(func->name, "translate") == 0) {
+                    tf->type = TRANSFORM_TRANSLATE;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.translate.x = resolve_length_value(lycon, prop_id, func->args[0]);
+                    }
+                    if (func->arg_count >= 2 && func->args[1]) {
+                        tf->params.translate.y = resolve_length_value(lycon, prop_id, func->args[1]);
+                    }
+                    log_debug("[CSS] transform: translate(%g, %g)", tf->params.translate.x, tf->params.translate.y);
+                }
+                else if (strcasecmp(func->name, "translateX") == 0) {
+                    tf->type = TRANSFORM_TRANSLATEX;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.translate.x = resolve_length_value(lycon, prop_id, func->args[0]);
+                    }
+                    log_debug("[CSS] transform: translateX(%g)", tf->params.translate.x);
+                }
+                else if (strcasecmp(func->name, "translateY") == 0) {
+                    tf->type = TRANSFORM_TRANSLATEY;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.translate.y = resolve_length_value(lycon, prop_id, func->args[0]);
+                    }
+                    log_debug("[CSS] transform: translateY(%g)", tf->params.translate.y);
+                }
+                else if (strcasecmp(func->name, "scale") == 0) {
+                    tf->type = TRANSFORM_SCALE;
+                    tf->params.scale.x = 1.0f;
+                    tf->params.scale.y = 1.0f;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.scale.x = func->args[0]->data.number.value;
+                        tf->params.scale.y = tf->params.scale.x; // default to uniform scale
+                    }
+                    if (func->arg_count >= 2 && func->args[1]) {
+                        tf->params.scale.y = func->args[1]->data.number.value;
+                    }
+                    log_debug("[CSS] transform: scale(%g, %g)", tf->params.scale.x, tf->params.scale.y);
+                }
+                else if (strcasecmp(func->name, "scaleX") == 0) {
+                    tf->type = TRANSFORM_SCALEX;
+                    tf->params.scale.x = 1.0f;
+                    tf->params.scale.y = 1.0f;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.scale.x = func->args[0]->data.number.value;
+                    }
+                    log_debug("[CSS] transform: scaleX(%g)", tf->params.scale.x);
+                }
+                else if (strcasecmp(func->name, "scaleY") == 0) {
+                    tf->type = TRANSFORM_SCALEY;
+                    tf->params.scale.x = 1.0f;
+                    tf->params.scale.y = 1.0f;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.scale.y = func->args[0]->data.number.value;
+                    }
+                    log_debug("[CSS] transform: scaleY(%g)", tf->params.scale.y);
+                }
+                else if (strcasecmp(func->name, "rotate") == 0) {
+                    tf->type = TRANSFORM_ROTATE;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        const CssValue* angle_val = func->args[0];
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH) {
+                            // Angle values come as LENGTH with angle units
+                            float angle = angle_val->data.length.value;
+                            CssUnit unit = angle_val->data.length.unit;
+                            // Convert to radians
+                            if (unit == CSS_UNIT_DEG) {
+                                tf->params.angle = angle * M_PI / 180.0f;
+                            } else if (unit == CSS_UNIT_RAD) {
+                                tf->params.angle = angle;
+                            } else if (unit == CSS_UNIT_GRAD) {
+                                tf->params.angle = angle * M_PI / 200.0f;
+                            } else if (unit == CSS_UNIT_TURN) {
+                                tf->params.angle = angle * 2.0f * M_PI;
+                            } else {
+                                tf->params.angle = angle * M_PI / 180.0f; // default to deg
+                            }
+                        } else if (angle_val->type == CSS_VALUE_TYPE_NUMBER) {
+                            // Unitless number = radians in some browsers, deg in CSS spec
+                            tf->params.angle = angle_val->data.number.value * M_PI / 180.0f;
+                        }
+                    }
+                    log_debug("[CSS] transform: rotate(%g rad)", tf->params.angle);
+                }
+                else if (strcasecmp(func->name, "skew") == 0) {
+                    tf->type = TRANSFORM_SKEW;
+                    // Parse skew angles
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        const CssValue* angle_val = func->args[0];
+                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
+                            ? angle_val->data.length.value : angle_val->data.number.value;
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
+                            tf->params.skew.x = angle;
+                        } else {
+                            tf->params.skew.x = angle * M_PI / 180.0f;
+                        }
+                    }
+                    if (func->arg_count >= 2 && func->args[1]) {
+                        const CssValue* angle_val = func->args[1];
+                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
+                            ? angle_val->data.length.value : angle_val->data.number.value;
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
+                            tf->params.skew.y = angle;
+                        } else {
+                            tf->params.skew.y = angle * M_PI / 180.0f;
+                        }
+                    }
+                    log_debug("[CSS] transform: skew(%g, %g rad)", tf->params.skew.x, tf->params.skew.y);
+                }
+                else if (strcasecmp(func->name, "skewX") == 0) {
+                    tf->type = TRANSFORM_SKEWX;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        const CssValue* angle_val = func->args[0];
+                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
+                            ? angle_val->data.length.value : angle_val->data.number.value;
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
+                            tf->params.angle = angle;
+                        } else {
+                            tf->params.angle = angle * M_PI / 180.0f;
+                        }
+                    }
+                    log_debug("[CSS] transform: skewX(%g rad)", tf->params.angle);
+                }
+                else if (strcasecmp(func->name, "skewY") == 0) {
+                    tf->type = TRANSFORM_SKEWY;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        const CssValue* angle_val = func->args[0];
+                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
+                            ? angle_val->data.length.value : angle_val->data.number.value;
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
+                            tf->params.angle = angle;
+                        } else {
+                            tf->params.angle = angle * M_PI / 180.0f;
+                        }
+                    }
+                    log_debug("[CSS] transform: skewY(%g rad)", tf->params.angle);
+                }
+                else if (strcasecmp(func->name, "matrix") == 0) {
+                    tf->type = TRANSFORM_MATRIX;
+                    // matrix(a, b, c, d, e, f) = [a c e; b d f; 0 0 1]
+                    // Default to identity
+                    tf->params.matrix.a = 1; tf->params.matrix.b = 0;
+                    tf->params.matrix.c = 0; tf->params.matrix.d = 1;
+                    tf->params.matrix.e = 0; tf->params.matrix.f = 0;
+                    if (func->arg_count >= 6) {
+                        tf->params.matrix.a = func->args[0]->data.number.value;
+                        tf->params.matrix.b = func->args[1]->data.number.value;
+                        tf->params.matrix.c = func->args[2]->data.number.value;
+                        tf->params.matrix.d = func->args[3]->data.number.value;
+                        tf->params.matrix.e = func->args[4]->data.number.value;
+                        tf->params.matrix.f = func->args[5]->data.number.value;
+                    }
+                    log_debug("[CSS] transform: matrix(%g,%g,%g,%g,%g,%g)",
+                        tf->params.matrix.a, tf->params.matrix.b, tf->params.matrix.c,
+                        tf->params.matrix.d, tf->params.matrix.e, tf->params.matrix.f);
+                }
+                // 3D transforms
+                else if (strcasecmp(func->name, "translate3d") == 0) {
+                    tf->type = TRANSFORM_TRANSLATE3D;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.translate3d.x = resolve_length_value(lycon, prop_id, func->args[0]);
+                    }
+                    if (func->arg_count >= 2 && func->args[1]) {
+                        tf->params.translate3d.y = resolve_length_value(lycon, prop_id, func->args[1]);
+                    }
+                    if (func->arg_count >= 3 && func->args[2]) {
+                        tf->params.translate3d.z = resolve_length_value(lycon, prop_id, func->args[2]);
+                    }
+                    log_debug("[CSS] transform: translate3d(%g, %g, %g)",
+                        tf->params.translate3d.x, tf->params.translate3d.y, tf->params.translate3d.z);
+                }
+                else if (strcasecmp(func->name, "translateZ") == 0) {
+                    tf->type = TRANSFORM_TRANSLATEZ;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.translate3d.z = resolve_length_value(lycon, prop_id, func->args[0]);
+                    }
+                    log_debug("[CSS] transform: translateZ(%g)", tf->params.translate3d.z);
+                }
+                else if (strcasecmp(func->name, "rotateX") == 0) {
+                    tf->type = TRANSFORM_ROTATEX;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        const CssValue* angle_val = func->args[0];
+                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
+                            ? angle_val->data.length.value : angle_val->data.number.value;
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
+                            tf->params.angle = angle;
+                        } else {
+                            tf->params.angle = angle * M_PI / 180.0f;
+                        }
+                    }
+                    log_debug("[CSS] transform: rotateX(%g rad)", tf->params.angle);
+                }
+                else if (strcasecmp(func->name, "rotateY") == 0) {
+                    tf->type = TRANSFORM_ROTATEY;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        const CssValue* angle_val = func->args[0];
+                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
+                            ? angle_val->data.length.value : angle_val->data.number.value;
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
+                            tf->params.angle = angle;
+                        } else {
+                            tf->params.angle = angle * M_PI / 180.0f;
+                        }
+                    }
+                    log_debug("[CSS] transform: rotateY(%g rad)", tf->params.angle);
+                }
+                else if (strcasecmp(func->name, "rotateZ") == 0) {
+                    tf->type = TRANSFORM_ROTATEZ;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        const CssValue* angle_val = func->args[0];
+                        float angle = (angle_val->type == CSS_VALUE_TYPE_LENGTH)
+                            ? angle_val->data.length.value : angle_val->data.number.value;
+                        if (angle_val->type == CSS_VALUE_TYPE_LENGTH && angle_val->data.length.unit == CSS_UNIT_RAD) {
+                            tf->params.angle = angle;
+                        } else {
+                            tf->params.angle = angle * M_PI / 180.0f;
+                        }
+                    }
+                    log_debug("[CSS] transform: rotateZ(%g rad)", tf->params.angle);
+                }
+                else if (strcasecmp(func->name, "perspective") == 0) {
+                    tf->type = TRANSFORM_PERSPECTIVE;
+                    if (func->arg_count >= 1 && func->args[0]) {
+                        tf->params.perspective = resolve_length_value(lycon, prop_id, func->args[0]);
+                    }
+                    log_debug("[CSS] transform: perspective(%g)", tf->params.perspective);
+                }
+                else {
+                    log_debug("[CSS] Unknown transform function: %s", func->name);
+                    return nullptr;
+                }
+
+                return tf;
+            };
+
+            // Parse transform functions from value
+            if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                // Single transform function
+                TransformFunction* tf = parse_transform_function(value);
+                if (tf) {
+                    func_list_head = tf;
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Multiple transform functions
+                const CssValue* list = value;
+                for (size_t i = 0; i < list->data.list.count; i++) {
+                    const CssValue* item = list->data.list.values[i];
+                    if (!item) continue;
+
+                    TransformFunction* tf = parse_transform_function(item);
+                    if (tf) {
+                        if (!func_list_head) {
+                            func_list_head = tf;
+                            func_list_tail = tf;
+                        } else {
+                            func_list_tail->next = tf;
+                            func_list_tail = tf;
+                        }
+                    }
+                }
+            }
+
+            span->transform->functions = func_list_head;
+            log_debug("[CSS] transform parsed: %s", func_list_head ? "function(s) set" : "none");
+            break;
+        }
+
+        case CSS_PROPERTY_TRANSFORM_ORIGIN: {
+            log_debug("[CSS] Processing transform-origin property (value type=%d)", value->type);
+
+            // Allocate transform property if needed
+            if (!span->transform) {
+                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
+                memset(span->transform, 0, sizeof(TransformProp));
+                span->transform->origin_x = 50.0f;
+                span->transform->origin_y = 50.0f;
+                span->transform->origin_x_percent = true;
+                span->transform->origin_y_percent = true;
+            }
+
+            // Parse transform-origin: can be keywords (left, center, right, top, bottom)
+            // or length/percentage values
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_LEFT) {
+                    span->transform->origin_x = 0;
+                    span->transform->origin_x_percent = true;
+                } else if (kw == CSS_VALUE_CENTER) {
+                    span->transform->origin_x = 50.0f;
+                    span->transform->origin_x_percent = true;
+                } else if (kw == CSS_VALUE_RIGHT) {
+                    span->transform->origin_x = 100.0f;
+                    span->transform->origin_x_percent = true;
+                } else if (kw == CSS_VALUE_TOP) {
+                    span->transform->origin_y = 0;
+                    span->transform->origin_y_percent = true;
+                } else if (kw == CSS_VALUE_BOTTOM) {
+                    span->transform->origin_y = 100.0f;
+                    span->transform->origin_y_percent = true;
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                const CssValue* list = value;
+                // First value is X, second is Y (optional third is Z)
+                for (size_t i = 0; i < list->data.list.count && i < 3; i++) {
+                    const CssValue* v = list->data.list.values[i];
+                    if (!v) continue;
+
+                    if (v->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        float pct = (float)v->data.percentage.value;
+                        if (i == 0) {
+                            span->transform->origin_x = pct;
+                            span->transform->origin_x_percent = true;
+                        } else if (i == 1) {
+                            span->transform->origin_y = pct;
+                            span->transform->origin_y_percent = true;
+                        } else {
+                            // Z cannot be percentage
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                        float len = resolve_length_value(lycon, prop_id, v);
+                        if (i == 0) {
+                            span->transform->origin_x = len;
+                            span->transform->origin_x_percent = false;
+                        } else if (i == 1) {
+                            span->transform->origin_y = len;
+                            span->transform->origin_y_percent = false;
+                        } else {
+                            span->transform->origin_z = len;
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = v->data.keyword;
+                        // Keywords can be in any order for X/Y
+                        if (kw == CSS_VALUE_LEFT || kw == CSS_VALUE_RIGHT) {
+                            span->transform->origin_x = (kw == CSS_VALUE_LEFT) ? 0 : 100.0f;
+                            span->transform->origin_x_percent = true;
+                        } else if (kw == CSS_VALUE_TOP || kw == CSS_VALUE_BOTTOM) {
+                            span->transform->origin_y = (kw == CSS_VALUE_TOP) ? 0 : 100.0f;
+                            span->transform->origin_y_percent = true;
+                        } else if (kw == CSS_VALUE_CENTER) {
+                            if (i == 0) {
+                                span->transform->origin_x = 50.0f;
+                                span->transform->origin_x_percent = true;
+                            } else {
+                                span->transform->origin_y = 50.0f;
+                                span->transform->origin_y_percent = true;
+                            }
+                        }
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                span->transform->origin_x = (float)value->data.percentage.value;
+                span->transform->origin_x_percent = true;
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                span->transform->origin_x = resolve_length_value(lycon, prop_id, value);
+                span->transform->origin_x_percent = false;
+            }
+
+            log_debug("[CSS] transform-origin: (%g%s, %g%s)",
+                span->transform->origin_x, span->transform->origin_x_percent ? "%" : "px",
+                span->transform->origin_y, span->transform->origin_y_percent ? "%" : "px");
+            break;
+        }
+
+        case CSS_PROPERTY_FILTER: {
+            log_debug("[CSS] Processing filter property");
+
+            // Helper lambda to parse a single filter function
+            auto parse_filter_func = [&](CssFunction* func) -> FilterFunction* {
+                if (!func || !func->name || func->arg_count == 0) return nullptr;
+
+                FilterFunction* filter = (FilterFunction*)alloc_prop(lycon, sizeof(FilterFunction));
+                filter->next = nullptr;
+
+                const char* name = func->name;
+                CssValue* arg = func->args[0];  // First argument
+
+                if (strcmp(name, "blur") == 0) {
+                    filter->type = FILTER_BLUR;
+                    if (arg && arg->type == CSS_VALUE_TYPE_LENGTH) {
+                        filter->params.blur_radius = resolve_length_value(lycon, prop_id, arg);
+                    } else {
+                        filter->params.blur_radius = 0;
+                    }
+                    log_debug("[CSS] filter: blur(%.2fpx)", filter->params.blur_radius);
+                }
+                else if (strcmp(name, "brightness") == 0) {
+                    filter->type = FILTER_BRIGHTNESS;
+                    if (arg) {
+                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
+                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            filter->params.amount = (float)arg->data.number.value;
+                        } else {
+                            filter->params.amount = 1.0f;
+                        }
+                    } else {
+                        filter->params.amount = 1.0f;
+                    }
+                    log_debug("[CSS] filter: brightness(%.2f)", filter->params.amount);
+                }
+                else if (strcmp(name, "contrast") == 0) {
+                    filter->type = FILTER_CONTRAST;
+                    if (arg) {
+                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
+                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            filter->params.amount = (float)arg->data.number.value;
+                        } else {
+                            filter->params.amount = 1.0f;
+                        }
+                    } else {
+                        filter->params.amount = 1.0f;
+                    }
+                    log_debug("[CSS] filter: contrast(%.2f)", filter->params.amount);
+                }
+                else if (strcmp(name, "grayscale") == 0) {
+                    filter->type = FILTER_GRAYSCALE;
+                    if (arg) {
+                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
+                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            filter->params.amount = (float)arg->data.number.value;
+                        } else {
+                            filter->params.amount = 1.0f;
+                        }
+                    } else {
+                        filter->params.amount = 1.0f;
+                    }
+                    // Clamp to [0, 1]
+                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
+                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
+                    log_debug("[CSS] filter: grayscale(%.2f)", filter->params.amount);
+                }
+                else if (strcmp(name, "invert") == 0) {
+                    filter->type = FILTER_INVERT;
+                    if (arg) {
+                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
+                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            filter->params.amount = (float)arg->data.number.value;
+                        } else {
+                            filter->params.amount = 1.0f;
+                        }
+                    } else {
+                        filter->params.amount = 1.0f;
+                    }
+                    // Clamp to [0, 1]
+                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
+                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
+                    log_debug("[CSS] filter: invert(%.2f)", filter->params.amount);
+                }
+                else if (strcmp(name, "opacity") == 0) {
+                    filter->type = FILTER_OPACITY;
+                    if (arg) {
+                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
+                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            filter->params.amount = (float)arg->data.number.value;
+                        } else {
+                            filter->params.amount = 1.0f;
+                        }
+                    } else {
+                        filter->params.amount = 1.0f;
+                    }
+                    // Clamp to [0, 1]
+                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
+                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
+                    log_debug("[CSS] filter: opacity(%.2f)", filter->params.amount);
+                }
+                else if (strcmp(name, "saturate") == 0) {
+                    filter->type = FILTER_SATURATE;
+                    if (arg) {
+                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
+                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            filter->params.amount = (float)arg->data.number.value;
+                        } else {
+                            filter->params.amount = 1.0f;
+                        }
+                    } else {
+                        filter->params.amount = 1.0f;
+                    }
+                    log_debug("[CSS] filter: saturate(%.2f)", filter->params.amount);
+                }
+                else if (strcmp(name, "sepia") == 0) {
+                    filter->type = FILTER_SEPIA;
+                    if (arg) {
+                        if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            filter->params.amount = (float)arg->data.percentage.value / 100.0f;
+                        } else if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                            filter->params.amount = (float)arg->data.number.value;
+                        } else {
+                            filter->params.amount = 1.0f;
+                        }
+                    } else {
+                        filter->params.amount = 1.0f;
+                    }
+                    // Clamp to [0, 1]
+                    if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
+                    if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
+                    log_debug("[CSS] filter: sepia(%.2f)", filter->params.amount);
+                }
+                else if (strcmp(name, "hue-rotate") == 0) {
+                    filter->type = FILTER_HUE_ROTATE;
+                    if (arg && (arg->type == CSS_VALUE_TYPE_ANGLE || arg->type == CSS_VALUE_TYPE_LENGTH)) {
+                        // Angles are stored in length.value (degrees)
+                        float degrees = (float)arg->data.length.value;
+                        filter->params.angle = degrees * ((float)M_PI / 180.0f);
+                    } else if (arg && arg->type == CSS_VALUE_TYPE_NUMBER) {
+                        // Unitless number treated as degrees
+                        filter->params.angle = (float)arg->data.number.value * ((float)M_PI / 180.0f);
+                    } else {
+                        filter->params.angle = 0;
+                    }
+                    log_debug("[CSS] filter: hue-rotate(%.2frad)", filter->params.angle);
+                }
+                else if (strcmp(name, "drop-shadow") == 0) {
+                    filter->type = FILTER_DROP_SHADOW;
+                    filter->params.drop_shadow.offset_x = 0;
+                    filter->params.drop_shadow.offset_y = 0;
+                    filter->params.drop_shadow.blur_radius = 0;
+                    filter->params.drop_shadow.color.r = 0;
+                    filter->params.drop_shadow.color.g = 0;
+                    filter->params.drop_shadow.color.b = 0;
+                    filter->params.drop_shadow.color.a = 255;
+
+                    // Parse drop-shadow arguments: <offset-x> <offset-y> [<blur-radius>] [<color>]
+                    int len_idx = 0;
+                    for (int i = 0; i < func->arg_count; i++) {
+                        CssValue* a = func->args[i];
+                        if (!a) continue;
+                        if (a->type == CSS_VALUE_TYPE_LENGTH) {
+                            float val = resolve_length_value(lycon, prop_id, a);
+                            if (len_idx == 0) filter->params.drop_shadow.offset_x = val;
+                            else if (len_idx == 1) filter->params.drop_shadow.offset_y = val;
+                            else if (len_idx == 2) filter->params.drop_shadow.blur_radius = val;
+                            len_idx++;
+                        } else if (a->type == CSS_VALUE_TYPE_COLOR) {
+                            filter->params.drop_shadow.color.r = a->data.color.data.rgba.r;
+                            filter->params.drop_shadow.color.g = a->data.color.data.rgba.g;
+                            filter->params.drop_shadow.color.b = a->data.color.data.rgba.b;
+                            filter->params.drop_shadow.color.a = a->data.color.data.rgba.a;
+                        }
+                    }
+                    log_debug("[CSS] filter: drop-shadow(%.2f %.2f %.2f rgba(%d,%d,%d,%.2f))",
+                        filter->params.drop_shadow.offset_x, filter->params.drop_shadow.offset_y,
+                        filter->params.drop_shadow.blur_radius,
+                        filter->params.drop_shadow.color.r, filter->params.drop_shadow.color.g,
+                        filter->params.drop_shadow.color.b, filter->params.drop_shadow.color.a / 255.0f);
+                }
+                else {
+                    log_debug("[CSS] filter: unknown function '%s'", name);
+                    return nullptr;
+                }
+
+                return filter;
+            };
+
+            // Handle "none" keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->filter = nullptr;
+                log_debug("[CSS] filter: none");
+                break;
+            }
+
+            // Handle single filter function
+            if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                span->filter = (FilterProp*)alloc_prop(lycon, sizeof(FilterProp));
+                span->filter->functions = parse_filter_func(value->data.function);
+                break;
+            }
+
+            // Handle list of filter functions
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                span->filter = (FilterProp*)alloc_prop(lycon, sizeof(FilterProp));
+                span->filter->functions = nullptr;
+                FilterFunction* tail = nullptr;
+
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (item && item->type == CSS_VALUE_TYPE_FUNCTION) {
+                        FilterFunction* f = parse_filter_func(item->data.function);
+                        if (f) {
+                            if (!span->filter->functions) {
+                                span->filter->functions = f;
+                            } else {
+                                tail->next = f;
+                            }
+                            tail = f;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        // ========================================================================
+        // Multi-column Layout Properties
+        // ========================================================================
+
+        case CSS_PROPERTY_COLUMN_COUNT: {
+            log_debug("[CSS] Processing column-count property");
+            if (!block) {
+                log_debug("[CSS] column-count: Cannot apply to non-block element");
+                break;
+            }
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                block->multicol->column_count = 0;  // auto
+                block->multicol->column_width = 0;  // auto
+                block->multicol->column_gap = 16.0f;  // default 1em (assuming 16px font)
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->rule_width = 0;
+                block->multicol->rule_style = CSS_VALUE_NONE;
+                block->multicol->rule_color.r = 0;
+                block->multicol->rule_color.g = 0;
+                block->multicol->rule_color.b = 0;
+                block->multicol->rule_color.a = 255;
+                block->multicol->span = COLUMN_SPAN_NONE;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                block->multicol->column_count = 0;  // auto
+                log_debug("[CSS] column-count: auto");
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int count = (int)value->data.number.value;
+                if (count > 0) {
+                    block->multicol->column_count = count;
+                    log_debug("[CSS] column-count: %d", count);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_WIDTH: {
+            log_debug("[CSS] Processing column-width property");
+            if (!block) {
+                log_debug("[CSS] column-width: Cannot apply to non-block element");
+                break;
+            }
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                block->multicol->column_count = 0;
+                block->multicol->column_width = 0;
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->rule_width = 0;
+                block->multicol->rule_style = CSS_VALUE_NONE;
+                block->multicol->rule_color.r = 0;
+                block->multicol->rule_color.g = 0;
+                block->multicol->rule_color.b = 0;
+                block->multicol->rule_color.a = 255;
+                block->multicol->span = COLUMN_SPAN_NONE;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                block->multicol->column_width = 0;  // auto
+                log_debug("[CSS] column-width: auto");
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                float width = resolve_length_value(lycon, prop_id, value);
+                if (width > 0) {
+                    block->multicol->column_width = width;
+                    log_debug("[CSS] column-width: %.2fpx", width);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_RULE_WIDTH: {
+            log_debug("[CSS] Processing column-rule-width property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                block->multicol->rule_width = resolve_length_value(lycon, prop_id, value);
+                log_debug("[CSS] column-rule-width: %.2fpx", block->multicol->rule_width);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // thin, medium, thick
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_THIN) block->multicol->rule_width = 1.0f;
+                else if (kw == CSS_VALUE_MEDIUM) block->multicol->rule_width = 3.0f;
+                else if (kw == CSS_VALUE_THICK) block->multicol->rule_width = 5.0f;
+                log_debug("[CSS] column-rule-width keyword: %.2fpx", block->multicol->rule_width);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_RULE_STYLE: {
+            log_debug("[CSS] Processing column-rule-style property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                block->multicol->rule_style = value->data.keyword;
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                log_debug("[CSS] column-rule-style: %s", info ? info->name : "unknown");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_RULE_COLOR: {
+            log_debug("[CSS] Processing column-rule-color property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_COLOR) {
+                block->multicol->rule_color.r = value->data.color.data.rgba.r;
+                block->multicol->rule_color.g = value->data.color.data.rgba.g;
+                block->multicol->rule_color.b = value->data.color.data.rgba.b;
+                block->multicol->rule_color.a = value->data.color.data.rgba.a;
+                log_debug("[CSS] column-rule-color: rgba(%d,%d,%d,%.2f)",
+                    block->multicol->rule_color.r, block->multicol->rule_color.g,
+                    block->multicol->rule_color.b, block->multicol->rule_color.a / 255.0f);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_SPAN: {
+            log_debug("[CSS] Processing column-span property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_ALL) {
+                    block->multicol->span = COLUMN_SPAN_ALL;
+                    log_debug("[CSS] column-span: all");
+                } else {
+                    block->multicol->span = COLUMN_SPAN_NONE;
+                    log_debug("[CSS] column-span: none");
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COLUMN_FILL: {
+            log_debug("[CSS] Processing column-fill property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_AUTO) {
+                    block->multicol->fill = COLUMN_FILL_AUTO;
+                    log_debug("[CSS] column-fill: auto");
+                } else {
+                    block->multicol->fill = COLUMN_FILL_BALANCE;
+                    log_debug("[CSS] column-fill: balance");
+                }
             }
             break;
         }
@@ -4803,7 +5757,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             float gap_value = 0;
             bool is_percent = false;
-            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+            bool is_normal = false;
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
+                gap_value = 16.0f;  // Default 1em = 16px
+                is_normal = true;
+                log_debug("[CSS] column-gap: normal (16px)");
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 gap_value = resolve_length_value(lycon, prop_id, value);
                 log_debug("[CSS] column-gap: %.2fpx", gap_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -4820,7 +5780,28 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Always apply to grid (for grid containers)
             alloc_grid_prop(lycon, block);
             block->embed->grid->column_gap = gap_value;
-            log_debug("[CSS] column-gap applied: %.2f (stored in both flex and grid)", gap_value);
+
+            // Also apply to multi-column layout
+            // Create multicol struct if it doesn't exist (column-gap may be processed before column-count)
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                block->multicol->column_count = 0;  // auto
+                block->multicol->column_width = 0;  // auto
+                block->multicol->column_gap = 16.0f;  // default 1em
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->rule_width = 0;
+                block->multicol->rule_style = CSS_VALUE_NONE;
+                block->multicol->rule_color.r = 0;
+                block->multicol->rule_color.g = 0;
+                block->multicol->rule_color.b = 0;
+                block->multicol->rule_color.a = 255;
+                block->multicol->span = COLUMN_SPAN_NONE;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+            block->multicol->column_gap = gap_value;
+            block->multicol->column_gap_is_normal = is_normal;
+
+            log_debug("[CSS] column-gap applied: %.2f (stored in flex, grid, and multicol)", gap_value);
             break;
         }
 

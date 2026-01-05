@@ -4,6 +4,8 @@
 #include "intrinsic_sizing.hpp"
 #include "form_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 
 #include "../lib/log.h"
 #include <float.h>
@@ -162,7 +164,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
     while (child) {
         if (child->is_element()) {
             float child_height = measure_content_height_recursive(child, lycon);
-            
+
             // If recursive measurement returned 0, try other measurement methods
             if (child_height == 0.0f && lycon) {
                 ViewElement* child_view = (ViewElement*)child->as_element();
@@ -464,7 +466,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             // For empty flex containers (e.g., flex items with no children or
                             // only empty children), the height should be 0
                             // For flex containers with content, use recursive measurement or estimate
-                            
+
                             // First check if direct children have explicit heights
                             bool has_children_with_explicit_height = false;
                             bool has_text_content = false;
@@ -501,7 +503,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                     content = content->next_sibling;
                                 }
                             }
-                            
+
                             if (!has_text_content && !has_element_content) {
                                 // Empty flex container - height is 0
                                 elem_height = 0;
@@ -654,7 +656,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             tag == HTM_TAG_BDO) {
                             is_inline_child = true;
                         }
-                        
+
                         if (is_row_flex || is_inline_child) {
                             // Row flex or inline children: use MAX of child heights
                             // Don't add margin for text-containing inline elements or explicit height elements
@@ -1133,20 +1135,101 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     // Check if item has children to measure
     DomNode* child = item->first_child;
     if (!child) {
-        // No children - use explicit dimensions if specified, otherwise 0
-        // CRITICAL FIX: Don't use item->width/height which may have been pre-set
-        // to container size. Use given_width/given_height which are the CSS-specified values.
+        // No children - check for pseudo-element content (::before/::after)
+        // This is critical for icon fonts like FontAwesome which use ::before with content
+        bool has_pseudo_content = false;
+        float pseudo_width = 0, pseudo_height = 0;
+
+        if (lycon) {
+            DomElement* elem = item;
+            bool has_before = dom_element_has_before_content(elem);
+            bool has_after = dom_element_has_after_content(elem);
+
+            if (has_before || has_after) {
+                log_debug("calculate_item_intrinsic_sizes: element has pseudo-element content (before=%d, after=%d)",
+                          has_before, has_after);
+
+                // Get content of pseudo-elements and measure using parent's font
+                // For FontAwesome icons, the icon font-family is inherited from parent
+                if (has_before) {
+                    const char* before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
+                    if (before_content && *before_content) {
+                        // Set up font for measurement using parent element's font
+                        FontBox saved = lycon->font;
+                        if (item->font) {
+                            setup_font(lycon->ui_context, &lycon->font, item->font);
+                        }
+
+                        // Measure the pseudo-element content
+                        size_t content_len = strlen(before_content);
+                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, before_content, content_len);
+
+                        pseudo_width += widths.max_content;
+                        float line_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
+                                            lycon->font.style->font_size : 16.0f;
+                        if (lycon->font.ft_face) {
+                            line_height = calc_normal_line_height(lycon->font.ft_face);
+                        }
+                        if (line_height > pseudo_height) {
+                            pseudo_height = line_height;
+                        }
+
+                        log_debug("calculate_item_intrinsic_sizes: ::before content='%s' -> width=%.1f, height=%.1f",
+                                  before_content, widths.max_content, line_height);
+
+                        lycon->font = saved;
+                        has_pseudo_content = true;
+                    }
+                }
+
+                if (has_after) {
+                    const char* after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
+                    if (after_content && *after_content) {
+                        FontBox saved = lycon->font;
+                        if (item->font) {
+                            setup_font(lycon->ui_context, &lycon->font, item->font);
+                        }
+
+                        size_t content_len = strlen(after_content);
+                        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, after_content, content_len);
+
+                        pseudo_width += widths.max_content;
+                        float line_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
+                                            lycon->font.style->font_size : 16.0f;
+                        if (lycon->font.ft_face) {
+                            line_height = calc_normal_line_height(lycon->font.ft_face);
+                        }
+                        if (line_height > pseudo_height) {
+                            pseudo_height = line_height;
+                        }
+
+                        log_debug("calculate_item_intrinsic_sizes: ::after content='%s' -> width=%.1f, height=%.1f",
+                                  after_content, widths.max_content, line_height);
+
+                        lycon->font = saved;
+                        has_pseudo_content = true;
+                    }
+                }
+            }
+        }
+
+        // Use explicit dimensions if specified, otherwise use pseudo-element content size
         if (item->blk && item->blk->given_width > 0) {
             min_width = max_width = item->blk->given_width;
+        } else if (has_pseudo_content) {
+            min_width = max_width = pseudo_width;
         } else {
-            min_width = max_width = 0;  // No explicit width, intrinsic is 0
+            min_width = max_width = 0;
         }
         if (item->blk && item->blk->given_height > 0) {
             min_height = max_height = item->blk->given_height;
+        } else if (has_pseudo_content) {
+            min_height = max_height = pseudo_height;
         } else {
-            min_height = max_height = 0;  // No explicit height, intrinsic is 0
+            min_height = max_height = 0;
         }
-        log_debug("Empty element intrinsic sizes: width=%.1f, height=%.1f (explicit)", min_width, min_height);
+        log_debug("Empty element intrinsic sizes: width=%.1f, height=%.1f (pseudo_content=%d)",
+                  min_width, min_height, has_pseudo_content);
     } else if (child->is_text() && !child->next_sibling) {
         // Simple text node - use unified intrinsic sizing API if available
         const char* text = (const char*)child->text_data();
@@ -1160,14 +1243,14 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 const char* measure_text = text;
                 size_t measure_len = len;
                 static thread_local char normalized_buffer[4096];
-                
+
                 if (should_collapse_whitespace(ws)) {
                     measure_len = normalize_whitespace_for_flex(text, len, normalized_buffer, sizeof(normalized_buffer));
                     measure_text = normalized_buffer;
-                    log_debug("Normalized text for intrinsic sizing: '%s' -> '%s' (ws=%d)", 
+                    log_debug("Normalized text for intrinsic sizing: '%s' -> '%s' (ws=%d)",
                               text, normalized_buffer, ws);
                 }
-                
+
                 // Get text-transform from parent element (text inherits from parent)
                 // Look up parent chain since text-transform is inherited
                 CssEnum text_transform = CSS_VALUE_NONE;
@@ -1195,7 +1278,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     }
                     tt_node = tt_node->parent;
                 }
-                
+
                 // Use accurate FreeType-based measurement
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                 min_width = widths.min_content;
@@ -1271,7 +1354,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             max_width = item_sizes.max_content;
             log_debug("calculate_item_intrinsic_sizes: non-flex container, using measure_element_intrinsic_widths: min=%.1f, max=%.1f",
                       min_width, max_width);
-            
+
             // For height, calculate from children or use cached value
             // Check cache for height
             if (cached && cached->measured_height > 0) {
@@ -1283,7 +1366,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
                 log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f", min_height);
             }
-            
+
             // Skip the manual child iteration since we've already calculated sizes
             goto store_results;
         }
@@ -1299,7 +1382,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
         {
             DomNode* c = child;
-            
+
             // Set up parent context with item's height so children with percentage heights
             // and aspect-ratio can compute their intrinsic width
             BlockContext* saved_parent = nullptr;
@@ -1345,13 +1428,13 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 const char* measure_text = text;
                                 size_t measure_len = text_len;
                                 static thread_local char normalized_buffer2[4096];
-                                
+
                                 if (should_collapse_whitespace(ws)) {
-                                    measure_len = normalize_whitespace_for_flex(text, text_len, 
+                                    measure_len = normalize_whitespace_for_flex(text, text_len,
                                                                                  normalized_buffer2, sizeof(normalized_buffer2));
                                     measure_text = normalized_buffer2;
                                 }
-                                
+
                                 // Get text-transform from parent element chain
                                 CssEnum text_transform = CSS_VALUE_NONE;
                                 DomNode* tt_node = item;
@@ -1378,7 +1461,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                     }
                                     tt_node = tt_node->parent;
                                 }
-                                
+
                                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                                 text_min_width = widths.min_content;
                                 text_max_width = widths.max_content;
@@ -1396,7 +1479,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 text_min_width = text_max_width;  // Fallback: same as max
                                 text_height = 20.0f;
                             }
-                            
+
                             // CRITICAL FIX: For row flex containers, text nodes should be summed
                             // into total_child_width just like element children. Previously text
                             // was only MAX'd which caused incorrect intrinsic width calculation
@@ -1408,7 +1491,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 min_child_width = max(min_child_width, text_min_width);
                                 max_child_width = max(max_child_width, text_max_width);
                             }
-                            
+
                             // For height, row flex takes max, column flex sums
                             if (is_row_flex_container) {
                                 total_child_height = max(total_child_height, text_height);
@@ -1472,7 +1555,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         } else if (lycon) {
                             // Child doesn't have fi yet - use measure_element_intrinsic_widths
                             // This handles the case where intrinsic sizing runs before fi is initialized
-                            
+
                             // CRITICAL FIX: Set up child's font context before measuring
                             // Otherwise text will be measured with parent's font (wrong width)
                             FontBox saved_child_font = lycon->font;
@@ -1481,13 +1564,13 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 setup_font(lycon->ui_context, &lycon->font, child_view->font);
                                 child_font_changed = true;
                             }
-                            
+
                             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)child_view);
                             child_min_width = child_sizes.min_content;
                             child_max_width = child_sizes.max_content;
                             log_debug("Used measure_element_intrinsic_widths for child: min=%.1f, max=%.1f",
                                       child_min_width, child_max_width);
-                            
+
                             // Restore parent font
                             if (child_font_changed) {
                                 lycon->font = saved_child_font;
@@ -1572,7 +1655,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
 
             log_debug("Traversed children: min_width=%.1f, max_width=%.1f, total_width=%.1f, total_height=%.1f, is_row_flex=%d",
                       min_child_width, max_child_width, total_child_width, total_child_height, is_row_flex_container);
-            
+
             // Restore parent context
             if (need_restore_parent && lycon) {
                 lycon->block.parent = saved_parent;

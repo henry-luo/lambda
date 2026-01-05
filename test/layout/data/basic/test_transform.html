@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CSS Transform Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 60px;
+            margin-top: 20px;
+        }
+        .box-wrapper {
+            width: 150px;
+            height: 120px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .box {
+            width: 100px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            text-align: center;
+            color: white;
+            border-radius: 8px;
+            box-shadow: 2px 2px 8px rgba(0,0,0,0.3);
+        }
+        .label {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #666;
+            text-align: center;
+        }
+
+        /* Transform examples */
+        .translate {
+            transform: translate(20px, 10px);
+        }
+
+        .scale {
+            transform: scale(1.3);
+        }
+
+        .scale-xy {
+            transform: scale(1.5, 0.8);
+        }
+
+        .rotate {
+            transform: rotate(15deg);
+        }
+
+        .rotate-negative {
+            transform: rotate(-30deg);
+        }
+
+        .skew {
+            transform: skew(10deg, 5deg);
+        }
+
+        .skewX {
+            transform: skewX(15deg);
+        }
+
+        .combined {
+            transform: translate(10px, 5px) rotate(10deg) scale(1.1);
+        }
+
+        .origin-top-left {
+            transform-origin: top left;
+            transform: rotate(20deg);
+        }
+
+        .origin-bottom-right {
+            transform-origin: bottom right;
+            transform: rotate(20deg);
+        }
+
+        .matrix {
+            /* matrix(a, b, c, d, e, f) - slight rotation and scale */
+            transform: matrix(0.9, 0.2, -0.2, 0.9, 5, 5);
+        }
+    </style>
+</head>
+<body>
+    <h1>CSS Transform Test</h1>
+    <div class="container">
+        <div class="box-wrapper">
+            <div class="box">No Transform</div>
+            <div class="label">Original</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box translate">Translate</div>
+            <div class="label">translate(20px, 10px)</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box scale">Scale</div>
+            <div class="label">scale(1.3)</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box scale-xy">Scale XY</div>
+            <div class="label">scale(1.5, 0.8)</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box rotate">Rotate</div>
+            <div class="label">rotate(15deg)</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box rotate-negative">Rotate -</div>
+            <div class="label">rotate(-30deg)</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box skew">Skew</div>
+            <div class="label">skew(10deg, 5deg)</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box skewX">SkewX</div>
+            <div class="label">skewX(15deg)</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box combined">Combined</div>
+            <div class="label">translate + rotate + scale</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box origin-top-left">Origin TL</div>
+            <div class="label">origin: top left</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box origin-bottom-right">Origin BR</div>
+            <div class="label">origin: bottom right</div>
+        </div>
+
+        <div class="box-wrapper">
+            <div class="box matrix">Matrix</div>
+            <div class="label">matrix()</div>
+        </div>
+    </div>
+</body>
+</html>

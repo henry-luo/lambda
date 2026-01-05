@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Box Shadow Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 40px;
+        }
+        .box {
+            width: 150px;
+            height: 100px;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            text-align: center;
+            padding: 10px;
+        }
+
+        /* Simple shadow */
+        .shadow-simple {
+            box-shadow: 5px 5px 10px rgba(0,0,0,0.3);
+        }
+
+        /* Shadow with spread */
+        .shadow-spread {
+            box-shadow: 5px 5px 10px 5px rgba(0,0,0,0.3);
+        }
+
+        /* Inset shadow */
+        .shadow-inset {
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        /* Multiple shadows */
+        .shadow-multiple {
+            box-shadow:
+                3px 3px 5px rgba(0,0,0,0.3),
+                -3px -3px 5px rgba(255,255,255,0.8);
+        }
+
+        /* Color shadow */
+        .shadow-color {
+            box-shadow: 8px 8px 0 blue;
+        }
+
+        /* Soft ambient shadow */
+        .shadow-ambient {
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        /* Sharp shadow (no blur) */
+        .shadow-sharp {
+            box-shadow: 5px 5px 0 black;
+        }
+
+        /* Large blur */
+        .shadow-blur {
+            box-shadow: 0 0 30px 5px rgba(0,0,200,0.5);
+        }
+
+        /* Rounded corners with shadow */
+        .shadow-rounded {
+            border-radius: 20px;
+            box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
+        }
+
+        /* Negative spread */
+        .shadow-negative-spread {
+            box-shadow: 0 10px 10px -5px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <h1>Box Shadow Test</h1>
+    <div class="container">
+        <div class="box shadow-simple">Simple Shadow<br>5px 5px 10px</div>
+        <div class="box shadow-spread">With Spread<br>5px 5px 10px 5px</div>
+        <div class="box shadow-inset">Inset Shadow<br>inset 0 0 10px</div>
+        <div class="box shadow-multiple">Multiple Shadows<br>3px 3px, -3px -3px</div>
+        <div class="box shadow-color">Color Shadow<br>8px 8px 0 blue</div>
+        <div class="box shadow-ambient">Ambient<br>0 10px 40px</div>
+        <div class="box shadow-sharp">Sharp (no blur)<br>5px 5px 0</div>
+        <div class="box shadow-blur">Large Blur<br>0 0 30px 5px</div>
+        <div class="box shadow-rounded">Rounded<br>border-radius: 20px</div>
+        <div class="box shadow-negative-spread">Negative Spread<br>0 10px 10px -5px</div>
+    </div>
+</body>
+</html>
