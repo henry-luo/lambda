@@ -511,9 +511,9 @@ bool save_pdf_to_file(HPDF_Doc pdf_doc, const char* filename) {
 }
 
 // Main function to layout HTML and render to PDF
-int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width, int viewport_height) {
-    log_debug("render_html_to_pdf called with html_file='%s', pdf_file='%s', viewport=%dx%d",
-              html_file, pdf_file, viewport_width, viewport_height);
+int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width, int viewport_height, float scale) {
+    log_debug("render_html_to_pdf called with html_file='%s', pdf_file='%s', viewport=%dx%d, scale=%.2f",
+              html_file, pdf_file, viewport_width, viewport_height, scale);
 
     // Remember if we need to auto-size (viewport was 0)
     bool auto_width = (viewport_width == 0);
@@ -555,6 +555,10 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
         return 1;
     }
 
+    // Set scale for rendering (in headless mode, pixel_ratio is always 1.0)
+    doc->given_scale = scale;
+    doc->scale = scale;
+
     ui_context.document = doc;
 
     // Process @font-face rules before layout
@@ -593,11 +597,14 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
         }
     }
 
-    // Render to PDF
+    // Render to PDF (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("Rendering view tree to PDF...");
+        // PDF output dimensions are scaled; coordinates inside are in CSS pixels with transform
+        float pdf_width = content_max_x * scale;
+        float pdf_height = content_max_y * scale;
         HPDF_Doc pdf_doc = render_view_tree_to_pdf(&ui_context, doc->view_tree->root,
-                                                   (float)content_max_x, (float)content_max_y);
+                                                   pdf_width, pdf_height);
         if (pdf_doc) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
                 printf("Successfully rendered HTML to PDF: %s\\n", pdf_file);

@@ -131,10 +131,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     // set default fonts
     // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
-    // default font size in HTML is 16 px for most browsers
-    uicon->default_font = (FontProp){"Times New Roman", (float)(16 * uicon->pixel_ratio), // 16px
+    // default font size in HTML is 16 CSS pixels - layout operates in CSS logical pixels
+    uicon->default_font = (FontProp){"Times New Roman", 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
-    uicon->legacy_default_font = (FontProp){"Times", (float)(16 * uicon->pixel_ratio), // 16px
+    uicon->legacy_default_font = (FontProp){"Times", 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->fallback_fonts = fallback_fonts;
 

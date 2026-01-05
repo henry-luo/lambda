@@ -507,9 +507,10 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             int iframe_width = block->width > 0 ? (int)block->width : lycon->ui_context->window_width;
             int iframe_height = block->height > 0 ? (int)block->height : lycon->ui_context->window_height;
             log_debug("load iframe doc src: %s (iframe viewport=%dx%d)", src->str, iframe_width, iframe_height);
+            // Load iframe document - pixel_ratio from ui_context is still used internally
             doc = load_html_doc(lycon->ui_context->document->url, src->str,
                 iframe_width, iframe_height,
-                lycon->ui_context->pixel_ratio);
+                1.0f);  // Layout in CSS logical pixels
             strbuf_free(src);
             if (!doc) {
                 log_debug("failed to load iframe document");
@@ -1544,9 +1545,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
         if (block->embed && block->embed->img) {
             ImageSurface* img = block->embed->img;
-            // scale image by pixel ratio
-            float w = img->width * lycon->ui_context->pixel_ratio;
-            float h = img->height * lycon->ui_context->pixel_ratio;
+            // Image intrinsic dimensions are in CSS logical pixels
+            float w = img->width;
+            float h = img->height;
 
             // Check if width was specified as percentage but resolved to 0
             // This happens when parent has auto/0 width - use intrinsic width instead

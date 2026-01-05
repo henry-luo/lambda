@@ -40,9 +40,9 @@ static Color parse_html_color(const char* color_str) {
 }
 
 // Get the cellpadding attribute value from the parent TABLE element
-// Returns -1 if no cellpadding attribute is found, otherwise returns the pixel value
+// Returns -1 if no cellpadding attribute is found, otherwise returns the pixel value (CSS logical pixels)
 // The HTML spec says: cellpadding on TABLE maps to padding on TD/TH cells
-static float get_parent_table_cellpadding(DomNode* elmt, float pixel_ratio) {
+static float get_parent_table_cellpadding(DomNode* elmt) {
     // Traverse up to find the TABLE element (TD -> TR -> TBODY/THEAD/TFOOT -> TABLE, or TD -> TR -> TABLE)
     DomNode* node = elmt->parent;
     while (node) {
@@ -55,7 +55,7 @@ static float get_parent_table_cellpadding(DomNode* elmt, float pixel_ratio) {
                     float cellpadding = strview_to_int(&cp_view);
                     if (cellpadding >= 0) {
                         log_debug("[HTML] TABLE cellpadding attribute: %.0fpx", cellpadding);
-                        return cellpadding * pixel_ratio;
+                        return cellpadding;  // CSS logical pixels
                     }
                 }
                 // Found parent table but no cellpadding attribute
@@ -87,9 +87,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     switch (elmt_name) {
     case HTM_TAG_BODY: {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        // margin: 8px
+        // margin: 8px (CSS logical pixels)
         block->bound->margin.top = block->bound->margin.right =
-            block->bound->margin.bottom = block->bound->margin.left = 8 * lycon->ui_context->pixel_ratio;
+            block->bound->margin.bottom = block->bound->margin.left = 8;
         block->bound->margin.top_specificity = block->bound->margin.right_specificity =
             block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
         // overflow: visible (CSS default - no special overflow handling for body)
@@ -182,7 +182,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // margin: 1em 0; padding: 0 0 0 40px;
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
-        block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.left = 40;  // CSS logical pixels
         block->bound->padding.left_specificity = -1;
         break;
     case HTM_TAG_CENTER:
@@ -196,7 +196,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             value_len = strlen(value);
             StrView width_view = strview_init(value, value_len);
             float width = strview_to_int(&width_view);
-            if (width >= 0) lycon->block.given_width = width * lycon->ui_context->pixel_ratio;
+            if (width >= 0) lycon->block.given_width = width;  // CSS logical pixels
             // else width attr ignored
         }
         value = elmt->get_attribute("height");
@@ -204,7 +204,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             value_len = strlen(value);
             StrView height_view = strview_init(value, value_len);
             float height = strview_to_int(&height_view);
-            if (height >= 0) lycon->block.given_height = height * lycon->ui_context->pixel_ratio;
+            if (height >= 0) lycon->block.given_height = height;  // CSS logical pixels
             // else height attr ignored
         }
         break;
@@ -214,23 +214,23 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // todo: inset border style
         block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left = 1 * lycon->ui_context->pixel_ratio;
+            block->bound->border->width.bottom = block->bound->border->width.left = 1;  // CSS logical pixels
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
         if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
         block->scroller->overflow_x = CSS_VALUE_AUTO;
         block->scroller->overflow_y = CSS_VALUE_AUTO;
-        // default iframe size to 300 x 200
-        lycon->block.given_width = 300 * lycon->ui_context->pixel_ratio;
-        lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;
+        // default iframe size to 300 x 200 (CSS logical pixels)
+        lycon->block.given_width = 300;
+        lycon->block.given_height = 200;
         break;
     case HTM_TAG_HR:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // hr default: 1px border on all sides (creates 2px height from border-top + border-bottom)
-        // This matches browser UA stylesheet behavior
-        block->bound->border->width.top = block->bound->border->width.bottom = 1 * lycon->ui_context->pixel_ratio;
-        block->bound->border->width.left = block->bound->border->width.right = 1 * lycon->ui_context->pixel_ratio;
+        // This matches browser UA stylesheet behavior (CSS logical pixels)
+        block->bound->border->width.top = block->bound->border->width.bottom = 1;
+        block->bound->border->width.left = block->bound->border->width.right = 1;
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
         // Default border style: inset (typical browser default for hr)
@@ -248,7 +248,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->border->right_color.r = 192; block->bound->border->right_color.g = 192;
         block->bound->border->right_color.b = 192; block->bound->border->right_color.a = 255;
         // 8px margin top/bottom, auto left/right for horizontal centering (browser default)
-        block->bound->margin.top = block->bound->margin.bottom = 8 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.top = block->bound->margin.bottom = 8;  // CSS logical pixels
         block->bound->margin.left = block->bound->margin.right = 0;
         block->bound->margin.left_type = CSS_VALUE_AUTO;
         block->bound->margin.right_type = CSS_VALUE_AUTO;
@@ -327,7 +327,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                     break;
             }
             if (!span->font) { span->font = alloc_font_prop(lycon); }
-            span->font->font_size = font_size * lycon->ui_context->pixel_ratio;
+            span->font->font_size = font_size;  // CSS logical pixels
             log_debug("HTM_TAG_FONT size='%s' -> %.1fpx", size_attr, span->font->font_size);
         }
         // Handle font face attribute
@@ -426,7 +426,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // margin: 1em 40px
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
-        block->bound->margin.left = block->bound->margin.right = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.left = block->bound->margin.right = 40;  // CSS logical pixels
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
@@ -439,7 +439,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // margin: 1em 40px
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
-        block->bound->margin.left = block->bound->margin.right = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.left = block->bound->margin.right = 40;  // CSS logical pixels
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
@@ -457,7 +457,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_DD:
         // definition description: margin-left 40px
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->margin.left = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.left = 40;  // CSS logical pixels
         block->bound->margin.left_specificity = -1;
         break;
     case HTM_TAG_DT:
@@ -501,7 +501,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                     StrView width_view = strview_init(width_attr, value_len);
                     float width = strview_to_int(&width_view);
                     if (width > 0) {
-                        lycon->block.given_width = width * lycon->ui_context->pixel_ratio;
+                        lycon->block.given_width = width;  // CSS logical pixels
                         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                         block->blk->given_width = lycon->block.given_width;
                         log_debug("[HTML] TABLE width attribute: %.0fpx", width);
@@ -518,7 +518,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 StrView height_view = strview_init(height_attr, value_len);
                 float height = strview_to_int(&height_view);
                 if (height > 0) {
-                    lycon->block.given_height = height * lycon->ui_context->pixel_ratio;
+                    lycon->block.given_height = height;  // CSS logical pixels
                     if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                     block->blk->given_height = lycon->block.given_height;
                     log_debug("[HTML] TABLE height attribute: %.0fpx", height);
@@ -560,7 +560,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
 
         // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
         // However, the cellpadding attribute on the parent TABLE overrides this default
-        float cellpadding = get_parent_table_cellpadding(elmt, lycon->ui_context->pixel_ratio);
+        float cellpadding = get_parent_table_cellpadding(elmt);
         if (cellpadding >= 0) {
             // Use cellpadding from parent table (can be 0)
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
@@ -569,10 +569,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->padding.top_specificity = block->bound->padding.right_specificity =
                 block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
         } else {
-            // No cellpadding attribute - apply UA default of 1px
+            // No cellpadding attribute - apply UA default of 1px (CSS logical pixels)
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
+                block->bound->padding.bottom = block->bound->padding.left = 1;
             block->bound->padding.top_specificity = block->bound->padding.right_specificity =
                 block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
         }
@@ -626,7 +626,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
         // However, the cellpadding attribute on the parent TABLE overrides this default
         // Per HTML spec: cellpadding maps to padding-top/right/bottom/left on TD/TH elements
-        float cellpadding = get_parent_table_cellpadding(elmt, lycon->ui_context->pixel_ratio);
+        float cellpadding = get_parent_table_cellpadding(elmt);
         if (cellpadding >= 0) {
             // Use cellpadding from parent table (can be 0)
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
@@ -635,10 +635,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->padding.top_specificity = block->bound->padding.right_specificity =
                 block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
         } else {
-            // No cellpadding attribute - apply UA default of 1px
+            // No cellpadding attribute - apply UA default of 1px (CSS logical pixels)
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             block->bound->padding.top = block->bound->padding.right =
-                block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
+                block->bound->padding.bottom = block->bound->padding.left = 1;
             block->bound->padding.top_specificity = block->bound->padding.right_specificity =
                 block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
         }
@@ -687,11 +687,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     // ========== Form elements ==========
     case HTM_TAG_FIELDSET:
-        // fieldset: border and padding
+        // fieldset: border and padding (CSS logical pixels)
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left = 2 * lycon->ui_context->pixel_ratio;
+            block->bound->border->width.bottom = block->bound->border->width.left = 2;
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
         block->bound->padding.top = block->bound->padding.bottom = 0.35 * lycon->font.style->font_size;
@@ -702,14 +702,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
     case HTM_TAG_LEGEND:
-        // legend: padding
+        // legend: padding (CSS logical pixels)
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->padding.left = block->bound->padding.right = 2 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.left = block->bound->padding.right = 2;
         block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
         break;
     case HTM_TAG_BUTTON: {
         // button: centered text, some padding, inline-block display with flow inner
-        float pr = lycon->ui_context->pixel_ratio;
+        // All values in CSS logical pixels
         block->item_prop_type = DomElement::ITEM_PROP_FORM;
         block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
         new (block->form) FormControlProp();
@@ -723,15 +723,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->padding.top = block->bound->padding.bottom = 1 * pr;
-        block->bound->padding.left = block->bound->padding.right = 6 * pr;
+        block->bound->padding.top = block->bound->padding.bottom = 1;
+        block->bound->padding.left = block->bound->padding.right = 6;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
             block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
         break;
     }
     case HTM_TAG_INPUT: {
-        // Allocate form control prop
-        float pr = lycon->ui_context->pixel_ratio;
+        // Allocate form control prop - all values in CSS logical pixels
         block->item_prop_type = DomElement::ITEM_PROP_FORM;
         block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
         new (block->form) FormControlProp();  // placement new for constructor
@@ -767,8 +766,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         case FORM_CONTROL_CHECKBOX:
         case FORM_CONTROL_RADIO:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
-            block->form->intrinsic_width = FormDefaults::CHECK_SIZE * pr;
-            block->form->intrinsic_height = FormDefaults::CHECK_SIZE * pr;
+            block->form->intrinsic_width = FormDefaults::CHECK_SIZE;
+            block->form->intrinsic_height = FormDefaults::CHECK_SIZE;
             // Set given_width/height so layout algorithm uses intrinsic size
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
@@ -779,8 +778,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             break;
         case FORM_CONTROL_RANGE: {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
-            block->form->intrinsic_width = FormDefaults::RANGE_WIDTH * pr;
-            block->form->intrinsic_height = FormDefaults::RANGE_HEIGHT * pr;
+            block->form->intrinsic_width = FormDefaults::RANGE_WIDTH;
+            block->form->intrinsic_height = FormDefaults::RANGE_HEIGHT;
             // Set given_width/height so layout algorithm uses intrinsic size
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
@@ -800,16 +799,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         default:  // FORM_CONTROL_TEXT
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
-            block->form->intrinsic_width = FormDefaults::TEXT_WIDTH * pr;
-            block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * pr;
+            block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;
+            block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
             // Set given_width/height so layout algorithm uses intrinsic size
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
-            // Default border for text inputs
+            // Default border for text inputs (CSS logical pixels)
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
             block->bound->border->width.top = block->bound->border->width.right =
-                block->bound->border->width.bottom = block->bound->border->width.left = 1 * pr;
+                block->bound->border->width.bottom = block->bound->border->width.left = 1;
             block->bound->border->top_style = block->bound->border->right_style =
                 block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_SOLID;
             block->bound->border->top_color.r = block->bound->border->right_color.r =
@@ -820,14 +819,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->bound->border->bottom_color.b = block->bound->border->left_color.b = 118;
             block->bound->border->top_color.a = block->bound->border->right_color.a =
                 block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
-            block->bound->padding.top = block->bound->padding.bottom = FormDefaults::TEXT_PADDING_V * pr;
-            block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXT_PADDING_H * pr;
+            block->bound->padding.top = block->bound->padding.bottom = FormDefaults::TEXT_PADDING_V;
+            block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXT_PADDING_H;
             break;
         }
         break;
     }
     case HTM_TAG_SELECT: {
-        float pr = lycon->ui_context->pixel_ratio;
+        // All values in CSS logical pixels
         block->item_prop_type = DomElement::ITEM_PROP_FORM;
         block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
         new (block->form) FormControlProp();
@@ -836,8 +835,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (block->get_attribute("disabled")) block->form->disabled = 1;
         if (block->get_attribute("multiple")) block->form->multiple = 1;
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
-        block->form->intrinsic_width = FormDefaults::SELECT_WIDTH * pr;
-        block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT * pr;
+        block->form->intrinsic_width = FormDefaults::SELECT_WIDTH;
+        block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
         // Set given_width/height so layout algorithm uses intrinsic size
         lycon->block.given_width = block->form->intrinsic_width;
         lycon->block.given_height = block->form->intrinsic_height;
@@ -845,11 +844,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left = 1 * pr;
+            block->bound->border->width.bottom = block->bound->border->width.left = 1;
         break;
     }
     case HTM_TAG_TEXTAREA: {
-        float pr = lycon->ui_context->pixel_ratio;
+        // All values in CSS logical pixels
         block->item_prop_type = DomElement::ITEM_PROP_FORM;
         block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
         new (block->form) FormControlProp();
@@ -865,8 +864,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (rows_attr) block->form->rows = atoi(rows_attr);
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         // Intrinsic size based on cols/rows - computed in layout with font metrics
-        block->form->intrinsic_width = FormDefaults::TEXT_WIDTH * pr;  // placeholder
-        block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * 2 * pr;  // 2 rows default
+        block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;  // placeholder
+        block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * 2;  // 2 rows default
         // Set given_width/height so layout algorithm uses intrinsic size
         lycon->block.given_width = block->form->intrinsic_width;
         lycon->block.given_height = block->form->intrinsic_height;
@@ -874,9 +873,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left = 1 * pr;
+            block->bound->border->width.bottom = block->bound->border->width.left = 1;
         block->bound->padding.top = block->bound->padding.bottom =
-            block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXTAREA_PADDING * pr;
+            block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXTAREA_PADDING;
         break;
     }
     case HTM_TAG_LABEL:
