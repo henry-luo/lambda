@@ -52,16 +52,16 @@ int cmd_layout(int argc, char** argv);
 int run_layout(const char* html_file);
 
 // SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width = 1200, int viewport_height = 800);
+int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f);
 
 // PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200);
+int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200, float scale = 1.0f);
 
 // PNG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_png(const char* html_file, const char* png_file, int viewport_width = 1200, int viewport_height = 800);
+int render_html_to_png(const char* html_file, const char* png_file, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f);
 
 // JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800);
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f);
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
 extern int view_doc_in_window(const char* doc_file);
@@ -857,6 +857,7 @@ int main(int argc, char *argv[]) {
             printf("  -o <output>              Output file path (required, format detected by extension)\n");
             printf("  -vw, --viewport-width    Viewport width in pixels (default: auto-size to content)\n");
             printf("  -vh, --viewport-height   Viewport height in pixels (default: auto-size to content)\n");
+            printf("  -s, --scale              Scale factor for output (default: 1.0, e.g., 2.0 for 2x resolution)\n");
             printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Auto-size to content\n", argv[0]);
@@ -865,6 +866,7 @@ int main(int argc, char *argv[]) {
             printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
+            printf("  %s render index.html -o out.png -s 2.0    # Render at 2x resolution\n", argv[0]);
             printf("  %s render test/page.html -o result.svg    # Render with relative paths\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
@@ -875,6 +877,7 @@ int main(int argc, char *argv[]) {
         const char* output_file = NULL;
         int viewport_width = 0;   // 0 means use format-specific default
         int viewport_height = 0;  // 0 means use format-specific default
+        float render_scale = 1.0f;  // Default scale factor
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -908,6 +911,19 @@ int main(int argc, char *argv[]) {
                     }
                 } else {
                     printf("Error: -vh option requires a height value\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--scale") == 0) {
+                if (i + 1 < argc) {
+                    render_scale = (float)atof(argv[++i]);
+                    if (render_scale <= 0.0f) {
+                        printf("Error: Invalid scale '%s'. Must be a positive number.\n", argv[i]);
+                        log_finish();
+                        return 1;
+                    }
+                } else {
+                    printf("Error: -s/--scale option requires a scale value\n");
                     log_finish();
                     return 1;
                 }
@@ -951,8 +967,8 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        log_debug("Rendering HTML '%s' to output '%s' with viewport %dx%d",
-                  html_file, output_file, viewport_width, viewport_height);
+        log_debug("Rendering HTML '%s' to output '%s' with viewport %dx%d, scale=%.2f",
+                  html_file, output_file, viewport_width, viewport_height, render_scale);
 
         // Determine output format based on file extension
         const char* ext = strrchr(output_file, '.');
@@ -963,25 +979,25 @@ int main(int argc, char *argv[]) {
             log_debug("Detected PDF output format");
             int pdf_width = viewport_width;   // 0 means auto-size
             int pdf_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_pdf(html_file, output_file, pdf_width, pdf_height);
+            exit_code = render_html_to_pdf(html_file, output_file, pdf_width, pdf_height, render_scale);
         } else if (ext && strcmp(ext, ".svg") == 0) {
             // Call the SVG rendering function (pass 0 for auto-sizing)
             log_debug("Detected SVG output format");
             int svg_width = viewport_width;   // 0 means auto-size
             int svg_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_svg(html_file, output_file, svg_width, svg_height);
+            exit_code = render_html_to_svg(html_file, output_file, svg_width, svg_height, render_scale);
         } else if (ext && strcmp(ext, ".png") == 0) {
             // Call the PNG rendering function (pass 0 for auto-sizing)
             log_debug("Detected PNG output format");
             int png_width = viewport_width;   // 0 means auto-size
             int png_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_png(html_file, output_file, png_width, png_height);
+            exit_code = render_html_to_png(html_file, output_file, png_width, png_height, render_scale);
         } else if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
             // Call the JPEG rendering function with default quality of 85 (pass 0 for auto-sizing)
             log_debug("Detected JPEG output format");
             int jpeg_width = viewport_width;   // 0 means auto-size
             int jpeg_height = viewport_height; // 0 means auto-size
-            exit_code = render_html_to_jpeg(html_file, output_file, 85, jpeg_width, jpeg_height);
+            exit_code = render_html_to_jpeg(html_file, output_file, 85, jpeg_width, jpeg_height, render_scale);
         } else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");

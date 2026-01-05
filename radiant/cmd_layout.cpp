@@ -1317,6 +1317,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
 
+    // Set scale fields for HTML documents
+    // HTML layout is in CSS logical pixels, scale is set later based on display context
+    dom_doc->given_scale = 1.0f;
+    dom_doc->scale = 1.0f;  // Will be updated by caller (window or render) with pixel_ratio
+
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] load: total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
 
@@ -1484,6 +1489,11 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
     dom_doc->view_tree = view_tree;    // Pre-created ViewTree from PDF
     dom_doc->state = nullptr;
 
+    // Set scale fields for rendering
+    // PDF view tree is pre-scaled by pixel_ratio, so given_scale = 1.0 and scale = pixel_ratio
+    dom_doc->given_scale = 1.0f;
+    dom_doc->scale = pixel_ratio;
+
     // Set content dimensions from ViewTree root
     if (view_tree->root) {
         ViewBlock* root = (ViewBlock*)view_tree->root;
@@ -1619,6 +1629,11 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     dom_doc->url = svg_url;
     dom_doc->view_tree = view_tree;
     dom_doc->state = nullptr;
+
+    // Set scale fields for rendering
+    // SVG view tree is pre-scaled by pixel_ratio, so given_scale = 1.0 and scale = pixel_ratio
+    dom_doc->given_scale = 1.0f;
+    dom_doc->scale = pixel_ratio;
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_svg_doc total: %.1fms, size: %.0fx%.0f (scaled: %.0fx%.0f)",
@@ -1756,6 +1771,11 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
     dom_doc->view_tree = view_tree;
     dom_doc->state = nullptr;
 
+    // Set scale fields for rendering
+    // Image view tree is pre-scaled by pixel_ratio, so given_scale = 1.0 and scale = pixel_ratio
+    dom_doc->given_scale = 1.0f;
+    dom_doc->scale = pixel_ratio;
+
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_image_doc total: %.1fms, size: %dx%d (scaled: %.0fx%.0f)",
         std::chrono::duration<double, std::milli>(total_end - total_start).count(),
@@ -1799,7 +1819,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 
     // Step 2: Escape HTML special characters for safe display
     auto step2_start = std::chrono::high_resolution_clock::now();
-    
+
     // count how many chars need escaping
     size_t escaped_len = 0;
     for (size_t i = 0; i < content_len; i++) {
@@ -2781,15 +2801,15 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = std::chrono::high_resolution_clock::now();
-    
+
     Runtime runtime;
     runtime_init(&runtime);
-    
+
     log_debug("[Lambda Script] Evaluating script...");
     // Use tree-walking interpreter instead of MIR for simple scripts
     // MIR JIT requires a main() function which simple expression scripts don't have
     Input* script_output = run_script(&runtime, nullptr, script_filepath, false);
-    
+
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
         runtime_cleanup(&runtime);
@@ -2803,22 +2823,22 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Step 2: Get the result from script execution
     TypeId result_type = get_type_id(script_output->root);
     log_debug("[Lambda Script] Script result type: %d", result_type);
-    
+
     // Check if the script returned an error
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
         runtime_cleanup(&runtime);
         return nullptr;
     }
-    
+
     // Check if the script returned a complete HTML document
     bool is_html_document = false;
     Element* html_elem = nullptr;
-    
+
     if (result_type == LMD_TYPE_ELEMENT) {
         Element* result_elem = script_output->root.element;
         TypeElmt* elem_type = (TypeElmt*)result_elem->type;
-        
+
         // Check if this is an 'html' element
         if (elem_type && strcasecmp(elem_type->name.str, "html") == 0) {
             log_debug("[Lambda Script] Script returned complete HTML document, using as-is");
@@ -2826,12 +2846,12 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             html_elem = result_elem;
         }
     }
-    
+
     // If not a complete HTML document, wrap the result
     if (!is_html_document) {
         // Wrap the result in an HTML structure for rendering
         Element* result_elem = nullptr;
-        
+
         if (result_type == LMD_TYPE_ELEMENT) {
             // If the script returns an element (but not html), use it directly
             result_elem = script_output->root.element;
@@ -2839,43 +2859,43 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         } else {
             // For other types, create a wrapper element with the result as text content
             log_debug("[Lambda Script] Script returned non-element, wrapping in div");
-            
+
             // Convert result to string representation
             StrBuf* result_str = strbuf_new();
             print_item(result_str, script_output->root, 0);
-            
+
             // Use MarkBuilder to create the div element properly
             MarkBuilder builder(script_output);
             ElementBuilder div = builder.element("div");
             div.text(result_str->str);
             Item div_item = div.final();
             result_elem = div_item.element;
-            
+
             strbuf_free(result_str);
         }
-        
+
         auto step2_start = std::chrono::high_resolution_clock::now();
         log_info("[TIMING] Step 2 - Wrap result: %.1fms",
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
 
         // Step 3: Create HTML wrapper structure using MarkBuilder
         log_debug("[Lambda Script] Building HTML wrapper structure");
-        
+
         MarkBuilder builder(script_output);
-        
+
         // Build: html > body > result_elem
         Item result_item = {.element = result_elem};
-        
+
         ElementBuilder body = builder.element("body");
         body.child(result_item);
         Item body_item = body.final();
-        
+
         ElementBuilder html = builder.element("html");
         html.child(body_item);
         Item html_item = html.final();
-        
+
         html_elem = html_item.element;
-        
+
         auto step3_end = std::chrono::high_resolution_clock::now();
         log_info("[TIMING] Step 3 - Build HTML structure: %.1fms",
             std::chrono::duration<double, std::milli>(step3_end - step2_start).count());
@@ -2887,7 +2907,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         log_info("[TIMING] Step 2 - HTML document detected, skipping wrap: %.1fms",
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
     }
-    
+
     // Step 5: Create DomDocument and build DomElement tree
     auto step5_start = std::chrono::high_resolution_clock::now();
     DomDocument* dom_doc = dom_document_create(script_output);
@@ -2923,7 +2943,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     CssStylesheet* script_stylesheet = nullptr;
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = nullptr;
-    
+
     if (!is_html_document) {
         // For non-HTML elements, load the default script.css
         const char* css_filename = "lambda/input/script.css";
@@ -2965,12 +2985,12 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Step 8: Apply CSS cascade to DOM tree
     auto step7_start = std::chrono::high_resolution_clock::now();
     SelectorMatcher* matcher = selector_matcher_create(pool);
-    
+
     // Apply script.css if loaded
     if (script_stylesheet && script_stylesheet->rule_count > 0) {
         apply_stylesheet_to_dom_tree_fast(dom_root, script_stylesheet, matcher, pool, css_engine);
     }
-    
+
     // Apply inline stylesheets for HTML documents
     if (inline_stylesheets && inline_stylesheet_count > 0) {
         for (int i = 0; i < inline_stylesheet_count; i++) {
@@ -2981,7 +3001,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             }
         }
     }
-    
+
     auto step7_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 7 - CSS cascade: %.1fms",
         std::chrono::duration<double, std::milli>(step7_end - step7_start).count());
@@ -2993,7 +3013,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     dom_doc->url = script_url;
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
-    
+
     // Note: Don't cleanup runtime yet - the script_output and its pool are still in use
     // The pool will be cleaned up when dom_doc is freed
 
@@ -3208,7 +3228,7 @@ int cmd_layout(int argc, char** argv) {
     // It writes to /tmp/view_tree.json or custom path if --view-output is specified
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("[Layout] Calling print_view_tree for complete layout output...");
-        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, 1.0f, opts.view_output_file);
+        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, opts.view_output_file);
         log_debug("[Layout] Layout tree written to %s", opts.view_output_file ? opts.view_output_file : "/tmp/view_tree.json");
     } else {
         log_warn("No view tree available to output");

@@ -640,7 +640,7 @@ void write_string_to_file(const char *filename, const char *text) {
     fclose(file); // Close file
 }
 
-void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio, const char* output_path) {
+void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) {
     StrBuf* buf = strbuf_new_cap(1024);
     print_view_block((ViewBlock*)view_root, buf, 0);
     log_debug("=================\nView tree:");
@@ -656,7 +656,7 @@ void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio, const 
     strbuf_free(buf);
 
     // also generate JSON output
-    print_view_tree_json(view_root, url, pixel_ratio, output_path);
+    print_view_tree_json(view_root, url, output_path);
 }
 
 // Helper function to escape JSON strings
@@ -680,8 +680,8 @@ void append_json_string(StrBuf* buf, const char* str) {
     strbuf_append_char(buf, '"');
 }
 
-void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, TextRect* rect = nullptr) {
-    // calculate absolute position for view
+void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr) {
+    // calculate absolute position for view (already in CSS logical pixels)
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
 
     // Check if this is a fixed or absolute positioned element
@@ -832,11 +832,11 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
         }
     }
 
-    // Convert absolute view dimensions to CSS pixels
-    float css_x = abs_x / pixel_ratio;
-    float css_y = abs_y / pixel_ratio;
-    float css_width = (rect ? rect->width : view->width) / pixel_ratio;
-    float css_height = (rect ? rect->height : view->height) / pixel_ratio;
+    // Output dimensions directly (already in CSS logical pixels)
+    float css_x = abs_x;
+    float css_y = abs_y;
+    float css_width = rect ? rect->width : view->width;
+    float css_height = rect ? rect->height : view->height;
 
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
@@ -856,10 +856,9 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
  * @param first_text The first text node in a sequence of consecutive text nodes
  * @param buf Output string buffer
  * @param indent Current indentation level
- * @param pixel_ratio Pixel ratio for coordinate conversion
  * @return Pointer to the last text node processed (to continue iteration from next sibling)
  */
-static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent, float pixel_ratio) {
+static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
     // Collect all consecutive text nodes
     struct TextNodeInfo {
         ViewText* text;
@@ -934,7 +933,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "\"layout\": {\n");
-            print_bounds_json(text, buf, indent, pixel_ratio, rect);
+            print_bounds_json(text, buf, indent, rect);
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "}\n");
 
@@ -1038,19 +1037,15 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         parent = parent->parent_view();
     }
 
-    float css_x = abs_x / pixel_ratio;
-    float css_y = abs_y / pixel_ratio;
-    float css_width = (max_x - min_x) / pixel_ratio;
-    float css_height = (max_y - min_y) / pixel_ratio;
-
+    // Output directly (already in CSS logical pixels)
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
+    strbuf_append_format(buf, "\"x\": %.1f,\n", abs_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %.1f,\n", css_y);
+    strbuf_append_format(buf, "\"y\": %.1f,\n", abs_y);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"width\": %.1f,\n", css_width);
+    strbuf_append_format(buf, "\"width\": %.1f,\n", max_x - min_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"height\": %.1f\n", css_height);
+    strbuf_append_format(buf, "\"height\": %.1f\n", max_y - min_y);
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
@@ -1072,10 +1067,12 @@ static bool is_anonymous_element(ViewBlock* block) {
 }
 
 // Forward declaration for recursive calls
-void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio);
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent);
+void print_br_json(View* br, StrBuf* buf, int indent);
+void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);
 
 // Helper to print children, skipping anonymous wrapper elements
-static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio, bool* first_child) {
+static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool* first_child) {
     View* child = ((ViewElement*)block)->first_child;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {  // skip the view
@@ -1101,7 +1098,7 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, float
         // For anonymous elements, skip the wrapper but process its children
         if (child->is_block() && is_anonymous_element((ViewBlock*)child)) {
             log_debug("JSON: Skipping anonymous element %s, processing its children", child->node_name());
-            print_children_json((ViewBlock*)child, buf, indent, pixel_ratio, first_child);
+            print_children_json((ViewBlock*)child, buf, indent, first_child);
             child = child->next();
             continue;
         }
@@ -1110,18 +1107,18 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, float
         *first_child = false;
 
         if (child->is_block()) {
-            print_block_json((ViewBlock*)child, buf, indent, pixel_ratio);
+            print_block_json((ViewBlock*)child, buf, indent);
         }
         else if (child->view_type == RDT_VIEW_TEXT) {
             // Use combined text printing to merge consecutive text nodes
-            View* last_text = print_combined_text_json((ViewText*)child, buf, indent, pixel_ratio);
+            View* last_text = print_combined_text_json((ViewText*)child, buf, indent);
             child = last_text;  // Skip to the last text node (loop will advance to next)
         }
         else if (child->view_type == RDT_VIEW_BR) {
-            print_br_json(child, buf, indent, pixel_ratio);
+            print_br_json(child, buf, indent);
         }
         else if (child->view_type == RDT_VIEW_INLINE) {
-            print_inline_json((ViewSpan*)child, buf, indent, pixel_ratio);
+            print_inline_json((ViewSpan*)child, buf, indent);
         }
         else {
             // Handle other view types
@@ -1140,7 +1137,7 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, float
 }
 
 // Recursive JSON generation for view blocks
-void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio) {
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     if (!block) {
         strbuf_append_str(buf, "null");
         return;
@@ -1260,7 +1257,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(block, buf, indent, pixel_ratio);
+    print_bounds_json(block, buf, indent);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
@@ -1645,7 +1642,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"children\": [\n");
 
     bool first_child = true;
-    print_children_json(block, buf, indent + 4, pixel_ratio, &first_child);
+    print_children_json(block, buf, indent + 4, &first_child);
 
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -1656,7 +1653,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 }
 
 // JSON generation for text nodes
-void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio) {
+void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* rect = text->rect;
 
     NEXT_RECT:
@@ -1703,7 +1700,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(text, buf, indent, pixel_ratio, rect);
+    print_bounds_json(text, buf, indent, rect);
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
@@ -1715,7 +1712,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     if (rect) { strbuf_append_str(buf, ",\n");  goto NEXT_RECT; }
 }
 
-void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio) {
+void print_br_json(View* br, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
 
@@ -1731,7 +1728,7 @@ void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio) {
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(br, buf, indent, pixel_ratio);
+    print_bounds_json(br, buf, indent);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
 
@@ -1740,7 +1737,7 @@ void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio) {
 }
 
 // JSON generation for inline elements (spans)
-void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_ratio) {
+void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     if (!span) {
         strbuf_append_str(buf, "null");
         return;
@@ -1821,7 +1818,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(span, buf, indent, pixel_ratio);
+    print_bounds_json(span, buf, indent);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
@@ -1921,18 +1918,18 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         first_child = false;
 
         if (child->view_type == RDT_VIEW_TEXT) {
-            print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
+            print_text_json((ViewText*)child, buf, indent + 4);
         }
         else if (child->view_type == RDT_VIEW_BR) {
-            print_br_json(child, buf, indent + 4, pixel_ratio);
+            print_br_json(child, buf, indent + 4);
         }
         else if (child->view_type == RDT_VIEW_INLINE) {
             // Nested inline elements
-            print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
+            print_inline_json((ViewSpan*)child, buf, indent + 4);
         }
         else if (child->is_block()) {
             // Block inside inline (block-in-inline case per CSS 2.1 Section 9.2.1.1)
-            print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
+            print_block_json((ViewBlock*)child, buf, indent + 4);
         } else {
             // Handle other child types
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1957,8 +1954,8 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 }
 
 // Main JSON generation function
-void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio, const char* output_path) {
-    log_debug("Generating JSON layout data...");
+void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path) {
+    log_debug("Generating JSON layout data (CSS logical pixels)...");
     StrBuf* json_buf = strbuf_new_cap(2048);
 
     strbuf_append_str(json_buf, "{\n");
@@ -1975,13 +1972,13 @@ void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio, c
     strbuf_append_str(json_buf, "\",\n");
 
     strbuf_append_str(json_buf, "    \"radiant_version\": \"1.0\",\n");
-    strbuf_append_format(json_buf, "    \"pixel_ratio\": %.2f,\n", pixel_ratio);
+    strbuf_append_str(json_buf, "    \"coordinate_system\": \"css_logical_pixels\",\n");
     strbuf_append_str(json_buf, "    \"viewport\": { \"width\": 1200, \"height\": 800 }\n");
     strbuf_append_str(json_buf, "  },\n");
 
     strbuf_append_str(json_buf, "  \"layout_tree\": ");
     if (view_root) {
-        print_block_json((ViewBlock*)view_root, json_buf, 2, pixel_ratio);
+        print_block_json((ViewBlock*)view_root, json_buf, 2);
     } else {
         strbuf_append_str(json_buf, "null");
     }
