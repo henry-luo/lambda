@@ -1993,10 +1993,19 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
     // Ensure minimum font size
     if (effective_font_size < 1.0) effective_font_size = 12.0;
 
-    // Convert PDF coordinates (bottom-left origin, Y up) to screen coordinates (top-left origin, Y down)
-    // For text, the PDF y is the baseline position from the bottom
-    // Screen y = page_height - pdf_y
-    double screen_y = parent->height - y;
+    // Convert PDF coordinates to screen coordinates
+    // Check if the text matrix has a negative Y scale (tm[3] < 0), which means
+    // the PDF is using a top-down coordinate system (like screen coordinates)
+    // In this case, y is already measured from the top, so don't flip
+    double screen_y;
+    if (parser->state.tm[3] < 0) {
+        // Negative Y scale means top-down coordinates - use y directly
+        screen_y = y;
+    } else {
+        // Standard PDF coordinates (bottom-up) - flip Y
+        // Screen y = page_height - pdf_y
+        screen_y = parent->height - y;
+    }
 
     // Create ViewText (which extends DomText, so it inherits text fields)
     ViewText* text_view = (ViewText*)pool_calloc(view_pool, sizeof(ViewText));
@@ -2069,42 +2078,48 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
     if (!text_array || text_array->length == 0) return;
 
     // TJ array contains alternating strings and numbers
-    // Strings are text to show, numbers are kerning adjustments (negative = move right)
-    double x_offset = 0.0;  // Accumulated horizontal offset
+    // Strings are text to show, numbers are kerning/spacing adjustments
+    // Numbers are in thousandths of an em unit (1/1000 of font size)
+    // Positive numbers move LEFT (reduce spacing), negative move RIGHT (increase spacing)
+    
+    // Calculate effective font size from text matrix for scaling
+    double tm_scale = sqrt(parser->state.tm[0] * parser->state.tm[0] +
+                          parser->state.tm[1] * parser->state.tm[1]);
+    double effective_font_size = parser->state.font_size * tm_scale;
+    if (effective_font_size < 1.0) effective_font_size = 12.0;
 
     for (int i = 0; i < text_array->length; i++) {
         Item item = text_array->items[i];
+        TypeId type = item.type_id();
 
         // Check if it's a string (text to show)
-        if (item._type_id == LMD_TYPE_STRING) {
+        if (type == LMD_TYPE_STRING) {
             String* text = item.get_string();
             if (text && text->len > 0) {
-                // Temporarily adjust text matrix for this text segment
-                double saved_x = parser->state.tm[4];
-                parser->state.tm[4] += x_offset;
-
                 create_text_view(input, view_pool, parent, parser, text);
 
-                // Restore x position
-                parser->state.tm[4] = saved_x;
-
-                // Advance by the width of the text (simplified - assumes 1 unit per character)
-                x_offset += text->len * parser->state.font_size * 0.5;
+                // Advance text position by approximate text width
+                // This is a rough estimate - proper implementation would use glyph widths from font
+                // Average character width is roughly 0.5-0.6 em for proportional fonts
+                double text_width = text->len * effective_font_size * 0.5;
+                parser->state.tm[4] += text_width;
             }
         }
-        // Check if it's a number (kerning adjustment)
-        else if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_FLOAT) {
-            // Kerning is in 1/1000 of an em, negative values move to the right
-            double kerning = 0.0;
-            if (item._type_id == LMD_TYPE_INT) {
-                kerning = -(double)item.int_val / 1000.0 * parser->state.font_size;
+        // Check if it's a number (kerning/spacing adjustment)
+        else if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
+            // Adjustment is in 1/1000 of an em
+            // Positive values move LEFT (subtract from position)
+            // Negative values move RIGHT (add to position)
+            double adjustment = 0.0;
+            if (type == LMD_TYPE_INT) {
+                adjustment = (double)item.int_val;
+            } else {
+                adjustment = item.get_double();
             }
-            else {
-                // For float, need to dereference pointer
-                double double_val = item.get_double();
-                kerning = -double_val / 1000.0 * parser->state.font_size;
-            }
-            x_offset += kerning;
+            // Convert from 1/1000 em to user space units and apply
+            // Positive = move left, so we subtract
+            double displacement = -adjustment / 1000.0 * effective_font_size;
+            parser->state.tm[4] += displacement;
         }
     }
     log_debug("Processed text array with %lld elements", text_array->length);
