@@ -3081,28 +3081,16 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
                     log_debug("Cell widths: block %s max=%.1f, min=%.1f",
                               child->node_name(), child_max, child_min);
                 } else {
-                    // Inline elements: layout in measurement context and track widths
-                    // For inline, both min and max come from measured layout width
-                    float child_start_x = lycon->line.advance_x;
-                    float saved_max_width = lycon->block.max_width;
-                    lycon->block.max_width = 0; // Reset to track this child's width
-
-                    log_debug("Cell widths: before layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
-                             child->node_name(), child_start_x, lycon->block.max_width);
-
-                    // Temporarily layout the child element in measurement mode
-                    layout_flow_node(lycon, child);
-
-                    log_debug("Cell widths: after layout_flow_node for %s: advance_x=%.1f, max_width=%.1f",
-                             child->node_name(), lycon->line.advance_x, lycon->block.max_width);
-
-                    // For inline elements with block children, line_break() resets advance_x,
-                    // so we use block.max_width which tracks maximum line width reached
-                    float measured_width = max(lycon->block.max_width, lycon->line.advance_x - child_start_x);
-                    child_max = child_min = measured_width; // Both use measured width
-
-                    lycon->block.max_width = saved_max_width; // Restore
-                    log_debug("Cell widths: child %s measured width=%.1f", child->node_name(), measured_width);
+                    // Inline elements: use intrinsic sizing API for proper measurement
+                    // This correctly handles:
+                    // - Regular inline elements with text content
+                    // - Inline elements with nested block children (block-in-inline)
+                    // - Inline elements with table-internal descendants
+                    IntrinsicSizes inline_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+                    child_max = inline_sizes.max_content;
+                    child_min = inline_sizes.min_content;
+                    log_debug("Cell widths: inline %s min=%.1f, max=%.1f",
+                              child->node_name(), child_min, child_max);
                 }
             }
 

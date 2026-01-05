@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
+#include "layout_table.hpp"
 
 // Forward declarations from layout_block.cpp for pseudo-element handling
 extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
@@ -90,8 +91,15 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         DisplayValue child_display = child->is_element() ?
             resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
 
-        if (child->is_element() && child_display.outer == CSS_VALUE_BLOCK) {
-            // Found block child - end current inline sequence if active
+        // CSS 2.1 §9.2.1.1 and §17.2.1: Block children and orphaned table-internal children
+        // both break the inline flow (table-internal elements get anonymous table wrappers)
+        bool is_block_or_table_internal = child->is_element() &&
+            (child_display.outer == CSS_VALUE_BLOCK ||
+             is_table_internal_display(child_display.inner) ||
+             is_table_internal_display(child_display.outer));
+
+        if (is_block_or_table_internal) {
+            // Found block/table-internal child - end current inline sequence if active
             if (in_inline_sequence) {
                 if (!lycon->line.is_line_start) {
                     log_debug("block-in-inline: calling line_break before block, advance_x=%.1f, max_width=%.1f",
@@ -222,8 +230,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         child = static_cast<DomElement*>(elmt)->first_child;
     }
 
-    // CSS 2.1 §9.2.1.1: Check if inline contains block-level children
-    // If so, split into anonymous boxes
+    // CSS 2.1 §9.2.1.1 and §17.2.1: Check if inline contains block-level or table-internal children
+    // If so, split into anonymous boxes (and wrap table-internal in anonymous tables)
     bool has_block_children = false;
     DomNode* scan = child;
     while (scan) {
@@ -231,9 +239,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             DisplayValue child_display = resolve_display_value(scan);
             log_debug("block-in-inline scan: child=%s outer=%d inner=%d",
                      scan->node_name(), child_display.outer, child_display.inner);
-            if (child_display.outer == CSS_VALUE_BLOCK) {
+            // CSS 2.1 §9.2.1.1: Block children break inline flow
+            // CSS 2.1 §17.2.1: Table-internal children also break inline flow
+            if (child_display.outer == CSS_VALUE_BLOCK ||
+                is_table_internal_display(child_display.inner) ||
+                is_table_internal_display(child_display.outer)) {
                 has_block_children = true;
-                log_debug("block-in-inline detected: %s contains block child %s",
+                log_debug("block-in-inline detected: %s contains block/table-internal child %s",
                          elmt->node_name(), scan->node_name());
                 break;
             }
@@ -242,6 +254,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     if (has_block_children) {
+        // CSS 2.1 §17.2.1: Before handling block-in-inline splitting,
+        // wrap any orphaned table-internal children in anonymous table structures
+        wrap_orphaned_table_children(lycon, static_cast<DomElement*>(elmt));
+        // Re-get first child after wrapping may have inserted anonymous elements
+        child = static_cast<DomElement*>(elmt)->first_child;
+
         // Handle block-in-inline splitting
         layout_inline_with_block_children(lycon, static_cast<DomElement*>(elmt), span, child);
         compute_span_bounding_box(span);
