@@ -2,6 +2,8 @@
 #include "render_img.hpp"
 #include "render_border.hpp"
 #include "render_background.hpp"
+#include "render_filter.hpp"
+#include "transform.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "../lib/log.h"
@@ -75,6 +77,18 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
+void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
+
+/**
+ * Helper function to apply transform and push paint to canvas
+ * If a transform is active in rdcon, applies it to the paint before pushing
+ */
+static void push_with_transform(RenderContext* rdcon, Tvg_Paint* paint) {
+    if (rdcon->has_transform) {
+        tvg_paint_set_transform(paint, &rdcon->transform);
+    }
+    tvg_canvas_push(rdcon->canvas, paint);
+}
 
 // draw a color glyph bitmap (BGRA format, used for color emoji) into the doc surface
 void draw_color_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
@@ -539,24 +553,24 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
     VectorPathProp* vpath = block->vpath;
     if (!vpath || !vpath->segments) return;
-    
+
     log_info("[VPATH] Rendering vector path for block at (%.1f, %.1f)", block->x, block->y);
-    
+
     Tvg_Canvas* canvas = rdcon->canvas;
     Tvg_Paint* shape = tvg_shape_new();
     if (!shape) {
         log_error("[VPATH] Failed to create ThorVG shape");
         return;
     }
-    
+
     // Build the path from segments
     float offset_x = rdcon->block.x + block->x;
     float offset_y = rdcon->block.y + block->y;
-    
+
     for (VectorPathSegment* seg = vpath->segments; seg; seg = seg->next) {
         float sx = offset_x + seg->x;
         float sy = offset_y + seg->y;
-        
+
         switch (seg->type) {
             case VectorPathSegment::VPATH_MOVETO:
                 tvg_shape_move_to(shape, sx, sy);
@@ -581,17 +595,17 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
                 break;
         }
     }
-    
+
     // Apply stroke if present
     if (vpath->has_stroke) {
-        tvg_shape_set_stroke_color(shape, 
+        tvg_shape_set_stroke_color(shape,
             vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b, vpath->stroke_color.a);
         tvg_shape_set_stroke_width(shape, vpath->stroke_width);
-        
+
         // Apply dash pattern if present
         if (vpath->dash_pattern && vpath->dash_pattern_length > 0) {
-            log_debug("[VPATH] Setting dash pattern: count=%d, values=[%.1f, %.1f]", 
-                     vpath->dash_pattern_length, 
+            log_debug("[VPATH] Setting dash pattern: count=%d, values=[%.1f, %.1f]",
+                     vpath->dash_pattern_length,
                      vpath->dash_pattern[0],
                      vpath->dash_pattern_length > 1 ? vpath->dash_pattern[1] : 0.0f);
             Tvg_Result result = tvg_shape_set_stroke_dash(shape, vpath->dash_pattern, vpath->dash_pattern_length, 0);
@@ -599,23 +613,23 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
             // Set butt cap for crisp dash ends
             tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
         }
-        
-        log_debug("[VPATH] Stroke: RGB(%d,%d,%d) width=%.1f", 
+
+        log_debug("[VPATH] Stroke: RGB(%d,%d,%d) width=%.1f",
                  vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b, vpath->stroke_width);
     }
-    
+
     // Apply fill if present
     if (vpath->has_fill) {
         tvg_shape_set_fill_color(shape,
             vpath->fill_color.r, vpath->fill_color.g, vpath->fill_color.b, vpath->fill_color.a);
     }
-    
+
     // Push to canvas and render
     tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
     tvg_canvas_push(canvas, shape);
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
-    
+
     log_info("[VPATH] Rendered vector path successfully");
 }
 
@@ -681,11 +695,118 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     rdcon->list = pa_list;
 }
 
+/**
+ * Render column rules for multi-column containers
+ * Column rules are drawn as vertical lines between columns
+ */
+void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
+    if (!block->multicol) return;
+
+    MultiColumnProp* mc = block->multicol;
+
+    // Only render if we have rules and multiple columns
+    if (mc->computed_column_count <= 1 || mc->rule_width <= 0 ||
+        mc->rule_style == CSS_VALUE_NONE) {
+        return;
+    }
+
+    float column_width = mc->computed_column_width;
+    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+
+    // Calculate block position
+    float block_x = rdcon->block.x + block->x;
+    float block_y = rdcon->block.y + block->y;
+
+    // Adjust for padding
+    if (block->bound) {
+        block_x += block->bound->padding.left;
+        block_y += block->bound->padding.top;
+    }
+
+    // Rule height is the content area height (block height minus padding/border)
+    // For multi-column containers, get the actual content height from block->height
+    float rule_height = block->height;
+    if (block->bound) {
+        // Subtract padding from top (already offset block_y, so don't need to subtract again)
+        // but we need to subtract total padding for height calculation
+        rule_height -= block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            rule_height -= block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+    }
+
+    // Ensure minimum rule height
+    if (rule_height <= 0) {
+        // Fall back to using the block's content height by iterating children
+        View* child = (View*)block->first_child;
+        float max_bottom = 0;
+        while (child) {
+            if (child->is_element()) {
+                ViewBlock* child_block = (ViewBlock*)child;
+                float child_bottom = child_block->y + child_block->height;
+                if (child_bottom > max_bottom) max_bottom = child_bottom;
+            }
+            child = child->next();
+        }
+        rule_height = max_bottom;
+        log_debug("[MULTICOL] Rule height computed from children: %.1f", rule_height);
+    }
+
+    log_debug("[MULTICOL] Rendering %d column rules, width=%.1f, style=%d",
+              mc->computed_column_count - 1, mc->rule_width, mc->rule_style);
+
+    // Draw rule between each pair of columns
+    for (int i = 0; i < mc->computed_column_count - 1; i++) {
+        float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f - mc->rule_width / 2.0f;
+
+        // Create rule shape
+        Tvg_Paint* rule = tvg_shape_new();
+
+        // Different stroke patterns for different styles
+        if (mc->rule_style == CSS_VALUE_DOTTED) {
+            // Dotted line: small dashes
+            float dash_pattern[] = {mc->rule_width, mc->rule_width * 2};
+            tvg_shape_set_stroke_dash(rule, dash_pattern, 2, 0);
+        } else if (mc->rule_style == CSS_VALUE_DASHED) {
+            // Dashed line: longer dashes
+            float dash_pattern[] = {mc->rule_width * 3, mc->rule_width * 2};
+            tvg_shape_set_stroke_dash(rule, dash_pattern, 2, 0);
+        } else if (mc->rule_style == CSS_VALUE_DOUBLE) {
+            // Double: two lines (render first here, second below)
+            // For double, we draw two thinner lines
+            float thin_width = mc->rule_width / 3.0f;
+            tvg_shape_append_rect(rule, rule_x - thin_width, block_y, thin_width, rule_height, 0, 0);
+            tvg_shape_append_rect(rule, rule_x + thin_width, block_y, thin_width, rule_height, 0, 0);
+            tvg_shape_set_fill_color(rule, mc->rule_color.r, mc->rule_color.g,
+                                     mc->rule_color.b, mc->rule_color.a);
+            push_with_transform(rdcon, rule);
+            continue;
+        }
+
+        // Solid, dotted, dashed: draw as vertical line
+        tvg_shape_move_to(rule, rule_x, block_y);
+        tvg_shape_line_to(rule, rule_x, block_y + rule_height);
+        tvg_shape_set_stroke_width(rule, mc->rule_width);
+        tvg_shape_set_stroke_color(rule, mc->rule_color.r, mc->rule_color.g,
+                                   mc->rule_color.b, mc->rule_color.a);
+        tvg_shape_set_stroke_cap(rule, TVG_STROKE_CAP_BUTT);
+
+        push_with_transform(rdcon, rule);
+
+        log_debug("[MULTICOL] Rule %d at x=%.1f, height=%.1f", i, rule_x, rule_height);
+    }
+}
+
 // Helper function to render linear gradient
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.width = view->width;  rect.height = view->height;
+
+    // Render box-shadow BEFORE background (shadows go underneath the element)
+    if (view->bound->box_shadow) {
+        render_box_shadow(rdcon, view, rect);
+    }
 
     // Render background (gradient or solid color) using new rendering system
     if (view->bound->background) {
@@ -890,6 +1011,54 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
     log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
+
+    // Save transform state and apply element's transform
+    Tvg_Matrix pa_transform = rdcon->transform;
+    bool pa_has_transform = rdcon->has_transform;
+
+    if (block->transform && block->transform->functions) {
+        // Calculate transform origin
+        float origin_x = block->transform->origin_x_percent
+            ? (block->transform->origin_x / 100.0f) * block->width
+            : block->transform->origin_x;
+        float origin_y = block->transform->origin_y_percent
+            ? (block->transform->origin_y / 100.0f) * block->height
+            : block->transform->origin_y;
+
+        // Origin is relative to element's position in parent
+        float elem_x = pa_block.x + block->x;
+        float elem_y = pa_block.y + block->y;
+        origin_x += elem_x;
+        origin_y += elem_y;
+
+        // Compute new transform matrix
+        Tvg_Matrix new_transform = radiant::compute_transform_matrix(
+            block->transform->functions, block->width, block->height, origin_x, origin_y);
+
+        // If parent has transform, concatenate
+        if (rdcon->has_transform) {
+            // Matrix multiply: new = parent * element
+            Tvg_Matrix combined = {
+                pa_transform.e11 * new_transform.e11 + pa_transform.e12 * new_transform.e21 + pa_transform.e13 * new_transform.e31,
+                pa_transform.e11 * new_transform.e12 + pa_transform.e12 * new_transform.e22 + pa_transform.e13 * new_transform.e32,
+                pa_transform.e11 * new_transform.e13 + pa_transform.e12 * new_transform.e23 + pa_transform.e13 * new_transform.e33,
+                pa_transform.e21 * new_transform.e11 + pa_transform.e22 * new_transform.e21 + pa_transform.e23 * new_transform.e31,
+                pa_transform.e21 * new_transform.e12 + pa_transform.e22 * new_transform.e22 + pa_transform.e23 * new_transform.e32,
+                pa_transform.e21 * new_transform.e13 + pa_transform.e22 * new_transform.e23 + pa_transform.e23 * new_transform.e33,
+                pa_transform.e31 * new_transform.e11 + pa_transform.e32 * new_transform.e21 + pa_transform.e33 * new_transform.e31,
+                pa_transform.e31 * new_transform.e12 + pa_transform.e32 * new_transform.e22 + pa_transform.e33 * new_transform.e32,
+                pa_transform.e31 * new_transform.e13 + pa_transform.e32 * new_transform.e23 + pa_transform.e33 * new_transform.e33
+            };
+            rdcon->transform = combined;
+        } else {
+            rdcon->transform = new_transform;
+        }
+        rdcon->has_transform = true;
+
+        log_debug("[TRANSFORM] Element %s: transform active, origin=(%.1f,%.1f)",
+            block->node_name(), origin_x, origin_y);
+    }
+
     if (block->font) {
         auto t1 = std::chrono::high_resolution_clock::now();
         setup_font(rdcon->ui_context, &rdcon->font, block->font);
@@ -915,7 +1084,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             render_bound(rdcon, block);
         }
     }
-    
+
     // Render vector path if present (for PDF curves and complex paths)
     if (block->vpath && block->vpath->segments) {
         render_vector_path(rdcon, block);
@@ -974,6 +1143,37 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     if (block->scroller) {
         render_scroller(rdcon, block, &pa_block);
     }
+
+    // Render multi-column rules between columns
+    if (block->multicol && block->multicol->computed_column_count > 1) {
+        render_column_rules(rdcon, block);
+    }
+
+    // Apply CSS filters after all content is rendered
+    // Filters are applied to the rendered pixel data in the element's region
+    if (block->filter && block->filter->functions) {
+        // Sync canvas to ensure all content is rendered to the surface
+        tvg_canvas_draw(rdcon->canvas, false);
+        tvg_canvas_sync(rdcon->canvas);
+
+        // Calculate the element's bounding rect
+        Rect filter_rect;
+        filter_rect.x = pa_block.x + block->x;
+        filter_rect.y = pa_block.y + block->y;
+        filter_rect.width = block->width;
+        filter_rect.height = block->height;
+
+        log_debug("[FILTER] Applying filters to element %s at (%.0f,%.0f) size %.0fx%.0f",
+                  block->node_name(), filter_rect.x, filter_rect.y, filter_rect.width, filter_rect.height);
+
+        // Apply the filter chain to the rendered pixels
+        apply_css_filters(rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
+    }
+
+    // Restore transform state
+    rdcon->transform = pa_transform;
+    rdcon->has_transform = pa_has_transform;
+
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
     log_leave();
 }
@@ -1038,7 +1238,7 @@ Tvg_Paint* load_picture(ImageSurface* surface) {
 // Used by both render_image_view and render_block_view for embedded images
 void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embed->img) return;
-    
+
     log_debug("render image content");
     ImageSurface* img = view->embed->img;
     Rect rect;
@@ -1094,14 +1294,14 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     if (block->bound) { render_bound(rdcon, block); }
 
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
-    
+
     // Constrain clip region to iframe content box (before scroller setup)
     // This ensures embedded documents (SVG, PDF, etc.) don't render outside iframe bounds
     float content_left = rdcon->block.x;
     float content_top = rdcon->block.y;
     float content_right = rdcon->block.x + block->width;
     float content_bottom = rdcon->block.y + block->height;
-    
+
     // Adjust for borders if present
     if (block->bound && block->bound->border) {
         content_left += block->bound->border->width.left;
@@ -1109,17 +1309,17 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
         content_right -= block->bound->border->width.right;
         content_bottom -= block->bound->border->width.bottom;
     }
-    
+
     // Intersect with parent clip region
     rdcon->block.clip.left = max(rdcon->block.clip.left, content_left);
     rdcon->block.clip.top = max(rdcon->block.clip.top, content_top);
     rdcon->block.clip.right = min(rdcon->block.clip.right, content_right);
     rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, content_bottom);
-    
+
     log_debug("iframe clip set to: left:%.0f, top:%.0f, right:%.0f, bottom:%.0f (content box)",
-              rdcon->block.clip.left, rdcon->block.clip.top, 
+              rdcon->block.clip.left, rdcon->block.clip.top,
               rdcon->block.clip.right, rdcon->block.clip.bottom);
-    
+
     // setup clip box for scrolling
     if (block->scroller) { setup_scroller(rdcon, block); }
     // render the embedded doc
@@ -1133,11 +1333,11 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 // Save parent context and reset for embedded document
                 FontBox pa_font = rdcon->font;
                 Color pa_color = rdcon->color;
-                
+
                 // Reset color to black for embedded document (don't inherit from parent doc)
                 // Each document should start with default black text color
                 rdcon->color.c = 0xFF000000;  // opaque black (ABGR)
-                
+
                 // load default font
                 FontProp* default_font = doc->view_tree->html_version == HTML5 ? &rdcon->ui_context->default_font : &rdcon->ui_context->legacy_default_font;
                 log_debug("render_init default font: %s, html version: %d", default_font->family, doc->view_tree->html_version);
@@ -1261,6 +1461,10 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     if (result != TVG_RESULT_SUCCESS) {
         log_error("render_init: tvg_swcanvas_set_target failed with result=%d", result);
     }
+
+    // Initialize transform state (identity matrix, not active)
+    rdcon->transform = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    rdcon->has_transform = false;
 
     // load default font
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;

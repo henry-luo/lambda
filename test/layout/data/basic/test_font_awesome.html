@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Font Awesome Test</title>
+    <style>
+        /* Font-face declaration for FontAwesome */
+        @font-face {
+            font-family: 'FontAwesome';
+            src: url('../res/ffmpeg_fonts_fontawesome-webfont.woff_v_4.2.woff') format('woff'),
+                 url('../res/ffmpeg_fonts_fontawesome-webfont.ttf_v_4.2.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+
+        body {
+            font-family: Helvetica Neue, Arial, sans-serif;
+            font-size: 14px;
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        /* Base .fa class - sets FontAwesome font */
+        .fa {
+            display: inline-block;
+            font: normal normal normal 14px/1 FontAwesome;
+            font-size: inherit;
+            text-rendering: auto;
+        }
+
+        /* Icon sizes */
+        .fa-2x { font-size: 2em; }
+        .fa-3x { font-size: 3em; }
+        .fa-5x { font-size: 5em; }
+
+        /* Individual icons using ::before with Unicode codepoints */
+        .fa-heart:before { content: "\f004"; }
+        .fa-star:before { content: "\f005"; }
+        .fa-user:before { content: "\f007"; }
+        .fa-check:before { content: "\f00c"; }
+        .fa-search:before { content: "\f002"; }
+        .fa-cog:before { content: "\f013"; }
+        .fa-home:before { content: "\f015"; }
+        .fa-lock:before { content: "\f023"; }
+        .fa-play:before { content: "\f04b"; }
+        .fa-terminal:before { content: "\f120"; }
+        .fa-code-fork:before { content: "\f126"; }
+        .fa-play-circle:before { content: "\f144"; }
+
+        /* Test layout */
+        .icon-row {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .icon-box {
+            width: 50px;
+            height: 50px;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .large-icon {
+            color: #007bff;
+            margin: 20px 0;
+        }
+
+        .icon-label {
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Font Awesome Icon Test</h1>
+
+    <!-- Basic icon tests -->
+    <div class="icon-row">
+        <i class="fa fa-heart"></i>
+        <span class="icon-label">Heart</span>
+    </div>
+
+    <div class="icon-row">
+        <i class="fa fa-star"></i>
+        <span class="icon-label">Star</span>
+    </div>
+
+    <div class="icon-row">
+        <i class="fa fa-user"></i>
+        <span class="icon-label">User</span>
+    </div>
+
+    <div class="icon-row">
+        <i class="fa fa-check"></i>
+        <span class="icon-label">Check</span>
+    </div>
+
+    <div class="icon-row">
+        <i class="fa fa-search"></i>
+        <span class="icon-label">Search</span>
+    </div>
+
+    <!-- Larger icons -->
+    <h2>Larger Icons (2x)</h2>
+    <div class="icon-row">
+        <i class="fa fa-2x fa-cog"></i>
+        <i class="fa fa-2x fa-home"></i>
+        <i class="fa fa-2x fa-lock"></i>
+        <i class="fa fa-2x fa-play"></i>
+    </div>
+
+    <!-- Even larger icons -->
+    <h2>Large Icons (3x)</h2>
+    <div class="icon-row large-icon">
+        <i class="fa fa-3x fa-terminal"></i>
+        <i class="fa fa-3x fa-code-fork"></i>
+        <i class="fa fa-3x fa-play-circle"></i>
+    </div>
+
+    <!-- Icons in boxes -->
+    <h2>Icons in Boxes</h2>
+    <div class="icon-row">
+        <div class="icon-box">
+            <i class="fa fa-2x fa-heart"></i>
+        </div>
+        <div class="icon-box">
+            <i class="fa fa-2x fa-star"></i>
+        </div>
+        <div class="icon-box">
+            <i class="fa fa-2x fa-user"></i>
+        </div>
+    </div>
+</body>
+</html>
