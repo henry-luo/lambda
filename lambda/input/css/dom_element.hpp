@@ -66,11 +66,17 @@ struct DomDocument {
     ViewTree* view_tree;         // View tree after layout
     StateStore* state;           // Document state (cursor, caret, etc.)
 
+    // Scale system for rendering
+    // Layout operates in CSS logical pixels; scaling applied only during rendering
+    float given_scale;           // User-specified scale factor (default 1.0), from CLI --scale
+    float scale;                 // Final render scale = given_scale × pixel_ratio
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
-                    view_tree(nullptr), state(nullptr) {}
+                    view_tree(nullptr), state(nullptr),
+                    given_scale(1.0f), scale(1.0f) {}
 };
 
 typedef struct {

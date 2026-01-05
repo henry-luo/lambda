@@ -403,8 +403,9 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         }
         if (block->embed && block->embed->img) {
             ImageSurface* img = block->embed->img;
-            float w = img->width * lycon->ui_context->pixel_ratio;
-            float h = img->height * lycon->ui_context->pixel_ratio;
+            // Image intrinsic dimensions are in CSS logical pixels
+            float w = img->width;
+            float h = img->height;
             log_debug("[ABS IMG] image intrinsic dims: %.1f x %.1f, given: %.1f x %.1f",
                       w, h, lycon->block.given_width, lycon->block.given_height);
 
