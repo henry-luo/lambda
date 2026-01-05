@@ -1,0 +1,154 @@
+%PDF-1.4
+% simple PDF document with various features
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+/Metadata 5 0 R
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Pages
+/Kids [3 0 R]
+/Count 1
+>>
+endobj
+
+3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Resources <<
+  /Font <<
+    /F1 4 0 R
+  >>
+  /ProcSet [/PDF /Text]
+>>
+/Contents 6 0 R
+>>
+endobj
+
+4 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+>>
+endobj
+
+5 0 obj
+<<
+/Type /Metadata
+/Subtype /XML
+/Length 157
+>>
+stream
+<?xml version="1.0"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description/>
+  </rdf:RDF>
+</x:xmpmeta>
+endstream
+endobj
+
+6 0 obj
+<<
+/Length 187
+/Filter /ASCII85Decode
+>>
+stream
+BT
+/F1 12 Tf
+72 720 Td
+(Hello, PDF World!) Tj
+0 -24 Td
+(This is a test PDF document.) Tj
+0 -24 Td
+(It contains various PDF features:) Tj
+0 -24 Td
+(- Indirect objects and references) Tj
+0 -24 Td
+(- Streams with filters) Tj
+0 -24 Td
+(- Metadata) Tj
+ET
+endstream
+endobj
+
+7 0 obj
+<<
+/Type /ExtGState
+/ca 0.5
+/CA 0.8
+>>
+endobj
+
+8 0 obj
+<<
+/Type /Action
+/S /URI
+/URI (https://example.com)
+>>
+endobj
+
+9 0 obj
+[
+  /PDF
+  /Text
+  /ImageB
+  /ImageC
+  /ImageI
+]
+endobj
+
+10 0 obj
+<<
+/Type /XObject
+/Subtype /Image
+/Width 100
+/Height 100
+/BitsPerComponent 8
+/ColorSpace /DeviceRGB
+/Length 5
+>>
+stream
+\xFF\xD8\xFF\xE0\x00
+endstream
+endobj
+
+xref
+0 11
+0000000000 65535 f 
+0000000015 00000 n 
+0000000074 00000 n 
+0000000120 00000 n 
+0000000284 00000 n 
+0000000382 00000 n 
+0000000694 00000 n 
+0000001053 00000 n 
+0000001108 00000 n 
+0000001172 00000 n 
+0000001234 00000 n 
+trailer
+<<
+/Size 11
+/Root 1 0 R
+/Info <<
+  /Title (Test PDF Document)
+  /Author (PDF Parser Test)
+  /Subject (Testing PDF parsing capabilities)
+  /Keywords (test, pdf, parser, lambda)
+  /Creator (PDF Test Generator)
+  /Producer (Custom PDF Generator 1.0)
+  /CreationDate (D:20250709120000Z)
+  /ModDate (D:20250709120000Z)
+>>
+>>
+startxref
+1389
+%%EOF

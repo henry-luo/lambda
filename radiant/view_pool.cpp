@@ -8,6 +8,19 @@
 
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
 
+// Flag to control whether consecutive text nodes are combined during JSON output
+// When true (default), consecutive ViewText nodes are merged for HTML output compatibility
+// When false, each ViewText is output separately (useful for PDF comparison testing)
+static bool g_combine_text_nodes = true;
+
+void set_combine_text_nodes(bool combine) {
+    g_combine_text_nodes = combine;
+}
+
+bool get_combine_text_nodes() {
+    return g_combine_text_nodes;
+}
+
 // Helper function to get view type name for JSON
 const char* View::view_name() {
     switch (this->view_type) {
@@ -667,14 +680,25 @@ void append_json_string(StrBuf* buf, const char* str) {
     }
 
     strbuf_append_char(buf, '"');
-    for (const char* p = str; *p; p++) {
+    for (const unsigned char* p = (const unsigned char*)str; *p; p++) {
         switch (*p) {
             case '"': strbuf_append_str(buf, "\\\""); break;
             case '\\': strbuf_append_str(buf, "\\\\"); break;
             case '\n': strbuf_append_str(buf, "\\n"); break;
             case '\r': strbuf_append_str(buf, "\\r"); break;
             case '\t': strbuf_append_str(buf, "\\t"); break;
-            default: strbuf_append_char(buf, *p); break;
+            case '\b': strbuf_append_str(buf, "\\b"); break;
+            case '\f': strbuf_append_str(buf, "\\f"); break;
+            default:
+                // Escape all other control characters (0x00-0x1F)
+                if (*p < 0x20) {
+                    char escape[8];
+                    snprintf(escape, sizeof(escape), "\\u%04x", (unsigned)*p);
+                    strbuf_append_str(buf, escape);
+                } else {
+                    strbuf_append_char(buf, *p);
+                }
+                break;
         }
     }
     strbuf_append_char(buf, '"');
@@ -859,6 +883,53 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
  * @return Pointer to the last text node processed (to continue iteration from next sibling)
  */
 static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
+    // If text combination is disabled, just print this single text node
+    if (!g_combine_text_nodes) {
+        // Output single text node without combining
+        ViewText* text = first_text;
+        TextRect* rect = text->rect;
+        unsigned char* text_data = text->text_data();
+        
+        if (rect) {
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_str(buf, "{\n");
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"type\": \"text\",\n");
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"tag\": \"text\",\n");
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"selector\": \"text\",\n");
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"content\": ");
+            
+            if (text_data && rect->length > 0) {
+                char content[2048];
+                int len = rect->length;
+                if (len >= (int)sizeof(content)) len = (int)sizeof(content) - 1;
+                if (len > 0) {
+                    memcpy(content, (char*)(text_data + rect->start_index), len);
+                    content[len] = '\0';
+                    append_json_string(buf, content);
+                } else {
+                    append_json_string(buf, "[empty]");
+                }
+            } else {
+                append_json_string(buf, "[empty]");
+            }
+            strbuf_append_str(buf, ",\n");
+            
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"layout\": {\n");
+            print_bounds_json(text, buf, indent, rect);
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "}\n");
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_str(buf, "}");
+        }
+        
+        return (View*)first_text;  // Return this text node only
+    }
+    
     // Collect all consecutive text nodes
     struct TextNodeInfo {
         ViewText* text;

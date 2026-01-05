@@ -3163,6 +3163,14 @@ int cmd_layout(int argc, char** argv) {
         // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
         log_info("[Layout] Detected XML file, using XML→DOM pipeline");
         doc = load_xml_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
+    } else if (ext && strcmp(ext, ".pdf") == 0) {
+        // Load PDF document: parse PDF → convert to ViewTree directly (no CSS layout needed)
+        log_info("[Layout] Detected PDF file, using PDF→ViewTree pipeline");
+        doc = load_pdf_doc(input_url, opts.viewport_width, opts.viewport_height, pool, 1.0f);
+    } else if (ext && strcmp(ext, ".svg") == 0) {
+        // Load SVG document: render SVG → convert to ViewTree directly (no CSS layout needed)
+        log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
+        doc = load_svg_doc(input_url, opts.viewport_width, opts.viewport_height, pool, 1.0f);
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(
@@ -3206,14 +3214,21 @@ int cmd_layout(int argc, char** argv) {
     process_document_font_faces(&ui_context, doc);
 
     // Perform layout computation
-    log_debug("[Layout] About to call layout_html_doc...");
-    log_debug("[Layout] lambda_html_root=%p, dom_root=%p",
-            (void*)doc->html_root, (void*)doc->root);
-
+    // Skip layout_html_doc for documents that already have a view_tree (PDF, SVG, image)
+    // These loaders produce the view_tree directly without CSS layout
     ui_context.document = doc;
-    layout_html_doc(&ui_context, doc, false);
-
-    log_debug("[Layout] layout_html_doc returned");
+    
+    if (doc->view_tree && doc->view_tree->root) {
+        // Document already has a view tree (PDF, SVG, image) - skip CSS layout
+        log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
+    } else {
+        // HTML document - perform CSS layout
+        log_debug("[Layout] About to call layout_html_doc...");
+        log_debug("[Layout] lambda_html_root=%p, dom_root=%p",
+                (void*)doc->html_root, (void*)doc->root);
+        layout_html_doc(&ui_context, doc, false);
+        log_debug("[Layout] layout_html_doc returned");
+    }
 
     if (!doc->view_tree || !doc->view_tree->root) {
         log_warn("Layout computation did not produce view tree");
@@ -3227,9 +3242,23 @@ int cmd_layout(int argc, char** argv) {
     // Use print_view_tree to generate complete layout tree JSON
     // It writes to /tmp/view_tree.json or custom path if --view-output is specified
     if (doc->view_tree && doc->view_tree->root) {
+        // For PDF/SVG documents, disable text node combination to preserve individual text items
+        // This is important for comparison testing against pdf.js reference
+        bool is_pdf = ext && strcmp(ext, ".pdf") == 0;
+        bool is_svg = ext && strcmp(ext, ".svg") == 0;
+        if (is_pdf || is_svg) {
+            set_combine_text_nodes(false);
+            log_debug("[Layout] Disabled text node combination for %s output", is_pdf ? "PDF" : "SVG");
+        }
+        
         log_debug("[Layout] Calling print_view_tree for complete layout output...");
         print_view_tree((ViewElement*)doc->view_tree->root, doc->url, opts.view_output_file);
         log_debug("[Layout] Layout tree written to %s", opts.view_output_file ? opts.view_output_file : "/tmp/view_tree.json");
+        
+        // Restore default text combination setting
+        if (is_pdf || is_svg) {
+            set_combine_text_nodes(true);
+        }
     } else {
         log_warn("No view tree available to output");
     }
