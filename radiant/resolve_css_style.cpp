@@ -2035,6 +2035,21 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             DomElement* ancestor = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
             CssDeclaration* inherited_decl = NULL;
 
+            // Special handling for font-family: also check ancestor's computed font->family
+            // This handles cases where font shorthand was used (sets font->family without
+            // creating a CSS_PROPERTY_FONT_FAMILY declaration)
+            if (prop_id == CSS_PROPERTY_FONT_FAMILY && ancestor && ancestor->font && ancestor->font->family) {
+                log_debug("[FONT INHERIT] Found computed font-family in parent <%s>: %s",
+                    ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->family);
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (!span->font) {
+                    span->font = alloc_font_prop(lycon);
+                }
+                // Copy font-family from parent's computed font
+                span->font->family = ancestor->font->family;
+                continue;  // Move to next property
+            }
+
             while (ancestor && !inherited_decl) {
                 if (ancestor->specified_style) {
                     inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);
