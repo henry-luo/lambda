@@ -1307,7 +1307,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("DOM tree: html version %d", doc->view_tree->html_version);
         log_debug("calling print_view_tree...");
-        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
+        print_view_tree((ViewElement*)doc->view_tree->root, doc->url);
         log_debug("print_view_tree complete");
     } else {
         log_debug("Warning: No view tree generated");

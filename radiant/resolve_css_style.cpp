@@ -983,27 +983,27 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         CssUnit unit = value->data.length.unit;
         log_debug("length value: %.2f, unit: %d", num, unit);
         switch (unit) {
-        // absolute units
+        // absolute units (all in CSS logical pixels, 96 dpi reference)
         case CSS_UNIT_Q:  // 1Q = 1cm / 40
-            result = num * (96 / 2.54 / 40) * lycon->ui_context->pixel_ratio;
+            result = num * (96 / 2.54 / 40);
             break;
         case CSS_UNIT_CM:  // 96px / 2.54
-            result = num * (96 / 2.54) * lycon->ui_context->pixel_ratio;
+            result = num * (96 / 2.54);
             break;
         case CSS_UNIT_IN:  // 96px
-            result = num * 96 * lycon->ui_context->pixel_ratio;
+            result = num * 96;
             break;
         case CSS_UNIT_MM:  // 1mm = 1cm / 10
-            result = num * (96 / 25.4) * lycon->ui_context->pixel_ratio;
+            result = num * (96 / 25.4);
             break;
         case CSS_UNIT_PC:  // 1pc = 12pt = 1in / 6
-            result = num * 16 * lycon->ui_context->pixel_ratio;
+            result = num * 16;
             break;
         case CSS_UNIT_PT:  // 1pt = 1in / 72
-            result = num * 4 / 3 * lycon->ui_context->pixel_ratio;
+            result = num * 4 / 3;
             break;
         case CSS_UNIT_PX:
-            result = num * lycon->ui_context->pixel_ratio;
+            result = num;  // CSS logical pixels
             break;
 
         // relative units
@@ -1028,25 +1028,25 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             }
             break;
         case CSS_UNIT_VW:
-            // viewport width percentage (result in physical pixels)
+            // viewport width percentage (result in CSS logical pixels)
             if (lycon && lycon->width > 0) {
-                result = (num / 100.0) * lycon->width * lycon->ui_context->pixel_ratio;
+                result = (num / 100.0) * lycon->width;
             }
             break;
         case CSS_UNIT_VH:
-            // viewport height percentage (result in physical pixels)
+            // viewport height percentage (result in CSS logical pixels)
             if (lycon && lycon->height > 0) {
-                result = (num / 100.0) * lycon->height * lycon->ui_context->pixel_ratio;
+                result = (num / 100.0) * lycon->height;
             }
             break;
         case CSS_UNIT_VMIN: {
             float vmin = (lycon->width < lycon->height) ? lycon->width : lycon->height;
-            result = (num / 100.0) * vmin * lycon->ui_context->pixel_ratio;
+            result = (num / 100.0) * vmin;
             break;
         }
         case CSS_UNIT_VMAX: {
             float vmax = (lycon->width > lycon->height) ? lycon->width : lycon->height;
-            result = (num / 100.0) * vmax * lycon->ui_context->pixel_ratio;
+            result = (num / 100.0) * vmax;
             break;
         }
         case CSS_UNIT_EX: {
