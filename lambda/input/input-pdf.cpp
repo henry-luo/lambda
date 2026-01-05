@@ -611,8 +611,9 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
     while (data_length > 0 && ((*pdf)[data_length-1] == '\r' || (*pdf)[data_length-1] == '\n')) {
         data_length--;
     }
-    if (data_length > 1000) { // Safety limit for stream size
-        data_length = 1000;
+    // Limit stream size to 10MB for safety (most PDF streams are well under 1MB)
+    if (data_length > 10 * 1024 * 1024) {
+        data_length = 10 * 1024 * 1024;
     }
 
     // Create a map to represent the stream (more serializable than custom struct)
@@ -665,7 +666,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
             ctx.builder.putToMap(stream_map, data_key, data_item);
 
             // Add content analysis for potential content streams
-            if (data_length > 10 && data_length < 2000) { // Only analyze reasonably sized streams
+            if (data_length > 10 && data_length < 100000) { // Only analyze reasonably sized streams
                 Item content_analysis = analyze_pdf_content_stream(ctx.input(), *pdf, data_length);
                 if (content_analysis .item != ITEM_NULL) {
                     String* analysis_key = ctx.builder.createString("analysis");
