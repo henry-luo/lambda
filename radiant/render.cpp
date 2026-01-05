@@ -2,6 +2,7 @@
 #include "render_img.hpp"
 #include "render_border.hpp"
 #include "render_background.hpp"
+#include "render_filter.hpp"
 #include "transform.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
@@ -76,6 +77,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
+void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
 
 /**
  * Helper function to apply transform and push paint to canvas
@@ -693,6 +695,108 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     rdcon->list = pa_list;
 }
 
+/**
+ * Render column rules for multi-column containers
+ * Column rules are drawn as vertical lines between columns
+ */
+void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
+    if (!block->multicol) return;
+
+    MultiColumnProp* mc = block->multicol;
+
+    // Only render if we have rules and multiple columns
+    if (mc->computed_column_count <= 1 || mc->rule_width <= 0 ||
+        mc->rule_style == CSS_VALUE_NONE) {
+        return;
+    }
+
+    float column_width = mc->computed_column_width;
+    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+
+    // Calculate block position
+    float block_x = rdcon->block.x + block->x;
+    float block_y = rdcon->block.y + block->y;
+
+    // Adjust for padding
+    if (block->bound) {
+        block_x += block->bound->padding.left;
+        block_y += block->bound->padding.top;
+    }
+
+    // Rule height is the content area height (block height minus padding/border)
+    // For multi-column containers, get the actual content height from block->height
+    float rule_height = block->height;
+    if (block->bound) {
+        // Subtract padding from top (already offset block_y, so don't need to subtract again)
+        // but we need to subtract total padding for height calculation
+        rule_height -= block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            rule_height -= block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+    }
+
+    // Ensure minimum rule height
+    if (rule_height <= 0) {
+        // Fall back to using the block's content height by iterating children
+        View* child = (View*)block->first_child;
+        float max_bottom = 0;
+        while (child) {
+            if (child->is_element()) {
+                ViewBlock* child_block = (ViewBlock*)child;
+                float child_bottom = child_block->y + child_block->height;
+                if (child_bottom > max_bottom) max_bottom = child_bottom;
+            }
+            child = child->next();
+        }
+        rule_height = max_bottom;
+        log_debug("[MULTICOL] Rule height computed from children: %.1f", rule_height);
+    }
+
+    log_debug("[MULTICOL] Rendering %d column rules, width=%.1f, style=%d",
+              mc->computed_column_count - 1, mc->rule_width, mc->rule_style);
+
+    // Draw rule between each pair of columns
+    for (int i = 0; i < mc->computed_column_count - 1; i++) {
+        float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f - mc->rule_width / 2.0f;
+
+        // Create rule shape
+        Tvg_Paint* rule = tvg_shape_new();
+
+        // Different stroke patterns for different styles
+        if (mc->rule_style == CSS_VALUE_DOTTED) {
+            // Dotted line: small dashes
+            float dash_pattern[] = {mc->rule_width, mc->rule_width * 2};
+            tvg_shape_set_stroke_dash(rule, dash_pattern, 2, 0);
+        } else if (mc->rule_style == CSS_VALUE_DASHED) {
+            // Dashed line: longer dashes
+            float dash_pattern[] = {mc->rule_width * 3, mc->rule_width * 2};
+            tvg_shape_set_stroke_dash(rule, dash_pattern, 2, 0);
+        } else if (mc->rule_style == CSS_VALUE_DOUBLE) {
+            // Double: two lines (render first here, second below)
+            // For double, we draw two thinner lines
+            float thin_width = mc->rule_width / 3.0f;
+            tvg_shape_append_rect(rule, rule_x - thin_width, block_y, thin_width, rule_height, 0, 0);
+            tvg_shape_append_rect(rule, rule_x + thin_width, block_y, thin_width, rule_height, 0, 0);
+            tvg_shape_set_fill_color(rule, mc->rule_color.r, mc->rule_color.g,
+                                     mc->rule_color.b, mc->rule_color.a);
+            push_with_transform(rdcon, rule);
+            continue;
+        }
+
+        // Solid, dotted, dashed: draw as vertical line
+        tvg_shape_move_to(rule, rule_x, block_y);
+        tvg_shape_line_to(rule, rule_x, block_y + rule_height);
+        tvg_shape_set_stroke_width(rule, mc->rule_width);
+        tvg_shape_set_stroke_color(rule, mc->rule_color.r, mc->rule_color.g,
+                                   mc->rule_color.b, mc->rule_color.a);
+        tvg_shape_set_stroke_cap(rule, TVG_STROKE_CAP_BUTT);
+
+        push_with_transform(rdcon, rule);
+
+        log_debug("[MULTICOL] Rule %d at x=%.1f, height=%.1f", i, rule_x, rule_height);
+    }
+}
+
 // Helper function to render linear gradient
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;
@@ -1038,6 +1142,32 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // render scrollbars
     if (block->scroller) {
         render_scroller(rdcon, block, &pa_block);
+    }
+
+    // Render multi-column rules between columns
+    if (block->multicol && block->multicol->computed_column_count > 1) {
+        render_column_rules(rdcon, block);
+    }
+
+    // Apply CSS filters after all content is rendered
+    // Filters are applied to the rendered pixel data in the element's region
+    if (block->filter && block->filter->functions) {
+        // Sync canvas to ensure all content is rendered to the surface
+        tvg_canvas_draw(rdcon->canvas, false);
+        tvg_canvas_sync(rdcon->canvas);
+
+        // Calculate the element's bounding rect
+        Rect filter_rect;
+        filter_rect.x = pa_block.x + block->x;
+        filter_rect.y = pa_block.y + block->y;
+        filter_rect.width = block->width;
+        filter_rect.height = block->height;
+
+        log_debug("[FILTER] Applying filters to element %s at (%.0f,%.0f) size %.0fx%.0f",
+                  block->node_name(), filter_rect.x, filter_rect.y, filter_rect.width, filter_rect.height);
+
+        // Apply the filter chain to the rendered pixels
+        apply_css_filters(rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
     }
 
     // Restore transform state
