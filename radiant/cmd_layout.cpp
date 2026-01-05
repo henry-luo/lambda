@@ -383,6 +383,245 @@ Element* get_html_root_element(Input* input) {
 }
 
 /**
+ * Parse viewport meta tag content string
+ * Format: "width=device-width, initial-scale=1.0, maximum-scale=2.0, ..."
+ * @param content The content attribute value from <meta name="viewport">
+ * @param doc The DomDocument to store parsed values in
+ */
+void parse_viewport_content(const char* content, DomDocument* doc) {
+    if (!content || !doc) return;
+
+    log_debug("[viewport] Parsing viewport content: '%s'", content);
+
+    // Parse comma or semicolon separated key=value pairs
+    const char* p = content;
+    while (*p) {
+        // skip whitespace and separators
+        while (*p && (*p == ' ' || *p == ',' || *p == ';' || *p == '\t' || *p == '\n')) p++;
+        if (!*p) break;
+
+        // find the key
+        const char* key_start = p;
+        while (*p && *p != '=' && *p != ',' && *p != ';' && *p != ' ') p++;
+        size_t key_len = p - key_start;
+
+        // skip to '='
+        while (*p && (*p == ' ' || *p == '\t')) p++;
+        if (*p != '=') continue;
+        p++; // skip '='
+
+        // skip whitespace after '='
+        while (*p && (*p == ' ' || *p == '\t')) p++;
+
+        // find the value
+        const char* value_start = p;
+        while (*p && *p != ',' && *p != ';' && *p != ' ' && *p != '\t') p++;
+        size_t value_len = p - value_start;
+
+        // parse key-value pairs
+        if (key_len > 0 && value_len > 0) {
+            char key[64], value[64];
+            size_t copy_len = (key_len < 63) ? key_len : 63;
+            strncpy(key, key_start, copy_len);
+            key[copy_len] = '\0';
+            copy_len = (value_len < 63) ? value_len : 63;
+            strncpy(value, value_start, copy_len);
+            value[copy_len] = '\0';
+
+            log_debug("[viewport] Key='%s' Value='%s'", key, value);
+
+            if (strcasecmp(key, "initial-scale") == 0) {
+                doc->viewport_initial_scale = (float)atof(value);
+                log_info("[viewport] initial-scale=%.2f", doc->viewport_initial_scale);
+            }
+            else if (strcasecmp(key, "minimum-scale") == 0) {
+                doc->viewport_min_scale = (float)atof(value);
+                log_debug("[viewport] minimum-scale=%.2f", doc->viewport_min_scale);
+            }
+            else if (strcasecmp(key, "maximum-scale") == 0) {
+                doc->viewport_max_scale = (float)atof(value);
+                log_debug("[viewport] maximum-scale=%.2f", doc->viewport_max_scale);
+            }
+            else if (strcasecmp(key, "width") == 0) {
+                if (strcasecmp(value, "device-width") == 0) {
+                    doc->viewport_width = 0;  // 0 means device-width
+                    log_debug("[viewport] width=device-width");
+                } else {
+                    doc->viewport_width = atoi(value);
+                    log_debug("[viewport] width=%d", doc->viewport_width);
+                }
+            }
+            else if (strcasecmp(key, "height") == 0) {
+                if (strcasecmp(value, "device-height") == 0) {
+                    doc->viewport_height = 0;  // 0 means device-height
+                    log_debug("[viewport] height=device-height");
+                } else {
+                    doc->viewport_height = atoi(value);
+                    log_debug("[viewport] height=%d", doc->viewport_height);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Recursively find and parse <meta name="viewport"> tag from HTML tree
+ * @param elem The current element to search (start with html_root)
+ * @param doc The DomDocument to store parsed viewport values
+ */
+void extract_viewport_meta(Element* elem, DomDocument* doc) {
+    if (!elem || !doc) return;
+
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type) return;
+
+    // Check if this is a <meta> element with name="viewport"
+    if (strcasecmp(type->name.str, "meta") == 0) {
+        const char* name = extract_element_attribute(elem, "name", nullptr);
+        if (name && strcasecmp(name, "viewport") == 0) {
+            const char* content = extract_element_attribute(elem, "content", nullptr);
+            if (content) {
+                parse_viewport_content(content, doc);
+            }
+        }
+        return;  // meta elements have no children to search
+    }
+
+    // Stop searching after <body> - viewport meta should be in <head>
+    if (strcasecmp(type->name.str, "body") == 0) {
+        return;
+    }
+
+    // Recursively process children
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            extract_viewport_meta(child_item.element, doc);
+        }
+    }
+}
+
+/**
+ * Extract scale value from a CSS transform declaration
+ * Parses transform functions like scale(0.9), scale(0.9, 0.9), scaleX(0.9), scaleY(0.9)
+ * Returns the uniform scale factor if found, 1.0 otherwise
+ */
+float extract_transform_scale(CssDeclaration* transform_decl) {
+    if (!transform_decl || !transform_decl->value) return 1.0f;
+
+    CssValue* value = transform_decl->value;
+
+    // Transform can be a single function or a list of functions
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values && value->data.list.count > 0) {
+        // Iterate through the transform function list
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item || item->type != CSS_VALUE_TYPE_FUNCTION || !item->data.function) continue;
+
+            CssFunction* func = item->data.function;
+            if (!func->name) continue;
+
+            // Check for scale functions
+            if (strcasecmp(func->name, "scale") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+                CssValue* arg = func->args[0];
+                if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                    float scale_x = (float)arg->data.number.value;
+                    float scale_y = scale_x;  // uniform scale
+                    if (func->arg_count >= 2 && func->args[1] && func->args[1]->type == CSS_VALUE_TYPE_NUMBER) {
+                        scale_y = (float)func->args[1]->data.number.value;
+                    }
+                    // Return uniform scale (use x as primary)
+                    log_info("[transform] Found scale(%.3f, %.3f)", scale_x, scale_y);
+                    return scale_x;
+                }
+            }
+            else if (strcasecmp(func->name, "scaleX") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+                if (func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
+                    float scale = (float)func->args[0]->data.number.value;
+                    log_info("[transform] Found scaleX(%.3f)", scale);
+                    return scale;  // X scale only
+                }
+            }
+            else if (strcasecmp(func->name, "scaleY") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+                if (func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
+                    float scale = (float)func->args[0]->data.number.value;
+                    log_info("[transform] Found scaleY(%.3f)", scale);
+                    return scale;  // Y scale only
+                }
+            }
+        }
+    }
+    else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+        // Single transform function
+        CssFunction* func = value->data.function;
+        if (func->name && strcasecmp(func->name, "scale") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+            CssValue* arg = func->args[0];
+            if (arg->type == CSS_VALUE_TYPE_NUMBER) {
+                float scale = (float)arg->data.number.value;
+                log_info("[transform] Found scale(%.3f)", scale);
+                return scale;
+            }
+        }
+    }
+
+    return 1.0f;  // no scale transform found
+}
+
+/**
+ * Find body element in DOM tree and extract transform scale from its CSS
+ * @param root The root DomElement to search from
+ * @param doc The DomDocument to store the body_transform_scale in
+ */
+void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
+    if (!root || !doc) return;
+
+    // Find body element
+    DomElement* body_elem = nullptr;
+
+    // Traverse to find body - typically root is <html>, body is a child
+    if (root->tag_name && strcasecmp(root->tag_name, "body") == 0) {
+        body_elem = root;
+    } else {
+        // Search in children
+        for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+            if (child->node_type == DOM_NODE_ELEMENT) {
+                DomElement* child_elem = static_cast<DomElement*>(child);
+                if (child_elem->tag_name && strcasecmp(child_elem->tag_name, "body") == 0) {
+                    body_elem = child_elem;
+                    break;
+                }
+                // Also check one level deeper (html > head, body)
+                for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
+                    if (grandchild->node_type == DOM_NODE_ELEMENT) {
+                        DomElement* grandchild_elem = static_cast<DomElement*>(grandchild);
+                        if (grandchild_elem->tag_name && strcasecmp(grandchild_elem->tag_name, "body") == 0) {
+                            body_elem = grandchild_elem;
+                            break;
+                        }
+                    }
+                }
+                if (body_elem) break;
+            }
+        }
+    }
+
+    if (!body_elem) {
+        log_debug("[transform] Body element not found");
+        return;
+    }
+
+    // Get transform property from body's specified styles
+    CssDeclaration* transform_decl = dom_element_get_specified_value(body_elem, CSS_PROPERTY_TRANSFORM);
+    if (transform_decl) {
+        float scale = extract_transform_scale(transform_decl);
+        if (scale != 1.0f) {
+            doc->body_transform_scale = scale;
+            log_info("[transform] Body transform scale=%.3f", scale);
+        }
+    }
+}
+
+/**
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
@@ -1155,6 +1394,14 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         return nullptr;
     }
 
+    // Extract viewport meta tag values before building DOM tree
+    extract_viewport_meta(html_root, dom_doc);
+    // If viewport initial-scale is set and given_scale is default (1.0), apply it
+    if (dom_doc->viewport_initial_scale != 1.0f && dom_doc->given_scale == 1.0f) {
+        dom_doc->given_scale = dom_doc->viewport_initial_scale;
+        log_info("[viewport] Applied initial-scale=%.2f to given_scale", dom_doc->given_scale);
+    }
+
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");
@@ -1321,6 +1568,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // HTML layout is in CSS logical pixels, scale is set later based on display context
     dom_doc->given_scale = 1.0f;
     dom_doc->scale = 1.0f;  // Will be updated by caller (window or render) with pixel_ratio
+
+    // Step 9: Extract body transform scale from CSS (after cascade is complete)
+    extract_body_transform_scale(dom_root, dom_doc);
+    // If body has transform: scale(), apply it to the document's body_transform_scale
+    // This can be used by the renderer to apply additional scaling
 
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] load: total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
