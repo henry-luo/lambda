@@ -103,6 +103,7 @@ static Item build_node(MathParseContext& ctx, TSNode node) {
         strcmp(type, "delimiter_group") == 0 ||
         strcmp(type, "accent") == 0 ||
         strcmp(type, "big_operator") == 0 ||
+        strcmp(type, "environment") == 0 ||
         strcmp(type, "text_command") == 0 ||
         strcmp(type, "style_command") == 0 ||
         strcmp(type, "space_command") == 0 ||
@@ -402,6 +403,85 @@ static Item build_command(MathParseContext& ctx, TSNode node) {
     return result;
 }
 
+static Item build_environment(MathParseContext& ctx, TSNode node) {
+    // Get environment name
+    TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+    char* env_name = ts_node_is_null(name_node) ? strdup("matrix") : ctx.node_text_dup(name_node);
+    
+    // Get body node
+    TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
+    
+    // Parse body into rows (list of lists)
+    // Each row contains cells, separated by col_sep (&)
+    // Rows are separated by row_sep (\\)
+    
+    // Allocate temporary arrays for building
+    static const int MAX_ROWS = 100;
+    static const int MAX_CELLS = 100;
+    static const int MAX_ITEMS = 100;
+    
+    Item rows[MAX_ROWS];
+    int row_count = 0;
+    
+    Item current_row_cells[MAX_CELLS];
+    int cell_count = 0;
+    
+    Item current_cell_items[MAX_ITEMS];
+    int item_count = 0;
+    
+    if (!ts_node_is_null(body_node)) {
+        uint32_t child_count = ts_node_named_child_count(body_node);
+        
+        for (uint32_t i = 0; i < child_count && row_count < MAX_ROWS; i++) {
+            TSNode child = ts_node_named_child(body_node, i);
+            const char* child_type = ts_node_type(child);
+            
+            if (strcmp(child_type, "row_sep") == 0) {
+                // End current cell and row
+                if (item_count > 0 && cell_count < MAX_CELLS) {
+                    current_row_cells[cell_count++] = ctx.builder->row(current_cell_items, item_count);
+                    item_count = 0;
+                }
+                if (cell_count > 0 && row_count < MAX_ROWS) {
+                    rows[row_count++] = ctx.builder->row(current_row_cells, cell_count);
+                    cell_count = 0;
+                }
+            } else if (strcmp(child_type, "col_sep") == 0) {
+                // End current cell
+                if (cell_count < MAX_CELLS) {
+                    if (item_count > 0) {
+                        current_row_cells[cell_count++] = ctx.builder->row(current_cell_items, item_count);
+                    } else {
+                        // Empty cell
+                        current_row_cells[cell_count++] = ItemNull;
+                    }
+                    item_count = 0;
+                }
+            } else {
+                // Regular expression - add to current cell
+                Item item = build_node(ctx, child);
+                if (item.item != ItemNull.item && item_count < MAX_ITEMS) {
+                    current_cell_items[item_count++] = item;
+                }
+            }
+        }
+        
+        // Handle remaining cell and row
+        if (item_count > 0 && cell_count < MAX_CELLS) {
+            current_row_cells[cell_count++] = ctx.builder->row(current_cell_items, item_count);
+        }
+        if (cell_count > 0 && row_count < MAX_ROWS) {
+            rows[row_count++] = ctx.builder->row(current_row_cells, cell_count);
+        }
+    }
+    
+    // Build rows list item
+    Item rows_item = ctx.builder->row(rows, row_count);
+    Item result = ctx.builder->environment(env_name, rows_item);
+    free(env_name);
+    return result;
+}
+
 static Item build_subsup(MathParseContext& ctx, TSNode node) {
     TSNode base_node = ts_node_child_by_field_name(node, "base", 4);
     TSNode sub_node = ts_node_child_by_field_name(node, "sub", 3);
@@ -428,6 +508,7 @@ static Item build_atom(MathParseContext& ctx, TSNode node) {
     if (strcmp(type, "delimiter_group") == 0) return build_delimiter_group(ctx, node);
     if (strcmp(type, "accent") == 0) return build_accent(ctx, node);
     if (strcmp(type, "big_operator") == 0) return build_big_operator(ctx, node);
+    if (strcmp(type, "environment") == 0) return build_environment(ctx, node);
     if (strcmp(type, "text_command") == 0) return build_text_command(ctx, node);
     if (strcmp(type, "style_command") == 0) return build_style_command(ctx, node);
     if (strcmp(type, "space_command") == 0) return build_space_command(ctx, node);

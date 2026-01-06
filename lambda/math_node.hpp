@@ -239,6 +239,16 @@ public:
         return mb.final();
     }
     
+    // Create an environment node (matrix, aligned, cases, etc.)
+    Item environment(const char* name, Item rows) {
+        MapBuilder mb = builder.map();
+        mb.put("node", builder.createSymbolItem("environment"));
+        mb.put("name", builder.createStringItem(name));
+        mb.put("rows", rows);
+        mb.put("atom", builder.createSymbolItem("inner"));
+        return mb.final();
+    }
+    
     // Create an error node
     Item error(const char* message, const char* source = nullptr) {
         MapBuilder mb = builder.map();

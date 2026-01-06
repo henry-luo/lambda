@@ -75,6 +75,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "environment"
+        },
+        {
+          "type": "SYMBOL",
           "name": "text_command"
         },
         {
@@ -1108,6 +1112,217 @@
           }
         ]
       }
+    },
+    "environment": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\begin"
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "env_name"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "columns",
+              "content": {
+                "type": "SYMBOL",
+                "name": "env_columns"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "FIELD",
+          "name": "body",
+          "content": {
+            "type": "SYMBOL",
+            "name": "env_body"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "\\end"
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "FIELD",
+          "name": "end_name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "env_name"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "env_name": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "matrix"
+        },
+        {
+          "type": "STRING",
+          "value": "pmatrix"
+        },
+        {
+          "type": "STRING",
+          "value": "bmatrix"
+        },
+        {
+          "type": "STRING",
+          "value": "vmatrix"
+        },
+        {
+          "type": "STRING",
+          "value": "Vmatrix"
+        },
+        {
+          "type": "STRING",
+          "value": "Bmatrix"
+        },
+        {
+          "type": "STRING",
+          "value": "smallmatrix"
+        },
+        {
+          "type": "STRING",
+          "value": "aligned"
+        },
+        {
+          "type": "STRING",
+          "value": "align"
+        },
+        {
+          "type": "STRING",
+          "value": "align*"
+        },
+        {
+          "type": "STRING",
+          "value": "gathered"
+        },
+        {
+          "type": "STRING",
+          "value": "gather"
+        },
+        {
+          "type": "STRING",
+          "value": "gather*"
+        },
+        {
+          "type": "STRING",
+          "value": "split"
+        },
+        {
+          "type": "STRING",
+          "value": "multline"
+        },
+        {
+          "type": "STRING",
+          "value": "multline*"
+        },
+        {
+          "type": "STRING",
+          "value": "cases"
+        },
+        {
+          "type": "STRING",
+          "value": "rcases"
+        },
+        {
+          "type": "STRING",
+          "value": "dcases"
+        },
+        {
+          "type": "STRING",
+          "value": "array"
+        },
+        {
+          "type": "STRING",
+          "value": "subarray"
+        },
+        {
+          "type": "STRING",
+          "value": "equation"
+        },
+        {
+          "type": "STRING",
+          "value": "equation*"
+        }
+      ]
+    },
+    "env_columns": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "PATTERN",
+          "value": "[lcr|@{}p\\d.]+"
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "env_body": {
+      "type": "REPEAT1",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "_expression"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "row_sep"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "col_sep"
+          }
+        ]
+      }
+    },
+    "row_sep": {
+      "type": "STRING",
+      "value": "\\\\"
+    },
+    "col_sep": {
+      "type": "STRING",
+      "value": "&"
     },
     "text_command": {
       "type": "SEQ",
