@@ -35,6 +35,7 @@ __pycache__/
 
 # Release directory
 release/
+conf
 
 # Executables and other project-specific generated files
 core/
@@ -131,7 +132,9 @@ test/pdf/output
 
 analysis-results*/
 
+# reference projects
 gumbo-parser/
 taffy/
 latex-js/
-conf
+mathlive/
+
