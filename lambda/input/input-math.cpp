@@ -4,10 +4,16 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "../mark_builder.hpp"
+#include "input-math2.hpp"  // new tree-sitter based parser
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
 #include "lib/log.h"
+
+// Feature flag: use new tree-sitter-based math parser
+#ifndef USE_NEW_MATH_PARSER
+#define USE_NEW_MATH_PARSER 1
+#endif
 
 using namespace lambda;
 
@@ -4862,71 +4868,74 @@ static MathFlavor get_math_flavor(const char* flavor_str) {
 
 // main parser function
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
-    log_debug("parse_math called with: '%s', flavor: '%s' (length: %zu)\n", math_string, flavor_str ? flavor_str : "null", strlen(math_string));
-
-    // create unified InputContext with source tracking
-    InputContext ctx(input, math_string, strlen(math_string));
-
-    // Add timeout protection
-    clock_t start_time = clock();
-    const double PARSING_TIMEOUT_SECONDS = 30.0; // 30 second timeout
-
-    // Debug: print the last 5 characters and their codes
-    size_t len = strlen(math_string);
-    for (size_t i = (len >= 5) ? len - 5 : 0; i < len; i++) {
-        log_debug("'%c'(%d) ", math_string[i], (int)math_string[i]);
-    }
-    log_debug("\n");
-
-    // Create MarkBuilder for StringBuf operations
-    const char *math = math_string;
+    log_debug("parse_math called with: '%s', flavor: '%s' (length: %zu)", math_string, flavor_str ? flavor_str : "null", strlen(math_string));
 
     MathFlavor flavor = get_math_flavor(flavor_str);
-    log_debug("Math flavor resolved to: %d\n", flavor);
-
-    // parse the math expression with timeout check
-    skip_whitespace(&math);
-
-    // Check timeout before parsing
-    if ((clock() - start_time) / CLOCKS_PER_SEC > PARSING_TIMEOUT_SECONDS) {
-        ctx.addError(ctx.tracker.location(), "Math parsing timed out before parsing (%.2f seconds)", PARSING_TIMEOUT_SECONDS);
-        fprintf(stderr, "Error: Math parsing timed out before parsing (%.2f seconds)\n", PARSING_TIMEOUT_SECONDS);
-        input->root = {.item = ITEM_ERROR};
-        return;
-    }
+    log_debug("Math flavor resolved to: %d", flavor);
 
     Item result;
 
     // Route to appropriate parser based on flavor
     if (flavor == MATH_FLAVOR_ASCII) {
-        log_debug("DEBUG: Routing to ASCII math parser\n");
+        log_debug("parse_math: routing to ASCII math parser");
         result = input_ascii_math(input, math_string);
-    } else {
+    }
+#if USE_NEW_MATH_PARSER
+    else if (flavor == MATH_FLAVOR_LATEX) {
+        // Use new tree-sitter-based parser for LaTeX
+        log_debug("parse_math: using new tree-sitter math parser");
+        result = lambda::parse_math(math_string, input);
+    }
+#endif
+    else {
+        // Fall back to old parser for typst and when new parser is disabled
+        // create unified InputContext with source tracking
+        InputContext ctx(input, math_string, strlen(math_string));
+
+        // Add timeout protection
+        clock_t start_time = clock();
+        const double PARSING_TIMEOUT_SECONDS = 30.0; // 30 second timeout
+
+        // Debug: print the last 5 characters and their codes
+        size_t len = strlen(math_string);
+        for (size_t i = (len >= 5) ? len - 5 : 0; i < len; i++) {
+            log_debug("'%c'(%d) ", math_string[i], (int)math_string[i]);
+        }
+        log_debug("\n");
+
+        const char *math = math_string;
+
+        // parse the math expression with timeout check
+        skip_whitespace(&math);
+
+        // Check timeout before parsing
+        if ((clock() - start_time) / CLOCKS_PER_SEC > PARSING_TIMEOUT_SECONDS) {
+            ctx.addError(ctx.tracker.location(), "Math parsing timed out before parsing (%.2f seconds)", PARSING_TIMEOUT_SECONDS);
+            fprintf(stderr, "Error: Math parsing timed out before parsing (%.2f seconds)\n", PARSING_TIMEOUT_SECONDS);
+            input->root = {.item = ITEM_ERROR};
+            return;
+        }
+
         result = parse_math_expression(ctx, &math, flavor);
+
+        // Check timeout after parsing
+        double elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
+        if (elapsed_time > PARSING_TIMEOUT_SECONDS) {
+            ctx.addError(ctx.tracker.location(), "Math parsing timed out (%.2f seconds)", elapsed_time);
+            fprintf(stderr, "Error: Math parsing timed out (%.2f seconds)\n", elapsed_time);
+            input->root = {.item = ITEM_ERROR};
+            return;
+        }
     }
 
-    // Check timeout after parsing
-    double elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
-    if (elapsed_time > PARSING_TIMEOUT_SECONDS) {
-        ctx.addError(ctx.tracker.location(), "Math parsing timed out (%.2f seconds)", elapsed_time);
-        fprintf(stderr, "Error: Math parsing timed out (%.2f seconds)\n", elapsed_time);
-        input->root = {.item = ITEM_ERROR};
-        return;
-    }
-
-    if (result .item == ITEM_ERROR || result .item == ITEM_NULL) {
-        ctx.addWarning(ctx.tracker.location(), "Math parsing returned error or null result");
+    if (result.item == ITEM_ERROR || result.item == ITEM_NULL) {
         log_debug("Result is error or null, setting input->root to ITEM_ERROR\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
 
-    log_debug("Setting input->root to result: %lu (0x%lx) (parsing took %.3f seconds)\n", result.item, result.item, elapsed_time);
+    log_debug("Setting input->root to result: %lu (0x%lx)\n", result.item, result.item);
     input->root = result;
-
-    if (ctx.hasErrors()) {
-        // errors occurred during parsing
-    }
 }
 
 // Parse styled fractions: \dfrac, \tfrac, \cfrac

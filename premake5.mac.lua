@@ -476,6 +476,7 @@ project "lambda"
         "lambda/input/html5/html5_token.cpp",
         "lambda/format/latex_generator.cpp",
         "lambda/format/latex_packages.cpp",
+        "lambda/format/format-math2.cpp",
         "lambda/format/format-md.cpp",
         "lambda/format/format-toml.cpp",
         "lambda/format/latex_assets.cpp",
