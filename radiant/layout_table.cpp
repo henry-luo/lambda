@@ -3196,60 +3196,18 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
             }
 
             // If still no explicit width, measure content
+            // Use unified intrinsic sizing API for ALL element types (block, inline, etc.)
+            // This properly handles:
+            // - Block elements with nested inline children (e.g., <div><span>text</span></div>)
+            // - Regular inline elements with text content
+            // - Inline elements with nested block children (block-in-inline)
+            // - Inline elements with table-internal descendants
             if (child_max == 0 && child_min == 0) {
-                DisplayValue child_display = resolve_display_value(child);
-
-                if (child_display.outer == CSS_VALUE_BLOCK) {
-                    // Block elements: measure their content width directly
-                    float block_max = 0.0f;
-                    float block_min = 0.0f;
-
-                    if (child_elem->first_child) {
-                        for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
-                            if (grandchild->is_text()) {
-                                const unsigned char* text = grandchild->text_data();
-                                if (text && *text) {
-                                    size_t text_len = strlen((const char*)text);
-                                    const char* measure_text = (const char*)text;
-                                    size_t measure_len = text_len;
-                                    static char normalized_buffer2[4096];
-
-                                    if (collapse_ws) {
-                                        if (is_all_whitespace((const char*)text, text_len)) continue;
-                                        size_t normalized_len = normalize_whitespace_to_buffer(
-                                            (const char*)text, text_len, normalized_buffer2, sizeof(normalized_buffer2));
-                                        if (normalized_len == 0) continue;
-                                        measure_text = normalized_buffer2;
-                                        measure_len = normalized_len;
-                                    }
-
-                                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                                        lycon, measure_text, measure_len);
-                                    float gchild_max = (float)widths.max_content;
-                                    float gchild_min = (float)widths.min_content;
-                                    if (gchild_max > block_max) block_max = gchild_max;
-                                    if (gchild_min > block_min) block_min = gchild_min;
-                                }
-                            }
-                        }
-                    }
-
-                    child_max = block_max;
-                    child_min = block_min;
-                    log_debug("Cell widths: block %s max=%.1f, min=%.1f",
-                              child->node_name(), child_max, child_min);
-                } else {
-                    // Inline elements: use intrinsic sizing API for proper measurement
-                    // This correctly handles:
-                    // - Regular inline elements with text content
-                    // - Inline elements with nested block children (block-in-inline)
-                    // - Inline elements with table-internal descendants
-                    IntrinsicSizes inline_sizes = measure_element_intrinsic_widths(lycon, child_elem);
-                    child_max = inline_sizes.max_content;
-                    child_min = inline_sizes.min_content;
-                    log_debug("Cell widths: inline %s min=%.1f, max=%.1f",
-                              child->node_name(), child_min, child_max);
-                }
+                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+                child_max = child_sizes.max_content;
+                child_min = child_sizes.min_content;
+                log_debug("Cell widths: element %s min=%.1f, max=%.1f",
+                          child->node_name(), child_min, child_max);
             }
 
             if (child_max > max_width) max_width = child_max;
