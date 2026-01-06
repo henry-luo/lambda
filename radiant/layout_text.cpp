@@ -129,12 +129,19 @@ static inline bool is_cjk_character(uint32_t codepoint) {
  * These characters have fixed widths defined by Unicode standard, which browsers
  * enforce regardless of what the font's glyph metrics say.
  * Returns the width as a fraction of 1em, or 0 if the character doesn't have
- * a Unicode-specified width.
+ * a Unicode-specified width. Returns -1 for zero-width characters.
  *
  * Reference: Unicode Standard, Chapter 6 "Writing Systems and Punctuation"
  */
 static inline float get_unicode_space_width_em(uint32_t codepoint) {
     switch (codepoint) {
+        // Zero-width characters (return negative to distinguish from "use font width")
+        case 0x200B: return -1.0f;  // Zero Width Space (ZWSP) - break opportunity
+        case 0x200C: return -1.0f;  // Zero Width Non-Joiner (ZWNJ)
+        case 0x200D: return -1.0f;  // Zero Width Joiner (ZWJ)
+        case 0xFEFF: return -1.0f;  // Zero Width No-Break Space (ZWNBSP / BOM)
+
+        // Unicode spaces with defined widths
         case 0x2000: return 0.5f;   // EN QUAD - width of 'n' (nominally 1/2 em)
         case 0x2001: return 1.0f;   // EM QUAD - width of 'm' (nominally 1 em)
         case 0x2002: return 0.5f;   // EN SPACE - 1/2 em
@@ -536,7 +543,10 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
         // Check for Unicode space characters with defined widths
         float unicode_space_em = get_unicode_space_width_em(codepoint);
-        if (unicode_space_em > 0.0f) {
+        if (unicode_space_em < 0.0f) {
+            // Zero-width character - skip with no width contribution
+            // (e.g., U+200B ZWSP, U+FEFF ZWNBSP/BOM)
+        } else if (unicode_space_em > 0.0f) {
             // Use Unicode-specified width (fraction of em)
             text_width += unicode_space_em * lycon->font.current_font_size;
         } else {
@@ -866,7 +876,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             // Check for Unicode space characters with defined widths
             float unicode_space_em = get_unicode_space_width_em(codepoint);
-            if (unicode_space_em > 0.0f) {
+            if (unicode_space_em < 0.0f) {
+                // Zero-width character (e.g., U+200B ZWSP, U+FEFF ZWNBSP/BOM)
+                // Skip with no width contribution, just advance the string pointer
+                str = next_ch;
+                lycon->line.is_line_start = false;
+                lycon->line.has_space = false;
+                continue;  // Skip to next character without adding width
+            } else if (unicode_space_em > 0.0f) {
                 // Use Unicode-specified width (fraction of em)
                 wd = unicode_space_em * lycon->font.current_font_size;
             } else {

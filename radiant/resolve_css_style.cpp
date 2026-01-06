@@ -651,6 +651,13 @@ DisplayValue resolve_display_value(void* child) {
                                 display.outer = CSS_VALUE_NONE;
                                 display.inner = CSS_VALUE_NONE;
                                 return display;
+                            } else if (keyword == CSS_VALUE_RUN_IN) {
+                                // CSS 2.1: run-in needs special handling at layout time
+                                // to determine if it becomes block or merges into following block
+                                display.outer = CSS_VALUE_RUN_IN;
+                                display.inner = CSS_VALUE_FLOW;
+                                log_debug("[CSS] ✅ MATCHED RUN_IN! Setting display to RUN_IN+FLOW");
+                                return display;
                             } else if (keyword == CSS_VALUE_TABLE) {
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_TABLE;
@@ -712,7 +719,7 @@ DisplayValue resolve_display_value(void* child) {
                                 } else if (outer_kw == CSS_VALUE_INLINE) {
                                     display.outer = CSS_VALUE_INLINE;
                                 } else if (outer_kw == CSS_VALUE_RUN_IN) {
-                                    display.outer = CSS_VALUE_INLINE; // run-in treated as inline fallback
+                                    display.outer = CSS_VALUE_RUN_IN; // run-in needs special handling at layout
                                 } else {
                                     display.outer = CSS_VALUE_BLOCK; // default to block
                                 }
