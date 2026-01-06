@@ -167,6 +167,196 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
     return false;
 }
 
+// ============================================================================
+// Run-in box helper functions (CSS 2.1 Section 9.2.3)
+// ============================================================================
+
+/**
+ * Check if an element contains any block-level child.
+ * Used for run-in: if a run-in box contains a block-level element,
+ * the run-in box itself becomes a block box.
+ */
+static bool run_in_contains_block_child(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            DisplayValue child_display = resolve_display_value(child);
+            // Check for block-level elements (block, list-item, table, etc.)
+            if (child_display.outer == CSS_VALUE_BLOCK ||
+                child_display.outer == CSS_VALUE_LIST_ITEM ||
+                child_display.outer == CSS_VALUE_RUN_IN ||  // nested run-in counts as block
+                child_display.inner == CSS_VALUE_TABLE) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Find the next sibling element, considering "immediately followed" semantics.
+ * For run-in: we need to find if there's a block box immediately following.
+ *
+ * CSS 2.1: "immediately followed" means no intervening content, except
+ * for whitespace that would be collapsed in normal formatting.
+ * With white-space: pre, whitespace is NOT collapsed and blocks merging.
+ *
+ * Since checking white-space at this point is complex (styles may not be resolved),
+ * we take a conservative approach: only skip whitespace text nodes that would
+ * be collapsed in normal flow (whitespace-only text between elements).
+ */
+static DomNode* get_next_element_sibling(DomNode* node) {
+    if (!node) return nullptr;
+    DomNode* sibling = node->next_sibling;
+    while (sibling) {
+        if (sibling->is_element()) {
+            return sibling;
+        } else if (sibling->is_text()) {
+            // Check if the text would be collapsed in normal formatting
+            // Whitespace between block elements is collapsed, but we need
+            // to be conservative here since we don't know the final display
+            // of siblings yet
+            const char* text = (const char*)sibling->text_data();
+            if (!is_only_whitespace(text)) {
+                // Non-whitespace text blocks run-in from merging
+                return nullptr;
+            }
+            // Check if parent has white-space: pre/pre-wrap/pre-line/break-spaces
+            // which would preserve this whitespace
+            DomNode* parent = node->parent;
+            if (parent && parent->is_element()) {
+                DomElement* parent_elem = parent->as_element();
+                if (parent_elem->blk && parent_elem->blk->white_space != 0) {
+                    CssEnum ws = parent_elem->blk->white_space;
+                    // white-space values that preserve whitespace
+                    if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+                        ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES) {
+                        // Whitespace is preserved, blocks run-in merging
+                        return nullptr;
+                    }
+                }
+            }
+            // Whitespace would be collapsed, continue looking
+        }
+        sibling = sibling->next_sibling;
+    }
+    return nullptr;
+}
+
+/**
+ * Check if the next sibling is a block box that run-in can merge into.
+ * CSS 2.1: The run-in becomes inline if immediately followed by a block box.
+ */
+static bool run_in_should_merge_with_next(DomNode* run_in_node) {
+    DomNode* next = get_next_element_sibling(run_in_node);
+    if (!next) return false;
+
+    DisplayValue next_display = resolve_display_value(next);
+
+    // Can only merge with a block-level flow container (not flex/grid/table)
+    if (next_display.outer == CSS_VALUE_BLOCK &&
+        (next_display.inner == CSS_VALUE_FLOW || next_display.inner == CSS_VALUE_FLOW_ROOT)) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Merge run-in element's children into the following block as first inline content.
+ * This modifies the DOM tree by:
+ * 1. Moving all children of run-in to the beginning of the following block
+ * 2. Removing the run-in element from the tree (it becomes empty/display:none)
+ */
+static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_in, DomElement* next_block) {
+    if (!lycon || !run_in || !next_block) return;
+
+    log_debug("[RUN-IN] Merging <%s> into <%s>",
+              run_in->tag_name ? run_in->tag_name : "unknown",
+              next_block->tag_name ? next_block->tag_name : "unknown");
+
+    // Get run-in's children
+    DomNode* first_run_in_child = run_in->first_child;
+    DomNode* last_run_in_child = run_in->last_child;
+
+    if (!first_run_in_child) {
+        // Empty run-in - just hide it
+        run_in->display.outer = CSS_VALUE_NONE;
+        run_in->display.inner = CSS_VALUE_NONE;
+        return;
+    }
+
+    // Save next block's first child
+    DomNode* next_block_first_child = next_block->first_child;
+
+    // Update parent pointers for all run-in children
+    for (DomNode* child = first_run_in_child; child; child = child->next_sibling) {
+        child->parent = next_block;
+    }
+
+    // Link run-in children as first children of next_block
+    if (next_block_first_child) {
+        // Insert before existing children
+        last_run_in_child->next_sibling = next_block_first_child;
+        next_block_first_child->prev_sibling = last_run_in_child;
+    } else {
+        // Block was empty, run-in children become only children
+        next_block->last_child = last_run_in_child;
+    }
+    next_block->first_child = first_run_in_child;
+    first_run_in_child->prev_sibling = nullptr;
+
+    // Clear run-in's children and hide the element
+    run_in->first_child = nullptr;
+    run_in->last_child = nullptr;
+    run_in->display.outer = CSS_VALUE_NONE;
+    run_in->display.inner = CSS_VALUE_NONE;
+
+    log_debug("[RUN-IN] Merge complete, run-in now hidden");
+}
+
+/**
+ * Resolve run-in display for an element.
+ * Called during layout to determine if a run-in box should:
+ * 1. Become a block (contains block child or not followed by block)
+ * 2. Merge into following block (become inline)
+ *
+ * Returns the effective display value after run-in resolution.
+ */
+static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) {
+    DisplayValue result = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};  // default: becomes block
+
+    if (!node || !node->is_element()) return result;
+    DomElement* elem = node->as_element();
+
+    // CSS 2.1: If run-in contains a block-level element, it becomes block
+    if (run_in_contains_block_child(node)) {
+        log_debug("[RUN-IN] <%s> contains block child, becomes BLOCK",
+                  elem->tag_name ? elem->tag_name : "unknown");
+        return result;
+    }
+
+    // CSS 2.1: If run-in is immediately followed by a block box, merge into it
+    DomNode* next = get_next_element_sibling(node);
+    if (next && run_in_should_merge_with_next(node)) {
+        DomElement* next_elem = next->as_element();
+
+        // Perform the merge - this moves run-in children into next block
+        merge_run_in_with_next_block(lycon, elem, next_elem);
+
+        // Return NONE since run-in is now hidden (children moved to next block)
+        result.outer = CSS_VALUE_NONE;
+        result.inner = CSS_VALUE_NONE;
+        return result;
+    }
+
+    // CSS 2.1: Otherwise, run-in becomes a block box
+    log_debug("[RUN-IN] <%s> not followed by block, becomes BLOCK",
+              elem->tag_name ? elem->tag_name : "unknown");
+    return result;
+}
+
 // Constant for fsSelection bit 7 (USE_TYPO_METRICS)
 constexpr uint16_t OS2_FS_SELECTION_USE_TYPO_METRICS = 0x0080;
 
@@ -929,11 +1119,27 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         if (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED) {
             // Absolutely positioned elements become block-level
-            if (display.outer == CSS_VALUE_INLINE) {
-                log_debug("Position absolute/fixed on %s: transforming display from INLINE to BLOCK",
-                          node->node_name());
+            if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_RUN_IN) {
+                log_debug("Position absolute/fixed on %s: transforming display from outer=%d to BLOCK",
+                          node->node_name(), display.outer);
                 display.outer = CSS_VALUE_BLOCK;
             }
+        }
+
+        // CSS 2.1 Section 9.2.3: Run-in boxes
+        // A run-in box behaves as follows:
+        // - If it contains a block-level box, becomes block
+        // - If immediately followed by a block box, merges into that block as inline
+        // - Otherwise, becomes block
+        if (display.outer == CSS_VALUE_RUN_IN) {
+            DisplayValue resolved = resolve_run_in_display(lycon, node);
+            if (resolved.outer == CSS_VALUE_NONE) {
+                // Run-in was merged into following block, skip layout
+                log_debug("run-in merged into following block, skipping");
+                return;
+            }
+            // Run-in becomes block
+            display = resolved;
         }
 
         switch (display.outer) {
