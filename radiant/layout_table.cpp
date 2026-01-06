@@ -1757,6 +1757,118 @@ static DomNode* collect_consecutive_run(DomNode* start, DomElement* parent,
  *
  * 1. If a child of a table-row is not a table-cell, wrap it in anonymous table-cell
  * 2. If a child of a table-row-group is not a table-row, wrap consecutive cells in anonymous table-row
+/**
+ * Helper to check if an element is floated or absolutely positioned.
+ * CSS 2.1 Section 17.2.1: Such elements should NOT be wrapped in anonymous table boxes.
+ */
+static bool is_float_or_positioned(DomElement* elem) {
+    if (!elem) return false;
+
+    // Check resolved position prop first (if styles already resolved)
+    if (elem->position) {
+        if (elem->position->float_prop != CSS_VALUE_NONE ||
+            elem->position->position == CSS_VALUE_ABSOLUTE ||
+            elem->position->position == CSS_VALUE_FIXED) {
+            return true;
+        }
+    }
+
+    // Check specified_style (CSS cascade result before full resolution)
+    if (elem->specified_style && elem->specified_style->tree) {
+        // Check float property
+        AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+        if (float_node) {
+            StyleNode* style_node = (StyleNode*)float_node->declaration;
+            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                CssValue* val = style_node->winning_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD &&
+                    (val->data.keyword == CSS_VALUE_LEFT || val->data.keyword == CSS_VALUE_RIGHT)) {
+                    return true;
+                }
+            }
+        }
+
+        // Check position property
+        AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
+        if (pos_node) {
+            StyleNode* style_node = (StyleNode*)pos_node->declaration;
+            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                CssValue* val = style_node->winning_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD &&
+                    (val->data.keyword == CSS_VALUE_ABSOLUTE || val->data.keyword == CSS_VALUE_FIXED)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Helper function to wrap a node in an anonymous table-cell if needed.
+ * If the node is already a cell, just reparent it.
+ * Otherwise, wrap it in a new anonymous cell.
+ */
+static void wrap_node_in_cell_if_needed(LayoutContext* lycon, DomNode* node, DomElement* parent_row) {
+    bool is_already_cell = false;
+    if (node->is_element()) {
+        DisplayValue disp = resolve_display_value(node);
+        uintptr_t tag = node->tag();
+        is_already_cell = is_cell_display(disp.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+    }
+
+    if (is_already_cell) {
+        // Already a cell, just reparent
+        reparent_node(node, parent_row);
+    } else {
+        // Need to wrap in anonymous cell (text nodes or non-cell elements)
+        DomElement* anon_td = create_anonymous_table_element(lycon, parent_row,
+            CSS_VALUE_TABLE_CELL, "::anon-td");
+        reparent_node(node, anon_td);
+        append_child_to_element(parent_row, anon_td);
+        log_debug("[ANON-TABLE] Wrapped node in anonymous cell");
+    }
+}
+
+/**
+ * Helper to wrap a run of nodes in table cells.
+ * - Elements that are already cells get reparented directly
+ * - Consecutive non-cell elements get wrapped together in a single anonymous cell
+ * This matches CSS 2.1 behavior where consecutive non-cell content forms a single cell.
+ */
+static void wrap_run_in_cells(LayoutContext* lycon, ArrayList* run, DomElement* parent_row) {
+    DomElement* current_anon_td = nullptr;
+
+    for (int i = 0; i < run->length; i++) {
+        DomNode* node = (DomNode*)run->data[i];
+
+        bool is_cell = false;
+        if (node->is_element()) {
+            DisplayValue disp = resolve_display_value(node);
+            uintptr_t tag = node->tag();
+            is_cell = is_cell_display(disp.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+        }
+
+        if (is_cell) {
+            // Cell element - reparent directly, reset accumulator
+            current_anon_td = nullptr;
+            reparent_node(node, parent_row);
+        } else {
+            // Non-cell content - add to current anonymous cell or create new one
+            if (!current_anon_td) {
+                current_anon_td = create_anonymous_table_element(lycon, parent_row,
+                    CSS_VALUE_TABLE_CELL, "::anon-td");
+                append_child_to_element(parent_row, current_anon_td);
+                log_debug("[ANON-TABLE] Created anonymous cell for non-cell content");
+            }
+            reparent_node(node, current_anon_td);
+        }
+    }
+}
+
+/*
+ * CSS 2.1 Section 17.2.1: Anonymous table objects
  * 3. If a child of a table/inline-table is not a proper table child (row-group, row, column, caption),
  *    wrap it appropriately:
  *    - Consecutive table-cells get wrapped in anonymous table-row, then in anonymous table-row-group
@@ -1793,7 +1905,31 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
     for (int i = 0; i < children_to_process->length; ) {
         DomNode* child = (DomNode*)children_to_process->data[i];
 
-        // Skip non-element nodes in this pass (they'll be handled when adjacent to cells)
+        // Handle text nodes - they need to be wrapped in anonymous cells
+        // CSS 2.1 Section 17.2.1: "Any content that is not a table-* element
+        // will be wrapped in an anonymous table-cell box"
+        if (child->is_text()) {
+            // Check if this text node has non-whitespace content
+            const char* text = ((DomText*)child)->text;
+            bool has_content = false;
+            if (text) {
+                for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
+                    // check for common whitespace characters
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
+                        has_content = true;
+                        break;
+                    }
+                }
+            }
+            if (has_content) {
+                log_debug("[ANON-TABLE] Text node with content needs cell wrapping");
+                arraylist_append(current_cell_run, child);
+            }
+            i++;
+            continue;
+        }
+
+        // Skip other non-element nodes
         if (!child->is_element()) {
             i++;
             continue;
@@ -1814,7 +1950,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         if (is_row_group || is_column || is_caption) {
             // Proper table child - flush any accumulated runs first
             if (current_cell_run->length > 0) {
-                log_debug("[ANON-TABLE] Flushing cell run of %d cells before row group",
+                log_debug("[ANON-TABLE] Flushing cell run of %d items before row group",
                          current_cell_run->length);
 
                 // Create anonymous tbody + tr for consecutive cells
@@ -1824,11 +1960,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     CSS_VALUE_TABLE_ROW, "::anon-tr");
                 append_child_to_element(anon_tbody, anon_tr);
 
-                // Move cells to anonymous tr
-                for (int j = 0; j < current_cell_run->length; j++) {
-                    DomNode* cell_node = (DomNode*)current_cell_run->data[j];
-                    reparent_node(cell_node, anon_tr);
-                }
+                // Move cells/nodes to anonymous tr (wrapping consecutive non-cells in single cell)
+                wrap_run_in_cells(lycon, current_cell_run, anon_tr);
 
                 // Insert at the position of the first cell
                 insert_node_before(table, (DomNode*)anon_tbody, child);
@@ -1862,7 +1995,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             // Row as direct child of table - accumulate for wrapping in tbody
             if (current_cell_run->length > 0) {
                 // Flush cells first - they get their own tbody+tr
-                log_debug("[ANON-TABLE] Flushing cell run of %d cells before row",
+                log_debug("[ANON-TABLE] Flushing cell run of %d items before row",
                          current_cell_run->length);
 
                 DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
@@ -1871,10 +2004,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     CSS_VALUE_TABLE_ROW, "::anon-tr");
                 append_child_to_element(anon_tbody, anon_tr);
 
-                for (int i = 0; i < current_cell_run->length; i++) {
-                    DomNode* cell_node = (DomNode*)current_cell_run->data[i];
-                    reparent_node(cell_node, anon_tr);
-                }
+                wrap_run_in_cells(lycon, current_cell_run, anon_tr);
 
                 insert_node_before(table, (DomNode*)anon_tbody, child);
                 arraylist_clear(current_cell_run);
@@ -1912,6 +2042,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         // Non-table content (text, inline elements, etc.) - wrap in cell
         // CSS 2.1: "Any other child of a table element is treated as if it were
         // wrapped in an anonymous table-cell box"
+        // Note: Floated/positioned elements also get wrapped - they render as floats
+        // within the anonymous cell, which is the correct CSS behavior.
         log_debug("[ANON-TABLE] Non-table content needs cell wrapping: tag=%s",
                  child->node_name() ? child->node_name() : "unknown");
 
@@ -1922,7 +2054,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
     // Flush any remaining runs
     if (current_cell_run->length > 0) {
-        log_debug("[ANON-TABLE] Flushing final cell run of %d cells", current_cell_run->length);
+        log_debug("[ANON-TABLE] Flushing final cell run of %d items", current_cell_run->length);
 
         DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
             CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
@@ -1930,10 +2062,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             CSS_VALUE_TABLE_ROW, "::anon-tr");
         append_child_to_element(anon_tbody, anon_tr);
 
-        for (int i = 0; i < current_cell_run->length; i++) {
-            DomNode* cell_node = (DomNode*)current_cell_run->data[i];
-            reparent_node(cell_node, anon_tr);
-        }
+        wrap_run_in_cells(lycon, current_cell_run, anon_tr);
 
         append_child_to_element(table, anon_tbody);
     }
@@ -1988,9 +2117,28 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             DomNode* gchild = (DomNode*)group_children->data[j];
 
             if (!gchild->is_element()) {
-                // Include text nodes in current run if we have cells
-                if (cell_run->length > 0) {
-                    arraylist_append(cell_run, gchild);
+                // Text nodes need to be wrapped in cell -> row
+                // CSS 2.1: "Any other child of a table-row-group is treated as if it were
+                // wrapped in an anonymous table-cell box"
+                if (gchild->is_text()) {
+                    // Check if this text node has non-whitespace content
+                    const char* text = ((DomText*)gchild)->text;
+                    bool has_content = false;
+                    if (text) {
+                        for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
+                            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
+                                has_content = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (has_content) {
+                        if (cell_run->length == 0) {
+                            first_cell_position = gchild;
+                        }
+                        arraylist_append(cell_run, gchild);
+                        log_debug("[ANON-TABLE] Phase 2: Text node with content added to cell run");
+                    }
                 }
                 continue;
             }
@@ -2004,16 +2152,13 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             if (is_row) {
                 // Flush any accumulated cells before this row
                 if (cell_run->length > 0) {
-                    log_debug("[ANON-TABLE] Wrapping %d cells in row group in anonymous row",
+                    log_debug("[ANON-TABLE] Wrapping %d items in row group in anonymous row",
                              cell_run->length);
 
                     DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
                         CSS_VALUE_TABLE_ROW, "::anon-tr");
 
-                    for (int i = 0; i < cell_run->length; i++) {
-                        DomNode* cell_node = (DomNode*)cell_run->data[i];
-                        reparent_node(cell_node, anon_tr);
-                    }
+                    wrap_run_in_cells(lycon, cell_run, anon_tr);
 
                     insert_node_before(row_group, (DomNode*)anon_tr, gchild);
                     arraylist_clear(cell_run);
@@ -2039,16 +2184,13 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
         // Flush remaining cells
         if (cell_run->length > 0) {
-            log_debug("[ANON-TABLE] Wrapping final %d cells in row group in anonymous row",
+            log_debug("[ANON-TABLE] Wrapping final %d items in row group in anonymous row",
                      cell_run->length);
 
             DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
                 CSS_VALUE_TABLE_ROW, "::anon-tr");
 
-            for (int i = 0; i < cell_run->length; i++) {
-                DomNode* cell_node = (DomNode*)cell_run->data[i];
-                reparent_node(cell_node, anon_tr);
-            }
+            wrap_run_in_cells(lycon, cell_run, anon_tr);
 
             append_child_to_element(row_group, anon_tr);
         }
@@ -2102,9 +2244,25 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 DomNode* rchild = (DomNode*)row_children->data[k];
 
                 if (!rchild->is_element()) {
-                    // Include text nodes in current run
-                    if (non_cell_run->length > 0) {
-                        arraylist_append(non_cell_run, rchild);
+                    // Text nodes need to be wrapped in cells
+                    // CSS 2.1: "Any other child of a table-row is treated as if it were
+                    // wrapped in an anonymous table-cell box"
+                    if (rchild->is_text()) {
+                        // Check if this text node has non-whitespace content
+                        const char* text = ((DomText*)rchild)->text;
+                        bool has_content = false;
+                        if (text) {
+                            for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
+                                if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
+                                    has_content = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (has_content) {
+                            arraylist_append(non_cell_run, rchild);
+                            log_debug("[ANON-TABLE] Phase 3: Text node with content added to non-cell run");
+                        }
                     }
                     continue;
                 }
@@ -3038,60 +3196,18 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
             }
 
             // If still no explicit width, measure content
+            // Use unified intrinsic sizing API for ALL element types (block, inline, etc.)
+            // This properly handles:
+            // - Block elements with nested inline children (e.g., <div><span>text</span></div>)
+            // - Regular inline elements with text content
+            // - Inline elements with nested block children (block-in-inline)
+            // - Inline elements with table-internal descendants
             if (child_max == 0 && child_min == 0) {
-                DisplayValue child_display = resolve_display_value(child);
-
-                if (child_display.outer == CSS_VALUE_BLOCK) {
-                    // Block elements: measure their content width directly
-                    float block_max = 0.0f;
-                    float block_min = 0.0f;
-
-                    if (child_elem->first_child) {
-                        for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
-                            if (grandchild->is_text()) {
-                                const unsigned char* text = grandchild->text_data();
-                                if (text && *text) {
-                                    size_t text_len = strlen((const char*)text);
-                                    const char* measure_text = (const char*)text;
-                                    size_t measure_len = text_len;
-                                    static char normalized_buffer2[4096];
-
-                                    if (collapse_ws) {
-                                        if (is_all_whitespace((const char*)text, text_len)) continue;
-                                        size_t normalized_len = normalize_whitespace_to_buffer(
-                                            (const char*)text, text_len, normalized_buffer2, sizeof(normalized_buffer2));
-                                        if (normalized_len == 0) continue;
-                                        measure_text = normalized_buffer2;
-                                        measure_len = normalized_len;
-                                    }
-
-                                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                                        lycon, measure_text, measure_len);
-                                    float gchild_max = (float)widths.max_content;
-                                    float gchild_min = (float)widths.min_content;
-                                    if (gchild_max > block_max) block_max = gchild_max;
-                                    if (gchild_min > block_min) block_min = gchild_min;
-                                }
-                            }
-                        }
-                    }
-
-                    child_max = block_max;
-                    child_min = block_min;
-                    log_debug("Cell widths: block %s max=%.1f, min=%.1f",
-                              child->node_name(), child_max, child_min);
-                } else {
-                    // Inline elements: use intrinsic sizing API for proper measurement
-                    // This correctly handles:
-                    // - Regular inline elements with text content
-                    // - Inline elements with nested block children (block-in-inline)
-                    // - Inline elements with table-internal descendants
-                    IntrinsicSizes inline_sizes = measure_element_intrinsic_widths(lycon, child_elem);
-                    child_max = inline_sizes.max_content;
-                    child_min = inline_sizes.min_content;
-                    log_debug("Cell widths: inline %s min=%.1f, max=%.1f",
-                              child->node_name(), child_min, child_max);
-                }
+                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+                child_max = child_sizes.max_content;
+                child_min = child_sizes.min_content;
+                log_debug("Cell widths: element %s min=%.1f, max=%.1f",
+                          child->node_name(), child_min, child_max);
             }
 
             if (child_max > max_width) max_width = child_max;
@@ -3544,7 +3660,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             fixed_explicit_width = lycon->block.given_width;
             log_debug("FIXED LAYOUT - using given_width: %dpx", fixed_explicit_width);
         } else if (fixed_explicit_width == 0) {
-            // CSS 2.1 Section 17.5.2.1: When width is 'auto', the table width is 
+            // CSS 2.1 Section 17.5.2.1: When width is 'auto', the table width is
             // determined by content (shrink-to-fit). Use PCW sum as content width.
             // Calculate preferred width from column max widths
             int pref_content_width = 0;

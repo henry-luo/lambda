@@ -1525,14 +1525,24 @@ class RadiantLayoutTester {
     }
 
     /**
-     * Test files matching a pattern across all categories
+     * Test files matching a pattern across all categories (or a specific category)
+     * @param {string} pattern - Pattern to match in file names
+     * @param {string} filterCategory - Optional category to limit search to
      */
-    async testByPattern(pattern) {
+    async testByPattern(pattern, filterCategory = null) {
         const engineName = this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant';
-        console.log(`\n🔍 Testing files matching pattern: "${pattern}" (${engineName} engine)`);
+        const categoryMsg = filterCategory ? ` in category "${filterCategory}"` : '';
+        console.log(`\n🔍 Testing files matching pattern: "${pattern}"${categoryMsg} (${engineName} engine)`);
         console.log('=' .repeat(50));
 
-        const categories = await this.getAvailableCategories();
+        let categories = await this.getAvailableCategories();
+        if (filterCategory) {
+            categories = categories.filter(c => c === filterCategory);
+            if (categories.length === 0) {
+                console.log(`\n⚠️  Category "${filterCategory}" not found`);
+                return [];
+            }
+        }
         const allResults = [];
         let totalMatches = 0;
 
@@ -1845,7 +1855,8 @@ Note: Run this script from the project root directory.
         } else if (pattern) {
             // Force verbose mode for pattern matching
             tester.verbose = true;
-            await tester.testByPattern(pattern);
+            // Pass category filter if specified
+            await tester.testByPattern(pattern, category || null);
 
         } else if (category) {
             await tester.testCategory(category);

@@ -82,6 +82,25 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             continue;
         }
 
+        // Check for Zero Width No-Break Space / BOM (U+FEFF) - UTF-8: 0xEF 0xBB 0xBF
+        // This has zero width and is NOT a break opportunity
+        if (ch == 0xEF && i + 2 < length && str[i+1] == 0xBB && str[i+2] == 0xBF) {
+            // Zero width, no break, just skip
+            prev_glyph = 0;
+            i += 3;
+            // Don't set is_word_start - this is not a word boundary
+            continue;
+        }
+
+        // Check for other zero-width characters (ZWNJ U+200C, ZWJ U+200D)
+        // UTF-8: U+200C = 0xE2 0x80 0x8C, U+200D = 0xE2 0x80 0x8D
+        if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && (str[i+2] == 0x8C || str[i+2] == 0x8D)) {
+            // Zero width, no break, just skip
+            prev_glyph = 0;
+            i += 3;
+            continue;
+        }
+
         // Word boundary detection (whitespace breaks words)
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
             longest_word = fmax(longest_word, current_word);
