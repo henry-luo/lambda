@@ -51,6 +51,7 @@ module.exports = grammar({
       $.operator,
       $.relation,
       $.punctuation,
+      $.brace_symbol,
       $.fraction,
       $.binomial,
       $.radical,
@@ -85,7 +86,7 @@ module.exports = grammar({
       '=', '<', '>', '!',
       '\\leq', '\\le', '\\geq', '\\ge',
       '\\neq', '\\ne', '\\equiv', '\\sim', '\\simeq',
-      '\\approx', '\\cong', '\\propto',
+      '\\approx', '\\cong', '\\propto', '\\asymp',
       '\\subset', '\\supset', '\\subseteq', '\\supseteq',
       '\\in', '\\ni', '\\notin',
       '\\ll', '\\gg', '\\prec', '\\succ',
@@ -93,8 +94,11 @@ module.exports = grammar({
       '\\vdash', '\\dashv', '\\models',
     ),
 
-    // Punctuation
-    punctuation: $ => choice(',', ';', ':', '.', '?'),
+    // Punctuation  
+    punctuation: $ => choice(',', ';', ':', '.', '?', '|', '(', ')', "'"),
+    
+    // Special brace symbols (not in groups)
+    brace_symbol: $ => choice('\\{', '\\}'),
 
     // ========================================================================
     // Groups

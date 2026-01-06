@@ -51,6 +51,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "brace_symbol"
+        },
+        {
+          "type": "SYMBOL",
           "name": "fraction"
         },
         {
@@ -277,6 +281,10 @@
         },
         {
           "type": "STRING",
+          "value": "\\asymp"
+        },
+        {
+          "type": "STRING",
           "value": "\\subset"
         },
         {
@@ -367,6 +375,35 @@
         {
           "type": "STRING",
           "value": "?"
+        },
+        {
+          "type": "STRING",
+          "value": "|"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "STRING",
+          "value": "'"
+        }
+      ]
+    },
+    "brace_symbol": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\{"
+        },
+        {
+          "type": "STRING",
+          "value": "\\}"
         }
       ]
     },

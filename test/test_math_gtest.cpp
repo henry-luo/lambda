@@ -112,12 +112,22 @@ std::string normalize_latex_for_comparison(const std::string& expr) {
     std::string result;
     result.reserve(expr.size());
     bool in_command = false;
+    bool in_subscript = false;
+    bool in_superscript = false;
     
     for (size_t i = 0; i < expr.size(); i++) {
         char c = expr[i];
         
         if (c == '\\') {
             in_command = true;
+            result += c;
+        } else if (c == '_') {
+            in_subscript = true;
+            in_superscript = false;
+            result += c;
+        } else if (c == '^') {
+            in_superscript = true;
+            in_subscript = false;
             result += c;
         } else if (in_command && !std::isalpha(c)) {
             in_command = false;
@@ -130,13 +140,53 @@ std::string normalize_latex_for_comparison(const std::string& expr) {
             }
             result += c;
         } else if (c == ' ') {
+            // Remove spaces around = in subscripts/superscripts
+            if ((in_subscript || in_superscript) && (result.back() == '=' || (i + 1 < expr.size() && expr[i + 1] == '='))) {
+                // Skip space around equals
+                continue;
+            }
             // Collapse multiple spaces to one
             while (i + 1 < expr.size() && expr[i + 1] == ' ') {
                 i++;
             }
             result += c;
+        } else if (c == '{') {
+            // Check if this is an optional brace around single char/command in sub/sup
+            if ((in_subscript || in_superscript) && i + 2 < expr.size()) {
+                // Look for single char or command
+                size_t closing = i + 1;
+                if (expr[closing] == '\\\\') {
+                    // It's a command - find end of command
+                    closing++;
+                    while (closing < expr.size() && std::isalpha(expr[closing])) {
+                        closing++;
+                    }
+                } else {
+                    // Single char
+                    closing++;
+                }
+                
+                if (closing < expr.size() && expr[closing] == '}') {
+                    // Found matching brace - skip braces
+                    i++; // skip {
+                    while (i < closing) {
+                        result += expr[i];
+                        i++;
+                    }
+                    // i now points to }, will be incremented in loop
+                    in_subscript = false;
+                    in_superscript = false;
+                    continue;
+                }
+            }
+            result += c;
         } else {
             result += c;
+            // Reset script mode after non-brace character (unless it's part of command)
+            if (!in_command && c != '=' && !std::isalnum(c)) {
+                in_subscript = false;
+                in_superscript = false;
+            }
         }
     }
     return result;
