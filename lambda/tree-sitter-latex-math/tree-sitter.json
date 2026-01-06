@@ -1,0 +1,33 @@
+{
+  "grammars": [
+    {
+      "name": "latex_math",
+      "camelcase": "LatexMath",
+      "scope": "source.latex.math",
+      "injection-regex": "^(latex[-_]?math|math)$",
+      "path": ".",
+      "file-types": []
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "LaTeX math mode grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "Lambda Project"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/user/tree-sitter-latex-math"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": false,
+    "node": false,
+    "python": false,
+    "rust": false,
+    "swift": true
+  }
+}
