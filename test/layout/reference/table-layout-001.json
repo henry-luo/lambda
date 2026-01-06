@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            @font-face {\n                font-family: 'ahem';\n                src: url('../font/Ahem.ttf') format('truetype');\n            }\n            table, div\n            {\n                font: 1em ahem;\n            }\n            table\n            {\n                background: black;\n                border-spacing: 0;\n                table-layout: auto;\n                width: 5em;\n            }\n            td\n            {\n                padding: 0;\n            }\n            div\n            {\n                background: black;\n                margin-top: 10px;\n                width: 10em;\n            }\n        ",
-                "length": 626,
+                "text": "\n            table, div\n            {\n                font: 1em ahem;\n            }\n            table\n            {\n                background: black;\n                border-spacing: 0;\n                table-layout: auto;\n                width: 5em;\n            }\n            td\n            {\n                padding: 0;\n            }\n            div\n            {\n                background: black;\n                margin-top: 10px;\n                width: 10em;\n            }\n        ",
+                "length": 485,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
