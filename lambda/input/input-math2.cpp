@@ -16,6 +16,7 @@
 #include <tree_sitter/api.h>
 #include <string.h>
 #include <stdlib.h>
+#include <vector>
 
 // Tree-sitter latex_math language
 extern "C" {
@@ -122,6 +123,21 @@ static Item build_node(MathParseContext& ctx, TSNode node) {
     
     log_debug("math parser: unknown node type '%s'", type);
     return ItemNull;
+}
+
+// Build a group WITH its braces (for command arguments)
+static Item build_group_preserved(MathParseContext& ctx, TSNode node) {
+    const char* type = ts_node_type(node);
+    if (strcmp(type, "group") != 0) {
+        // Not a group, just build normally
+        return build_node(ctx, node);
+    }
+    
+    // Build the content
+    Item content = build_math(ctx, node);
+    
+    // Wrap in a group node
+    return ctx.builder->group(content);
 }
 
 // ============================================================================
@@ -388,18 +404,69 @@ static Item build_command(MathParseContext& ctx, TSNode node) {
     
     char* cmd = ctx.node_text_dup(name_node);
     
+    // Collect any arguments (groups or bracket groups)
+    std::vector<Item> args;
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        const char* field_name = ts_node_field_name_for_child(node, i);
+        if (field_name && strcmp(field_name, "arg") == 0) {
+            // Use build_group_preserved to keep braces for formatting
+            Item arg = build_group_preserved(ctx, child);
+            if (arg.item != ItemNull.item) {
+                args.push_back(arg);
+                log_debug("build_command: found arg for cmd=%s, arg type=%d", cmd, get_type_id(arg));
+            }
+        }
+    }
+    
+    log_debug("build_command: cmd=%s, found %zu args", cmd, args.size());
+    
     // look up in symbol tables
     int codepoint;
     MathAtomType atom_type;
+    Item result;
+    
     if (lookup_math_symbol(cmd, &codepoint, &atom_type)) {
-        Item result = ctx.builder->command(cmd, codepoint, atom_type);
-        free(cmd);
-        return result;
+        result = ctx.builder->command(cmd, codepoint, atom_type);
+    } else {
+        // unknown command - create as generic command node
+        result = ctx.builder->command(cmd, 0, MathAtomType::Ord);
     }
     
-    // unknown command - create as generic command node
-    Item result = ctx.builder->command(cmd, 0, MathAtomType::Ord);
     free(cmd);
+    
+    // Add args if present - need to modify the map
+    if (!args.empty()) {
+        // The command function returns a finalized map, but we need to add args
+        // We need to create a new map with the args field added
+        Map* orig_map = result.map;
+        MarkBuilder mb(ctx.input);
+        MapBuilder new_mb = mb.map();
+        
+        // Copy existing fields from original map
+        ConstItem node_field = orig_map->get("node");
+        if (node_field.item != ItemNull.item) new_mb.put("node", *(Item*)&node_field);
+        
+        ConstItem cmd_field = orig_map->get("cmd");
+        if (cmd_field.item != ItemNull.item) new_mb.put("cmd", *(Item*)&cmd_field);
+        
+        ConstItem codepoint_field = orig_map->get("codepoint");
+        if (codepoint_field.item != ItemNull.item) new_mb.put("codepoint", *(Item*)&codepoint_field);
+        
+        ConstItem atom_field = orig_map->get("atom");
+        if (atom_field.item != ItemNull.item) new_mb.put("atom", *(Item*)&atom_field);
+        
+        // Add args list
+        ListBuilder lb = mb.list();
+        for (Item arg : args) {
+            lb.push(arg);
+        }
+        new_mb.put("args", lb.final());
+        
+        result = new_mb.final();
+    }
+    
     return result;
 }
 

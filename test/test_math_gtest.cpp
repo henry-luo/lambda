@@ -497,3 +497,125 @@ char* read_text_doc(Url *url) {
     // Use the existing read_text_file function
     return read_text_file(path);
 }
+
+// Helper function to extract math expressions from indexed_math_test.md
+std::vector<std::string> extract_indexed_math_expressions(const char* filepath) {
+    std::vector<std::string> expressions;
+    
+    char* content = read_text_file(filepath);
+    if (!content) {
+        printf("ERROR: Failed to read file: %s\n", filepath);
+        return expressions;
+    }
+    
+    std::string text(content);
+    free(content);
+    
+    // Pattern: **Expr N:** followed by math expression
+    // Math can be inline ($...$) or display ($$...$$)
+    std::regex expr_pattern(R"(\*\*Expr\s+\d+:\*\*\s*(\$\$?[^$]+\$\$?))");
+    
+    std::sregex_iterator it(text.begin(), text.end(), expr_pattern);
+    std::sregex_iterator end;
+    
+    while (it != end) {
+        std::smatch match = *it;
+        if (match.size() >= 2) {
+            std::string expr = match[1].str();
+            // Skip moved expressions
+            if (expr.find("MOVED") == std::string::npos) {
+                expressions.push_back(expr);
+            }
+        }
+        ++it;
+    }
+    
+    return expressions;
+}
+
+// Test comprehensive indexed math expressions from file
+TEST_F(MathRoundtripTest, IndexedMathFileTest) {
+    const char* filepath = "test/input/indexed_math_test.md";
+    
+    std::vector<std::string> expressions = extract_indexed_math_expressions(filepath);
+    
+    if (expressions.empty()) {
+        FAIL() << "No math expressions found in " << filepath;
+    }
+    
+    printf("Testing %zu expressions from %s\n", expressions.size(), filepath);
+    
+    int passed = 0;
+    int failed = 0;
+    
+    for (size_t i = 0; i < expressions.size(); i++) {
+        const std::string& expr_str = expressions[i];
+        const char* expr = expr_str.c_str();
+        
+        // Determine format based on delimiters
+        bool is_inline = (expr[0] == '$' && expr[1] != '$');
+        const char* input_format = "markdown";
+        const char* input_flavor = "commonmark";
+        
+        // Create URL for the test
+        char url_str[512];
+        snprintf(url_str, sizeof(url_str), "test://indexed_math_expr_%zu", i + 1);
+        Url* test_url = url_parse(url_str);
+        
+        // Parse input
+        String* input_type = create_lambda_string(input_format);
+        String* input_flavor_str = create_lambda_string(input_flavor);
+        
+        char* content_copy = strdup(expr);
+        Item parsed = input_from_source(content_copy, test_url, input_type, input_flavor_str);
+        Input* input = parsed.element ? (Input*)parsed.element : nullptr;
+        
+        if (!input) {
+            printf("  Expr %zu: ❌ Parse failed: %s\n", i + 1, expr);
+            failed++;
+            free(content_copy);
+            free(input_type);
+            free(input_flavor_str);
+            url_destroy(test_url);
+            continue;
+        }
+        
+        // Format back to markdown
+        String* output_type = create_lambda_string(input_format);
+        String* output_flavor = create_lambda_string(input_flavor);
+        
+        String* formatted = format_data(input->root, output_type, output_flavor, input->pool);
+        
+        if (!formatted || formatted->len == 0) {
+            printf("  Expr %zu: ❌ Format failed: %s\n", i + 1, expr);
+            failed++;
+        } else {
+            std::string result(formatted->chars, formatted->len);
+            std::string original(expr);
+            
+            // Use semantic equivalence check (same as other tests)
+            bool match = are_expressions_semantically_equivalent(result, original);
+            
+            if (match) {
+                passed++;
+            } else {
+                printf("  Expr %zu: ❌ Mismatch\n", i + 1);
+                printf("    Original: %s\n", expr);
+                printf("    Result:   %s\n", result.c_str());
+                failed++;
+            }
+        }
+        
+        free(content_copy);
+        free(input_type);
+        free(input_flavor_str);
+        free(output_type);
+        free(output_flavor);
+        url_destroy(test_url);
+    }
+    
+    printf("Results: %d passed, %d failed out of %zu total\n", 
+           passed, failed, expressions.size());
+    
+    EXPECT_EQ(failed, 0) << "Some indexed math expressions failed roundtrip";
+}
