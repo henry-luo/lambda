@@ -201,6 +201,18 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     float cb_x = containing_block->x, cb_y = containing_block->y;
     float cb_width = containing_block->width, cb_height = containing_block->height;
 
+    // CSS 2.1 Section 10.1: For absolutely positioned elements, if the containing block is
+    // the initial containing block (ICB - i.e., the root element with no positioned ancestors),
+    // then cb_height should be the viewport height, not the root element's content height.
+    // The ICB has dimensions equal to the viewport.
+    bool is_icb = (containing_block->parent_view() == nullptr);
+    if (is_icb && lycon->ui_context && lycon->ui_context->viewport_height > 0) {
+        // Use viewport height for ICB when the root has auto height
+        cb_height = lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio;
+        log_debug("[ABS POS] Using viewport height for ICB: %.1f (viewport=%.1f, pixel_ratio=%.2f)",
+                  cb_height, lycon->ui_context->viewport_height, lycon->ui_context->pixel_ratio);
+    }
+
     // Calculate border offset - the absolute element is positioned relative to padding box,
     // but block->x/y are stored relative to containing block's origin (border box)
     float border_offset_x = 0, border_offset_y = 0;
@@ -265,13 +277,23 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         content_width = lycon->block.given_width;
     } else if (block->position->has_left && block->position->has_right && !is_intrinsic_width) {
         // both left and right specified - calculate width from constraints
+        // The constraint defines the BORDER-BOX width, not content width
         float left_edge = block->position->left + (block->bound ? block->bound->margin.left : 0);
         float right_edge = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0);
-        content_width = max(right_edge - left_edge, 0.0f);
+        float border_box_width = max(right_edge - left_edge, 0.0f);
+        // Subtract padding and border to get content width
+        content_width = border_box_width;
+        if (block->bound) {
+            content_width -= (block->bound->padding.left + block->bound->padding.right);
+            if (block->bound->border) {
+                content_width -= (block->bound->border->width.left + block->bound->border->width.right);
+            }
+        }
+        content_width = max(content_width, 0.0f);
         // CRITICAL: Store constraint-calculated width so finalize_block_flow knows width is fixed
         lycon->block.given_width = content_width;
-        log_debug("[ABS POS] width from constraints: left_edge=%.1f, right_edge=%.1f, content_width=%.1f (stored in given_width)",
-                  left_edge, right_edge, content_width);
+        log_debug("[ABS POS] width from constraints: left_edge=%.1f, right_edge=%.1f, border_box=%.1f, content_width=%.1f (stored in given_width)",
+                  left_edge, right_edge, border_box_width, content_width);
     } else if (is_intrinsic_width) {
         // For max-content/min-content/fit-content, use 0 as initial width
         // The actual width will be determined by content and adjusted post-layout
@@ -303,17 +325,27 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         log_debug("[ABS POS] using explicit height: %.1f", content_height);
     } else if (block->position->has_top && block->position->has_bottom) {
         // both top and bottom specified - calculate height from constraints
+        // The constraint defines the BORDER-BOX height, not content height
         float top_edge = block->position->top + (block->bound ? block->bound->margin.top : 0);
         float bottom_edge = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
-        content_height = max(bottom_edge - top_edge, 0.0f);
+        float border_box_height = max(bottom_edge - top_edge, 0.0f);
+        // Subtract padding and border to get content height
+        content_height = border_box_height;
+        if (block->bound) {
+            content_height -= (block->bound->padding.top + block->bound->padding.bottom);
+            if (block->bound->border) {
+                content_height -= (block->bound->border->width.top + block->bound->border->width.bottom);
+            }
+        }
+        content_height = max(content_height, 0.0f);
         // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
         // finalize_block_flow uses block->blk->given_height (not lycon->block.given_height) to
         // determine if height is explicitly set, so we must also update block->blk->given_height
         lycon->block.given_height = content_height;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->given_height = content_height;
-        log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, content_height=%.1f (stored in given_height)",
-                  top_edge, bottom_edge, content_height);
+        log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, border_box=%.1f, content_height=%.1f (stored in given_height)",
+                  top_edge, bottom_edge, border_box_height, content_height);
     } else {
         // shrink-to-fit: height will be determined by content after layout
         // Start with 0 and let the post-layout adjustment set the final height
@@ -322,10 +354,27 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     }
 
     // Now determine y position (relative to padding box, then add border offset)
+    // CRITICAL: For bottom positioning, we need the border-box height (including padding/border)
+    // not just content_height, to correctly position the element at the bottom
+    // Note: For box-sizing: border-box, the given height IS the border-box height (content_height here)
+    // For box-sizing: content-box (default), we need to add padding and border
+    bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+    float border_box_height = content_height;
+    if (!is_border_box && block->bound) {
+        // Only add padding/border for content-box sizing
+        border_box_height += block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            border_box_height += block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+    }
+
     if (block->position->has_top) {
         block->y = border_offset_y + block->position->top + (block->bound ? block->bound->margin.top : 0);
     } else if (block->position->has_bottom) {
-        block->y = border_offset_y + cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0) - content_height;
+        // Use border_box_height for bottom positioning to account for padding and border
+        block->y = border_offset_y + cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0) - border_box_height;
+        log_debug("[ABS POS] bottom positioning: y=%.1f (cb_height=%.1f, bottom=%.1f, border_box_height=%.1f, is_border_box=%d)",
+                  block->y, cb_height, block->position->bottom, border_box_height, is_border_box);
     } else {
         // neither top nor bottom specified - use static position (with margin offset)
         block->y = border_offset_y + (block->bound ? block->bound->margin.top : 0);
@@ -671,6 +720,28 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             log_debug("[ABS BFC] Expanding height from %.1f to %.1f to contain floats",
                       block->height, max_float_bottom);
             block->height = max_float_bottom;
+        }
+
+        // CRITICAL: Recalculate Y position when has_bottom without has_top and height is auto
+        // The initial y was calculated with content_height=0, now we have the actual height
+        if (block->position->has_bottom && !block->position->has_top) {
+            // Recalculate cb_height (must use same logic as calculate_absolute_position)
+            float cb_height = cb->height;
+            bool is_icb = (cb->parent_view() == nullptr);
+            if (is_icb && lycon->ui_context && lycon->ui_context->viewport_height > 0) {
+                cb_height = lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio;
+            }
+            // Adjust for containing block's border (padding box)
+            if (cb->bound && cb->bound->border) {
+                cb_height -= (cb->bound->border->width.top + cb->bound->border->width.bottom);
+            }
+            float border_offset_y = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
+            float margin_bottom = block->bound ? block->bound->margin.bottom : 0;
+
+            float new_y = border_offset_y + cb_height - block->position->bottom - margin_bottom - block->height;
+            log_debug("[ABS POS] Recalculating Y for bottom-positioned auto-height element: old_y=%.1f, new_y=%.1f (cb_height=%.1f, bottom=%.1f, height=%.1f)",
+                      block->y, new_y, cb_height, block->position->bottom, block->height);
+            block->y = new_y;
         }
     }
     log_debug("final block position: x=%f, y=%f, width=%f, height=%f",
