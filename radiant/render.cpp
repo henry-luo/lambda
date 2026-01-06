@@ -204,6 +204,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         setup_font(rdcon->ui_context, &rdcon->font, text_view->font);
     }
 
+    // Skip rendering if font size is 0 - text should be invisible (e.g., font-size: 0)
+    if (rdcon->font.style && rdcon->font.style->font_size <= 0.0f) {
+        log_debug("skipping zero font-size text render");
+        return;
+    }
+
     // Get the white-space property for this text node
     CssEnum white_space = get_white_space_value(text_view);
     bool preserve_spaces = ws_preserve_spaces(white_space);
