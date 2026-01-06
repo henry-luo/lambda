@@ -1993,6 +1993,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_TEXT_ALIGN,
         CSS_PROPERTY_TEXT_DECORATION,
         CSS_PROPERTY_TEXT_TRANSFORM,
+        CSS_PROPERTY_TEXT_INDENT,
         CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING,
         CSS_PROPERTY_WHITE_SPACE,
@@ -2600,6 +2601,42 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->blk->text_align = align_value;
                     const CssEnumInfo* info = css_enum_info(align_value);
                     log_debug("[CSS] Text-align: %s -> 0x%04X", info ? info->name : "unknown", align_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_INDENT: {
+            log_debug("[CSS] Processing text-indent property");
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+
+            // text-indent can be a length or percentage
+            // CSS 2.1: text-indent applies to the first line of a block container
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                float indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, value);
+                block->blk->text_indent = indent;
+                log_debug("[CSS] Text-indent: %.1fpx", indent);
+            }
+            else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                // Percentage is relative to containing block's width
+                // We'll resolve this later during layout when we know the containing width
+                // For now, store the percentage and mark it for later resolution
+                float percent = value->data.percentage.value;
+                // Resolve percentage against containing block width
+                float containing_width = lycon->block.content_width;
+                float indent = containing_width * percent / 100.0f;
+                block->blk->text_indent = indent;
+                log_debug("[CSS] Text-indent: %.1f%% -> %.1fpx (containing width: %.1f)",
+                         percent, indent, containing_width);
+            }
+            else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                // Handle inherit - get parent's text-indent
+                DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
+                DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+                if (parent && parent->blk) {
+                    block->blk->text_indent = parent->blk->text_indent;
+                    log_debug("[CSS] Text-indent: inherit -> %.1fpx", block->blk->text_indent);
                 }
             }
             break;
