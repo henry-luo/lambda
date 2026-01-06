@@ -27,6 +27,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         return result;
     }
 
+    // if font-size is 0, text has no size
+    if (lycon->font.style && lycon->font.style->font_size <= 0.0f) {
+        return result;  // min_content=0, max_content=0
+    }
+
     // Check if we have a valid font face
     if (!lycon->font.ft_face) {
         // Fallback: rough estimate without font metrics

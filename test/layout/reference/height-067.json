@@ -731,7 +731,7 @@
           "contentWidth": 1184,
           "contentHeight": 34,
           "scrollWidth": 1184,
-          "scrollHeight": 52
+          "scrollHeight": 50
         },
         "computed": {
           "display": "block",
@@ -881,7 +881,7 @@
               "contentWidth": 1184,
               "contentHeight": 0,
               "scrollWidth": 1184,
-              "scrollHeight": 18
+              "scrollHeight": 16
             },
             "computed": {
               "display": "block",
@@ -937,10 +937,10 @@
                     {
                       "x": 8,
                       "y": 50,
-                      "width": 66.59,
-                      "height": 18,
-                      "right": 74.59,
-                      "bottom": 68,
+                      "width": 176,
+                      "height": 16,
+                      "right": 184,
+                      "bottom": 66,
                       "text": "Filler Text",
                       "startIndex": 0,
                       "endIndex": 11

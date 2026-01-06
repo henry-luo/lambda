@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 68,
+      "height": 65,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 44,
+          "height": 41,
           "contentWidth": 1184,
-          "contentHeight": 44,
+          "contentHeight": 41,
           "scrollWidth": 1184,
-          "scrollHeight": 44
+          "scrollHeight": 41
         },
         "computed": {
           "display": "block",
@@ -877,11 +877,11 @@
               "x": 8,
               "y": 50,
               "width": 1184,
-              "height": 10,
+              "height": 7,
               "contentWidth": 1184,
-              "contentHeight": 10,
+              "contentHeight": 7,
               "scrollWidth": 1184,
-              "scrollHeight": 10
+              "scrollHeight": 7
             },
             "computed": {
               "display": "block",
@@ -909,7 +909,7 @@
               "alignSelf": "auto",
               "order": 0,
               "gap": "normal",
-              "fontSize": 9,
+              "fontSize": 7.17969,
               "lineHeight": "normal",
               "fontFamily": "ahem",
               "fontWeight": "400",
@@ -937,10 +937,10 @@
                     {
                       "x": 8,
                       "y": 50,
-                      "width": 6.5,
-                      "height": 10,
-                      "right": 14.5,
-                      "bottom": 60,
+                      "width": 7.17,
+                      "height": 7,
+                      "right": 15.17,
+                      "bottom": 57,
                       "text": "X",
                       "startIndex": 0,
                       "endIndex": 1

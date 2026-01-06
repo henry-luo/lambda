@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33

@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 135,
+      "height": 126,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -577,7 +577,7 @@
           "contentWidth": 1184,
           "contentHeight": 52,
           "scrollWidth": 1184,
-          "scrollHeight": 127
+          "scrollHeight": 118
         },
         "computed": {
           "display": "block",
@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -819,7 +819,7 @@
               "contentWidth": 150,
               "contentHeight": 0,
               "scrollWidth": 150,
-              "scrollHeight": 59
+              "scrollHeight": 50
             },
             "computed": {
               "display": "block",
@@ -876,12 +876,12 @@
                 "layout": {
                   "x": 8,
                   "y": 76,
-                  "width": 36.11,
-                  "height": 59,
-                  "contentWidth": 36,
-                  "contentHeight": 59,
-                  "scrollWidth": 36,
-                  "scrollHeight": 59
+                  "width": 50,
+                  "height": 50,
+                  "contentWidth": 50,
+                  "contentHeight": 50,
+                  "scrollWidth": 50,
+                  "scrollHeight": 50
                 },
                 "computed": {
                   "display": "block",
@@ -937,10 +937,10 @@
                         {
                           "x": 8,
                           "y": 76,
-                          "width": 36.11,
-                          "height": 59,
-                          "right": 44.11,
-                          "bottom": 135,
+                          "width": 50,
+                          "height": 50,
+                          "right": 58,
+                          "bottom": 126,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1

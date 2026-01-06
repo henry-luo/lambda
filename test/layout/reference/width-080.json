@@ -876,11 +876,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 7.17,
+              "width": 12.8,
               "height": 96,
-              "contentWidth": 7,
+              "contentWidth": 13,
               "contentHeight": 96,
-              "scrollWidth": 7,
+              "scrollWidth": 13,
               "scrollHeight": 96
             },
             "computed": {
