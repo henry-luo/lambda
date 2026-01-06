@@ -338,6 +338,10 @@
           "named": true
         },
         {
+          "type": "environment",
+          "named": true
+        },
+        {
           "type": "fraction",
           "named": true
         },
@@ -473,6 +477,10 @@
           "named": true
         },
         {
+          "type": "environment",
+          "named": true
+        },
+        {
           "type": "fraction",
           "named": true
         },
@@ -521,6 +529,153 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "env_body",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "accent",
+          "named": true
+        },
+        {
+          "type": "big_operator",
+          "named": true
+        },
+        {
+          "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "col_sep",
+          "named": true
+        },
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "environment",
+          "named": true
+        },
+        {
+          "type": "fraction",
+          "named": true
+        },
+        {
+          "type": "group",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "radical",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "row_sep",
+          "named": true
+        },
+        {
+          "type": "space_command",
+          "named": true
+        },
+        {
+          "type": "style_command",
+          "named": true
+        },
+        {
+          "type": "subsup",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "text_command",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "env_columns",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "env_name",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "environment",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "env_body",
+            "named": true
+          }
+        ]
+      },
+      "columns": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "env_columns",
+            "named": true
+          }
+        ]
+      },
+      "end_name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "env_name",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "env_name",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -597,6 +752,10 @@
         },
         {
           "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "environment",
           "named": true
         },
         {
@@ -677,6 +836,10 @@
         },
         {
           "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "environment",
           "named": true
         },
         {
@@ -880,6 +1043,10 @@
           },
           {
             "type": "delimiter_group",
+            "named": true
+          },
+          {
+            "type": "environment",
             "named": true
           },
           {
@@ -1100,6 +1267,14 @@
     "named": false
   },
   {
+    "type": "Bmatrix",
+    "named": false
+  },
+  {
+    "type": "Vmatrix",
+    "named": false
+  },
+  {
     "type": "[",
     "named": false
   },
@@ -1137,6 +1312,10 @@
   },
   {
     "type": "\\bar",
+    "named": false
+  },
+  {
+    "type": "\\begin",
     "named": false
   },
   {
@@ -1253,6 +1432,10 @@
   },
   {
     "type": "\\dot",
+    "named": false
+  },
+  {
+    "type": "\\end",
     "named": false
   },
   {
@@ -1724,12 +1907,100 @@
     "named": false
   },
   {
+    "type": "align",
+    "named": false
+  },
+  {
+    "type": "align*",
+    "named": false
+  },
+  {
+    "type": "aligned",
+    "named": false
+  },
+  {
+    "type": "array",
+    "named": false
+  },
+  {
+    "type": "bmatrix",
+    "named": false
+  },
+  {
+    "type": "cases",
+    "named": false
+  },
+  {
+    "type": "col_sep",
+    "named": true
+  },
+  {
     "type": "command_name",
     "named": true
   },
   {
+    "type": "dcases",
+    "named": false
+  },
+  {
+    "type": "equation",
+    "named": false
+  },
+  {
+    "type": "equation*",
+    "named": false
+  },
+  {
+    "type": "gather",
+    "named": false
+  },
+  {
+    "type": "gather*",
+    "named": false
+  },
+  {
+    "type": "gathered",
+    "named": false
+  },
+  {
+    "type": "matrix",
+    "named": false
+  },
+  {
+    "type": "multline",
+    "named": false
+  },
+  {
+    "type": "multline*",
+    "named": false
+  },
+  {
     "type": "number",
     "named": true
+  },
+  {
+    "type": "pmatrix",
+    "named": false
+  },
+  {
+    "type": "rcases",
+    "named": false
+  },
+  {
+    "type": "row_sep",
+    "named": true
+  },
+  {
+    "type": "smallmatrix",
+    "named": false
+  },
+  {
+    "type": "split",
+    "named": false
+  },
+  {
+    "type": "subarray",
+    "named": false
   },
   {
     "type": "symbol",
@@ -1738,6 +2009,10 @@
   {
     "type": "text_content",
     "named": true
+  },
+  {
+    "type": "vmatrix",
+    "named": false
   },
   {
     "type": "{",

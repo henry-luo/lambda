@@ -446,6 +446,69 @@ static void format_style_latex(StringBuf* sb, Map* map, int depth) {
     }
 }
 
+static void format_environment_latex(StringBuf* sb, Map* map, int depth) {
+    const char* env_name = get_field_string(map, "name");
+    if (!env_name) env_name = "matrix";
+    
+    // Output \begin{name}
+    stringbuf_append_str(sb, "\\begin{");
+    stringbuf_append_str(sb, env_name);
+    stringbuf_append_str(sb, "}");
+    
+    // Get rows - this is a row node containing the rows as items
+    Item rows_node = get_field_item(map, "rows");
+    
+    // Check if it's a row node (Map with "node":"row" and "items")
+    if (rows_node.item != ItemNull.item && get_type_id(rows_node) == LMD_TYPE_MAP) {
+        Map* rows_map = rows_node.map;
+        Item rows_items = get_field_item(rows_map, "items");
+        
+        if (rows_items.item != ItemNull.item && get_type_id(rows_items) == LMD_TYPE_LIST) {
+            List* rows_list = rows_items.list;
+            
+            for (int row_idx = 0; row_idx < rows_list->length; row_idx++) {
+                if (row_idx > 0) {
+                    stringbuf_append_str(sb, " \\\\ ");
+                } else {
+                    stringbuf_append_char(sb, ' ');
+                }
+                
+                // Each row is also a row node containing cells as items
+                Item row = rows_list->items[row_idx];
+                if (get_type_id(row) == LMD_TYPE_MAP) {
+                    Map* row_map = row.map;
+                    Item cells = get_field_item(row_map, "items");
+                    
+                    if (cells.item != ItemNull.item && get_type_id(cells) == LMD_TYPE_LIST) {
+                        List* cells_list = cells.list;
+                        
+                        for (int cell_idx = 0; cell_idx < cells_list->length; cell_idx++) {
+                            if (cell_idx > 0) {
+                                stringbuf_append_str(sb, " & ");
+                            }
+                            
+                            Item cell = cells_list->items[cell_idx];
+                            // Cell is a row node containing items
+                            if (cell.item != ItemNull.item) {
+                                format_node_latex(sb, cell, depth + 1);
+                            }
+                        }
+                    }
+                } else {
+                    // Direct item
+                    format_node_latex(sb, row, depth + 1);
+                }
+            }
+            stringbuf_append_char(sb, ' ');
+        }
+    }
+    
+    // Output \end{name}
+    stringbuf_append_str(sb, "\\end{");
+    stringbuf_append_str(sb, env_name);
+    stringbuf_append_str(sb, "}");
+}
+
 static void format_space_latex(StringBuf* sb, Map* map, int /* depth */) {
     const char* cmd = get_field_string(map, "cmd");
     if (cmd) {
@@ -541,6 +604,9 @@ static void format_node_latex(StringBuf* sb, Item node, int depth) {
     }
     else if (strcmp(node_type, "space") == 0) {
         format_space_latex(sb, map, depth);
+    }
+    else if (strcmp(node_type, "environment") == 0) {
+        format_environment_latex(sb, map, depth);
     }
     else if (strcmp(node_type, "error") == 0) {
         const char* msg = get_field_string(map, "message");

@@ -57,6 +57,7 @@ module.exports = grammar({
       $.delimiter_group,
       $.accent,
       $.big_operator,
+      $.environment,
       $.text_command,
       $.style_command,
       $.space_command,
@@ -224,6 +225,46 @@ module.exports = grammar({
         seq('^', field('upper', $._script_arg), optional(seq('_', field('lower', $._script_arg)))),
       )),
     )),
+
+    // ========================================================================
+    // Environments: \begin{...} ... \end{...}
+    // ========================================================================
+    
+    environment: $ => seq(
+      '\\begin', '{', field('name', $.env_name), '}',
+      optional(field('columns', $.env_columns)),  // For array: {ccc}
+      field('body', $.env_body),
+      '\\end', '{', field('end_name', $.env_name), '}',
+    ),
+
+    // Environment name
+    env_name: $ => choice(
+      // Matrix environments
+      'matrix', 'pmatrix', 'bmatrix', 'vmatrix', 'Vmatrix', 'Bmatrix', 'smallmatrix',
+      // Alignment environments
+      'aligned', 'align', 'align*', 'gathered', 'gather', 'gather*',
+      'split', 'multline', 'multline*',
+      // Cases
+      'cases', 'rcases', 'dcases',
+      // Arrays
+      'array', 'subarray',
+      // Equation environments
+      'equation', 'equation*',
+    ),
+
+    // Column spec for arrays: {ccc} or {|c|c|c|}
+    env_columns: $ => seq('{', /[lcr|@{}p\d.]+/, '}'),
+
+    // Environment body - content between \begin and \end
+    // Can contain expressions, row separators (\\), and column separators (&)
+    env_body: $ => repeat1(choice(
+      $._expression,
+      $.row_sep,
+      $.col_sep,
+    )),
+
+    row_sep: $ => '\\\\',
+    col_sep: $ => '&',
 
     // ========================================================================
     // Text mode in math
