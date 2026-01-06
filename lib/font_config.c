@@ -305,7 +305,18 @@ static int font_entry_ptr_compare(const void *a, const void *b, void *udata) {
 static uint64_t font_family_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const FontFamily *family = (const FontFamily*)item;
     if (!family || !family->family_name) return 0;
-    return hashmap_xxhash3(family->family_name, strlen(family->family_name), seed0, seed1);
+    
+    // Convert to lowercase for case-insensitive hashing
+    // This must match the case-insensitive compare function
+    size_t len = strlen(family->family_name);
+    char lower_name[256];
+    size_t copy_len = len < sizeof(lower_name) - 1 ? len : sizeof(lower_name) - 1;
+    for (size_t i = 0; i < copy_len; i++) {
+        lower_name[i] = tolower((unsigned char)family->family_name[i]);
+    }
+    lower_name[copy_len] = '\0';
+    
+    return hashmap_xxhash3(lower_name, copy_len, seed0, seed1);
 }
 
 // Comparison function for font families (for hashmap)
@@ -348,13 +359,13 @@ static uint32_t calculate_unicode_coverage_hash(FontUnicodeRange *ranges) {
 // ============================================================================
 
 #ifdef __APPLE__
-static void add_macos_user_fonts(ArrayList *directories) {
+static void add_macos_user_fonts(FontDatabase *db) {
     const char *home = getenv("HOME");
     if (home) {
         StrBuf *user_fonts = strbuf_create(home);
         strbuf_append_str(user_fonts, "/Library/Fonts");
-        arraylist_append(directories, user_fonts->str);
-        // Note: strbuf_cstr returns internal pointer, safe until strbuf is freed
+        font_add_scan_directory(db, user_fonts->str);
+        strbuf_free(user_fonts);
     }
 }
 
@@ -398,18 +409,20 @@ static bool get_font_metadata_with_core_text(const char *file_path, FontEntry *e
 #endif
 
 #ifdef __linux__
-static void add_linux_user_fonts(ArrayList *directories) {
+static void add_linux_user_fonts(FontDatabase *db) {
     const char *home = getenv("HOME");
     if (home) {
         // ~/.fonts (traditional)
         StrBuf *user_fonts_old = strbuf_create(home);
         strbuf_append_str(user_fonts_old, "/.fonts");
-        arraylist_append(directories, user_fonts_old->str);
+        font_add_scan_directory(db, user_fonts_old->str);
+        strbuf_free(user_fonts_old);
 
         // ~/.local/share/fonts (XDG standard)
         StrBuf *user_fonts_xdg = strbuf_create(home);
         strbuf_append_str(user_fonts_xdg, "/.local/share/fonts");
-        arraylist_append(directories, user_fonts_xdg->str);
+        font_add_scan_directory(db, user_fonts_xdg->str);
+        strbuf_free(user_fonts_xdg);
     }
 
     // Check XDG_DATA_HOME
@@ -417,7 +430,8 @@ static void add_linux_user_fonts(ArrayList *directories) {
     if (xdg_data_home) {
         StrBuf *xdg_fonts = strbuf_create(xdg_data_home);
         strbuf_append_str(xdg_fonts, "/fonts");
-        arraylist_append(directories, xdg_fonts->str);
+        font_add_scan_directory(db, xdg_fonts->str);
+        strbuf_free(xdg_fonts);
     }
 }
 #endif
@@ -1164,19 +1178,21 @@ static void add_platform_font_directories(FontDatabase* db) {
     const char **dirs = NULL;
 
 #ifdef __APPLE__
+    // Add user fonts first - they're most likely what the user wants
+    add_macos_user_fonts(db);
     dirs = macos_font_dirs;
     while (*dirs) {
         font_add_scan_directory(db, *dirs);
         dirs++;
     }
-    add_macos_user_fonts(db->scan_directories);
 #elif defined(__linux__)
+    // Add user fonts first - they're most likely what the user wants
+    add_linux_user_fonts(db);
     dirs = linux_font_dirs;
     while (*dirs) {
         font_add_scan_directory(db, *dirs);
         dirs++;
     }
-    add_linux_user_fonts(db->scan_directories);
 #elif defined(_WIN32)
     add_windows_font_directories(db->scan_directories);
 #endif
@@ -1362,8 +1378,19 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
     } else if (strstr(filename, "Songti") || strstr(filename, "songti")) {
         font->family_name = arena_strdup(arena, "Songti SC");
     } else {
-        // Unknown family - will be parsed on demand
-        font->family_name = NULL;
+        // Unknown family - use filename without extension as family name
+        // This enables lazy loading for user fonts like Ahem.ttf, lato.ttf, etc.
+        size_t name_len = strlen(filename);
+        const char* ext = strrchr(filename, '.');
+        if (ext) {
+            name_len = ext - filename;
+        }
+        if (name_len > 0 && name_len < 256) {
+            char family_buf[256];
+            memcpy(family_buf, filename, name_len);
+            family_buf[name_len] = '\0';
+            font->family_name = arena_strdup(arena, family_buf);
+        }
     }
 
     return font;

@@ -3544,16 +3544,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             fixed_explicit_width = lycon->block.given_width;
             log_debug("FIXED LAYOUT - using given_width: %dpx", fixed_explicit_width);
         } else if (fixed_explicit_width == 0) {
-            // No explicit width, use container width or default
-            int container_width = lycon->line.right - lycon->line.left;
-            fixed_explicit_width = container_width > 0 ? container_width : 600;
-            log_debug("FIXED LAYOUT - given_width=0, using container/default: %dpx (container=%d-%d=%d)",
-                   fixed_explicit_width, lycon->line.right, lycon->line.left, container_width);
+            // CSS 2.1 Section 17.5.2.1: When width is 'auto', the table width is 
+            // determined by content (shrink-to-fit). Use PCW sum as content width.
+            // Calculate preferred width from column max widths
+            int pref_content_width = 0;
+            for (int i = 0; i < columns; i++) {
+                pref_content_width += meta->col_max_widths[i];
+            }
+            fixed_explicit_width = pref_content_width;
+            log_debug("FIXED LAYOUT - width:auto, using content-based sizing: %dpx (from PCW)", fixed_explicit_width);
         }
 
         // Store for later use
         fixed_table_width = fixed_explicit_width;
-        log_debug("FIXED LAYOUT - stored fixed_table_width: %dpx", fixed_table_width);
+        if (fixed_table_width > 0) {
+            log_debug("FIXED LAYOUT - stored fixed_table_width: %dpx", fixed_table_width);
+        }
 
         // STEP 2: Calculate available content width (subtract borders and spacing)
         int content_width = fixed_explicit_width;
