@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -883,7 +883,7 @@
                   "contentWidth": 160,
                   "contentHeight": 20,
                   "scrollWidth": 160,
-                  "scrollHeight": 21
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "block",
@@ -1000,12 +1000,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 28,
-                          "y": 74,
-                          "width": 80,
-                          "height": 23,
-                          "right": 108,
-                          "bottom": 97,
+                          "x": 8,
+                          "y": 96,
+                          "width": 160,
+                          "height": 20,
+                          "right": 168,
+                          "bottom": 116,
                           "text": "\n    xxxxxxxx\n   ",
                           "startIndex": 0,
                           "endIndex": 17

@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 334,
+      "height": 362,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -650,11 +650,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 310,
+          "height": 338,
           "contentWidth": 1184,
-          "contentHeight": 310,
+          "contentHeight": 338,
           "scrollWidth": 1184,
-          "scrollHeight": 310
+          "scrollHeight": 338
         },
         "computed": {
           "display": "block",
@@ -800,11 +800,11 @@
               "x": 8,
               "y": 50,
               "width": 160,
-              "height": 276,
+              "height": 304,
               "contentWidth": 160,
-              "contentHeight": 260,
+              "contentHeight": 288,
               "scrollWidth": 160,
-              "scrollHeight": 260
+              "scrollHeight": 288
             },
             "computed": {
               "display": "block",
@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 8,
                   "y": 98,
-                  "width": 66.59,
-                  "height": 68,
-                  "contentWidth": 67,
-                  "contentHeight": 68,
-                  "scrollWidth": 67,
-                  "scrollHeight": 68
+                  "width": 160,
+                  "height": 96,
+                  "contentWidth": 160,
+                  "contentHeight": 96,
+                  "scrollWidth": 160,
+                  "scrollHeight": 96
                 },
                 "computed": {
                   "display": "table",
@@ -919,12 +919,12 @@
                     "layout": {
                       "x": 8,
                       "y": 130,
-                      "width": 66.59,
-                      "height": 18,
-                      "contentWidth": 67,
-                      "contentHeight": 18,
-                      "scrollWidth": 67,
-                      "scrollHeight": 18
+                      "width": 160,
+                      "height": 32,
+                      "contentWidth": 160,
+                      "contentHeight": 32,
+                      "scrollWidth": 160,
+                      "scrollHeight": 32
                     },
                     "computed": {
                       "display": "table-caption",
@@ -972,21 +972,49 @@
                     "children": [
                       {
                         "nodeType": "text",
-                        "text": "Filler Text",
-                        "length": 11,
+                        "text": "Filler ",
+                        "length": 7,
                         "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-                              "x": 8,
+                              "x": 40,
                               "y": 130,
-                              "width": 66.59,
-                              "height": 18,
-                              "right": 74.59,
-                              "bottom": 148,
-                              "text": "Filler Text",
+                              "width": 96,
+                              "height": 16,
+                              "right": 136,
+                              "bottom": 146,
+                              "text": "Filler ",
                               "startIndex": 0,
-                              "endIndex": 11
+                              "endIndex": 7
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "table-caption",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "Text",
+                        "length": 4,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 56,
+                              "y": 146,
+                              "width": 64,
+                              "height": 16,
+                              "right": 120,
+                              "bottom": 162,
+                              "text": "Text",
+                              "startIndex": 0,
+                              "endIndex": 4
                             }
                           ],
                           "hasLayout": true,
@@ -1008,13 +1036,13 @@
                     "classes": [],
                     "layout": {
                       "x": 8,
-                      "y": 148,
-                      "width": 66.59,
-                      "height": 18,
-                      "contentWidth": 67,
-                      "contentHeight": 18,
-                      "scrollWidth": 67,
-                      "scrollHeight": 18
+                      "y": 162,
+                      "width": 160,
+                      "height": 32,
+                      "contentWidth": 160,
+                      "contentHeight": 32,
+                      "scrollWidth": 160,
+                      "scrollHeight": 32
                     },
                     "computed": {
                       "display": "table-row-group",
@@ -1068,13 +1096,13 @@
                         "classes": [],
                         "layout": {
                           "x": 8,
-                          "y": 148,
-                          "width": 66.59,
-                          "height": 18,
-                          "contentWidth": 67,
-                          "contentHeight": 18,
-                          "scrollWidth": 67,
-                          "scrollHeight": 18
+                          "y": 162,
+                          "width": 160,
+                          "height": 32,
+                          "contentWidth": 160,
+                          "contentHeight": 32,
+                          "scrollWidth": 160,
+                          "scrollHeight": 32
                         },
                         "computed": {
                           "display": "table-row",
@@ -1128,13 +1156,13 @@
                             "classes": [],
                             "layout": {
                               "x": 8,
-                              "y": 148,
-                              "width": 66.59,
-                              "height": 18,
-                              "contentWidth": 67,
-                              "contentHeight": 18,
-                              "scrollWidth": 67,
-                              "scrollHeight": 18
+                              "y": 162,
+                              "width": 160,
+                              "height": 32,
+                              "contentWidth": 160,
+                              "contentHeight": 32,
+                              "scrollWidth": 160,
+                              "scrollHeight": 32
                             },
                             "computed": {
                               "display": "table-cell",
@@ -1182,21 +1210,49 @@
                             "children": [
                               {
                                 "nodeType": "text",
-                                "text": "Filler Text",
-                                "length": 11,
+                                "text": "Filler ",
+                                "length": 7,
                                 "isWhitespaceOnly": false,
                                 "layout": {
                                   "rects": [
                                     {
                                       "x": 8,
-                                      "y": 148,
-                                      "width": 66.59,
-                                      "height": 18,
-                                      "right": 74.59,
-                                      "bottom": 166,
-                                      "text": "Filler Text",
+                                      "y": 162,
+                                      "width": 96,
+                                      "height": 16,
+                                      "right": 104,
+                                      "bottom": 178,
+                                      "text": "Filler ",
                                       "startIndex": 0,
-                                      "endIndex": 11
+                                      "endIndex": 7
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "Text",
+                                "length": 4,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 8,
+                                      "y": 178,
+                                      "width": 64,
+                                      "height": 16,
+                                      "right": 72,
+                                      "bottom": 194,
+                                      "text": "Text",
+                                      "startIndex": 0,
+                                      "endIndex": 4
                                     }
                                   ],
                                   "hasLayout": true,
@@ -1224,7 +1280,7 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 102,
+                  "y": 130,
                   "width": 160,
                   "height": 160,
                   "contentWidth": 160,

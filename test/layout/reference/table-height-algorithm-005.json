@@ -799,11 +799,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 144.44,
+              "width": 200,
               "height": 64,
-              "contentWidth": 144,
+              "contentWidth": 200,
               "contentHeight": 64,
-              "scrollWidth": 144,
+              "scrollWidth": 200,
               "scrollHeight": 64
             },
             "computed": {
@@ -859,11 +859,11 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 144.44,
+                  "width": 200,
                   "height": 64,
-                  "contentWidth": 144,
+                  "contentWidth": 200,
                   "contentHeight": 64,
-                  "scrollWidth": 144,
+                  "scrollWidth": 200,
                   "scrollHeight": 64
                 },
                 "computed": {
@@ -919,11 +919,11 @@
                     "layout": {
                       "x": 8,
                       "y": 50,
-                      "width": 144.44,
+                      "width": 200,
                       "height": 32,
-                      "contentWidth": 144,
+                      "contentWidth": 200,
                       "contentHeight": 32,
-                      "scrollWidth": 144,
+                      "scrollWidth": 200,
                       "scrollHeight": 32
                     },
                     "computed": {
@@ -979,11 +979,11 @@
                         "layout": {
                           "x": 8,
                           "y": 50,
-                          "width": 144.44,
+                          "width": 200,
                           "height": 32,
-                          "contentWidth": 144,
+                          "contentWidth": 200,
                           "contentHeight": 32,
-                          "scrollWidth": 144,
+                          "scrollWidth": 200,
                           "scrollHeight": 32
                         },
                         "computed": {
@@ -1039,11 +1039,11 @@
                               "rects": [
                                 {
                                   "x": 8,
-                                  "y": 54,
-                                  "width": 144.44,
-                                  "height": 23,
-                                  "right": 152.44,
-                                  "bottom": 77,
+                                  "y": 56,
+                                  "width": 200,
+                                  "height": 20,
+                                  "right": 208,
+                                  "bottom": 76,
                                   "text": "XXXXXXXXXX",
                                   "startIndex": 0,
                                   "endIndex": 10
@@ -1071,11 +1071,11 @@
                     "layout": {
                       "x": 8,
                       "y": 82,
-                      "width": 144.44,
+                      "width": 200,
                       "height": 32,
-                      "contentWidth": 144,
+                      "contentWidth": 200,
                       "contentHeight": 32,
-                      "scrollWidth": 144,
+                      "scrollWidth": 200,
                       "scrollHeight": 32
                     },
                     "computed": {
@@ -1131,11 +1131,11 @@
                         "layout": {
                           "x": 8,
                           "y": 82,
-                          "width": 144.44,
+                          "width": 200,
                           "height": 32,
-                          "contentWidth": 144,
+                          "contentWidth": 200,
                           "contentHeight": 32,
-                          "scrollWidth": 144,
+                          "scrollWidth": 200,
                           "scrollHeight": 32
                         },
                         "computed": {
@@ -1191,11 +1191,11 @@
                               "rects": [
                                 {
                                   "x": 8,
-                                  "y": 86,
-                                  "width": 144.44,
-                                  "height": 23,
-                                  "right": 152.44,
-                                  "bottom": 109,
+                                  "y": 88,
+                                  "width": 200,
+                                  "height": 20,
+                                  "right": 208,
+                                  "bottom": 108,
                                   "text": "XXXXXXXXXX",
                                   "startIndex": 0,
                                   "endIndex": 10

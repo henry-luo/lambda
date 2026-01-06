@@ -735,8 +735,8 @@
                 "children": [
                   {
                     "nodeType": "text",
-                    "text": "\n            This text content should wrap around the orange box that is floated to the right side of the container.\n        ",
-                    "length": 125,
+                    "text": "\n            This text content should wrap ",
+                    "length": 43,
                     "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
@@ -750,7 +750,24 @@
                           "text": "\n            This text content should wrap ",
                           "startIndex": 0,
                           "endIndex": 43
-                        },
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "around the orange box that is ",
+                    "length": 30,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 42,
                           "y": 60,
@@ -759,9 +776,26 @@
                           "right": 250.16,
                           "bottom": 77,
                           "text": "around the orange box that is ",
-                          "startIndex": 43,
-                          "endIndex": 73
-                        },
+                          "startIndex": 0,
+                          "endIndex": 30
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "floated to the right side of the ",
+                    "length": 33,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 42,
                           "y": 78,
@@ -770,9 +804,26 @@
                           "right": 248.36,
                           "bottom": 95,
                           "text": "floated to the right side of the ",
-                          "startIndex": 73,
-                          "endIndex": 106
-                        },
+                          "startIndex": 0,
+                          "endIndex": 33
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "container.\n        ",
+                    "length": 19,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 42,
                           "y": 96,
@@ -781,8 +832,8 @@
                           "right": 111.39,
                           "bottom": 113,
                           "text": "container.\n        ",
-                          "startIndex": 106,
-                          "endIndex": 125
+                          "startIndex": 0,
+                          "endIndex": 19
                         }
                       ],
                       "hasLayout": true,

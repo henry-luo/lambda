@@ -1062,7 +1062,7 @@
               "height": 128,
               "contentWidth": 128,
               "contentHeight": 128,
-              "scrollWidth": 185,
+              "scrollWidth": 256,
               "scrollHeight": 128
             },
             "computed": {
@@ -1122,7 +1122,7 @@
                   "height": 128,
                   "contentWidth": 128,
                   "contentHeight": 128,
-                  "scrollWidth": 185,
+                  "scrollWidth": 256,
                   "scrollHeight": 128
                 },
                 "computed": {
@@ -1178,11 +1178,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 113,
-                          "width": 184.88,
-                          "height": 37,
-                          "right": 192.88,
-                          "bottom": 150,
+                          "y": 116,
+                          "width": 256,
+                          "height": 32,
+                          "right": 264,
+                          "bottom": 148,
                           "text": "XXXXXXXX",
                           "startIndex": 0,
                           "endIndex": 8

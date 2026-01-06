@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 512,
+      "height": 540,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -650,11 +650,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 488,
+          "height": 516,
           "contentWidth": 1184,
-          "contentHeight": 488,
+          "contentHeight": 516,
           "scrollWidth": 1184,
-          "scrollHeight": 488
+          "scrollHeight": 516
         },
         "computed": {
           "display": "block",
@@ -800,11 +800,11 @@
               "x": 8,
               "y": 50,
               "width": 160,
-              "height": 294,
+              "height": 322,
               "contentWidth": 160,
-              "contentHeight": 278,
+              "contentHeight": 306,
               "scrollWidth": 160,
-              "scrollHeight": 278
+              "scrollHeight": 306
             },
             "computed": {
               "display": "block",
@@ -860,11 +860,11 @@
                   "x": 8,
                   "y": 50,
                   "width": 160,
-                  "height": 198,
+                  "height": 226,
                   "contentWidth": 160,
-                  "contentHeight": 198,
+                  "contentHeight": 226,
                   "scrollWidth": 160,
-                  "scrollHeight": 198
+                  "scrollHeight": 226
                 },
                 "computed": {
                   "display": "table",
@@ -918,13 +918,13 @@
                     "classes": [],
                     "layout": {
                       "x": 8,
-                      "y": 70,
+                      "y": 84,
                       "width": 160,
-                      "height": 18,
+                      "height": 32,
                       "contentWidth": 160,
-                      "contentHeight": 18,
+                      "contentHeight": 32,
                       "scrollWidth": 160,
-                      "scrollHeight": 18
+                      "scrollHeight": 32
                     },
                     "computed": {
                       "display": "table-caption",
@@ -972,21 +972,49 @@
                     "children": [
                       {
                         "nodeType": "text",
-                        "text": "Filler Text",
-                        "length": 11,
+                        "text": "Filler ",
+                        "length": 7,
                         "isWhitespaceOnly": false,
                         "layout": {
                           "rects": [
                             {
-                              "x": 54.7,
-                              "y": 70,
-                              "width": 66.59,
-                              "height": 18,
-                              "right": 121.3,
-                              "bottom": 88,
-                              "text": "Filler Text",
+                              "x": 40,
+                              "y": 84,
+                              "width": 96,
+                              "height": 16,
+                              "right": 136,
+                              "bottom": 100,
+                              "text": "Filler ",
                               "startIndex": 0,
-                              "endIndex": 11
+                              "endIndex": 7
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "table-caption",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "Text",
+                        "length": 4,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 56,
+                              "y": 100,
+                              "width": 64,
+                              "height": 16,
+                              "right": 120,
+                              "bottom": 116,
+                              "text": "Text",
+                              "startIndex": 0,
+                              "endIndex": 4
                             }
                           ],
                           "hasLayout": true,
@@ -1010,11 +1038,11 @@
                       "x": 8,
                       "y": 50,
                       "width": 160,
-                      "height": 20,
+                      "height": 34,
                       "contentWidth": 160,
-                      "contentHeight": 20,
+                      "contentHeight": 34,
                       "scrollWidth": 160,
-                      "scrollHeight": 20
+                      "scrollHeight": 34
                     },
                     "computed": {
                       "display": "table-row-group",
@@ -1070,11 +1098,11 @@
                           "x": 8,
                           "y": 50,
                           "width": 160,
-                          "height": 20,
+                          "height": 34,
                           "contentWidth": 160,
-                          "contentHeight": 20,
+                          "contentHeight": 34,
                           "scrollWidth": 160,
-                          "scrollHeight": 20
+                          "scrollHeight": 34
                         },
                         "computed": {
                           "display": "table-row",
@@ -1130,11 +1158,11 @@
                               "x": 8,
                               "y": 50,
                               "width": 160,
-                              "height": 20,
+                              "height": 34,
                               "contentWidth": 160,
-                              "contentHeight": 20,
+                              "contentHeight": 34,
                               "scrollWidth": 160,
-                              "scrollHeight": 20
+                              "scrollHeight": 34
                             },
                             "computed": {
                               "display": "table-cell",
@@ -1182,21 +1210,49 @@
                             "children": [
                               {
                                 "nodeType": "text",
-                                "text": "Filler Text",
-                                "length": 11,
+                                "text": "Filler ",
+                                "length": 7,
                                 "isWhitespaceOnly": false,
                                 "layout": {
                                   "rects": [
                                     {
                                       "x": 9,
                                       "y": 51,
-                                      "width": 66.59,
-                                      "height": 18,
-                                      "right": 75.59,
-                                      "bottom": 69,
-                                      "text": "Filler Text",
+                                      "width": 96,
+                                      "height": 16,
+                                      "right": 105,
+                                      "bottom": 67,
+                                      "text": "Filler ",
                                       "startIndex": 0,
-                                      "endIndex": 11
+                                      "endIndex": 7
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "Text",
+                                "length": 4,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 9,
+                                      "y": 67,
+                                      "width": 64,
+                                      "height": 16,
+                                      "right": 73,
+                                      "bottom": 83,
+                                      "text": "Text",
+                                      "startIndex": 0,
+                                      "endIndex": 4
                                     }
                                   ],
                                   "hasLayout": true,
@@ -1226,7 +1282,7 @@
             "classes": [],
             "layout": {
               "x": 8,
-              "y": 168,
+              "y": 196,
               "width": 160,
               "height": 160,
               "contentWidth": 160,

@@ -735,8 +735,8 @@
                 "children": [
                   {
                     "nodeType": "text",
-                    "text": "This text should wrap around the floated red box on the left.",
-                    "length": 61,
+                    "text": "This text should wrap ",
+                    "length": 22,
                     "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
@@ -750,7 +750,24 @@
                           "text": "This text should wrap ",
                           "startIndex": 0,
                           "endIndex": 22
-                        },
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "around the floated red ",
+                    "length": 23,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 122,
                           "y": 35,
@@ -759,9 +776,26 @@
                           "right": 278.56,
                           "bottom": 52,
                           "text": "around the floated red ",
-                          "startIndex": 22,
-                          "endIndex": 45
-                        },
+                          "startIndex": 0,
+                          "endIndex": 23
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "box on the left.",
+                    "length": 16,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 122,
                           "y": 53,
@@ -770,8 +804,8 @@
                           "right": 226.97,
                           "bottom": 70,
                           "text": "box on the left.",
-                          "startIndex": 45,
-                          "endIndex": 61
+                          "startIndex": 0,
+                          "endIndex": 16
                         }
                       ],
                       "hasLayout": true,

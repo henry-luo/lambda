@@ -469,7 +469,7 @@
               "scrollHeight": 110
             },
             "computed": {
-              "display": "flex",
+              "display": "grid",
               "position": "relative",
               "marginTop": 0,
               "marginRight": 0,

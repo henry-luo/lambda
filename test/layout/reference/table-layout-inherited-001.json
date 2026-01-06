@@ -936,11 +936,11 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 280,
+                  "width": 400,
                   "height": 40,
-                  "contentWidth": 280,
+                  "contentWidth": 400,
                   "contentHeight": 40,
-                  "scrollWidth": 280,
+                  "scrollWidth": 400,
                   "scrollHeight": 40
                 },
                 "computed": {
@@ -996,11 +996,11 @@
                     "layout": {
                       "x": 8,
                       "y": 50,
-                      "width": 140,
+                      "width": 200,
                       "height": 40,
-                      "contentWidth": 140,
+                      "contentWidth": 200,
                       "contentHeight": 40,
-                      "scrollWidth": 140,
+                      "scrollWidth": 200,
                       "scrollHeight": 40
                     },
                     "computed": {
@@ -1055,13 +1055,13 @@
                     "id": null,
                     "classes": [],
                     "layout": {
-                      "x": 148,
+                      "x": 208,
                       "y": 50,
-                      "width": 140,
+                      "width": 200,
                       "height": 40,
-                      "contentWidth": 140,
+                      "contentWidth": 200,
                       "contentHeight": 40,
-                      "scrollWidth": 140,
+                      "scrollWidth": 200,
                       "scrollHeight": 40
                     },
                     "computed": {
@@ -1118,11 +1118,11 @@
                     "layout": {
                       "x": 8,
                       "y": 50,
-                      "width": 280,
+                      "width": 400,
                       "height": 40,
-                      "contentWidth": 280,
+                      "contentWidth": 400,
                       "contentHeight": 40,
-                      "scrollWidth": 280,
+                      "scrollWidth": 400,
                       "scrollHeight": 40
                     },
                     "computed": {
@@ -1178,11 +1178,11 @@
                         "layout": {
                           "x": 8,
                           "y": 50,
-                          "width": 280,
+                          "width": 400,
                           "height": 20,
-                          "contentWidth": 280,
+                          "contentWidth": 400,
                           "contentHeight": 20,
-                          "scrollWidth": 280,
+                          "scrollWidth": 400,
                           "scrollHeight": 20
                         },
                         "computed": {
@@ -1238,12 +1238,12 @@
                             "layout": {
                               "x": 8,
                               "y": 50,
-                              "width": 140,
+                              "width": 200,
                               "height": 20,
-                              "contentWidth": 140,
+                              "contentWidth": 200,
                               "contentHeight": 20,
-                              "scrollWidth": 140,
-                              "scrollHeight": 21
+                              "scrollWidth": 200,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "table-cell",
@@ -1298,11 +1298,11 @@
                                   "rects": [
                                     {
                                       "x": 8,
-                                      "y": 48,
-                                      "width": 72.22,
-                                      "height": 23,
-                                      "right": 80.22,
-                                      "bottom": 71,
+                                      "y": 50,
+                                      "width": 100,
+                                      "height": 20,
+                                      "right": 108,
+                                      "bottom": 70,
                                       "text": "XXXXX",
                                       "startIndex": 0,
                                       "endIndex": 5
@@ -1326,14 +1326,14 @@
                             "id": null,
                             "classes": [],
                             "layout": {
-                              "x": 148,
+                              "x": 208,
                               "y": 50,
-                              "width": 140,
+                              "width": 200,
                               "height": 20,
-                              "contentWidth": 140,
+                              "contentWidth": 200,
                               "contentHeight": 20,
-                              "scrollWidth": 140,
-                              "scrollHeight": 21
+                              "scrollWidth": 200,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "table-cell",
@@ -1387,12 +1387,12 @@
                                 "layout": {
                                   "rects": [
                                     {
-                                      "x": 148,
-                                      "y": 48,
-                                      "width": 72.22,
-                                      "height": 23,
-                                      "right": 220.22,
-                                      "bottom": 71,
+                                      "x": 208,
+                                      "y": 50,
+                                      "width": 100,
+                                      "height": 20,
+                                      "right": 308,
+                                      "bottom": 70,
                                       "text": "XXXXX",
                                       "startIndex": 0,
                                       "endIndex": 5
@@ -1420,11 +1420,11 @@
                         "layout": {
                           "x": 8,
                           "y": 70,
-                          "width": 280,
+                          "width": 400,
                           "height": 20,
-                          "contentWidth": 280,
+                          "contentWidth": 400,
                           "contentHeight": 20,
-                          "scrollWidth": 280,
+                          "scrollWidth": 400,
                           "scrollHeight": 20
                         },
                         "computed": {
@@ -1480,12 +1480,12 @@
                             "layout": {
                               "x": 8,
                               "y": 70,
-                              "width": 140,
+                              "width": 200,
                               "height": 20,
-                              "contentWidth": 140,
+                              "contentWidth": 200,
                               "contentHeight": 20,
-                              "scrollWidth": 140,
-                              "scrollHeight": 21
+                              "scrollWidth": 200,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "table-cell",
@@ -1540,11 +1540,11 @@
                                   "rects": [
                                     {
                                       "x": 8,
-                                      "y": 68,
-                                      "width": 140,
-                                      "height": 23,
-                                      "right": 148,
-                                      "bottom": 91,
+                                      "y": 70,
+                                      "width": 200,
+                                      "height": 20,
+                                      "right": 208,
+                                      "bottom": 90,
                                       "text": "XXXXXXXXX0",
                                       "startIndex": 0,
                                       "endIndex": 10
@@ -1568,14 +1568,14 @@
                             "id": null,
                             "classes": [],
                             "layout": {
-                              "x": 148,
+                              "x": 208,
                               "y": 70,
-                              "width": 140,
+                              "width": 200,
                               "height": 20,
-                              "contentWidth": 140,
+                              "contentWidth": 200,
                               "contentHeight": 20,
-                              "scrollWidth": 140,
-                              "scrollHeight": 21
+                              "scrollWidth": 200,
+                              "scrollHeight": 20
                             },
                             "computed": {
                               "display": "table-cell",
@@ -1629,12 +1629,12 @@
                                 "layout": {
                                   "rects": [
                                     {
-                                      "x": 148,
-                                      "y": 68,
-                                      "width": 140,
-                                      "height": 23,
-                                      "right": 288,
-                                      "bottom": 91,
+                                      "x": 208,
+                                      "y": 70,
+                                      "width": 200,
+                                      "height": 20,
+                                      "right": 408,
+                                      "bottom": 90,
                                       "text": "XXXXXXXXX0",
                                       "startIndex": 0,
                                       "endIndex": 10
