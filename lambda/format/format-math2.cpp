@@ -85,10 +85,27 @@ static void format_number_latex(StringBuf* sb, Map* map) {
     }
 }
 
-static void format_command_latex(StringBuf* sb, Map* map) {
+static void format_command_latex(StringBuf* sb, Map* map, int depth) {
     const char* cmd = get_field_string(map, "cmd");
     if (cmd) {
         stringbuf_append_str(sb, cmd);
+    }
+    
+    // Format any arguments (groups following the command)
+    // Commands can have args field which is a list of groups
+    Item args = get_field_item(map, "args");
+    log_debug("format_command_latex: cmd=%s, args type=%d", cmd ? cmd : "NULL", get_type_id(args));
+    if (args.item != ItemNull.item && get_type_id(args) == LMD_TYPE_LIST) {
+        List* args_list = args.list;
+        log_debug("format_command_latex: formatting %d args", args_list->length);
+        for (int i = 0; i < args_list->length; i++) {
+            Item arg = args_list->items[i];
+            if (arg.item != ItemNull.item) {
+                const char* arg_node_type = get_node_type_string(arg.map);
+                log_debug("format_command_latex: arg %d node_type=%s", i, arg_node_type ? arg_node_type : "NULL");
+                format_node_latex(sb, arg, depth + 1);
+            }
+        }
     }
 }
 
@@ -567,7 +584,7 @@ static void format_node_latex(StringBuf* sb, Item node, int depth) {
         format_number_latex(sb, map);
     }
     else if (strcmp(node_type, "command") == 0) {
-        format_command_latex(sb, map);
+        format_command_latex(sb, map, depth);
     }
     else if (strcmp(node_type, "row") == 0) {
         format_row_latex(sb, map, depth);
