@@ -409,6 +409,17 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_float_intrusion = false;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
 
+    // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
+    // Apply text-indent offset to advance_x for the first line only
+    if (lycon->block.is_first_line && lycon->block.text_indent != 0) {
+        lycon->line.advance_x += lycon->block.text_indent;
+        lycon->line.effective_left += lycon->block.text_indent;
+        log_debug("Applied text-indent: %.1fpx, advance_x=%.1f",
+                  lycon->block.text_indent, lycon->line.advance_x);
+        // After applying text-indent for the first line, mark it as done
+        lycon->block.is_first_line = false;
+    }
+
     // Adjust effective bounds for floats at current Y position using BlockContext
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
@@ -492,11 +503,11 @@ void line_break(LayoutContext* lycon) {
     // printf("DEBUG: Line advance - font: %d, css: %d, mixed: %s, used: %d\n",
     //        font_line_height, css_line_height, has_mixed_fonts ? "yes" : "no", used_line_height);
     lycon->block.advance_y += used_line_height;
-    
+
     // CSS 2.1 10.8.1: Track last line's ascender for inline-block baseline alignment
     // The baseline of an inline-block with in-flow content is the baseline of its last line box
     lycon->block.last_line_ascender = lycon->line.max_ascender;
-    
+
     // reset the new line
     line_reset(lycon);
 }
