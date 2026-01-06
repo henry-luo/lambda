@@ -82,6 +82,10 @@ typedef struct BlockContext {
     float given_height;         // CSS specified height (-1 if auto)
     float last_line_ascender;   // Baseline of last line (for inline-block baseline alignment)
 
+    // CSS text-indent: applies only to the first line of a block container
+    float text_indent;          // Resolved text-indent value in pixels
+    bool is_first_line;         // True if we're laying out the first line of this block
+
     // =========================================================================
     // BFC Hierarchy
     // =========================================================================

@@ -1279,6 +1279,16 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     float content_width = lycon->block.content_width;
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
 
+    // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
+    // Initialize is_first_line to true when starting a new block
+    lycon->block.is_first_line = true;
+    // Copy text-indent from BlockProp to BlockContext for layout
+    lycon->block.text_indent = (block->blk && block->blk->text_indent != 0.0f)
+                               ? block->blk->text_indent : 0.0f;
+    if (lycon->block.text_indent != 0.0f) {
+        log_debug("setup_inline: text-indent=%.1fpx for block", lycon->block.text_indent);
+    }
+
     // Calculate BFC offset for this block (used for float coordinate conversion)
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
@@ -1785,7 +1795,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (block->bound) content_width = adjust_min_max_width(block, content_width);
         }
     }
-    assert(content_width >= 0);
+    // Clamp to 0 - negative content_width can occur with very narrow containers
+    // (e.g., width:1px) after subtracting borders/padding/margins. CSS allows this,
+    // with content overflowing the container.
+    if (content_width < 0) content_width = 0;
     log_debug("content_width=%f, given_width=%f, max_width=%f", content_width, lycon->block.given_width,
         block->blk && block->blk->given_max_width >= 0 ? block->blk->given_max_width : -1);
 
