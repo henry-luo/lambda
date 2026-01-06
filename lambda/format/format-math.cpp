@@ -1,4 +1,5 @@
 #include "format.h"
+#include "format-math2.hpp"  // new MathNode formatter
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
@@ -1010,7 +1011,6 @@ static const char* get_format_string(const MathFormatDef* def, MathOutputFlavor 
         case MATH_OUTPUT_TYPST:
             return def->typst_format;
         case MATH_OUTPUT_ASCII:
-            printf("DEBUG: Using general math formatter with ASCII flavor for '%s'\n", def->element_name);
             return def->ascii_format;
         case MATH_OUTPUT_MATHML:
             return def->mathml_format;
@@ -1194,8 +1194,6 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         name_buf[name_len] = '\0';
         element_name = name_buf;
 
-        printf("DEBUG: format_math_element processing element: '%s'\n", element_name);
-
         #ifdef DEBUG_MATH_FORMAT
         log_debug("Math element name: '%s'", element_name);
         #endif
@@ -1206,22 +1204,16 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     }
 
     // Special handling for matrix environments - handle before format definition lookup
-    printf("DEBUG: Checking matrix element: '%s'\n", element_name ? element_name : "NULL");
     if (element_name && (strcmp(element_name, "pmatrix") == 0 || strcmp(element_name, "bmatrix") == 0 ||
         strcmp(element_name, "matrix") == 0 || strcmp(element_name, "vmatrix") == 0 ||
         strcmp(element_name, "Vmatrix") == 0 || strcmp(element_name, "smallmatrix") == 0)) {
-
-        printf("DEBUG: Matrix element detected: '%s', flavor=%d (LATEX=%d)\n", element_name, flavor, MATH_OUTPUT_LATEX);
 
         List* children = NULL;
         if (elmt_type->content_length > 0) {
             children = (List*)elem;
         }
 
-        printf("DEBUG: Children count: %d\n", children ? (int)children->length : 0);
-
         if (flavor == MATH_OUTPUT_LATEX) {
-            printf("DEBUG: Using LaTeX matrix formatting\n");
             stringbuf_append_str(sb, "\\begin{");
             stringbuf_append_str(sb, element_name);
             stringbuf_append_str(sb, "}");
@@ -1731,13 +1723,10 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
             break;
         }
         case LMD_TYPE_SYMBOL: {
-            printf("DEBUG: format_math_item processing LMD_TYPE_SYMBOL\n");
             String* str = item.get_string();
             if (str) {
-                printf("DEBUG: SYMBOL string='%s', len=%d\n", str->chars ? str->chars : "NULL", str->len);
                 format_math_string(sb, str);
             } else {
-                printf("DEBUG: SYMBOL has NULL string pointer\n");
                 stringbuf_append_str(sb, "?");
             }
             break;
@@ -1834,7 +1823,15 @@ static String* format_math_reader(Pool* pool, const ItemReader& item) {
 
 // Main LaTeX math formatter
 String* format_math_latex(Pool* pool, Item root_item) {
-    // Use MarkReader API
+    // Try new MathNode formatter first (for Map-based nodes from tree-sitter parser)
+    if (is_math_node_item(root_item)) {
+        log_debug("format_math_latex: detected new MathNode format, using format_math2_latex");
+        String* result = format_math2_latex(pool, root_item);
+        if (result) return result;
+        // Fall through to old formatter if new one fails
+    }
+
+    // Use MarkReader API for old Element-based format
     ItemReader reader(root_item.to_const());
 
     StringBuf* sb = stringbuf_new(pool);
@@ -2073,12 +2070,8 @@ String* format_math_typst(Pool* pool, Item root_item) {
 
 // Format math expression to ASCII
 String* format_math_ascii(Pool* pool, Item root_item) {
-    printf("DEBUG: format_math_ascii called with item=0x%lx\n", root_item.item);
-    fflush(stdout);
     // Use the dedicated standalone ASCII math formatter for better results
     String* result = format_math_ascii_standalone(pool, root_item);
-    printf("DEBUG: format_math_ascii result='%s'\n", result ? result->chars : "NULL");
-    fflush(stdout);
     return result;
 }
 
