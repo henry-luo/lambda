@@ -98,6 +98,7 @@ static Item build_node(MathParseContext& ctx, TSNode node) {
         strcmp(type, "operator") == 0 ||
         strcmp(type, "relation") == 0 ||
         strcmp(type, "punctuation") == 0 ||
+        strcmp(type, "brace_symbol") == 0 ||
         strcmp(type, "fraction") == 0 ||
         strcmp(type, "binomial") == 0 ||
         strcmp(type, "radical") == 0 ||
@@ -269,6 +270,14 @@ static Item build_punctuation(MathParseContext& ctx, TSNode node) {
     return result;
 }
 
+static Item build_brace_symbol(MathParseContext& ctx, TSNode node) {
+    char* text = ctx.node_text_dup(node);
+    // \{ or \} - treat as symbol with the full command
+    Item result = ctx.builder->symbol(text);
+    free(text);
+    return result;
+}
+
 static Item build_fraction(MathParseContext& ctx, TSNode node) {
     // get command
     TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
@@ -415,12 +424,9 @@ static Item build_command(MathParseContext& ctx, TSNode node) {
             Item arg = build_group_preserved(ctx, child);
             if (arg.item != ItemNull.item) {
                 args.push_back(arg);
-                log_debug("build_command: found arg for cmd=%s, arg type=%d", cmd, get_type_id(arg));
             }
         }
     }
-    
-    log_debug("build_command: cmd=%s, found %zu args", cmd, args.size());
     
     // look up in symbol tables
     int codepoint;
@@ -569,6 +575,7 @@ static Item build_atom(MathParseContext& ctx, TSNode node) {
     if (strcmp(type, "operator") == 0) return build_operator(ctx, node);
     if (strcmp(type, "relation") == 0) return build_relation(ctx, node);
     if (strcmp(type, "punctuation") == 0) return build_punctuation(ctx, node);
+    if (strcmp(type, "brace_symbol") == 0) return build_brace_symbol(ctx, node);
     if (strcmp(type, "fraction") == 0) return build_fraction(ctx, node);
     if (strcmp(type, "binomial") == 0) return build_binomial(ctx, node);
     if (strcmp(type, "radical") == 0) return build_radical(ctx, node);
