@@ -134,12 +134,17 @@ TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
 TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
 TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javascript.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
+TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 
 # LaTeX grammar dependencies
 LATEX_GRAMMAR_JS = lambda/tree-sitter-latex/grammar.js
 LATEX_PARSER_C = lambda/tree-sitter-latex/src/parser.c
 LATEX_GRAMMAR_JSON = lambda/tree-sitter-latex/src/grammar.json
 LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
+
+# LaTeX Math grammar dependencies
+LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
+LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 
 # Build or verify tree-sitter library
 $(TREE_SITTER_LIB):
@@ -199,6 +204,29 @@ $(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
 	@echo "🔧 Unsetting OS variable to bypass Windows check..."
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-latex libtree-sitter-latex.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+
+# Generate LaTeX Math parser from grammar.js when it changes
+$(LATEX_MATH_PARSER_C): $(LATEX_MATH_GRAMMAR_JS)
+	@echo "Generating LaTeX Math parser from grammar.js..."
+	@echo "🔧 Working directory: lambda/tree-sitter-latex-math"
+	@if command -v tree-sitter >/dev/null 2>&1; then \
+		echo "Using local tree-sitter CLI"; \
+		cd lambda/tree-sitter-latex-math && tree-sitter generate; \
+	elif command -v npx >/dev/null 2>&1; then \
+		echo "Using npx tree-sitter-cli"; \
+		cd lambda/tree-sitter-latex-math && npx tree-sitter-cli@0.24.7 generate; \
+	else \
+		echo "❌ Error: tree-sitter CLI not found!"; \
+		echo "Install with: npm install -g tree-sitter-cli"; \
+		exit 1; \
+	fi
+	@echo "✅ LaTeX Math parser generated successfully"
+
+# Build tree-sitter-latex-math library (depends on parser generation)
+$(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
+	@echo "Building tree-sitter-latex-math library..."
+	@echo "🔧 Working directory: lambda/tree-sitter-latex-math"
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-latex-math libtree-sitter-latex-math.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # MINGW64 Environment Validation Functions
 define mingw64_env_check
@@ -291,7 +319,7 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_LATEX_LIB)
+tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
 # Build tree-sitter without Unicode/ICU dependencies (minimal build)
 # Uses the amalgamated lib.c file approach recommended by ChatGPT
