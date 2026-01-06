@@ -1282,9 +1282,21 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
     // Initialize is_first_line to true when starting a new block
     lycon->block.is_first_line = true;
-    // Copy text-indent from BlockProp to BlockContext for layout
-    lycon->block.text_indent = (block->blk && block->blk->text_indent != 0.0f)
-                               ? block->blk->text_indent : 0.0f;
+
+    // Resolve text-indent: percentage needs containing block width (now available)
+    float resolved_text_indent = 0.0f;
+    if (block->blk) {
+        if (!isnan(block->blk->text_indent_percent)) {
+            // Percentage text-indent: resolve against containing block width
+            resolved_text_indent = content_width * block->blk->text_indent_percent / 100.0f;
+            log_debug("setup_inline: resolved text-indent %.1f%% -> %.1fpx (content_width=%.1f)",
+                     block->blk->text_indent_percent, resolved_text_indent, content_width);
+        } else if (block->blk->text_indent != 0.0f) {
+            // Fixed length text-indent
+            resolved_text_indent = block->blk->text_indent;
+        }
+    }
+    lycon->block.text_indent = resolved_text_indent;
     if (lycon->block.text_indent != 0.0f) {
         log_debug("setup_inline: text-indent=%.1fpx for block", lycon->block.text_indent);
     }
