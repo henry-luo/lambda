@@ -710,9 +710,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -771,11 +771,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -898,7 +898,7 @@
               "contentWidth": 32,
               "contentHeight": 32,
               "scrollWidth": 32,
-              "scrollHeight": 34
+              "scrollHeight": 32
             },
             "computed": {
               "display": "block",
@@ -953,14 +953,14 @@
                   "test"
                 ],
                 "layout": {
-                  "x": 59,
+                  "x": 43,
                   "y": 95,
-                  "width": 16,
+                  "width": 32,
                   "height": 32,
-                  "contentWidth": 16,
+                  "contentWidth": 32,
                   "contentHeight": 32,
-                  "scrollWidth": 16,
-                  "scrollHeight": 34
+                  "scrollWidth": 32,
+                  "scrollHeight": 32
                 },
                 "computed": {
                   "display": "block",
@@ -1014,12 +1014,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 59,
-                          "y": 92,
-                          "width": 16,
-                          "height": 37,
+                          "x": 43,
+                          "y": 95,
+                          "width": 32,
+                          "height": 32,
                           "right": 75,
-                          "bottom": 129,
+                          "bottom": 127,
                           "text": "x",
                           "startIndex": 0,
                           "endIndex": 1
@@ -1054,7 +1054,7 @@
               "contentWidth": 32,
               "contentHeight": 32,
               "scrollWidth": 32,
-              "scrollHeight": 34
+              "scrollHeight": 32
             },
             "computed": {
               "display": "block",
@@ -1109,14 +1109,14 @@
                   "test"
                 ],
                 "layout": {
-                  "x": 59,
+                  "x": 43,
                   "y": 165,
-                  "width": 16,
+                  "width": 32,
                   "height": 32,
-                  "contentWidth": 16,
+                  "contentWidth": 32,
                   "contentHeight": 32,
-                  "scrollWidth": 16,
-                  "scrollHeight": 34
+                  "scrollWidth": 32,
+                  "scrollHeight": 32
                 },
                 "computed": {
                   "display": "block",
@@ -1170,12 +1170,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 59,
-                          "y": 162,
-                          "width": 16,
-                          "height": 37,
+                          "x": 43,
+                          "y": 165,
+                          "width": 32,
+                          "height": 32,
                           "right": 75,
-                          "bottom": 199,
+                          "bottom": 197,
                           "text": " x ",
                           "startIndex": 0,
                           "endIndex": 3

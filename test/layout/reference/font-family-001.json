@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 76,
+      "height": 74,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 52,
+          "height": 50,
           "contentWidth": 1184,
-          "contentHeight": 52,
+          "contentHeight": 50,
           "scrollWidth": 1184,
-          "scrollHeight": 52
+          "scrollHeight": 50
         },
         "computed": {
           "display": "block",
@@ -877,11 +877,11 @@
               "x": 8,
               "y": 50,
               "width": 1184,
-              "height": 18,
+              "height": 16,
               "contentWidth": 1184,
-              "contentHeight": 18,
+              "contentHeight": 16,
               "scrollWidth": 1184,
-              "scrollHeight": 18
+              "scrollHeight": 16
             },
             "computed": {
               "display": "block",
@@ -937,10 +937,10 @@
                     {
                       "x": 8,
                       "y": 50,
-                      "width": 11.56,
-                      "height": 18,
-                      "right": 19.56,
-                      "bottom": 68,
+                      "width": 16,
+                      "height": 16,
+                      "right": 24,
+                      "bottom": 66,
                       "text": "X",
                       "startIndex": 0,
                       "endIndex": 1

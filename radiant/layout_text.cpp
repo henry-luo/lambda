@@ -721,6 +721,26 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         text_view = (ViewText*)set_view(lycon, RDT_VIEW_TEXT, text_node);
         text_view->font = lycon->font.style;
     }
+
+    // if font-size is 0, create zero-size text rect and return
+    if (lycon->font.style && lycon->font.style->font_size <= 0.0f) {
+        TextRect* rect = (TextRect*)pool_calloc(lycon->doc->view_tree->pool, sizeof(TextRect));
+        if (!text_view->rect) {
+            text_view->rect = rect;
+        } else {
+            TextRect* last_rect = text_view->rect;
+            while (last_rect && last_rect->next) { last_rect = last_rect->next; }
+            last_rect->next = rect;
+        }
+        rect->start_index = 0;
+        rect->length = strlen((char*)text_start);
+        rect->x = lycon->line.advance_x;
+        rect->y = lycon->block.advance_y;
+        rect->width = 0.0f;
+        rect->height = 0.0f;
+        return;
+    }
+
     TextRect* rect = (TextRect*)pool_calloc(lycon->doc->view_tree->pool, sizeof(TextRect));
     if (!text_view->rect) {
         text_view->rect = rect;

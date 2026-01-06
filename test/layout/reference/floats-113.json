@@ -710,9 +710,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 293.53,
-              "height": 18,
+              "y": 9,
+              "width": 608,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -771,11 +771,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 293.53,
-                      "height": 18,
-                      "right": 301.53,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 608,
+                      "height": 16,
+                      "right": 616,
+                      "bottom": 25,
                       "text": "Ahem_font_would_be_nice_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 38
@@ -898,7 +898,7 @@
               "contentWidth": 96,
               "contentHeight": 32,
               "scrollWidth": 96,
-              "scrollHeight": 34
+              "scrollHeight": 32
             },
             "computed": {
               "display": "block",
@@ -953,14 +953,14 @@
                   "test"
                 ],
                 "layout": {
-                  "x": 99,
+                  "x": 43,
                   "y": 95,
-                  "width": 40,
+                  "width": 96,
                   "height": 32,
-                  "contentWidth": 40,
+                  "contentWidth": 96,
                   "contentHeight": 32,
-                  "scrollWidth": 40,
-                  "scrollHeight": 34
+                  "scrollWidth": 96,
+                  "scrollHeight": 32
                 },
                 "computed": {
                   "display": "block",
@@ -1014,12 +1014,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 99,
-                          "y": 92,
-                          "width": 40,
-                          "height": 37,
+                          "x": 43,
+                          "y": 95,
+                          "width": 96,
+                          "height": 32,
                           "right": 139,
-                          "bottom": 129,
+                          "bottom": 127,
                           "text": "x x",
                           "startIndex": 0,
                           "endIndex": 3
@@ -1054,7 +1054,7 @@
               "contentWidth": 96,
               "contentHeight": 32,
               "scrollWidth": 96,
-              "scrollHeight": 34
+              "scrollHeight": 32
             },
             "computed": {
               "display": "block",
@@ -1109,14 +1109,14 @@
                   "test"
                 ],
                 "layout": {
-                  "x": 99,
+                  "x": 43,
                   "y": 165,
-                  "width": 40,
+                  "width": 96,
                   "height": 32,
-                  "contentWidth": 40,
+                  "contentWidth": 96,
                   "contentHeight": 32,
-                  "scrollWidth": 40,
-                  "scrollHeight": 34
+                  "scrollWidth": 96,
+                  "scrollHeight": 32
                 },
                 "computed": {
                   "display": "block",
@@ -1170,12 +1170,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 99,
-                          "y": 162,
-                          "width": 40,
-                          "height": 37,
+                          "x": 43,
+                          "y": 165,
+                          "width": 96,
+                          "height": 32,
                           "right": 139,
-                          "bottom": 199,
+                          "bottom": 197,
                           "text": " x x ",
                           "startIndex": 0,
                           "endIndex": 5

@@ -937,9 +937,9 @@
                     {
                       "x": 8,
                       "y": 50,
-                      "width": 0.5,
+                      "width": 1,
                       "height": 1,
-                      "right": 8.5,
+                      "right": 9,
                       "bottom": 51,
                       "text": "x",
                       "startIndex": 0,

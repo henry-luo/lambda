@@ -477,13 +477,13 @@ class RadiantLayoutTester {
 
             // Keep text nodes for comparison
             if (child.type === 'text') {
-                // Only keep text nodes that have visible layout
+                // Keep text nodes that have layout info (including zero-size text for font-size: 0)
                 if (child.node.layout && child.node.layout.rects) {
                     return child.node.layout.rects.length > 0; // Browser format with nested rects
                 } else if (child.node.rects && child.node.rects.length > 0) {
                     return true; // Browser text nodes have rects at top level
-                } else if (child.node.layout && child.node.layout.width > 0) {
-                    return true; // Radiant format
+                } else if (child.node.layout && typeof child.node.layout.width === 'number') {
+                    return true; // Radiant format (allow zero-width text e.g. font-size: 0)
                 }
                 return false;
             }
