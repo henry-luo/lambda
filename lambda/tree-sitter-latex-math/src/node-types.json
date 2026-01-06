@@ -1,0 +1,1754 @@
+[
+  {
+    "type": "accent",
+    "named": true,
+    "fields": {
+      "base": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      },
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\acute",
+            "named": false
+          },
+          {
+            "type": "\\bar",
+            "named": false
+          },
+          {
+            "type": "\\breve",
+            "named": false
+          },
+          {
+            "type": "\\check",
+            "named": false
+          },
+          {
+            "type": "\\ddddot",
+            "named": false
+          },
+          {
+            "type": "\\dddot",
+            "named": false
+          },
+          {
+            "type": "\\ddot",
+            "named": false
+          },
+          {
+            "type": "\\dot",
+            "named": false
+          },
+          {
+            "type": "\\grave",
+            "named": false
+          },
+          {
+            "type": "\\hat",
+            "named": false
+          },
+          {
+            "type": "\\overbrace",
+            "named": false
+          },
+          {
+            "type": "\\overleftarrow",
+            "named": false
+          },
+          {
+            "type": "\\overleftrightarrow",
+            "named": false
+          },
+          {
+            "type": "\\overline",
+            "named": false
+          },
+          {
+            "type": "\\overrightarrow",
+            "named": false
+          },
+          {
+            "type": "\\tilde",
+            "named": false
+          },
+          {
+            "type": "\\underbrace",
+            "named": false
+          },
+          {
+            "type": "\\underline",
+            "named": false
+          },
+          {
+            "type": "\\vec",
+            "named": false
+          },
+          {
+            "type": "\\widehat",
+            "named": false
+          },
+          {
+            "type": "\\widetilde",
+            "named": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "big_operator",
+    "named": true,
+    "fields": {
+      "lower": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      },
+      "op": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\Pr",
+            "named": false
+          },
+          {
+            "type": "\\bigcap",
+            "named": false
+          },
+          {
+            "type": "\\bigcup",
+            "named": false
+          },
+          {
+            "type": "\\bigoplus",
+            "named": false
+          },
+          {
+            "type": "\\bigotimes",
+            "named": false
+          },
+          {
+            "type": "\\bigsqcup",
+            "named": false
+          },
+          {
+            "type": "\\bigvee",
+            "named": false
+          },
+          {
+            "type": "\\bigwedge",
+            "named": false
+          },
+          {
+            "type": "\\coprod",
+            "named": false
+          },
+          {
+            "type": "\\det",
+            "named": false
+          },
+          {
+            "type": "\\gcd",
+            "named": false
+          },
+          {
+            "type": "\\iiint",
+            "named": false
+          },
+          {
+            "type": "\\iint",
+            "named": false
+          },
+          {
+            "type": "\\inf",
+            "named": false
+          },
+          {
+            "type": "\\int",
+            "named": false
+          },
+          {
+            "type": "\\lim",
+            "named": false
+          },
+          {
+            "type": "\\liminf",
+            "named": false
+          },
+          {
+            "type": "\\limsup",
+            "named": false
+          },
+          {
+            "type": "\\max",
+            "named": false
+          },
+          {
+            "type": "\\min",
+            "named": false
+          },
+          {
+            "type": "\\oint",
+            "named": false
+          },
+          {
+            "type": "\\prod",
+            "named": false
+          },
+          {
+            "type": "\\sum",
+            "named": false
+          },
+          {
+            "type": "\\sup",
+            "named": false
+          }
+        ]
+      },
+      "upper": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "binomial",
+    "named": true,
+    "fields": {
+      "bottom": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\binom",
+            "named": false
+          },
+          {
+            "type": "\\choose",
+            "named": false
+          },
+          {
+            "type": "\\dbinom",
+            "named": false
+          },
+          {
+            "type": "\\tbinom",
+            "named": false
+          }
+        ]
+      },
+      "top": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "brack_group",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "accent",
+          "named": true
+        },
+        {
+          "type": "big_operator",
+          "named": true
+        },
+        {
+          "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "fraction",
+          "named": true
+        },
+        {
+          "type": "group",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "radical",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "space_command",
+          "named": true
+        },
+        {
+          "type": "style_command",
+          "named": true
+        },
+        {
+          "type": "subsup",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "text_command",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "command",
+    "named": true,
+    "fields": {
+      "arg": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "brack_group",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "command_name",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "delimiter",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "delimiter_group",
+    "named": true,
+    "fields": {
+      "left_delim": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "delimiter",
+            "named": true
+          }
+        ]
+      },
+      "right_delim": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "delimiter",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "accent",
+          "named": true
+        },
+        {
+          "type": "big_operator",
+          "named": true
+        },
+        {
+          "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "fraction",
+          "named": true
+        },
+        {
+          "type": "group",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "radical",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "space_command",
+          "named": true
+        },
+        {
+          "type": "style_command",
+          "named": true
+        },
+        {
+          "type": "subsup",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "text_command",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fraction",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\cfrac",
+            "named": false
+          },
+          {
+            "type": "\\dfrac",
+            "named": false
+          },
+          {
+            "type": "\\frac",
+            "named": false
+          },
+          {
+            "type": "\\tfrac",
+            "named": false
+          }
+        ]
+      },
+      "denom": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "numer": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "group",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "accent",
+          "named": true
+        },
+        {
+          "type": "big_operator",
+          "named": true
+        },
+        {
+          "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "fraction",
+          "named": true
+        },
+        {
+          "type": "group",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "radical",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "space_command",
+          "named": true
+        },
+        {
+          "type": "style_command",
+          "named": true
+        },
+        {
+          "type": "subsup",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "text_command",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "math",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "accent",
+          "named": true
+        },
+        {
+          "type": "big_operator",
+          "named": true
+        },
+        {
+          "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "fraction",
+          "named": true
+        },
+        {
+          "type": "group",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "radical",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "space_command",
+          "named": true
+        },
+        {
+          "type": "style_command",
+          "named": true
+        },
+        {
+          "type": "subsup",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "text_command",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "operator",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "punctuation",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "radical",
+    "named": true,
+    "fields": {
+      "index": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brack_group",
+            "named": true
+          }
+        ]
+      },
+      "radicand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "relation",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "space_command",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "style_command",
+    "named": true,
+    "fields": {
+      "arg": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\displaystyle",
+            "named": false
+          },
+          {
+            "type": "\\mathbb",
+            "named": false
+          },
+          {
+            "type": "\\mathbf",
+            "named": false
+          },
+          {
+            "type": "\\mathcal",
+            "named": false
+          },
+          {
+            "type": "\\mathfrak",
+            "named": false
+          },
+          {
+            "type": "\\mathit",
+            "named": false
+          },
+          {
+            "type": "\\mathrm",
+            "named": false
+          },
+          {
+            "type": "\\mathscr",
+            "named": false
+          },
+          {
+            "type": "\\mathsf",
+            "named": false
+          },
+          {
+            "type": "\\mathtt",
+            "named": false
+          },
+          {
+            "type": "\\operatorname",
+            "named": false
+          },
+          {
+            "type": "\\scriptscriptstyle",
+            "named": false
+          },
+          {
+            "type": "\\scriptstyle",
+            "named": false
+          },
+          {
+            "type": "\\textstyle",
+            "named": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "subsup",
+    "named": true,
+    "fields": {
+      "base": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "accent",
+            "named": true
+          },
+          {
+            "type": "big_operator",
+            "named": true
+          },
+          {
+            "type": "binomial",
+            "named": true
+          },
+          {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "delimiter_group",
+            "named": true
+          },
+          {
+            "type": "fraction",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "operator",
+            "named": true
+          },
+          {
+            "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "radical",
+            "named": true
+          },
+          {
+            "type": "relation",
+            "named": true
+          },
+          {
+            "type": "space_command",
+            "named": true
+          },
+          {
+            "type": "style_command",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "text_command",
+            "named": true
+          }
+        ]
+      },
+      "sub": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      },
+      "sup": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "text_command",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\hbox",
+            "named": false
+          },
+          {
+            "type": "\\mbox",
+            "named": false
+          },
+          {
+            "type": "\\text",
+            "named": false
+          },
+          {
+            "type": "\\textbf",
+            "named": false
+          },
+          {
+            "type": "\\textit",
+            "named": false
+          },
+          {
+            "type": "\\textrm",
+            "named": false
+          },
+          {
+            "type": "\\textsf",
+            "named": false
+          },
+          {
+            "type": "\\texttt",
+            "named": false
+          }
+        ]
+      },
+      "content": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "text_group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "text_group",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "text_content",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "!",
+    "named": false
+  },
+  {
+    "type": "(",
+    "named": false
+  },
+  {
+    "type": ")",
+    "named": false
+  },
+  {
+    "type": "*",
+    "named": false
+  },
+  {
+    "type": "+",
+    "named": false
+  },
+  {
+    "type": ",",
+    "named": false
+  },
+  {
+    "type": "-",
+    "named": false
+  },
+  {
+    "type": ".",
+    "named": false
+  },
+  {
+    "type": "/",
+    "named": false
+  },
+  {
+    "type": ":",
+    "named": false
+  },
+  {
+    "type": ";",
+    "named": false
+  },
+  {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
+    "type": "?",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "\\!",
+    "named": false
+  },
+  {
+    "type": "\\,",
+    "named": false
+  },
+  {
+    "type": "\\:",
+    "named": false
+  },
+  {
+    "type": "\\;",
+    "named": false
+  },
+  {
+    "type": "\\Pr",
+    "named": false
+  },
+  {
+    "type": "\\acute",
+    "named": false
+  },
+  {
+    "type": "\\approx",
+    "named": false
+  },
+  {
+    "type": "\\ast",
+    "named": false
+  },
+  {
+    "type": "\\bar",
+    "named": false
+  },
+  {
+    "type": "\\bigcap",
+    "named": false
+  },
+  {
+    "type": "\\bigcup",
+    "named": false
+  },
+  {
+    "type": "\\bigoplus",
+    "named": false
+  },
+  {
+    "type": "\\bigotimes",
+    "named": false
+  },
+  {
+    "type": "\\bigsqcup",
+    "named": false
+  },
+  {
+    "type": "\\bigvee",
+    "named": false
+  },
+  {
+    "type": "\\bigwedge",
+    "named": false
+  },
+  {
+    "type": "\\binom",
+    "named": false
+  },
+  {
+    "type": "\\breve",
+    "named": false
+  },
+  {
+    "type": "\\bullet",
+    "named": false
+  },
+  {
+    "type": "\\cap",
+    "named": false
+  },
+  {
+    "type": "\\cdot",
+    "named": false
+  },
+  {
+    "type": "\\cfrac",
+    "named": false
+  },
+  {
+    "type": "\\check",
+    "named": false
+  },
+  {
+    "type": "\\choose",
+    "named": false
+  },
+  {
+    "type": "\\circ",
+    "named": false
+  },
+  {
+    "type": "\\cong",
+    "named": false
+  },
+  {
+    "type": "\\coprod",
+    "named": false
+  },
+  {
+    "type": "\\cup",
+    "named": false
+  },
+  {
+    "type": "\\dashv",
+    "named": false
+  },
+  {
+    "type": "\\dbinom",
+    "named": false
+  },
+  {
+    "type": "\\ddddot",
+    "named": false
+  },
+  {
+    "type": "\\dddot",
+    "named": false
+  },
+  {
+    "type": "\\ddot",
+    "named": false
+  },
+  {
+    "type": "\\det",
+    "named": false
+  },
+  {
+    "type": "\\dfrac",
+    "named": false
+  },
+  {
+    "type": "\\displaystyle",
+    "named": false
+  },
+  {
+    "type": "\\div",
+    "named": false
+  },
+  {
+    "type": "\\dot",
+    "named": false
+  },
+  {
+    "type": "\\equiv",
+    "named": false
+  },
+  {
+    "type": "\\frac",
+    "named": false
+  },
+  {
+    "type": "\\gcd",
+    "named": false
+  },
+  {
+    "type": "\\ge",
+    "named": false
+  },
+  {
+    "type": "\\geq",
+    "named": false
+  },
+  {
+    "type": "\\gg",
+    "named": false
+  },
+  {
+    "type": "\\grave",
+    "named": false
+  },
+  {
+    "type": "\\hat",
+    "named": false
+  },
+  {
+    "type": "\\hbox",
+    "named": false
+  },
+  {
+    "type": "\\hphantom",
+    "named": false
+  },
+  {
+    "type": "\\hspace",
+    "named": false
+  },
+  {
+    "type": "\\hspace*",
+    "named": false
+  },
+  {
+    "type": "\\iiint",
+    "named": false
+  },
+  {
+    "type": "\\iint",
+    "named": false
+  },
+  {
+    "type": "\\in",
+    "named": false
+  },
+  {
+    "type": "\\inf",
+    "named": false
+  },
+  {
+    "type": "\\int",
+    "named": false
+  },
+  {
+    "type": "\\lVert",
+    "named": false
+  },
+  {
+    "type": "\\langle",
+    "named": false
+  },
+  {
+    "type": "\\lceil",
+    "named": false
+  },
+  {
+    "type": "\\le",
+    "named": false
+  },
+  {
+    "type": "\\left",
+    "named": false
+  },
+  {
+    "type": "\\leq",
+    "named": false
+  },
+  {
+    "type": "\\lfloor",
+    "named": false
+  },
+  {
+    "type": "\\lim",
+    "named": false
+  },
+  {
+    "type": "\\liminf",
+    "named": false
+  },
+  {
+    "type": "\\limsup",
+    "named": false
+  },
+  {
+    "type": "\\ll",
+    "named": false
+  },
+  {
+    "type": "\\lvert",
+    "named": false
+  },
+  {
+    "type": "\\mathbb",
+    "named": false
+  },
+  {
+    "type": "\\mathbf",
+    "named": false
+  },
+  {
+    "type": "\\mathcal",
+    "named": false
+  },
+  {
+    "type": "\\mathfrak",
+    "named": false
+  },
+  {
+    "type": "\\mathit",
+    "named": false
+  },
+  {
+    "type": "\\mathrm",
+    "named": false
+  },
+  {
+    "type": "\\mathscr",
+    "named": false
+  },
+  {
+    "type": "\\mathsf",
+    "named": false
+  },
+  {
+    "type": "\\mathtt",
+    "named": false
+  },
+  {
+    "type": "\\max",
+    "named": false
+  },
+  {
+    "type": "\\mbox",
+    "named": false
+  },
+  {
+    "type": "\\mid",
+    "named": false
+  },
+  {
+    "type": "\\min",
+    "named": false
+  },
+  {
+    "type": "\\models",
+    "named": false
+  },
+  {
+    "type": "\\mp",
+    "named": false
+  },
+  {
+    "type": "\\ne",
+    "named": false
+  },
+  {
+    "type": "\\neq",
+    "named": false
+  },
+  {
+    "type": "\\ni",
+    "named": false
+  },
+  {
+    "type": "\\notin",
+    "named": false
+  },
+  {
+    "type": "\\odot",
+    "named": false
+  },
+  {
+    "type": "\\oint",
+    "named": false
+  },
+  {
+    "type": "\\ominus",
+    "named": false
+  },
+  {
+    "type": "\\operatorname",
+    "named": false
+  },
+  {
+    "type": "\\oplus",
+    "named": false
+  },
+  {
+    "type": "\\oslash",
+    "named": false
+  },
+  {
+    "type": "\\otimes",
+    "named": false
+  },
+  {
+    "type": "\\overbrace",
+    "named": false
+  },
+  {
+    "type": "\\overleftarrow",
+    "named": false
+  },
+  {
+    "type": "\\overleftrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\overline",
+    "named": false
+  },
+  {
+    "type": "\\overrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\parallel",
+    "named": false
+  },
+  {
+    "type": "\\perp",
+    "named": false
+  },
+  {
+    "type": "\\phantom",
+    "named": false
+  },
+  {
+    "type": "\\pm",
+    "named": false
+  },
+  {
+    "type": "\\prec",
+    "named": false
+  },
+  {
+    "type": "\\prod",
+    "named": false
+  },
+  {
+    "type": "\\propto",
+    "named": false
+  },
+  {
+    "type": "\\qquad",
+    "named": false
+  },
+  {
+    "type": "\\quad",
+    "named": false
+  },
+  {
+    "type": "\\rVert",
+    "named": false
+  },
+  {
+    "type": "\\rangle",
+    "named": false
+  },
+  {
+    "type": "\\rceil",
+    "named": false
+  },
+  {
+    "type": "\\rfloor",
+    "named": false
+  },
+  {
+    "type": "\\right",
+    "named": false
+  },
+  {
+    "type": "\\rvert",
+    "named": false
+  },
+  {
+    "type": "\\scriptscriptstyle",
+    "named": false
+  },
+  {
+    "type": "\\scriptstyle",
+    "named": false
+  },
+  {
+    "type": "\\setminus",
+    "named": false
+  },
+  {
+    "type": "\\sim",
+    "named": false
+  },
+  {
+    "type": "\\simeq",
+    "named": false
+  },
+  {
+    "type": "\\sqcap",
+    "named": false
+  },
+  {
+    "type": "\\sqcup",
+    "named": false
+  },
+  {
+    "type": "\\sqrt",
+    "named": false
+  },
+  {
+    "type": "\\star",
+    "named": false
+  },
+  {
+    "type": "\\subset",
+    "named": false
+  },
+  {
+    "type": "\\subseteq",
+    "named": false
+  },
+  {
+    "type": "\\succ",
+    "named": false
+  },
+  {
+    "type": "\\sum",
+    "named": false
+  },
+  {
+    "type": "\\sup",
+    "named": false
+  },
+  {
+    "type": "\\supset",
+    "named": false
+  },
+  {
+    "type": "\\supseteq",
+    "named": false
+  },
+  {
+    "type": "\\tbinom",
+    "named": false
+  },
+  {
+    "type": "\\text",
+    "named": false
+  },
+  {
+    "type": "\\textbf",
+    "named": false
+  },
+  {
+    "type": "\\textit",
+    "named": false
+  },
+  {
+    "type": "\\textrm",
+    "named": false
+  },
+  {
+    "type": "\\textsf",
+    "named": false
+  },
+  {
+    "type": "\\textstyle",
+    "named": false
+  },
+  {
+    "type": "\\texttt",
+    "named": false
+  },
+  {
+    "type": "\\tfrac",
+    "named": false
+  },
+  {
+    "type": "\\tilde",
+    "named": false
+  },
+  {
+    "type": "\\times",
+    "named": false
+  },
+  {
+    "type": "\\underbrace",
+    "named": false
+  },
+  {
+    "type": "\\underline",
+    "named": false
+  },
+  {
+    "type": "\\vdash",
+    "named": false
+  },
+  {
+    "type": "\\vec",
+    "named": false
+  },
+  {
+    "type": "\\vee",
+    "named": false
+  },
+  {
+    "type": "\\vphantom",
+    "named": false
+  },
+  {
+    "type": "\\wedge",
+    "named": false
+  },
+  {
+    "type": "\\widehat",
+    "named": false
+  },
+  {
+    "type": "\\widetilde",
+    "named": false
+  },
+  {
+    "type": "\\{",
+    "named": false
+  },
+  {
+    "type": "\\|",
+    "named": false
+  },
+  {
+    "type": "\\}",
+    "named": false
+  },
+  {
+    "type": "]",
+    "named": false
+  },
+  {
+    "type": "^",
+    "named": false
+  },
+  {
+    "type": "_",
+    "named": false
+  },
+  {
+    "type": "command_name",
+    "named": true
+  },
+  {
+    "type": "number",
+    "named": true
+  },
+  {
+    "type": "symbol",
+    "named": true
+  },
+  {
+    "type": "text_content",
+    "named": true
+  },
+  {
+    "type": "{",
+    "named": false
+  },
+  {
+    "type": "|",
+    "named": false
+  },
+  {
+    "type": "}",
+    "named": false
+  }
+]
