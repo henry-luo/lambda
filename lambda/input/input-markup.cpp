@@ -2409,24 +2409,31 @@ static Item parse_math_content(InputContext& ctx, const char* math_content, cons
 static const char* detect_math_flavor(const char* content) {
     if (!content) return "latex";
 
-    // Look for ASCII math indicators first
-    // ASCII math uses simple operators without backslashes
+    // Look for ASCII math indicators - must be specific ASCII math syntax patterns
+    // NOTE: ^ alone is NOT an ASCII math indicator since it's valid LaTeX too
+    // Only use clear ASCII math patterns that wouldn't appear in LaTeX
     bool has_ascii_indicators = (
-        // Basic ASCII operators
-        (strstr(content, "^") && !strstr(content, "\\")) ||  // Power without LaTeX
-        (strstr(content, "!=") != NULL) ||                   // Not equal ASCII style
-        (strstr(content, "**") != NULL) ||                   // Double star power
+        // Clear ASCII math function syntax
         (strstr(content, "sqrt(") != NULL) ||                // Function style sqrt
         (strstr(content, "sum_(") != NULL) ||                // ASCII summation
-        (strstr(content, "int_") != NULL) ||                 // ASCII integration
+        (strstr(content, "prod_(") != NULL) ||               // ASCII product
+        (strstr(content, "int_") != NULL && !strstr(content, "\\int")) ||  // ASCII integration
         (strstr(content, "lim_(") != NULL) ||                // ASCII limit
-        // Greek letters without backslashes
-        (strstr(content, "alpha") && !strstr(content, "\\alpha")) ||
-        (strstr(content, "beta") && !strstr(content, "\\beta")) ||
-        (strstr(content, "gamma") && !strstr(content, "\\gamma")) ||
-        (strstr(content, "pi") && !strstr(content, "\\pi")) ||
+        // ASCII math specific operators
+        (strstr(content, "!=") != NULL) ||                   // Not equal ASCII style
+        (strstr(content, "**") != NULL) ||                   // Double star power
+        (strstr(content, "<=") != NULL) ||                   // Less than or equal
+        (strstr(content, ">=") != NULL) ||                   // Greater than or equal
+        (strstr(content, "~=") != NULL) ||                   // Approximately equal
+        // ASCII infinity symbol
         (strstr(content, "infinity") != NULL) ||
-        (strstr(content, "oo") && !strstr(content, "\\"))    // ASCII infinity (not in LaTeX commands)
+        (strstr(content, " oo ") != NULL) ||                 // Standalone oo as infinity
+        // Greek letters in ASCII math must be standalone words, not prefixed by \
+        // Only detect if explicitly NOT using LaTeX style
+        (strstr(content, " alpha ") && !strstr(content, "\\")) ||
+        (strstr(content, " beta ") && !strstr(content, "\\")) ||
+        (strstr(content, " gamma ") && !strstr(content, "\\")) ||
+        (strstr(content, " pi ") && !strstr(content, "\\"))
     );
 
     // Look for LaTeX-specific commands
