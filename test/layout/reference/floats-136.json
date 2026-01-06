@@ -577,7 +577,7 @@
           "contentWidth": 1184,
           "contentHeight": 98,
           "scrollWidth": 1184,
-          "scrollHeight": 101
+          "scrollHeight": 98
         },
         "computed": {
           "display": "block",
@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -821,7 +821,7 @@
               "contentWidth": 1184,
               "contentHeight": 30,
               "scrollWidth": 1184,
-              "scrollHeight": 33
+              "scrollHeight": 30
             },
             "computed": {
               "display": "block",
@@ -939,11 +939,11 @@
                   "rects": [
                     {
                       "x": 38,
-                      "y": 73,
-                      "width": 21.67,
-                      "height": 36,
-                      "right": 59.67,
-                      "bottom": 109,
+                      "y": 76,
+                      "width": 30,
+                      "height": 30,
+                      "right": 68,
+                      "bottom": 106,
                       "text": "\n   X\n  ",
                       "startIndex": 0,
                       "endIndex": 8

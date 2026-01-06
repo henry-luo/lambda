@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 92,
+      "height": 90,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 68,
+          "height": 66,
           "contentWidth": 1184,
-          "contentHeight": 68,
+          "contentHeight": 66,
           "scrollWidth": 1184,
-          "scrollHeight": 68
+          "scrollHeight": 66
         },
         "computed": {
           "display": "block",
@@ -876,12 +876,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 223.98,
-              "height": 18,
-              "contentWidth": 224,
-              "contentHeight": 18,
-              "scrollWidth": 224,
-              "scrollHeight": 18
+              "width": 320,
+              "height": 16,
+              "contentWidth": 320,
+              "contentHeight": 16,
+              "scrollWidth": 320,
+              "scrollHeight": 16
             },
             "computed": {
               "display": "table",
@@ -936,12 +936,12 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 223.98,
-                  "height": 18,
-                  "contentWidth": 224,
-                  "contentHeight": 18,
-                  "scrollWidth": 224,
-                  "scrollHeight": 18
+                  "width": 320,
+                  "height": 16,
+                  "contentWidth": 320,
+                  "contentHeight": 16,
+                  "scrollWidth": 320,
+                  "scrollHeight": 16
                 },
                 "computed": {
                   "display": "table-column-group",
@@ -997,12 +997,12 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 223.98,
-                  "height": 18,
-                  "contentWidth": 224,
-                  "contentHeight": 18,
-                  "scrollWidth": 224,
-                  "scrollHeight": 18
+                  "width": 320,
+                  "height": 16,
+                  "contentWidth": 320,
+                  "contentHeight": 16,
+                  "scrollWidth": 320,
+                  "scrollHeight": 16
                 },
                 "computed": {
                   "display": "table-row",
@@ -1057,12 +1057,12 @@
                     "layout": {
                       "x": 8,
                       "y": 50,
-                      "width": 223.98,
-                      "height": 18,
-                      "contentWidth": 224,
-                      "contentHeight": 18,
-                      "scrollWidth": 224,
-                      "scrollHeight": 18
+                      "width": 320,
+                      "height": 16,
+                      "contentWidth": 320,
+                      "contentHeight": 16,
+                      "scrollWidth": 320,
+                      "scrollHeight": 16
                     },
                     "computed": {
                       "display": "table-cell",
@@ -1118,10 +1118,10 @@
                             {
                               "x": 8,
                               "y": 50,
-                              "width": 223.98,
-                              "height": 18,
-                              "right": 231.98,
-                              "bottom": 68,
+                              "width": 320,
+                              "height": 16,
+                              "right": 328,
+                              "bottom": 66,
                               "text": "XXXXXXXXX0XXXXXXXXX0",
                               "startIndex": 0,
                               "endIndex": 20
@@ -1150,7 +1150,7 @@
             "classes": [],
             "layout": {
               "x": 8,
-              "y": 68,
+              "y": 66,
               "width": 320,
               "height": 16,
               "contentWidth": 320,
