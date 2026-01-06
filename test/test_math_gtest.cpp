@@ -145,6 +145,13 @@ std::string normalize_latex_for_comparison(const std::string& expr) {
                 // Skip space around equals
                 continue;
             }
+            // Remove space after single-token subscript/superscript (ends the script)
+            if (in_subscript || in_superscript) {
+                // Space signals end of non-braced script content - skip it
+                in_subscript = false;
+                in_superscript = false;
+                continue;
+            }
             // Collapse multiple spaces to one
             while (i + 1 < expr.size() && expr[i + 1] == ' ') {
                 i++;
@@ -155,7 +162,7 @@ std::string normalize_latex_for_comparison(const std::string& expr) {
             if ((in_subscript || in_superscript) && i + 2 < expr.size()) {
                 // Look for single char or command
                 size_t closing = i + 1;
-                if (expr[closing] == '\\\\') {
+                if (expr[closing] == '\\') {
                     // It's a command - find end of command
                     closing++;
                     while (closing < expr.size() && std::isalpha(expr[closing])) {
