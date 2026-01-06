@@ -456,18 +456,33 @@ TEST_F(MathRoundtripTest, IndexedMathTest) {
     EXPECT_TRUE(result) << "Indexed math test failed";
 }
 
-// DISABLED: Environment syntax (\begin{aligned}...\end{aligned}) not yet supported by tree-sitter-latex-math
-TEST_F(MathRoundtripTest, DISABLED_AdvancedMathTest) {
+// Test matrix environment
+TEST_F(MathRoundtripTest, MatrixTest) {
     const char* test_cases[] = {
-        "$$\\begin{aligned} f(x) &= x^2 + 2x + 1 \\\\ &= (x + 1)^2 \\end{aligned}$$"
+        "\\begin{matrix} a & b \\\\ c & d \\end{matrix}"
+    };
+
+    int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
+    bool result = test_math_expressions_roundtrip(
+        test_cases, num_cases, "math", "latex",
+        "pure_math", "matrix_test", "Matrix"
+    );
+    EXPECT_TRUE(result) << "Matrix test should pass";
+}
+
+// Test aligned environment
+TEST_F(MathRoundtripTest, AlignedTest) {
+    const char* test_cases[] = {
+        // Using simpler expressions without parentheses (which are not yet fully supported)
+        "$$\\begin{aligned} x &= a + b \\\\ y &= c + d \\end{aligned}$$"
     };
 
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
     bool result = test_math_expressions_roundtrip(
         test_cases, num_cases, "markdown", "commonmark",
-        "block_math", "advanced_math_test", "Advanced math"
+        "block_math", "aligned_test", "Aligned"
     );
-    EXPECT_TRUE(result) << "Advanced math test should pass";
+    EXPECT_TRUE(result) << "Aligned test should pass";
 }
 
 // Helper function to read text from URL
