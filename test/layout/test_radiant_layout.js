@@ -32,6 +32,8 @@ class RadiantLayoutTester {
         this.maxConcurrency = options.maxConcurrency || 5; // Max parallel tests
         this.testIdCounter = 0; // Counter for unique test IDs
         this.singleTestMode = options.singleTestMode || false; // Single test mode for detailed failure reports
+        this.batchSize = options.batchSize || 0; // Batch size for layout (0 = disabled, use single file mode)
+        this.batchOutputDir = '/tmp/layout_batch'; // Directory for batch output files
     }
 
     /**
@@ -51,7 +53,7 @@ class RadiantLayoutTester {
         return new Promise((resolve, reject) => {
             // Always use standard viewport size (1200x800) to match browser reference
             // Note: Lambda defaults to 1200x800, but we pass args explicitly for clarity
-            const args = ['layout', htmlFile, '--width', '1200', '--height', '800'];
+            const args = ['layout', htmlFile, '-vw', '1200', '-vh', '800'];
 
             // Add view output file argument if specified (for parallel execution)
             if (outputFile) {
@@ -85,6 +87,70 @@ class RadiantLayoutTester {
                 } else {
                     reject(new Error(`${this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant'} failed with exit code ${code}: ${stderr}`));
                 }
+            });
+
+            proc.on('error', (error) => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+        });
+    }
+
+    /**
+     * Run layout engine on multiple files in batch mode.
+     * This is much faster than running individual files as it reuses the UiContext.
+     * @param {Array<string>} htmlFiles - Array of HTML file paths to process
+     * @returns {Promise<Map<string, string>>} - Map of input file -> output JSON file path
+     */
+    async runBatchLayout(htmlFiles) {
+        // Ensure batch output directory exists
+        const { mkdir } = require('fs').promises;
+        try {
+            await mkdir(this.batchOutputDir, { recursive: true });
+        } catch (e) {
+            // Directory may already exist
+        }
+
+        return new Promise((resolve, reject) => {
+            // Build command: layout file1.html file2.html ... --output-dir /tmp/layout_batch/
+            const args = ['layout', ...htmlFiles, '--output-dir', this.batchOutputDir, '--continue-on-error'];
+
+            if (this.verbose) {
+                console.log(`   🚀 Batch layout: ${htmlFiles.length} files`);
+            }
+
+            const proc = spawn(this.radiantExe, args, {
+                cwd: this.projectRoot
+            });
+
+            let stdout = '';
+            let stderr = '';
+
+            proc.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            proc.stderr.on('data', (data) => {
+                stderr += data.toString();
+            });
+
+            // Longer timeout for batch processing
+            const timeout = setTimeout(() => {
+                proc.kill();
+                reject(new Error(`Batch layout timeout (${htmlFiles.length} files, 120s limit)`));
+            }, 120000);
+
+            proc.on('close', (code) => {
+                clearTimeout(timeout);
+                // Build map of input file -> output file
+                const outputMap = new Map();
+                for (const htmlFile of htmlFiles) {
+                    const basename = path.basename(htmlFile).replace(/\.(html|htm)$/i, '');
+                    const outputFile = path.join(this.batchOutputDir, `${basename}.json`);
+                    outputMap.set(htmlFile, outputFile);
+                }
+                // We continue even on non-zero exit code since --continue-on-error was used
+                resolve(outputMap);
             });
 
             proc.on('error', (error) => {
@@ -1343,11 +1409,124 @@ class RadiantLayoutTester {
     }
 
     /**
+     * Compare a single test result against browser reference (used in batch mode)
+     * @param {string} htmlFile - Path to the HTML file
+     * @param {string} category - Test category name
+     * @param {string} outputFile - Path to the layout output JSON file
+     */
+    async compareTestResult(htmlFile, category, outputFile) {
+        const ext = htmlFile.endsWith('.htm') && !htmlFile.endsWith('.html') ? '.htm' : '.html';
+        const testName = path.basename(htmlFile, ext);
+        const testFileName = path.basename(htmlFile);
+
+        try {
+            // Load the layout result
+            const radiantData = await this.loadRadiantOutput(testFileName, outputFile);
+
+            // Load browser reference
+            const browserData = await this.loadBrowserReference(testName, category);
+            if (!browserData) {
+                console.log(`   ⚠️  No browser reference found for ${testName}`);
+                return null;
+            }
+
+            // Compare tree structures
+            const radiantTree = radiantData.layout_tree;
+            const browserTree = browserData.layout_tree;
+
+            let results;
+            try {
+                results = this.compareNodes(radiantTree, browserTree, 'root', null, 0);
+            } catch (compareError) {
+                console.log(`\n📊 Test Case: ${testName}`);
+                console.log(`❌ FAIL Overall: Error during hierarchical comparison`);
+                console.log(`   💥 COMPARISON ERROR: ${compareError.message}`);
+                return {
+                    testName,
+                    testFile: testFileName,
+                    error: `Comparison error: ${compareError.message}`,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            // Generate and print report
+            const metadata = {
+                htmlFile: htmlFile,
+                resultFile: outputFile,
+                viewFile: outputFile.replace('.json', '.txt')
+            };
+            const report = this.generateReport(results, null, testName, metadata);
+            this.printReport(report);
+
+            return report;
+
+        } catch (error) {
+            const testFileInfo = `${testFileName} (${category}/${testName})`;
+            console.log(`\n📊 Test Case: ${testName}`);
+            console.log(`❌ FAIL Overall: Error during test comparison`);
+            console.log(`   💥 ERROR: ${error.message}`);
+
+            return {
+                testName,
+                testFile: testFileInfo,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            };
+        }
+    }
+
+    /**
+     * Run tests using batch layout mode.
+     * Runs layout on multiple files at once, then compares results.
+     * @param {Array} testTasks - Array of {htmlFile, category} objects
+     * @returns {Array} - Array of test results
+     */
+    async runTestsInBatchMode(testTasks) {
+        const results = [];
+        const batchSize = this.batchSize;
+
+        if (this.verbose) {
+            console.log(`\n🚀 Batch mode: processing ${testTasks.length} files in batches of ${batchSize}`);
+        }
+
+        // Process in batches
+        for (let i = 0; i < testTasks.length; i += batchSize) {
+            const batch = testTasks.slice(i, i + batchSize);
+            const htmlFiles = batch.map(task => task.htmlFile);
+
+            if (this.verbose) {
+                console.log(`\n📦 Batch ${Math.floor(i / batchSize) + 1}: ${batch.length} files`);
+            }
+
+            // Run batch layout
+            const outputMap = await this.runBatchLayout(htmlFiles);
+
+            // Compare each result against reference (in parallel)
+            const comparePromises = batch.map(async (task) => {
+                const outputFile = outputMap.get(task.htmlFile);
+                return this.compareTestResult(task.htmlFile, task.category, outputFile);
+            });
+
+            const batchResults = await Promise.all(comparePromises);
+            results.push(...batchResults.filter(r => r !== null));
+        }
+
+        return results;
+    }
+
+    /**
      * Run tests in parallel with a dynamic pool of up to maxConcurrency tests
+     * If batchSize is set, uses batch mode for better performance.
      * @param {Array} testTasks - Array of {htmlFile, category} objects
      * @returns {Array} - Array of test results
      */
     async runTestsInPool(testTasks) {
+        // Use batch mode if batchSize is configured
+        if (this.batchSize > 0) {
+            return this.runTestsInBatchMode(testTasks);
+        }
+
+        // Original single-file parallel mode
         const results = [];
         const pool = new Map(); // Map of testId -> Promise
         let taskIndex = 0;
@@ -1710,7 +1889,8 @@ async function main() {
         verbose: false,
         engine: 'radiant', // default to radiant engine
         json: false, // JSON output mode
-        maxConcurrency: 5 // Max parallel tests
+        maxConcurrency: 5, // Max parallel tests
+        batchSize: 20 // Default batch size for layout (20 files at once)
     };
 
     let category = null;
@@ -1772,6 +1952,17 @@ async function main() {
                     process.exit(1);
                 }
                 break;
+            case '--batch-size':
+            case '-b':
+                options.batchSize = parseInt(args[++i], 10);
+                if (isNaN(options.batchSize) || options.batchSize < 0) {
+                    console.error('Invalid batch size. Must be 0 (disabled) or a positive integer.');
+                    process.exit(1);
+                }
+                break;
+            case '--no-batch':
+                options.batchSize = 0; // Disable batch mode
+                break;
             default:
                 console.error(`Unknown argument: ${arg}`);
                 showHelp = true;
@@ -1793,10 +1984,17 @@ Options:
   --element-threshold <pct> Element match threshold percentage (default: 80.0)
   --text-threshold <pct>   Text match threshold percentage (default: 70.0)
   --concurrency, -j <n>    Number of parallel tests to run (default: 5)
+  --batch-size, -b <n>     Batch size for layout processing (default: 20, 0 to disable)
+  --no-batch               Disable batch mode (same as --batch-size 0)
   --verbose, -v            Show detailed output
   --json                   Output results in JSON format
   --radiant-exe <path>     Path to layout engine executable (default: ./lambda.exe)
   --help, -h               Show this help message
+
+Batch Mode:
+  By default, tests are processed in batches of 20 files to improve performance.
+  The layout engine's UiContext is initialized once per batch, reducing overhead.
+  Use --no-batch to disable batch mode and process files individually.
 
 Engines:
   lambda-css   - Lambda CSS layout engine (custom CSS cascade and layout)
@@ -1812,6 +2010,8 @@ Examples:
   node test/layout/test_radiant_layout.js --element-threshold 90       # Require 90% element match
   node test/layout/test_radiant_layout.js --text-threshold 80          # Require 80% text match
   node test/layout/test_radiant_layout.js -j 10                        # Run 10 tests in parallel
+  node test/layout/test_radiant_layout.js -b 50                        # Process layout in batches of 50
+  node test/layout/test_radiant_layout.js --no-batch                   # Disable batch mode
   node test/layout/test_radiant_layout.js -v                           # Verbose output
 
 Note: Run this script from the project root directory.
