@@ -6,6 +6,7 @@
 #include "transform.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
+#include "state_store.hpp"
 #include "../lib/log.h"
 #include "../lib/avl_tree.h"
 #include "../lambda/input/css/css_style.hpp"
@@ -1458,6 +1459,185 @@ void render_children(RenderContext* rdcon, View* view) {
     } while (view);
 }
 
+// ============================================================================
+// Focus, Caret, and Selection Rendering
+// ============================================================================
+
+/**
+ * Render focus outline around the currently focused element
+ * Draws a 2px dotted outline outside the element's border box
+ */
+void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
+    if (!state || !state->focus || !state->focus->current) return;
+    
+    // Only render focus-visible (keyboard navigation)
+    if (!state->focus->focus_visible) return;
+    
+    View* focused = state->focus->current;
+    if (focused->view_type != RDT_VIEW_BLOCK) return;
+    
+    ViewBlock* block = (ViewBlock*)focused;
+    
+    // Calculate absolute position of the focused element
+    float x = block->x;
+    float y = block->y;
+    float width = block->width;
+    float height = block->height;
+    
+    // Walk up the tree to get absolute coordinates
+    View* parent = block->parent;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK) {
+            x += ((ViewBlock*)parent)->x;
+            y += ((ViewBlock*)parent)->y;
+        }
+        parent = parent->parent;
+    }
+    
+    // Outline offset (outside border box)
+    float outline_offset = 2.0f;
+    float outline_width = 2.0f;
+    
+    // Create outline shape
+    Tvg_Paint* shape = tvg_shape_new();
+    if (!shape) return;
+    
+    // Draw dotted rectangle outline
+    float ox = x - outline_offset;
+    float oy = y - outline_offset;
+    float ow = width + outline_offset * 2;
+    float oh = height + outline_offset * 2;
+    
+    tvg_shape_append_rect(shape, ox, oy, ow, oh, 0, 0);
+    
+    // Focus ring color: typically blue or system accent color
+    // Using a standard web focus color: #005FCC (blue)
+    tvg_shape_set_stroke_color(shape, 0x00, 0x5F, 0xCC, 0xFF);
+    tvg_shape_set_stroke_width(shape, outline_width);
+    
+    // Dotted pattern: dash length 4, gap 2
+    float dash_pattern[] = {4.0f, 2.0f};
+    tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
+    
+    tvg_canvas_push(rdcon->canvas, shape);
+    log_debug("[FOCUS] Rendered focus outline at (%.0f,%.0f) size %.0fx%.0f", ox, oy, ow, oh);
+}
+
+/**
+ * Render the text caret (blinking cursor) in an editable element
+ */
+void render_caret(RenderContext* rdcon, RadiantState* state) {
+    if (!state || !state->caret || !state->caret->visible) return;
+    if (!state->caret->view) return;
+    
+    CaretState* caret = state->caret;
+    View* view = caret->view;
+    
+    // Calculate absolute position
+    float x = caret->x;
+    float y = caret->y;
+    
+    // Walk up the tree to get absolute coordinates
+    View* parent = view;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK) {
+            x += ((ViewBlock*)parent)->x;
+            y += ((ViewBlock*)parent)->y;
+        }
+        parent = parent->parent;
+    }
+    
+    // Create caret line shape
+    Tvg_Paint* shape = tvg_shape_new();
+    if (!shape) return;
+    
+    // Caret is a vertical line at x, from y to y+height
+    tvg_shape_move_to(shape, x, y);
+    tvg_shape_line_to(shape, x, y + caret->height);
+    
+    // Caret color: black
+    tvg_shape_set_stroke_color(shape, 0x00, 0x00, 0x00, 0xFF);
+    tvg_shape_set_stroke_width(shape, 1.5f);
+    
+    tvg_canvas_push(rdcon->canvas, shape);
+    log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, caret->height);
+}
+
+/**
+ * Render text selection highlight
+ * Draws semi-transparent blue rectangles behind selected text
+ */
+void render_selection(RenderContext* rdcon, RadiantState* state) {
+    if (!state || !state->selection) return;
+    if (state->selection->is_collapsed) return;  // no selection
+    if (!state->selection->view) return;
+    
+    SelectionState* sel = state->selection;
+    View* view = sel->view;
+    
+    // For single-line selection, draw a single rectangle
+    // Multi-line selection would require multiple rectangles per line
+    
+    // Calculate absolute position
+    float start_x = sel->start_x;
+    float start_y = sel->start_y;
+    float end_x = sel->end_x;
+    float end_y = sel->end_y;
+    
+    // Walk up to get absolute coordinates
+    View* parent = view;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK) {
+            ViewBlock* block = (ViewBlock*)parent;
+            start_x += block->x;
+            start_y += block->y;
+            end_x += block->x;
+            end_y += block->y;
+        }
+        parent = parent->parent;
+    }
+    
+    // Normalize coordinates (anchor can be after focus)
+    float min_x = start_x < end_x ? start_x : end_x;
+    float max_x = start_x > end_x ? start_x : end_x;
+    float min_y = start_y < end_y ? start_y : end_y;
+    
+    // For now, simple single-line selection rect
+    float sel_width = max_x - min_x;
+    float sel_height = end_y - start_y;  // Use line height approximation
+    if (sel_height <= 0) sel_height = 20;  // default line height if not set
+    
+    // Create selection highlight shape
+    Tvg_Paint* shape = tvg_shape_new();
+    if (!shape) return;
+    
+    tvg_shape_append_rect(shape, min_x, min_y, sel_width, sel_height, 0, 0);
+    
+    // Selection highlight color: semi-transparent blue (standard selection blue)
+    // #0078D7 at 50% opacity
+    tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);
+    
+    tvg_canvas_push(rdcon->canvas, shape);
+    log_debug("[SELECTION] Rendered selection at (%.0f,%.0f) size %.0fx%.0f", min_x, min_y, sel_width, sel_height);
+}
+
+/**
+ * Render all interactive state overlays (focus, caret, selection)
+ * Called after main content rendering, before canvas sync
+ */
+void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
+    if (!state) return;
+    
+    // Selection is rendered first (behind text/caret)
+    render_selection(rdcon, state);
+    
+    // Caret rendered on top of selection
+    render_caret(rdcon, state);
+    
+    // Focus outline rendered last (outside content)
+    render_focus_outline(rdcon, state);
+}
+
 void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
@@ -1568,6 +1748,11 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     auto t_render = high_resolution_clock::now();
     log_info("[TIMING] render_block_view: %.1fms", duration<double, std::milli>(t_render - t_init).count());
     log_render_stats();  // log detailed render statistics
+
+    // Render UI overlays (focus outline, caret, selection) on top of content
+    if (uicon->document && uicon->document->state) {
+        render_ui_overlays(&rdcon, uicon->document->state);
+    }
 
     // all shapes should already have been drawn to the canvas
     // tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer

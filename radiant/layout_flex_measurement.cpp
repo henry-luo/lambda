@@ -1014,8 +1014,21 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
 
 // Calculate intrinsic sizes for a flex item
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout) {
-    if (!item || !item->fi) {
-        log_debug("calculate_item_intrinsic_sizes: invalid item or no flex properties");
+    if (!item) {
+        log_debug("calculate_item_intrinsic_sizes: invalid item");
+        return;
+    }
+    
+    // Form controls use FormControlProp instead of FlexItemProp (they're in a union).
+    // Form controls have their intrinsic sizes in form->intrinsic_width/height,
+    // not fi->intrinsic_width/height. Skip this function for form controls.
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
+        log_debug("calculate_item_intrinsic_sizes: skipping form control (uses FormControlProp)");
+        return;
+    }
+    
+    if (!item->fi) {
+        log_debug("calculate_item_intrinsic_sizes: no flex properties");
         return;
     }
 

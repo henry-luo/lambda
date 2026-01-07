@@ -11,6 +11,7 @@
 #include "../lib/log.h"
 #include "layout.hpp"
 #include "font_face.h"
+#include "state_store.hpp"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -222,19 +223,41 @@ void reflow_html_doc(DomDocument* doc) {
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
+        return;
+    }
+    
+    // Build keyboard event
+    RdtEvent event;
+    event.key.type = (action == GLFW_PRESS || action == GLFW_REPEAT) ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP;
+    event.key.timestamp = glfwGetTime();
+    event.key.key = key;
+    event.key.scancode = scancode;
+    event.key.mods = 0;
+    if (mods & GLFW_MOD_SHIFT) event.key.mods |= RDT_MOD_SHIFT;
+    if (mods & GLFW_MOD_CONTROL) event.key.mods |= RDT_MOD_CTRL;
+    if (mods & GLFW_MOD_ALT) event.key.mods |= RDT_MOD_ALT;
+    if (mods & GLFW_MOD_SUPER) event.key.mods |= RDT_MOD_SUPER;
+    
+    // Handle key events
+    handle_event(&ui_context, ui_context.document, &event);
 }
 
 void character_callback(GLFWwindow* window, unsigned int codepoint) {
-    // codepoint in UFT32
+    // Build text input event
+    RdtEvent event;
+    event.text_input.type = RDT_EVENT_TEXT_INPUT;
+    event.text_input.timestamp = glfwGetTime();
+    event.text_input.codepoint = codepoint;
+    
     if (codepoint > 127) {
-        // wchar_t unicodeChar = codepoint;
-        // wprintf(L"Unicode codepoint: %u, %lc\n", codepoint, codepoint);
-        log_debug("Unicode character entered: %u", codepoint);
+        log_debug("Unicode character entered: U+%04X", codepoint);
     } else {
-        log_debug("Character entered: %u, %c", codepoint, codepoint);
+        log_debug("Character entered: %u '%c'", codepoint, codepoint);
     }
+    
+    handle_event(&ui_context, ui_context.document, &event);
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
@@ -383,6 +406,20 @@ void render(GLFWwindow* window) {
         }
         log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
+    
+    // Check for incremental reflow due to state changes (pseudo-classes, etc.)
+    RadiantState* state = ui_context.document ? ui_context.document->state : nullptr;
+    if (state && state->needs_reflow) {
+        log_debug("render: incremental reflow triggered by state change");
+        double start_time = glfwGetTime();
+        // Reflow the document (styles will be recalculated for marked elements)
+        if (ui_context.document) {
+            reflow_html_doc(ui_context.document);
+        }
+        state->needs_reflow = false;
+        log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
+    }
+    
     // rerender if the document is dirty
     if (ui_context.document && ui_context.document->state && ui_context.document->state->is_dirty) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
@@ -584,6 +621,8 @@ int view_doc_in_window(const char* doc_file) {
     // Main loop
     double lastTime = glfwGetTime();
     double deltaTime = 0.0;
+    double caretBlinkTime = 0.0;
+    const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
     int frames = 0;
 
     while (!glfwWindowShouldClose(window)) {
@@ -594,6 +633,17 @@ int view_doc_in_window(const char* doc_file) {
 
         // poll for new events
         glfwPollEvents();
+
+        // Handle caret blinking
+        RadiantState* state = ui_context.document ? ui_context.document->state : nullptr;
+        if (state && state->caret) {
+            caretBlinkTime += deltaTime;
+            if (caretBlinkTime >= CARET_BLINK_INTERVAL) {
+                caretBlinkTime = 0.0;
+                caret_toggle_blink(state);
+                do_redraw = 1;  // trigger repaint for caret blink
+            }
+        }
 
         // only redraw if we need to
         if (do_redraw) {

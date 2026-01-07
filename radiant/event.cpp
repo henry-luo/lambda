@@ -1,4 +1,5 @@
 #include "handler.hpp"
+#include "state_store.hpp"
 
 #include "../lib/log.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -277,11 +278,250 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     setup_font(uicon, &evcon->font, &uicon->default_font);
     evcon->new_cursor = CSS_VALUE_AUTO;
     if (!uicon->document->state) {
-        uicon->document->state = (StateStore*)calloc(1, sizeof(StateStore));
+        // Create the new RadiantState with in-place mode
+        uicon->document->state = radiant_state_create(uicon->document->pool, STATE_MODE_IN_PLACE);
+        if (uicon->document->state) {
+            log_debug("event_context_init: created RadiantState for document");
+        }
     }
 }
 
 void event_context_cleanup(EventContext* evcon) {
+}
+
+// ============================================================================
+// Interaction State Updates
+// ============================================================================
+
+/**
+ * Helper to update element's pseudo_state bitmask along with state store
+ * Also schedules reflow if the pseudo-state change may affect layout
+ */
+static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
+    if (!view || !view->is_element()) return;
+    
+    DomElement* element = (DomElement*)view;
+    uint32_t old_state = element->pseudo_state;
+    
+    if (set) {
+        dom_element_set_pseudo_state(element, pseudo_flag);
+    } else {
+        dom_element_clear_pseudo_state(element, pseudo_flag);
+    }
+    
+    // If state actually changed, schedule potential reflow
+    if (element->pseudo_state != old_state && element->doc && element->doc->state) {
+        RadiantState* state = (RadiantState*)element->doc->state;
+        
+        // Pseudo-states that can affect layout (need reflow, not just repaint)
+        bool affects_layout = (pseudo_flag == PSEUDO_STATE_HOVER ||
+                               pseudo_flag == PSEUDO_STATE_ACTIVE ||
+                               pseudo_flag == PSEUDO_STATE_FOCUS ||
+                               pseudo_flag == PSEUDO_STATE_CHECKED ||
+                               pseudo_flag == PSEUDO_STATE_DISABLED);
+        
+        if (affects_layout) {
+            // Schedule subtree reflow (element and descendants may change)
+            reflow_schedule(state, view, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
+        }
+        
+        // Always mark for repaint
+        dirty_mark_element(state, view);
+        state->is_dirty = true;
+    }
+}
+
+/**
+ * Update hover state when mouse moves to a new target
+ * Sets :hover on target and all ancestors, clears :hover on previous target
+ */
+void update_hover_state(EventContext* evcon, View* new_target) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state) return;
+    
+    View* prev_hover = (View*)state->hover_target;
+    
+    if (prev_hover == new_target) return;  // no change
+    
+    // Clear :hover on previous target and its ancestors
+    if (prev_hover) {
+        View* node = prev_hover;
+        while (node) {
+            state_set_bool(state, node, STATE_HOVER, false);
+            sync_pseudo_state(node, PSEUDO_STATE_HOVER, false);
+            node = (View*)node->parent;
+        }
+        log_debug("update_hover_state: cleared hover on %p", prev_hover);
+    }
+    
+    // Set :hover on new target and its ancestors
+    if (new_target) {
+        View* node = new_target;
+        while (node) {
+            state_set_bool(state, node, STATE_HOVER, true);
+            sync_pseudo_state(node, PSEUDO_STATE_HOVER, true);
+            node = (View*)node->parent;
+        }
+        log_debug("update_hover_state: set hover on %p", new_target);
+    }
+    
+    state->hover_target = new_target;
+    state->needs_repaint = true;
+}
+
+/**
+ * Update active state on mouse down/up
+ */
+void update_active_state(EventContext* evcon, View* target, bool is_active) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state) return;
+    
+    if (is_active) {
+        // Set :active on target and ancestors
+        View* node = target;
+        while (node) {
+            state_set_bool(state, node, STATE_ACTIVE, true);
+            sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, true);
+            node = (View*)node->parent;
+        }
+        state->active_target = target;
+        log_debug("update_active_state: set active on %p", target);
+    } else {
+        // Clear :active on previous active target
+        View* prev_active = (View*)state->active_target;
+        if (prev_active) {
+            View* node = prev_active;
+            while (node) {
+                state_set_bool(state, node, STATE_ACTIVE, false);
+                sync_pseudo_state(node, PSEUDO_STATE_ACTIVE, false);
+                node = (View*)node->parent;
+            }
+        }
+        state->active_target = NULL;
+        log_debug("update_active_state: cleared active");
+    }
+    
+    state->needs_repaint = true;
+}
+
+/**
+ * Check if an element is focusable
+ */
+bool is_view_focusable(View* view) {
+    if (!view) return false;
+    
+    // Elements that are focusable by default:
+    // - <a> with href
+    // - <button>
+    // - <input> (except hidden)
+    // - <select>
+    // - <textarea>
+    // - elements with tabindex >= 0
+    
+    if (view->is_element()) {
+        ViewElement* elem = (ViewElement*)view;
+        uint32_t tag = elem->tag();
+        
+        switch (tag) {
+        case HTM_TAG_A:
+            // <a> is focusable if it has href
+            return elem->get_attribute("href") != NULL;
+        case HTM_TAG_BUTTON:
+        case HTM_TAG_SELECT:
+        case HTM_TAG_TEXTAREA:
+            return true;
+        case HTM_TAG_INPUT: {
+            // Input is focusable unless type="hidden"
+            const char* type = elem->get_attribute("type");
+            return !type || strcmp(type, "hidden") != 0;
+        }
+        default:
+            // Check for tabindex attribute
+            const char* tabindex = elem->get_attribute("tabindex");
+            if (tabindex) {
+                int ti = atoi(tabindex);
+                return ti >= 0;
+            }
+            break;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Propagate :focus-within pseudo-state up the ancestor chain
+ */
+static void propagate_focus_within(View* view, bool set) {
+    View* ancestor = view ? view->parent : nullptr;
+    while (ancestor) {
+        sync_pseudo_state(ancestor, PSEUDO_STATE_FOCUS_WITHIN, set);
+        ancestor = ancestor->parent;
+    }
+}
+
+/**
+ * Update focus state when an element gains/loses focus
+ * @param from_keyboard true if focus change was triggered by keyboard (Tab key, etc.)
+ */
+void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state) return;
+    
+    View* prev_focus = focus_get(state);
+    
+    if (prev_focus == new_focus) return;  // no change
+    
+    // Use the focus API to handle all state updates
+    if (new_focus) {
+        focus_set(state, new_focus, from_keyboard);
+        
+        // Sync DOM pseudo-states for previous focus
+        if (prev_focus) {
+            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
+            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
+            // Clear :focus-within from previous ancestor chain
+            propagate_focus_within(prev_focus, false);
+        }
+        
+        // Set :focus on new element
+        sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS, true);
+        
+        // Set :focus-visible only for keyboard navigation
+        if (from_keyboard) {
+            sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS_VISIBLE, true);
+        }
+        
+        // Propagate :focus-within up the ancestor chain
+        propagate_focus_within(new_focus, true);
+        
+        log_debug("update_focus_state: set focus on %p (keyboard=%d, focus-visible=%d)", 
+                  new_focus, from_keyboard, from_keyboard);
+    } else {
+        focus_clear(state);
+        
+        if (prev_focus) {
+            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
+            sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
+            // Clear :focus-within from ancestor chain
+            propagate_focus_within(prev_focus, false);
+        }
+        
+        log_debug("update_focus_state: cleared focus");
+    }
+}
+
+/**
+ * Update drag state
+ */
+void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state) return;
+    
+    state->drag_target = is_dragging ? target : NULL;
+    state->is_dirty = true;
+    
+    log_debug("update_drag_state: dragging=%d, target=%p", is_dragging, target);
 }
 
 // find iframe by name and set new src using selector
@@ -393,6 +633,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse event at (%d, %d)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree);
+        
+        // Update hover state based on new target
+        update_hover_state(&evcon, evcon.target);
+        
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
@@ -406,9 +650,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         // fire drag event if dragging in progress
-        if (evcon.ui_context->document->state->is_dragging) {
+        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        if (state && state->drag_target) {
             log_debug("Dragging in progress");
-            ArrayList* target_list = build_view_stack(&evcon, evcon.ui_context->document->state->drag_target);
+            ArrayList* target_list = build_view_stack(&evcon, (View*)state->drag_target);
             evcon.event.type = RDT_EVENT_MOUSE_DRAG;  // deliver as drag event
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
@@ -439,6 +684,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
+        
+        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        
+        // Update active and focus states
+        if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target) {
+            // Set :active state
+            update_active_state(&evcon, evcon.target, true);
+            
+            // Update focus if target is focusable (mouse-triggered focus)
+            if (is_view_focusable(evcon.target)) {
+                update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
+            }
+        } else if (event->type == RDT_EVENT_MOUSE_UP) {
+            // Clear :active state
+            update_active_state(&evcon, NULL, false);
+        }
+        
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
@@ -452,11 +714,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         // fire drag event if dragging in progress
-        if (evcon.event.type == RDT_EVENT_MOUSE_UP && evcon.ui_context->document->state->is_dragging) {
+        if (evcon.event.type == RDT_EVENT_MOUSE_UP && state && state->drag_target) {
             log_debug("mouse up in dragging");
-            ArrayList* target_list = build_view_stack(&evcon, evcon.ui_context->document->state->drag_target);
+            ArrayList* target_list = build_view_stack(&evcon, (View*)state->drag_target);
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
+            update_drag_state(&evcon, NULL, false);
         }
 
         if (evcon.new_url) {
@@ -557,10 +820,187 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
         break;
     }
+    case RDT_EVENT_KEY_DOWN: {
+        KeyEvent* key_event = &event->key;
+        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        if (!state) break;
+        
+        View* focused = focus_get(state);
+        log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
+        
+        // Tab navigation
+        if (key_event->key == RDT_KEY_TAB) {
+            bool forward = !(key_event->mods & RDT_MOD_SHIFT);
+            if (doc->view_tree && doc->view_tree->root) {
+                focus_move(state, doc->view_tree->root, forward);
+            }
+            evcon.need_repaint = true;
+            break;
+        }
+        
+        // Handle caret/selection navigation for focused editable elements
+        if (focused && state->caret) {
+            bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
+            bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
+            bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+            
+            switch (key_event->key) {
+                case RDT_KEY_LEFT:
+                    if (shift) {
+                        // Extend selection left
+                        if (!state->selection || state->selection->is_collapsed) {
+                            selection_start(state, focused, state->caret->char_offset);
+                        }
+                        selection_extend(state, state->caret->char_offset - 1);
+                    } else {
+                        selection_clear(state);
+                        caret_move(state, ctrl ? -10 : -1);  // word jump with ctrl
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                    
+                case RDT_KEY_RIGHT:
+                    if (shift) {
+                        if (!state->selection || state->selection->is_collapsed) {
+                            selection_start(state, focused, state->caret->char_offset);
+                        }
+                        selection_extend(state, state->caret->char_offset + 1);
+                    } else {
+                        selection_clear(state);
+                        caret_move(state, ctrl ? 10 : 1);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                    
+                case RDT_KEY_UP:
+                    if (shift) {
+                        if (!state->selection || state->selection->is_collapsed) {
+                            selection_start(state, focused, state->caret->char_offset);
+                        }
+                        // Calculate line start/end for extending selection
+                        caret_move_line(state, -1);
+                        selection_extend(state, state->caret->char_offset);
+                    } else {
+                        selection_clear(state);
+                        caret_move_line(state, -1);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                    
+                case RDT_KEY_DOWN:
+                    if (shift) {
+                        if (!state->selection || state->selection->is_collapsed) {
+                            selection_start(state, focused, state->caret->char_offset);
+                        }
+                        caret_move_line(state, 1);
+                        selection_extend(state, state->caret->char_offset);
+                    } else {
+                        selection_clear(state);
+                        caret_move_line(state, 1);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                    
+                case RDT_KEY_HOME:
+                    if (shift) {
+                        if (!state->selection || state->selection->is_collapsed) {
+                            selection_start(state, focused, state->caret->char_offset);
+                        }
+                        caret_move_to(state, cmd ? 2 : 0);  // doc start or line start
+                        selection_extend(state, state->caret->char_offset);
+                    } else {
+                        selection_clear(state);
+                        caret_move_to(state, cmd ? 2 : 0);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                    
+                case RDT_KEY_END:
+                    if (shift) {
+                        if (!state->selection || state->selection->is_collapsed) {
+                            selection_start(state, focused, state->caret->char_offset);
+                        }
+                        caret_move_to(state, cmd ? 3 : 1);  // doc end or line end
+                        selection_extend(state, state->caret->char_offset);
+                    } else {
+                        selection_clear(state);
+                        caret_move_to(state, cmd ? 3 : 1);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                    
+                case RDT_KEY_A:
+                    // Select all (Ctrl+A / Cmd+A)
+                    if (ctrl || cmd) {
+                        selection_select_all(state);
+                        evcon.need_repaint = true;
+                    }
+                    break;
+                    
+                case RDT_KEY_BACKSPACE:
+                    // TODO: delete selection or character before caret
+                    evcon.need_repaint = true;
+                    break;
+                    
+                case RDT_KEY_DELETE:
+                    // TODO: delete selection or character after caret
+                    evcon.need_repaint = true;
+                    break;
+                    
+                default:
+                    break;
+            }
+        }
+        break;
+    }
+    case RDT_EVENT_KEY_UP: {
+        // Key release - typically not needed for text editing
+        log_debug("Key up: key=%d", event->key.key);
+        break;
+    }
+    case RDT_EVENT_TEXT_INPUT: {
+        TextInputEvent* text_event = &event->text_input;
+        RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        if (!state) break;
+        
+        View* focused = focus_get(state);
+        log_debug("Text input: codepoint=U+%04X, focused=%p", text_event->codepoint, focused);
+        
+        if (focused && state->caret) {
+            // Delete any existing selection first
+            if (selection_has(state)) {
+                // TODO: delete selected text
+                selection_clear(state);
+            }
+            
+            // TODO: insert character at caret position
+            // This requires access to the text content of the focused element
+            
+            // Move caret forward
+            caret_move(state, 1);
+            evcon.need_repaint = true;
+        }
+        break;
+    }
     default:
         log_debug("Unhandled event type: %d", event->type);
         break;
     }
+    
+    // Process pending reflows if any state changes require relayout
+    RadiantState* state = (RadiantState*)uicon->document->state;
+    if (state && state->needs_reflow) {
+        log_debug("Processing pending reflows before repaint");
+        reflow_process_pending(state);
+        
+        // If reflow is still needed after processing, trigger actual relayout
+        if (state->needs_reflow) {
+            // Trigger relayout by marking the event context
+            evcon.need_repaint = true;  // repaint includes relayout
+            log_debug("Reflow required, will trigger relayout");
+        }
+    }
+    
     if (evcon.need_repaint) {
         uicon->document->state->is_dirty = true;
         to_repaint();
