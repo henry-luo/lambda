@@ -698,10 +698,18 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
             return dom_element_has_pseudo_state(element, PSEUDO_STATE_ACTIVE);
         case CSS_SELECTOR_PSEUDO_FOCUS:
             return dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS);
+        case CSS_SELECTOR_PSEUDO_FOCUS_VISIBLE:
+            // :focus-visible matches when focused via keyboard navigation
+            return dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_VISIBLE);
+        case CSS_SELECTOR_PSEUDO_FOCUS_WITHIN:
+            // :focus-within matches when element or any descendant has focus
+            return dom_element_has_pseudo_state(element, PSEUDO_STATE_FOCUS_WITHIN);
         case CSS_SELECTOR_PSEUDO_VISITED:
             return dom_element_has_pseudo_state(element, PSEUDO_STATE_VISITED);
         case CSS_SELECTOR_PSEUDO_LINK:
             return dom_element_has_pseudo_state(element, PSEUDO_STATE_LINK);
+        case CSS_SELECTOR_PSEUDO_TARGET:
+            return dom_element_has_pseudo_state(element, PSEUDO_STATE_TARGET);
 
         // Form pseudo-classes
         case CSS_SELECTOR_PSEUDO_ENABLED:
@@ -725,6 +733,8 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
         case CSS_SELECTOR_PSEUDO_READ_WRITE:
             // :read-write matches when NOT read-only
             return !dom_element_has_pseudo_state(element, PSEUDO_STATE_READ_ONLY);
+        case CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN:
+            return dom_element_has_pseudo_state(element, PSEUDO_STATE_PLACEHOLDER_SHOWN);
 
         // Structural pseudo-classes
         case CSS_SELECTOR_PSEUDO_ROOT:
@@ -1321,8 +1331,11 @@ uint32_t selector_matcher_pseudo_class_to_flag(const char* pseudo_class) {
     if (strcasecmp_local(pseudo_class, "hover") == 0) return PSEUDO_STATE_HOVER;
     if (strcasecmp_local(pseudo_class, "active") == 0) return PSEUDO_STATE_ACTIVE;
     if (strcasecmp_local(pseudo_class, "focus") == 0) return PSEUDO_STATE_FOCUS;
+    if (strcasecmp_local(pseudo_class, "focus-visible") == 0) return PSEUDO_STATE_FOCUS_VISIBLE;
+    if (strcasecmp_local(pseudo_class, "focus-within") == 0) return PSEUDO_STATE_FOCUS_WITHIN;
     if (strcasecmp_local(pseudo_class, "visited") == 0) return PSEUDO_STATE_VISITED;
     if (strcasecmp_local(pseudo_class, "link") == 0) return PSEUDO_STATE_LINK;
+    if (strcasecmp_local(pseudo_class, "target") == 0) return PSEUDO_STATE_TARGET;
     if (strcasecmp_local(pseudo_class, "enabled") == 0) return PSEUDO_STATE_ENABLED;
     if (strcasecmp_local(pseudo_class, "disabled") == 0) return PSEUDO_STATE_DISABLED;
     if (strcasecmp_local(pseudo_class, "checked") == 0) return PSEUDO_STATE_CHECKED;
@@ -1333,6 +1346,8 @@ uint32_t selector_matcher_pseudo_class_to_flag(const char* pseudo_class) {
     if (strcasecmp_local(pseudo_class, "optional") == 0) return PSEUDO_STATE_OPTIONAL;
     if (strcasecmp_local(pseudo_class, "read-only") == 0) return PSEUDO_STATE_READ_ONLY;
     if (strcasecmp_local(pseudo_class, "read-write") == 0) return PSEUDO_STATE_READ_WRITE;
+    if (strcasecmp_local(pseudo_class, "placeholder-shown") == 0) return PSEUDO_STATE_PLACEHOLDER_SHOWN;
+    if (strcasecmp_local(pseudo_class, "selected") == 0) return PSEUDO_STATE_SELECTED;
     if (strcasecmp_local(pseudo_class, "first-child") == 0) return PSEUDO_STATE_FIRST_CHILD;
     if (strcasecmp_local(pseudo_class, "last-child") == 0) return PSEUDO_STATE_LAST_CHILD;
     if (strcasecmp_local(pseudo_class, "only-child") == 0) return PSEUDO_STATE_ONLY_CHILD;
@@ -1345,8 +1360,11 @@ const char* selector_matcher_flag_to_pseudo_class(uint32_t flag) {
         case PSEUDO_STATE_HOVER: return "hover";
         case PSEUDO_STATE_ACTIVE: return "active";
         case PSEUDO_STATE_FOCUS: return "focus";
+        case PSEUDO_STATE_FOCUS_VISIBLE: return "focus-visible";
+        case PSEUDO_STATE_FOCUS_WITHIN: return "focus-within";
         case PSEUDO_STATE_VISITED: return "visited";
         case PSEUDO_STATE_LINK: return "link";
+        case PSEUDO_STATE_TARGET: return "target";
         case PSEUDO_STATE_ENABLED: return "enabled";
         case PSEUDO_STATE_DISABLED: return "disabled";
         case PSEUDO_STATE_CHECKED: return "checked";
@@ -1357,6 +1375,8 @@ const char* selector_matcher_flag_to_pseudo_class(uint32_t flag) {
         case PSEUDO_STATE_OPTIONAL: return "optional";
         case PSEUDO_STATE_READ_ONLY: return "read-only";
         case PSEUDO_STATE_READ_WRITE: return "read-write";
+        case PSEUDO_STATE_PLACEHOLDER_SHOWN: return "placeholder-shown";
+        case PSEUDO_STATE_SELECTED: return "selected";
         case PSEUDO_STATE_FIRST_CHILD: return "first-child";
         case PSEUDO_STATE_LAST_CHILD: return "last-child";
         case PSEUDO_STATE_ONLY_CHILD: return "only-child";

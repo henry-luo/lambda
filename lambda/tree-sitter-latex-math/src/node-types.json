@@ -310,6 +310,11 @@
     }
   },
   {
+    "type": "brace_symbol",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "brack_group",
     "named": true,
     "fields": {},
@@ -327,6 +332,10 @@
         },
         {
           "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "brace_symbol",
           "named": true
         },
         {
@@ -469,6 +478,10 @@
           "named": true
         },
         {
+          "type": "brace_symbol",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -549,6 +562,10 @@
         },
         {
           "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "brace_symbol",
           "named": true
         },
         {
@@ -747,6 +764,10 @@
           "named": true
         },
         {
+          "type": "brace_symbol",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -828,6 +849,10 @@
         },
         {
           "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "brace_symbol",
           "named": true
         },
         {
@@ -1035,6 +1060,10 @@
           },
           {
             "type": "binomial",
+            "named": true
+          },
+          {
+            "type": "brace_symbol",
             "named": true
           },
           {

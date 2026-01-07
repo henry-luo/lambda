@@ -32,7 +32,8 @@ typedef struct Element Element;
 typedef struct Input Input;
 typedef struct Arena Arena;
 typedef struct ViewTree ViewTree;  // From radiant/view.hpp
-typedef struct StateStore StateStore;  // From radiant/view.hpp
+typedef struct RadiantState RadiantState;  // From radiant/state_store.h
+typedef RadiantState StateStore;  // For backward compatibility
 typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
@@ -221,7 +222,12 @@ struct DomElement : DomNode {
         before_styles(nullptr), after_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
         pseudo_state(0), doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
-        item_prop_type(ITEM_PROP_NONE), fi(nullptr), vpath(nullptr), layout_cache(nullptr) {}
+        font(nullptr), bound(nullptr), in_line(nullptr),
+        item_prop_type(ITEM_PROP_NONE), fi(nullptr),
+        content_width(0), content_height(0),
+        blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
+        transform(nullptr), filter(nullptr), multicol(nullptr), pseudo(nullptr),
+        vpath(nullptr), layout_cache(nullptr) {}
 };
 
 // Pseudo-class state flags
@@ -243,6 +249,11 @@ struct DomElement : DomNode {
 #define PSEUDO_STATE_FIRST_CHILD    (1 << 15)
 #define PSEUDO_STATE_LAST_CHILD     (1 << 16)
 #define PSEUDO_STATE_ONLY_CHILD     (1 << 17)
+#define PSEUDO_STATE_FOCUS_VISIBLE  (1 << 18)  // keyboard focus (Tab/arrow keys)
+#define PSEUDO_STATE_FOCUS_WITHIN   (1 << 19)  // has focused descendant
+#define PSEUDO_STATE_SELECTED       (1 << 20)  // option/selection state
+#define PSEUDO_STATE_TARGET         (1 << 21)  // URL fragment target
+#define PSEUDO_STATE_PLACEHOLDER_SHOWN (1 << 22)  // input showing placeholder
 
 // ============================================================================
 // DOM Document Creation and Destruction
