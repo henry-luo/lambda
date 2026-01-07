@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "handler.hpp"
+#include "state_store.hpp"
 #include "../lib/log.h"
 
 struct ScrollConfig {
