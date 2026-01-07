@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radiant State Test</title>
+    <style>
+        /* Reset and base styles */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #1a1a1a;
+        }
+        
+        h2 {
+            font-size: 18px;
+            margin: 20px 0 10px 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+            color: #444;
+        }
+        
+        .section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .description {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+        
+        /* ============================================
+           TEST 1: :hover state
+           ============================================ */
+        .hover-test {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .hover-box {
+            width: 120px;
+            height: 80px;
+            background-color: #e0e0e0;
+            border: 2px solid #999;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        
+        .hover-box:hover {
+            background-color: #4a90d9;
+            border-color: #2d6bb3;
+            color: white;
+            transform: scale(1.05);
+        }
+        
+        .hover-nested {
+            padding: 15px;
+            background-color: #f0f0f0;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+        }
+        
+        .hover-nested:hover {
+            background-color: #e8f4fd;
+            border-color: #4a90d9;
+        }
+        
+        .hover-nested .hover-inner {
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .hover-nested .hover-inner:hover {
+            background-color: #4a90d9;
+            color: white;
+            border-color: #2d6bb3;
+        }
+        
+        /* ============================================
+           TEST 2: :active state
+           ============================================ */
+        .active-test {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .active-button {
+            padding: 12px 24px;
+            background-color: #4a90d9;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.1s ease;
+        }
+        
+        .active-button:hover {
+            background-color: #3a7fc8;
+        }
+        
+        .active-button:active {
+            background-color: #2d6bb3;
+            transform: translateY(2px);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .active-link {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #f0f0f0;
+            color: #333;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        
+        .active-link:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .active-link:active {
+            background-color: #d0d0d0;
+            color: #000;
+        }
+        
+        /* ============================================
+           TEST 3: :focus state
+           ============================================ */
+        .focus-test {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .focus-input {
+            padding: 10px 14px;
+            font-size: 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            max-width: 300px;
+        }
+        
+        .focus-input:focus {
+            border-color: #4a90d9;
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.2);
+        }
+        
+        .focus-textarea {
+            padding: 10px 14px;
+            font-size: 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            max-width: 400px;
+            min-height: 80px;
+            resize: vertical;
+        }
+        
+        .focus-textarea:focus {
+            border-color: #4a90d9;
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.2);
+        }
+        
+        .focus-button {
+            padding: 10px 20px;
+            background-color: #4a90d9;
+            color: white;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            outline: none;
+            max-width: 150px;
+        }
+        
+        .focus-button:focus {
+            border-color: #1a5a9c;
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.3);
+        }
+        
+        /* ============================================
+           TEST 4: :focus-visible state
+           ============================================ */
+        .focus-visible-test {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .fv-button {
+            padding: 12px 24px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            outline: none;
+        }
+        
+        /* :focus-visible only shows when focused via keyboard (Tab), not mouse click */
+        .fv-button:focus-visible {
+            outline: 3px dashed #ff6b35;
+            outline-offset: 3px;
+        }
+        
+        .fv-input {
+            padding: 10px 14px;
+            font-size: 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            max-width: 200px;
+        }
+        
+        .fv-input:focus-visible {
+            border-color: #ff6b35;
+            box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.3);
+        }
+        
+        /* ============================================
+           TEST 5: :focus-within state
+           ============================================ */
+        .focus-within-test {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .fw-container {
+            padding: 20px;
+            background-color: #f8f8f8;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+        
+        /* Parent highlights when any child has focus */
+        .fw-container:focus-within {
+            background-color: #e8f4fd;
+            border-color: #4a90d9;
+            box-shadow: 0 0 0 4px rgba(74, 144, 217, 0.15);
+        }
+        
+        .fw-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #555;
+        }
+        
+        .fw-container:focus-within .fw-label {
+            color: #2d6bb3;
+        }
+        
+        .fw-input {
+            padding: 10px 14px;
+            font-size: 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            width: 100%;
+            max-width: 300px;
+        }
+        
+        .fw-input:focus {
+            border-color: #4a90d9;
+        }
+        
+        /* Nested focus-within */
+        .fw-nested-outer {
+            padding: 15px;
+            background-color: #f0f0f0;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+        }
+        
+        .fw-nested-outer:focus-within {
+            background-color: #fff3e0;
+            border-color: #ff9800;
+        }
+        
+        .fw-nested-inner {
+            padding: 15px;
+            background-color: #fff;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        
+        .fw-nested-inner:focus-within {
+            background-color: #e8f5e9;
+            border-color: #4caf50;
+        }
+        
+        /* ============================================
+           TEST 6: Tab Navigation Order
+           ============================================ */
+        .tab-test {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .tab-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .tab-item {
+            padding: 10px 16px;
+            background-color: #e0e0e0;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            outline: none;
+        }
+        
+        .tab-item:hover {
+            background-color: #d0d0d0;
+        }
+        
+        .tab-item:focus {
+            border-color: #4a90d9;
+            background-color: #e8f4fd;
+        }
+        
+        .tab-item:focus-visible {
+            outline: 2px dashed #ff6b35;
+            outline-offset: 2px;
+        }
+        
+        /* Custom tabindex */
+        .tab-custom {
+            background-color: #fff3e0;
+        }
+        
+        .tab-skip {
+            background-color: #ffebee;
+        }
+        
+        /* ============================================
+           TEST 7: :checked state (checkboxes/radios)
+           ============================================ */
+        .checked-test {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .checkbox-group,
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .checkbox-label,
+        .radio-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        
+        .checkbox-label:hover,
+        .radio-label:hover {
+            background-color: #f0f0f0;
+        }
+        
+        /* Style the label when checkbox is checked */
+        input[type="checkbox"]:checked + .checkbox-text,
+        input[type="radio"]:checked + .radio-text {
+            color: #4a90d9;
+            font-weight: 600;
+        }
+        
+        /* ============================================
+           TEST 8: :disabled state
+           ============================================ */
+        .disabled-test {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+        
+        .disabled-input {
+            padding: 10px 14px;
+            font-size: 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            max-width: 200px;
+        }
+        
+        .disabled-input:disabled {
+            background-color: #f0f0f0;
+            color: #999;
+            cursor: not-allowed;
+        }
+        
+        .disabled-button {
+            padding: 10px 20px;
+            font-size: 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .disabled-button:disabled {
+            background-color: #ccc;
+            color: #888;
+            cursor: not-allowed;
+        }
+        
+        .disabled-button:enabled {
+            background-color: #4a90d9;
+            color: white;
+        }
+        
+        /* ============================================
+           TEST 9: Combined states
+           ============================================ */
+        .combined-test {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .combined-button {
+            padding: 14px 28px;
+            font-size: 14px;
+            font-weight: 600;
+            background-color: #28a745;
+            color: white;
+            border: 3px solid transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.15s ease;
+        }
+        
+        .combined-button:hover {
+            background-color: #218838;
+        }
+        
+        .combined-button:focus {
+            border-color: #155724;
+        }
+        
+        .combined-button:focus-visible {
+            outline: 3px dashed #ffc107;
+            outline-offset: 3px;
+        }
+        
+        .combined-button:active {
+            background-color: #1e7e34;
+            transform: translateY(2px);
+        }
+        
+        /* hover + focus */
+        .combined-button:hover:focus {
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+        }
+        
+        /* ============================================
+           TEST 10: Text selection and caret
+           ============================================ */
+        .selection-test {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .selection-textarea {
+            width: 100%;
+            max-width: 500px;
+            min-height: 120px;
+            padding: 12px;
+            font-size: 14px;
+            font-family: inherit;
+            line-height: 1.6;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            resize: vertical;
+        }
+        
+        .selection-textarea:focus {
+            border-color: #4a90d9;
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.2);
+        }
+        
+        .selection-contenteditable {
+            width: 100%;
+            max-width: 500px;
+            min-height: 100px;
+            padding: 12px;
+            font-size: 14px;
+            line-height: 1.6;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            background-color: #fff;
+        }
+        
+        .selection-contenteditable:focus {
+            border-color: #4a90d9;
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.2);
+        }
+        
+        /* ============================================
+           TEST 11: :placeholder-shown state
+           ============================================ */
+        .placeholder-test {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .placeholder-input {
+            padding: 10px 14px;
+            font-size: 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            outline: none;
+            max-width: 300px;
+        }
+        
+        .placeholder-input:placeholder-shown {
+            border-color: #ffc107;
+            background-color: #fffde7;
+        }
+        
+        .placeholder-input:not(:placeholder-shown) {
+            border-color: #4caf50;
+            background-color: #e8f5e9;
+        }
+        
+        .placeholder-input:focus {
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.2);
+        }
+        
+        /* ============================================
+           Instructions panel
+           ============================================ */
+        .instructions {
+            background-color: #e8f4fd;
+            border: 1px solid #b3d7f2;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .instructions h3 {
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: #2d6bb3;
+        }
+        
+        .instructions ul {
+            margin-left: 20px;
+            font-size: 14px;
+            color: #444;
+        }
+        
+        .instructions li {
+            margin-bottom: 5px;
+        }
+        
+        .instructions code {
+            background-color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Radiant State Management Test Suite</h1>
+    
+    <div class="instructions">
+        <h3>Testing Instructions</h3>
+        <ul>
+            <li>Use <code>Tab</code> and <code>Shift+Tab</code> to navigate between focusable elements</li>
+            <li>Use <code>Arrow keys</code> to move the caret in text fields</li>
+            <li>Hold <code>Shift + Arrow keys</code> to extend selection</li>
+            <li>Use <code>Ctrl/Cmd + A</code> to select all text in a focused input</li>
+            <li>Use <code>Home/End</code> to move to line start/end</li>
+            <li>Click to focus, observe <code>:focus</code> styles</li>
+            <li>Tab to focus, observe <code>:focus-visible</code> outline (dashed orange)</li>
+        </ul>
+    </div>
+
+    <!-- TEST 1: :hover -->
+    <div class="section">
+        <h2>Test 1: :hover State</h2>
+        <p class="description">Move mouse over the boxes. They should change color and scale up.</p>
+        <div class="hover-test">
+            <div class="hover-box">Hover me</div>
+            <div class="hover-box">Hover me</div>
+            <div class="hover-box">Hover me</div>
+        </div>
+        <p class="description" style="margin-top: 15px;">Nested hover - parent and child both respond:</p>
+        <div class="hover-nested">
+            <span>Parent (hover turns blue border)</span>
+            <div class="hover-inner">Child (hover turns blue)</div>
+        </div>
+    </div>
+
+    <!-- TEST 2: :active -->
+    <div class="section">
+        <h2>Test 2: :active State</h2>
+        <p class="description">Click and hold the buttons. They should press down visually.</p>
+        <div class="active-test">
+            <button class="active-button">Click & Hold</button>
+            <button class="active-button">Press Me</button>
+            <a href="#" class="active-link">Link (click)</a>
+        </div>
+    </div>
+
+    <!-- TEST 3: :focus -->
+    <div class="section">
+        <h2>Test 3: :focus State</h2>
+        <p class="description">Click on inputs or Tab to them. Blue border and shadow appear on focus.</p>
+        <div class="focus-test">
+            <input type="text" class="focus-input" placeholder="Click or Tab here">
+            <input type="text" class="focus-input" placeholder="Another input">
+            <textarea class="focus-textarea" placeholder="Textarea - try typing here"></textarea>
+            <button class="focus-button">Button</button>
+        </div>
+    </div>
+
+    <!-- TEST 4: :focus-visible -->
+    <div class="section">
+        <h2>Test 4: :focus-visible State</h2>
+        <p class="description">
+            <strong>Click</strong> on buttons - no dashed outline (mouse focus).<br>
+            <strong>Tab</strong> to buttons - orange dashed outline appears (keyboard focus).
+        </p>
+        <div class="focus-visible-test">
+            <button class="fv-button">Click me</button>
+            <button class="fv-button">Tab to me</button>
+            <input type="text" class="fv-input" placeholder="Tab here">
+        </div>
+    </div>
+
+    <!-- TEST 5: :focus-within -->
+    <div class="section">
+        <h2>Test 5: :focus-within State</h2>
+        <p class="description">When you focus the input inside, the entire container changes style.</p>
+        <div class="focus-within-test">
+            <div class="fw-container">
+                <label class="fw-label">Form Field (container highlights when child is focused)</label>
+                <input type="text" class="fw-input" placeholder="Focus me to highlight parent">
+            </div>
+            
+            <p class="description">Nested containers - both levels respond:</p>
+            <div class="fw-nested-outer">
+                <span>Outer container (orange on focus-within)</span>
+                <div class="fw-nested-inner">
+                    <span>Inner container (green on focus-within)</span>
+                    <input type="text" class="fw-input" placeholder="Focus to see both containers change">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TEST 6: Tab Navigation -->
+    <div class="section">
+        <h2>Test 6: Tab Navigation Order</h2>
+        <p class="description">Press Tab repeatedly. Focus should move through items in order. Shift+Tab goes backwards.</p>
+        <div class="tab-test">
+            <div class="tab-row">
+                <button class="tab-item">First</button>
+                <button class="tab-item">Second</button>
+                <button class="tab-item">Third</button>
+            </div>
+            <div class="tab-row">
+                <input type="text" class="tab-item" placeholder="Input 1">
+                <input type="text" class="tab-item" placeholder="Input 2">
+            </div>
+            <div class="tab-row">
+                <button class="tab-item tab-custom" tabindex="10">tabindex=10 (later)</button>
+                <button class="tab-item tab-skip" tabindex="-1">tabindex=-1 (skipped)</button>
+                <button class="tab-item tab-custom" tabindex="1">tabindex=1 (earlier)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TEST 7: :checked -->
+    <div class="section">
+        <h2>Test 7: :checked State</h2>
+        <p class="description">Toggle checkboxes and radio buttons. Label text changes style when checked.</p>
+        <div class="checked-test">
+            <div class="checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox">
+                    <span class="checkbox-text">Option A (checkbox)</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" checked>
+                    <span class="checkbox-text">Option B (pre-checked)</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox">
+                    <span class="checkbox-text">Option C (checkbox)</span>
+                </label>
+            </div>
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="radio-test">
+                    <span class="radio-text">Choice 1 (radio)</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="radio-test" checked>
+                    <span class="radio-text">Choice 2 (pre-selected)</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="radio-test">
+                    <span class="radio-text">Choice 3 (radio)</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- TEST 8: :disabled / :enabled -->
+    <div class="section">
+        <h2>Test 8: :disabled / :enabled State</h2>
+        <p class="description">Disabled elements should appear grayed out and not respond to interaction.</p>
+        <div class="disabled-test">
+            <input type="text" class="disabled-input" placeholder="Enabled input">
+            <input type="text" class="disabled-input" disabled placeholder="Disabled input">
+            <button class="disabled-button">Enabled</button>
+            <button class="disabled-button" disabled>Disabled</button>
+        </div>
+    </div>
+
+    <!-- TEST 9: Combined States -->
+    <div class="section">
+        <h2>Test 9: Combined States</h2>
+        <p class="description">These buttons combine multiple pseudo-states. Try hover + focus, click while hovering, Tab to see focus-visible.</p>
+        <div class="combined-test">
+            <button class="combined-button">Hover + Focus + Active</button>
+            <button class="combined-button">Try All States</button>
+            <button class="combined-button">Tab Here</button>
+        </div>
+    </div>
+
+    <!-- TEST 10: Text Selection & Caret -->
+    <div class="section">
+        <h2>Test 10: Text Selection & Caret</h2>
+        <p class="description">
+            Click to place caret. Use arrow keys to move. Hold Shift to select.<br>
+            Try: Ctrl/Cmd+A (select all), Home/End (line start/end).
+        </p>
+        <div class="selection-test">
+            <textarea class="selection-textarea">This is a multi-line textarea.
+You can select text here using Shift+Arrow keys.
+Try Home and End keys to jump to line boundaries.
+Ctrl+A or Cmd+A selects all text.</textarea>
+            
+            <div class="selection-contenteditable" contenteditable="true">
+                This is a contenteditable div.
+                Click to place the caret.
+                Use arrow keys to navigate.
+            </div>
+        </div>
+    </div>
+
+    <!-- TEST 11: :placeholder-shown -->
+    <div class="section">
+        <h2>Test 11: :placeholder-shown State</h2>
+        <p class="description">Empty input shows yellow border (placeholder visible). Type something to see green border.</p>
+        <div class="placeholder-test">
+            <input type="text" class="placeholder-input" placeholder="Type something...">
+            <input type="text" class="placeholder-input" placeholder="Empty = yellow, filled = green">
+            <input type="text" class="placeholder-input" placeholder="This one has text" value="Hello!">
+        </div>
+    </div>
+
+</body>
+</html>

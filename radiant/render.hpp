@@ -1,5 +1,6 @@
 #pragma once
 #include "view.hpp"
+#include "state_store.hpp"
 #include <thorvg_capi.h>
 
 // format to SDL_PIXELFORMAT_ARGB8888
@@ -21,3 +22,9 @@ typedef struct {
 
 // Function declarations
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
+
+// UI overlay rendering (focus, caret, selection)
+void render_focus_outline(RenderContext* rdcon, RadiantState* state);
+void render_caret(RenderContext* rdcon, RadiantState* state);
+void render_selection(RenderContext* rdcon, RadiantState* state);
+void render_ui_overlays(RenderContext* rdcon, RadiantState* state);
