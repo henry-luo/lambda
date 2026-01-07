@@ -147,14 +147,30 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
             rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
         return; // glyph outside the surface
     }
-    log_debug("[GLYPH RENDER] drawing glyph at x=%d y=%d size=%dx%d color=#%02x%02x%02x (c=0x%08x)",
-        x, y, bitmap->width, bitmap->rows, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.c);
+    log_debug("[GLYPH RENDER] drawing glyph at x=%d y=%d size=%dx%d color=#%02x%02x%02x (c=0x%08x) pixel_mode=%d",
+        x, y, bitmap->width, bitmap->rows, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.c, bitmap->pixel_mode);
     ImageSurface* surface = rdcon->ui_context->surface;
+    
+    // handle monochrome bitmaps (1 bit per pixel) - common for some system fonts like Monaco
+    bool is_mono = (bitmap->pixel_mode == FT_PIXEL_MODE_MONO);
+    
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
         for (int j = left - x; j < right - x; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
-            uint32_t intensity = bitmap->buffer[i * bitmap->pitch + j];
+            
+            uint32_t intensity;
+            if (is_mono) {
+                // for monochrome: each byte contains 8 pixels, MSB first
+                int byte_index = j / 8;
+                int bit_index = 7 - (j % 8);  // MSB is leftmost pixel
+                uint8_t byte_val = bitmap->buffer[i * bitmap->pitch + byte_index];
+                intensity = (byte_val & (1 << bit_index)) ? 255 : 0;
+            } else {
+                // grayscale: 1 byte per pixel
+                intensity = bitmap->buffer[i * bitmap->pitch + j];
+            }
+            
             if (intensity > 0) {
                 // blend the pixel with the background
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
@@ -345,6 +361,19 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
                 is_word_start = false;
 
+                // Debug: Log the font face being used for this glyph
+                static int glyph_debug_count = 0;
+                if (glyph_debug_count < 500) {
+                    FT_Face f = rdcon->font.ft_face;
+                    log_debug("[GLYPH DEBUG] loading glyph U+%04X from font '%s' (family=%s) y_ppem=%d css_size=%.2f",
+                              codepoint,
+                              f ? f->family_name : "NULL",
+                              rdcon->font.style ? rdcon->font.style->family : "NULL",
+                              f && f->size ? f->size->metrics.y_ppem : -1,
+                              rdcon->font.style ? rdcon->font.style->font_size : -1.0f);
+                    glyph_debug_count++;
+                }
+
                 auto t1 = std::chrono::high_resolution_clock::now();
                 FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, codepoint, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
@@ -363,6 +392,18 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else {
                     // draw the glyph to the image buffer
                     float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                    
+                    // Debug: Check bitmap data for Monaco (capped to avoid log spam)
+                    static int bitmap_debug_count = 0;
+                    if (bitmap_debug_count < 50 && rdcon->font.ft_face && 
+                        strcmp(rdcon->font.ft_face->family_name, "Monaco") == 0) {
+                        log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
+                                  codepoint, glyph->bitmap.width, glyph->bitmap.rows,
+                                  glyph->bitmap.pitch, glyph->bitmap_left, glyph->bitmap_top,
+                                  glyph->advance.x / 64.0, glyph->bitmap.pixel_mode);
+                        bitmap_debug_count++;
+                    }
+                    
                     auto t3 = std::chrono::high_resolution_clock::now();
                     draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
                     auto t4 = std::chrono::high_resolution_clock::now();
