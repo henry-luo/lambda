@@ -269,6 +269,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     if (use_database_result) {
         FontEntry* font = result.font;
         FT_Long face_index = font->is_collection ? font->collection_index : 0;
+        log_debug("[FONT PATH] Loading font: %s from path: %s (index=%ld)", font_name, font->file_path, face_index);
         if (FT_New_Face(uicon->ft_library, font->file_path, face_index, &face) == 0) {
             // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
             if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
@@ -337,11 +338,13 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
     
     // Debug: Log the face's current pixel size and glyph metrics
     static int debug_count = 0;
-    if (for_rendering && debug_count < 10) {
-        log_debug("[GLYPH LOAD] face=%s, y_ppem=%d, height=%ld, css_size=%.2f, codepoint=U+%04X",
+    if (for_rendering && debug_count < 100) {
+        // y_ppem is in pixels, height is in 26.6 fixed-point
+        log_debug("[GLYPH LOAD] face=%s, char_index=%u, y_ppem=%d, height=%.1f, css_size=%.2f, codepoint=U+%04X",
                   face->family_name, 
-                  face->size ? (face->size->metrics.y_ppem >> 6) : 0,
-                  face->size ? face->size->metrics.height : 0,
+                  char_index,
+                  face->size ? face->size->metrics.y_ppem : 0,
+                  face->size ? (face->size->metrics.height / 64.0) : 0,
                   font_style ? font_style->font_size : 0.0f, codepoint);
         debug_count++;
     }
