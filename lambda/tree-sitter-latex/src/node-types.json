@@ -108,6 +108,11 @@
     }
   },
   {
+    "type": "caret_char",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "char_command",
     "named": true,
     "fields": {}
@@ -451,6 +456,10 @@
           "named": true
         },
         {
+          "type": "caret_char",
+          "named": true
+        },
+        {
           "type": "char_command",
           "named": true
         },
@@ -564,6 +573,10 @@
       "types": [
         {
           "type": "brack_group",
+          "named": true
+        },
+        {
+          "type": "caret_char",
           "named": true
         },
         {
