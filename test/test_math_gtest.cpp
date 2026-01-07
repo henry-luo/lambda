@@ -112,10 +112,10 @@ std::string normalize_latex_for_comparison(const std::string& expr) {
     std::string result;
     result.reserve(expr.size());
     bool in_command = false;
-    
+
     for (size_t i = 0; i < expr.size(); i++) {
         char c = expr[i];
-        
+
         if (c == '\\') {
             in_command = true;
             result += c;
@@ -145,26 +145,80 @@ std::string normalize_latex_for_comparison(const std::string& expr) {
 /**
  * Check semantic equivalence for expressions that GiNaC can't parse
  */
+// Normalize script braces: ^{x} and ^x are equivalent for single tokens
+std::string normalize_script_braces(const std::string& expr) {
+    std::string result;
+    result.reserve(expr.size() * 2);
+
+    for (size_t i = 0; i < expr.size(); i++) {
+        char c = expr[i];
+
+        // Check for ^ or _ followed by single token or already braced
+        if ((c == '^' || c == '_') && i + 1 < expr.size()) {
+            result += c;
+            char next = expr[i + 1];
+
+            if (next == '{') {
+                // Already braced, keep as is
+                result += next;
+                i++;
+            } else if (next == '\\') {
+                // Command - add braces around it
+                result += '{';
+                result += next;
+                i++;
+                // Consume the command name
+                while (i + 1 < expr.size() && std::isalpha(expr[i + 1])) {
+                    result += expr[i + 1];
+                    i++;
+                }
+                result += '}';
+            } else if (std::isalnum(next)) {
+                // Single character - add braces
+                result += '{';
+                result += next;
+                result += '}';
+                i++;
+            } else {
+                // Something else, keep as is
+                result += next;
+                i++;
+            }
+        } else {
+            result += c;
+        }
+    }
+    return result;
+}
+
 bool are_expressions_semantically_equivalent(const std::string& expr1, const std::string& expr2) {
     // Direct comparison first
     if (expr1 == expr2) {
         return true;
     }
-    
+
     // Normalize and compare
     std::string norm1 = normalize_latex_for_comparison(expr1);
     std::string norm2 = normalize_latex_for_comparison(expr2);
-    
+
     if (norm1 == norm2) {
         return true;
     }
-    
+
     // Remove all spaces and compare (very lenient)
     std::string no_space1, no_space2;
     for (char c : expr1) if (c != ' ') no_space1 += c;
     for (char c : expr2) if (c != ' ') no_space2 += c;
-    
+
     if (no_space1 == no_space2) {
+        return true;
+    }
+
+    // Normalize script braces and compare without spaces
+    std::string brace_norm1 = normalize_script_braces(no_space1);
+    std::string brace_norm2 = normalize_script_braces(no_space2);
+
+    if (brace_norm1 == brace_norm2) {
         return true;
     }
 
@@ -501,23 +555,23 @@ char* read_text_doc(Url *url) {
 // Helper function to extract math expressions from indexed_math_test.md
 std::vector<std::string> extract_indexed_math_expressions(const char* filepath) {
     std::vector<std::string> expressions;
-    
+
     char* content = read_text_file(filepath);
     if (!content) {
         printf("ERROR: Failed to read file: %s\n", filepath);
         return expressions;
     }
-    
+
     std::string text(content);
     free(content);
-    
+
     // Pattern: **Expr N:** followed by math expression
     // Math can be inline ($...$) or display ($$...$$)
     std::regex expr_pattern(R"(\*\*Expr\s+\d+:\*\*\s*(\$\$?[^$]+\$\$?))");
-    
+
     std::sregex_iterator it(text.begin(), text.end(), expr_pattern);
     std::sregex_iterator end;
-    
+
     while (it != end) {
         std::smatch match = *it;
         if (match.size() >= 2) {
@@ -529,47 +583,47 @@ std::vector<std::string> extract_indexed_math_expressions(const char* filepath) 
         }
         ++it;
     }
-    
+
     return expressions;
 }
 
 // Test comprehensive indexed math expressions from file
 TEST_F(MathRoundtripTest, IndexedMathFileTest) {
     const char* filepath = "test/input/indexed_math_test.md";
-    
+
     std::vector<std::string> expressions = extract_indexed_math_expressions(filepath);
-    
+
     if (expressions.empty()) {
         FAIL() << "No math expressions found in " << filepath;
     }
-    
+
     printf("Testing %zu expressions from %s\n", expressions.size(), filepath);
-    
+
     int passed = 0;
     int failed = 0;
-    
+
     for (size_t i = 0; i < expressions.size(); i++) {
         const std::string& expr_str = expressions[i];
         const char* expr = expr_str.c_str();
-        
+
         // Determine format based on delimiters
         bool is_inline = (expr[0] == '$' && expr[1] != '$');
         const char* input_format = "markdown";
         const char* input_flavor = "commonmark";
-        
+
         // Create URL for the test
         char url_str[512];
         snprintf(url_str, sizeof(url_str), "test://indexed_math_expr_%zu", i + 1);
         Url* test_url = url_parse(url_str);
-        
+
         // Parse input
         String* input_type = create_lambda_string(input_format);
         String* input_flavor_str = create_lambda_string(input_flavor);
-        
+
         char* content_copy = strdup(expr);
         Item parsed = input_from_source(content_copy, test_url, input_type, input_flavor_str);
         Input* input = parsed.element ? (Input*)parsed.element : nullptr;
-        
+
         if (!input) {
             printf("  Expr %zu: ❌ Parse failed: %s\n", i + 1, expr);
             failed++;
@@ -579,23 +633,23 @@ TEST_F(MathRoundtripTest, IndexedMathFileTest) {
             url_destroy(test_url);
             continue;
         }
-        
+
         // Format back to markdown
         String* output_type = create_lambda_string(input_format);
         String* output_flavor = create_lambda_string(input_flavor);
-        
+
         String* formatted = format_data(input->root, output_type, output_flavor, input->pool);
-        
+
         if (!formatted || formatted->len == 0) {
             printf("  Expr %zu: ❌ Format failed: %s\n", i + 1, expr);
             failed++;
         } else {
             std::string result(formatted->chars, formatted->len);
             std::string original(expr);
-            
+
             // Use semantic equivalence check (same as other tests)
             bool match = are_expressions_semantically_equivalent(result, original);
-            
+
             if (match) {
                 passed++;
             } else {
@@ -605,7 +659,7 @@ TEST_F(MathRoundtripTest, IndexedMathFileTest) {
                 failed++;
             }
         }
-        
+
         free(content_copy);
         free(input_type);
         free(input_flavor_str);
@@ -613,9 +667,9 @@ TEST_F(MathRoundtripTest, IndexedMathFileTest) {
         free(output_flavor);
         url_destroy(test_url);
     }
-    
-    printf("Results: %d passed, %d failed out of %zu total\n", 
+
+    printf("Results: %d passed, %d failed out of %zu total\n",
            passed, failed, expressions.size());
-    
+
     EXPECT_EQ(failed, 0) << "Some indexed math expressions failed roundtrip";
 }

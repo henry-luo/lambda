@@ -277,6 +277,10 @@
         },
         {
           "type": "STRING",
+          "value": "\\asymp"
+        },
+        {
+          "type": "STRING",
           "value": "\\subset"
         },
         {
@@ -318,6 +322,14 @@
         {
           "type": "STRING",
           "value": "\\succ"
+        },
+        {
+          "type": "STRING",
+          "value": "\\preceq"
+        },
+        {
+          "type": "STRING",
+          "value": "\\succeq"
         },
         {
           "type": "STRING",
@@ -367,6 +379,38 @@
         {
           "type": "STRING",
           "value": "?"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "STRING",
+          "value": "|"
+        },
+        {
+          "type": "STRING",
+          "value": "\\{"
+        },
+        {
+          "type": "STRING",
+          "value": "\\}"
+        },
+        {
+          "type": "STRING",
+          "value": "\\lbrace"
+        },
+        {
+          "type": "STRING",
+          "value": "\\rbrace"
+        },
+        {
+          "type": "STRING",
+          "value": "'"
         }
       ]
     },
