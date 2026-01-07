@@ -1,0 +1,18 @@
+{
+  "category": "mode_shift",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "\\\\text{\\\\ensuremath{\\\\frac34}}",
+      "description": "MODE SHIFT test case 1",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 2,
+      "latex": "1+\\\\textcolor{blue}{$ 2 $}+3+\\\\textcolor{red}{4}+\\\\text{5\\\\textcolor{purple}{6}}",
+      "description": "MODE SHIFT test case 2",
+      "source": "mathlive/markup.test.ts"
+    }
+  ]
+}

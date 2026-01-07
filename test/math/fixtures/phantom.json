@@ -1,0 +1,192 @@
+{
+  "category": "phantom",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "\\\\sin x \\\\textcolor{#f00}{red} \\\\colorbox{yellow}{$x + \\\\frac1{\\\\frac34}$} \\\\textcolor{m1}{\\\\blacktriangle}\\\\textcolor{m2}{\\\\blacktriangle}\\\\textcolor{m3}{\\\\blacktriangle}\\\\textcolor{m4}{\\\\blacktriangle}\\\\textcolor{m5}{\\\\blacktriangle}\\\\textcolor{m6}{\\\\blacktriangle}\\\\textcolor{m7}{\\\\blacktriangle}\\\\textcolor{m8}{\\\\blacktriangle}\\\\textcolor{m9}{\\\\blacktriangle}",
+      "description": "PHANTOM test case 1",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 2,
+      "latex": "a+\\\\colorbox{#f00}{$\\\\frac1{\\\\frac{a+1}{b+c}}$}",
+      "description": "PHANTOM test case 2",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 3,
+      "latex": "a+\\\\colorbox{#f00}{$\\\\frac{\\\\frac{\\\\frac{1}{2}}{c}}{\\\\frac{a+1}{b+c}}$}",
+      "description": "PHANTOM test case 3",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 4,
+      "latex": "a+\\\\colorbox{#f00}{$\\\\frac{\\\\frac{\\\\frac{1}{2}}{c}}{a}$}",
+      "description": "PHANTOM test case 4",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 5,
+      "latex": "a+\\\\colorbox{#f00}{$\\\\frac1{\\\\frac{a+1}{b+c}}$}",
+      "description": "PHANTOM test case 5",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 6,
+      "latex": "a+\\\\colorbox{#f00}{$\\\\frac{\\\\frac{\\\\frac{1}{2}}{c}}{\\\\frac{a+1}{b+c}}$}",
+      "description": "PHANTOM test case 6",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 7,
+      "latex": "a{b\\\\color{#f00} c}d",
+      "description": "PHANTOM test case 7",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 8,
+      "latex": "a\\\\left(b\\\\color{#f00} c\\\\right)d",
+      "description": "PHANTOM test case 8",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 9,
+      "latex": "aquamarine",
+      "description": "PHANTOM test case 9",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 10,
+      "latex": "rgb(240, 10, 200)",
+      "description": "PHANTOM test case 10",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 11,
+      "latex": "#33d",
+      "description": "PHANTOM test case 11",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 12,
+      "latex": "#3130da",
+      "description": "PHANTOM test case 12",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 13,
+      "latex": "white",
+      "description": "PHANTOM test case 13",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 14,
+      "latex": "Aquamarine",
+      "description": "PHANTOM test case 14",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 15,
+      "latex": "m5",
+      "description": "PHANTOM test case 15",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 16,
+      "latex": "#fff",
+      "description": "PHANTOM test case 16",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 17,
+      "latex": "#ffffff",
+      "description": "PHANTOM test case 17",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 18,
+      "latex": "#fCFcfC",
+      "description": "PHANTOM test case 18",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 19,
+      "latex": "rgb(255, 255, 255)",
+      "description": "PHANTOM test case 19",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 20,
+      "latex": "rgb(255,255,255)",
+      "description": "PHANTOM test case 20",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 21,
+      "latex": "  rgb  (  255  ,  255  ,  255  ) ",
+      "description": "PHANTOM test case 21",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 22,
+      "latex": "rgb(3.5, 0, 0)",
+      "description": "PHANTOM test case 22",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 23,
+      "latex": "rgb(3, 5, 7",
+      "description": "PHANTOM test case 23",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 24,
+      "latex": "rgb(125.5, 0.556, -12.5)",
+      "description": "PHANTOM test case 24",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 25,
+      "latex": "rgb(xxy)",
+      "description": "PHANTOM test case 25",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 26,
+      "latex": "rgb(3, 5)",
+      "description": "PHANTOM test case 26",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 27,
+      "latex": "rgb(3, 5, 7, 11)",
+      "description": "PHANTOM test case 27",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 28,
+      "latex": "#111!50",
+      "description": "PHANTOM test case 28",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 29,
+      "latex": "#111!50!#fff",
+      "description": "PHANTOM test case 29",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 30,
+      "latex": "#111!50!#000",
+      "description": "PHANTOM test case 30",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 31,
+      "latex": "-green!40!yellow",
+      "description": "PHANTOM test case 31",
+      "source": "mathlive/markup.test.ts"
+    }
+  ]
+}

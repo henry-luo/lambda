@@ -17,10 +17,10 @@ namespace lambda {
 // Returns processed string - caller owns the result
 static std::string processTypography(const char* input) {
     if (!input) return "";
-    
+
     std::string result;
     result.reserve(strlen(input) * 2);  // Reserve extra space for potential expansions
-    
+
     const char* p = input;
     while (*p) {
         // Check for --- (em dash) first (before --)
@@ -37,7 +37,7 @@ static std::string processTypography(const char* input) {
         }
         // Note: Single hyphens (-) are NOT converted to Unicode hyphens (U+2010)
         // LaTeX.js keeps regular ASCII hyphens for words like "daughter-in-law"
-        
+
         // Check for ligatures - order matters! Check longer ligatures first
         // ffi ligature
         if (p[0] == 'f' && p[1] == 'f' && p[2] == 'i') {
@@ -102,7 +102,7 @@ static std::string processTypography(const char* input) {
         // Default: copy character as-is
         result += *p++;
     }
-    
+
     return result;
 }
 
@@ -113,7 +113,7 @@ static std::string processTypography(const char* input) {
 HtmlGenerator::HtmlGenerator(Pool* pool, HtmlWriter* writer)
     : LatexGenerator(pool, writer), math_mode_(false), verbatim_mode_(false),
       capture_writer_(nullptr), original_writer_(nullptr) {
-    
+
     log_debug("HtmlGenerator created");
 }
 
@@ -151,10 +151,10 @@ void HtmlGenerator::h(int level, const char* attrs) {
     // html-generator.ls h method
     if (level < 1) level = 1;
     if (level > 6) level = 6;
-    
+
     char tag[4];
     snprintf(tag, sizeof(tag), "h%d", level);
-    
+
     createWithChildren(tag, attrs);
 }
 
@@ -196,20 +196,20 @@ void HtmlGenerator::p(const char* attrs) {
 void HtmlGenerator::text(const char* content) {
     // html-generator.ls text method
     if (!content) return;
-    
+
     // Skip EMPTY_STRING sentinel ("lambda.nil")
     size_t len = strlen(content);
     if (len == 10 && strncmp(content, "lambda.nil", 10) == 0) {
         return;
     }
-    
+
     // In verbatim mode or monospace font, preserve all and don't process typography
     // Monospace fonts (like \texttt) should not use ligatures or dash conversion
     if (verbatim_mode_ || currentFont().family == FontFamily::Typewriter) {
         writer_->writeText(content);
         return;
     }
-    
+
     // In normal mode, apply typography transformations (dashes, ligatures, quotes)
     std::string processed = processTypography(content);
     writer_->writeText(processed.c_str());
@@ -242,7 +242,7 @@ std::string HtmlGenerator::length(const std::string& length_name) const {
     if (hasLength(length_name)) {
         return getLength(length_name).toCss();
     }
-    
+
     log_warn("length: unknown length '%s'", length_name.c_str());
     return "0pt";
 }
@@ -250,12 +250,12 @@ std::string HtmlGenerator::length(const std::string& length_name) const {
 void HtmlGenerator::applyFontStyle(const FontContext& font) {
     // html-generator.ls applyStyle method
     // Apply font styling to current element
-    
+
     std::string style = getFontStyle(font);
     if (!style.empty()) {
         writer_->writeAttribute("style", style.c_str());
     }
-    
+
     std::string css_class = getFontClass(font);
     if (!css_class.empty()) {
         writer_->writeAttribute("class", css_class.c_str());
@@ -266,19 +266,19 @@ std::string HtmlGenerator::getFontClass(const FontContext& font) const {
     // html-generator.ls getFontClass method
     // Only output classes for non-default font properties
     std::stringstream ss;
-    
+
     // Build CSS class from font properties (only non-default values)
     switch (font.family) {
         case FontFamily::Roman: break;  // Roman is default, don't output
         case FontFamily::SansSerif: ss << "sf "; break;
         case FontFamily::Typewriter: ss << "tt "; break;
     }
-    
+
     switch (font.series) {
         case FontSeries::Bold: ss << "bf "; break;
         case FontSeries::Normal: break;
     }
-    
+
     switch (font.shape) {
         case FontShape::Italic: ss << "it "; break;
         case FontShape::Slanted: ss << "sl "; break;
@@ -286,7 +286,7 @@ std::string HtmlGenerator::getFontClass(const FontContext& font) const {
         case FontShape::ExplicitUpright: ss << "up "; break;  // Explicit upright toggle from italic
         case FontShape::Upright: break;  // Default upright, no class
     }
-    
+
     // Include font size as class (e.g., "small", "large") for LaTeX.js compatibility
     switch (font.size) {
         case FontSize::Tiny: ss << "tiny "; break;
@@ -300,19 +300,19 @@ std::string HtmlGenerator::getFontClass(const FontContext& font) const {
         case FontSize::Huge: ss << "huge "; break;
         case FontSize::Huge2: ss << "Huge "; break;
     }
-    
+
     std::string result = ss.str();
     if (!result.empty() && result.back() == ' ') {
         result.pop_back();  // Remove trailing space
     }
-    
+
     return result;
 }
 
 std::string HtmlGenerator::getFontStyle(const FontContext& font) const {
     // html-generator.ls getFontStyle method
     std::stringstream ss;
-    
+
     // Font size
     const char* size_str = nullptr;
     switch (font.size) {
@@ -327,11 +327,11 @@ std::string HtmlGenerator::getFontStyle(const FontContext& font) const {
         case FontSize::Huge: size_str = "2.07em"; break;
         case FontSize::Huge2: size_str = "2.49em"; break;
     }
-    
+
     if (size_str) {
         ss << "font-size: " << size_str << ";";
     }
-    
+
     return ss.str();
 }
 
@@ -342,36 +342,36 @@ std::string HtmlGenerator::getFontStyle(const FontContext& font) const {
 void HtmlGenerator::startSection(const std::string& level, bool starred,
                                  const std::string& toc_title, const std::string& title) {
     // html-generator.ls startsection method
-    
-    log_debug("startSection: level=%s, starred=%d, title=%s", 
+
+    log_debug("startSection: level=%s, starred=%d, title=%s",
               level.c_str(), starred, title.c_str());
-    
+
     // Get counter name for this section level
     std::string counter_name = level;
-    
+
     // Step counter (unless starred)
     if (!starred && hasCounter(counter_name)) {
         stepCounter(counter_name);
     }
-    
+
     // Get section number
     std::string number;
     if (!starred) {
         number = macro(counter_name);  // e.g., "1.2.3"
     }
-    
+
     // Generate anchor ID - use "sec" prefix for all section-level elements
     std::string anchor = generateAnchorId("sec");
-    
+
     // Set label info for \label command
     std::string label_text = number;
     setCurrentLabel(anchor, label_text);
-    
+
     // Add to TOC (unless starred)
     if (!starred) {
         addTocEntry(level, number, toc_title.empty() ? title : toc_title, anchor);
     }
-    
+
     // Create section heading HTML
     createSectionHeading(level, number, title, anchor);
 }
@@ -381,17 +381,17 @@ void HtmlGenerator::createSectionHeading(const std::string& level, const std::st
     // html-generator.ls createSectionHeading method
     // Expected format for chapter: <h1 id="sec-1"><div>Chapter 1</div>Title</h1>
     // Expected format for others: <h2 id="sec-1">1 Section Name</h2>
-    
+
     int heading_level = getHeadingLevel(level);
-    
+
     // Create heading element with anchor ID as raw attribute
     char tag[4];
     snprintf(tag, sizeof(tag), "h%d", heading_level);
-    
+
     std::stringstream attrs;
     attrs << "id=\"" << anchor << "\"";
     writer_->openTagRaw(tag, attrs.str().c_str());
-    
+
     // Section number followed by title
     if (!number.empty()) {
         if (level == "chapter") {
@@ -407,26 +407,26 @@ void HtmlGenerator::createSectionHeading(const std::string& level, const std::st
             text("\xe2\x80\x83");  // UTF-8 encoding of U+2003 (em space / quad)
         }
     }
-    
+
     // Section title
     text(title.c_str());
-    
+
     closeElement();  // h*
 }
 
 void HtmlGenerator::addTocEntry(const std::string& level, const std::string& number,
                                const std::string& title, const std::string& anchor) {
     // html-generator.ls addTocEntry method
-    
+
     TocEntry entry;
     entry.level = level;
     entry.number = number;
     entry.title = title;
     entry.anchor = anchor;
-    
+
     toc_entries_.push_back(entry);
-    
-    log_debug("addTocEntry: level=%s, number=%s, title=%s", 
+
+    log_debug("addTocEntry: level=%s, number=%s, title=%s",
               level.c_str(), number.c_str(), title.c_str());
 }
 
@@ -436,15 +436,15 @@ void HtmlGenerator::addTocEntry(const std::string& level, const std::string& num
 
 void HtmlGenerator::startItemize(const char* alignment) {
     // html-generator.ls startItemize method - match LaTeX.js output
-    
+
     LatexGenerator::startList();  // Update list depth counter
     pushListState("itemize");
-    
+
     // Store alignment in list state
     if (alignment && alignment[0]) {
         currentList().alignment = alignment;
     }
-    
+
     // Use "list" class, add alignment class if present
     if (alignment && alignment[0]) {
         std::string list_class = std::string("list ") + alignment;
@@ -456,7 +456,7 @@ void HtmlGenerator::startItemize(const char* alignment) {
 
 void HtmlGenerator::endItemize() {
     // html-generator.ls endItemize method
-    
+
     writer_->closeTag("ul");
     popListState();
     LatexGenerator::endList();
@@ -464,15 +464,15 @@ void HtmlGenerator::endItemize() {
 
 void HtmlGenerator::startEnumerate(const char* alignment) {
     // html-generator.ls startEnumerate method
-    
+
     LatexGenerator::startList();
     pushListState("enumerate");
-    
+
     // Store alignment in list state
     if (alignment && alignment[0]) {
         currentList().alignment = alignment;
     }
-    
+
     // Use "list" class, add alignment class if present
     if (alignment && alignment[0]) {
         std::string list_class = std::string("list ") + alignment;
@@ -484,7 +484,7 @@ void HtmlGenerator::startEnumerate(const char* alignment) {
 
 void HtmlGenerator::endEnumerate() {
     // html-generator.ls endEnumerate method
-    
+
     writer_->closeTag("ol");
     popListState();
     LatexGenerator::endList();
@@ -492,16 +492,16 @@ void HtmlGenerator::endEnumerate() {
 
 void HtmlGenerator::startDescription() {
     // html-generator.ls startDescription method
-    
+
     LatexGenerator::startList();
     pushListState("description");
-    
+
     writer_->openTag("dl", "list");
 }
 
 void HtmlGenerator::endDescription() {
     // html-generator.ls endDescription method
-    
+
     writer_->closeTag("dl");
     popListState();
     LatexGenerator::endList();
@@ -513,15 +513,15 @@ void HtmlGenerator::createItem(const char* label) {
     //   <li><span class="itemlabel"><span class="hbox llap">•</span></span><p>content</p></li>
     // Expected format for enumerate:
     //   <li><span class="itemlabel"><span class="hbox llap">1.</span></span><p>content</p></li>
-    
+
     if (list_stack_.empty()) {
         log_error("createItem: not in a list environment");
         return;
     }
-    
+
     ListState& state = currentList();
     state.item_count++;
-    
+
     if (state.type == "itemize") {
         // Check if we have an alignment class to add to the li
         const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
@@ -529,7 +529,7 @@ void HtmlGenerator::createItem(const char* label) {
         // Add item label span structure matching LaTeX.js
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
-        
+
         // Check if custom label is provided
         if (label != nullptr) {
             // Use custom label (can be empty string for \item[])
@@ -550,7 +550,7 @@ void HtmlGenerator::createItem(const char* label) {
                 writer_->writeRawHtml("•");  // Level 1: bullet (U+2022)
             }
         }
-        
+
         writer_->closeTag("span");  // close hbox llap
         writer_->closeTag("span");  // close itemlabel
         // Open paragraph for content with alignment class if present
@@ -568,14 +568,14 @@ void HtmlGenerator::createItem(const char* label) {
             default: counter_name = "enumi"; break;
         }
         stepCounter(counter_name);
-        
+
         // Set current label for \label commands within this item
         // The anchor is item-N where N is the counter value
         int counter_value = getCounter(counter_name);
         std::string item_anchor = "item-" + std::to_string(counter_value);
         std::string item_text = std::to_string(counter_value);
         setCurrentLabel(item_anchor, item_text);
-        
+
         // Check if we have an alignment class to add
         const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
         writer_->openTag("li", li_class);
@@ -605,14 +605,14 @@ void HtmlGenerator::createItem(const char* label) {
 void HtmlGenerator::endItem() {
     // End list item - closes <p> and <li> for itemize/enumerate
     // For description, just closes <dd>
-    
+
     if (list_stack_.empty()) {
         log_error("endItem: not in a list environment");
         return;
     }
-    
+
     ListState& state = currentList();
-    
+
     if (state.type == "itemize" || state.type == "enumerate") {
         // Check if there's an empty <p> tag at the end (from paragraph break before end of item)
         // If so, remove it instead of closing it
@@ -649,14 +649,14 @@ void HtmlGenerator::itemParagraphBreak() {
     // Handle paragraph break within list item - closes </p> only
     // A new <p> is opened lazily when content is encountered
     // This is used when parbreak appears inside list item content
-    
+
     if (list_stack_.empty()) {
         log_error("itemParagraphBreak: not in a list environment");
         return;
     }
-    
+
     ListState& state = currentList();
-    
+
     if (state.type == "itemize" || state.type == "enumerate" || state.type == "description") {
         // Trim trailing whitespace before closing paragraph
         writer_->trimTrailingWhitespace();
@@ -675,12 +675,12 @@ std::string HtmlGenerator::getEnumerateLabel(int depth) const {
     // Level 2: <span id="item-2">(a)</span> (alph with parens)
     // Level 3: <span id="item-3">i.</span> (roman with dot)
     // Level 4: <span id="item-4">A.</span> (Alph with dot)
-    
+
     std::string counter_name;
     std::string format;
     std::string prefix = "";
     std::string suffix = ".";
-    
+
     switch (depth) {
         case 1:
             counter_name = "enumi";
@@ -706,14 +706,14 @@ std::string HtmlGenerator::getEnumerateLabel(int depth) const {
         default:
             return "";
     }
-    
+
     if (hasCounter(counter_name)) {
         int value = getCounter(counter_name);
         std::string item_id = "item-" + std::to_string(value);
         std::string formatted = formatCounter(counter_name, format);
         return "<span id=\"" + item_id + "\">" + prefix + formatted + suffix + "</span>";
     }
-    
+
     return "";
 }
 
@@ -808,7 +808,7 @@ void HtmlGenerator::startTabular(const char* column_spec) {
     // Parse column specification
     std::vector<std::string> cols = parseColumnSpec(column_spec);
     pushTableState(cols);
-    
+
     writer_->openTag("table", "tabular");
 }
 
@@ -822,10 +822,10 @@ void HtmlGenerator::startRow() {
         log_error("startRow: not in a table");
         return;
     }
-    
+
     TableState& state = currentTable();
     state.current_column = 0;
-    
+
     writer_->openTag("tr", nullptr);
 }
 
@@ -838,24 +838,24 @@ void HtmlGenerator::startCell(const char* align) {
         log_error("startCell: not in a table");
         return;
     }
-    
+
     TableState& state = currentTable();
-    
+
     // Get alignment from column spec if not specified
     std::string alignment = align ? align : "";
     if (alignment.empty() && state.current_column < state.column_specs.size()) {
         alignment = state.column_specs[state.current_column];
     }
-    
+
     // Build attributes
     std::stringstream attrs;
     if (!alignment.empty()) {
         attrs << "class=\"" << alignment << "\"";
     }
-    
+
     const char* tag = state.in_header_row ? "th" : "td";
     writer_->openTag(tag, attrs.str().c_str());
-    
+
     state.current_column++;
 }
 
@@ -864,7 +864,7 @@ void HtmlGenerator::endCell() {
         log_error("endCell: not in a table");
         return;
     }
-    
+
     TableState& state = currentTable();
     const char* tag = state.in_header_row ? "th" : "td";
     writer_->closeTag(tag);
@@ -898,17 +898,17 @@ void HtmlGenerator::startCaption() {
         log_error("startCaption: not in a float environment");
         return;
     }
-    
+
     FloatState& state = currentFloat();
     state.has_caption = true;
-    
+
     // Step the appropriate counter
     if (state.type == "figure") {
         stepCounter("figure");
     } else if (state.type == "table") {
         stepCounter("table");
     }
-    
+
     // Generate anchor for labeling
     std::string anchor_id;
     if (state.type == "figure") {
@@ -924,10 +924,10 @@ void HtmlGenerator::startCaption() {
         anchor_id = state.anchor;
         setCurrentLabel(state.anchor, formatCounter("table", "arabic"));
     }
-    
+
     // Open caption div with ID
     writer_->openTag("div", "caption", anchor_id.c_str());
-    
+
     // Write caption label
     std::string label;
     if (state.type == "figure") {
@@ -935,7 +935,7 @@ void HtmlGenerator::startCaption() {
     } else if (state.type == "table") {
         label = "Table " + formatCounter("table", "arabic");
     }
-    
+
     if (!label.empty()) {
         span("caption-label");
         text(label.c_str());
@@ -952,11 +952,11 @@ void HtmlGenerator::includegraphics(const char* filename, const char* options) {
     // Create img element with raw attributes
     std::stringstream attrs;
     attrs << "src=\"" << filename << "\"";
-    
+
     if (options) {
         attrs << " " << options;
     }
-    
+
     writer_->openTagRaw("img", attrs.str().c_str());
     writer_->closeTag("img");
 }
@@ -970,6 +970,27 @@ void HtmlGenerator::startInlineMath() {
     writer_->openTag("span", "math inline");
 }
 
+void HtmlGenerator::startInlineMathWithSource(const char* latex_source) {
+    math_mode_ = true;
+    // Store original LaTeX source in data-latex attribute for math typesetting
+    std::string attrs = "class=\"math inline\"";
+    if (latex_source && *latex_source) {
+        // Escape special characters for HTML attribute
+        std::string escaped;
+        for (const char* p = latex_source; *p; p++) {
+            switch (*p) {
+                case '"': escaped += "&quot;"; break;
+                case '&': escaped += "&amp;"; break;
+                case '<': escaped += "&lt;"; break;
+                case '>': escaped += "&gt;"; break;
+                default: escaped += *p; break;
+            }
+        }
+        attrs += " data-latex=\"" + escaped + "\"";
+    }
+    writer_->openTagRaw("span", attrs.c_str());
+}
+
 void HtmlGenerator::endInlineMath() {
     writer_->closeTag("span");
     math_mode_ = false;
@@ -980,6 +1001,27 @@ void HtmlGenerator::startDisplayMath() {
     writer_->openTag("div", "math display");
 }
 
+void HtmlGenerator::startDisplayMathWithSource(const char* latex_source) {
+    math_mode_ = true;
+    // Store original LaTeX source in data-latex attribute for math typesetting
+    std::string attrs = "class=\"math display\"";
+    if (latex_source && *latex_source) {
+        // Escape special characters for HTML attribute
+        std::string escaped;
+        for (const char* p = latex_source; *p; p++) {
+            switch (*p) {
+                case '"': escaped += "&quot;"; break;
+                case '&': escaped += "&amp;"; break;
+                case '<': escaped += "&lt;"; break;
+                case '>': escaped += "&gt;"; break;
+                default: escaped += *p; break;
+            }
+        }
+        attrs += " data-latex=\"" + escaped + "\"";
+    }
+    writer_->openTagRaw("div", attrs.c_str());
+}
+
 void HtmlGenerator::endDisplayMath() {
     writer_->closeTag("div");
     math_mode_ = false;
@@ -987,14 +1029,14 @@ void HtmlGenerator::endDisplayMath() {
 
 void HtmlGenerator::startEquation(bool starred) {
     math_mode_ = true;
-    
+
     if (!starred) {
         stepCounter("equation");
     }
-    
+
     std::string attrs = starred ? "class=\"equation*\"" : "class=\"equation\"";
     writer_->openTag("div", attrs.c_str());
-    
+
     // Equation number (if not starred)
     if (!starred) {
         std::string number = "(" + formatCounter("equation", "arabic") + ")";
@@ -1013,7 +1055,7 @@ void HtmlGenerator::mathContent(const char* content) {
     if (!math_mode_) {
         log_warn("mathContent: not in math mode");
     }
-    
+
     // For now, just write the content directly
     // In a full implementation, this would be rendered using MathML or KaTeX
     writer_->writeText(content);
@@ -1026,7 +1068,7 @@ void HtmlGenerator::mathContent(const char* content) {
 void HtmlGenerator::ligature(const char* chars) {
     // html-generator.ls ligature method
     // Common ligatures: ff, fi, fl, ffi, ffl
-    
+
     if (strcmp(chars, "ff") == 0) {
         text("ﬀ");
     } else if (strcmp(chars, "fi") == 0) {
@@ -1045,9 +1087,9 @@ void HtmlGenerator::ligature(const char* chars) {
 void HtmlGenerator::accent(const char* type, const char* base) {
     // html-generator.ls accent method
     // Combining diacritical marks
-    
+
     text(base);
-    
+
     // Add combining character
     if (strcmp(type, "acute") == 0) {
         text("\u0301");  // Combining acute accent
@@ -1066,7 +1108,7 @@ void HtmlGenerator::accent(const char* type, const char* base) {
 void HtmlGenerator::symbol(const char* name) {
     // html-generator.ls symbol method
     // Special LaTeX symbols
-    
+
     // This would lookup the symbol in a table
     // For now, just write the name
     text(name);
@@ -1074,7 +1116,7 @@ void HtmlGenerator::symbol(const char* name) {
 
 void HtmlGenerator::space(const char* type) {
     // html-generator.ls space method
-    
+
     if (strcmp(type, "quad") == 0) {
         text("\u2003");  // Em space
     } else if (strcmp(type, "qquad") == 0) {
@@ -1111,25 +1153,25 @@ void HtmlGenerator::writeZWS() {
 void HtmlGenerator::hyperlink(const char* url, const char* text_content) {
     std::stringstream attrs;
     attrs << "href=\"" << url << "\"";
-    
+
     writer_->openTag("a", attrs.str().c_str());
-    
+
     if (text_content) {
         text(text_content);
     } else {
         text(url);
     }
-    
+
     writer_->closeTag("a");
 }
 
 void HtmlGenerator::ref(const char* label_name) {
     if (hasLabel(label_name)) {
         LabelInfo info = getLabel(label_name);
-        
+
         std::stringstream attrs;
         attrs << "href=\"#" << info.id << "\"";
-        
+
         writer_->openTagRaw("a", attrs.str().c_str());
         text(info.text.c_str());
         writer_->closeTag("a");
@@ -1142,10 +1184,10 @@ void HtmlGenerator::ref(const char* label_name) {
 void HtmlGenerator::pageref(const char* label_name) {
     if (hasLabel(label_name)) {
         LabelInfo info = getLabel(label_name);
-        
+
         std::stringstream attrs;
         attrs << "href=\"#" << info.id << "\"";
-        
+
         writer_->openTag("a", attrs.str().c_str());
         text(std::to_string(info.page).c_str());
         writer_->closeTag("a");
@@ -1159,7 +1201,7 @@ void HtmlGenerator::cite(const char* key) {
     // Create citation link
     std::stringstream attrs;
     attrs << "href=\"#cite-" << key << "\"";
-    
+
     writer_->openTag("a", attrs.str().c_str());
     text("[");
     text(key);
@@ -1169,20 +1211,20 @@ void HtmlGenerator::cite(const char* key) {
 
 void HtmlGenerator::footnote(const char* text_content) {
     stepCounter("footnote");
-    
+
     std::string number = formatCounter("footnote", "arabic");
     std::string anchor = "fn-" + number;
-    
+
     // Create superscript footnote marker
     std::stringstream attrs;
     attrs << "href=\"#" << anchor << "\" class=\"footnote-ref\"";
-    
+
     writer_->openTag("sup", nullptr);
     writer_->openTag("a", attrs.str().c_str());
     text(number.c_str());
     writer_->closeTag("a");
     writer_->closeTag("sup");
-    
+
     // TODO: Store footnote text for rendering at end of page/document
 }
 
@@ -1193,7 +1235,7 @@ void HtmlGenerator::footnote(const char* text_content) {
 std::string HtmlGenerator::escapeHtml(const std::string& text) {
     // html-generator.ls escapeHtml method
     std::stringstream ss;
-    
+
     for (char c : text) {
         switch (c) {
             case '&': ss << "&amp;"; break;
@@ -1204,14 +1246,14 @@ std::string HtmlGenerator::escapeHtml(const std::string& text) {
             default: ss << c; break;
         }
     }
-    
+
     return ss.str();
 }
 
 const char* HtmlGenerator::getSectionTag(const std::string& level) {
     // Get HTML heading tag for section level
     int heading_level = getHeadingLevel(level);
-    
+
     static char tag[4];
     snprintf(tag, sizeof(tag), "h%d", heading_level);
     return tag;
@@ -1219,7 +1261,7 @@ const char* HtmlGenerator::getSectionTag(const std::string& level) {
 
 int HtmlGenerator::getHeadingLevel(const std::string& level) {
     // html-generator.ls getHeadingLevel method
-    
+
     if (level == "part") return 1;
     if (level == "chapter") return 1;
     if (level == "section") return 2;
@@ -1227,7 +1269,7 @@ int HtmlGenerator::getHeadingLevel(const std::string& level) {
     if (level == "subsubsection") return 4;
     if (level == "paragraph") return 5;
     if (level == "subparagraph") return 6;
-    
+
     return 2;  // Default
 }
 
@@ -1240,7 +1282,7 @@ void HtmlGenerator::pushTableState(const std::vector<std::string>& cols) {
     state.column_specs = cols;
     state.current_column = 0;
     state.in_header_row = false;
-    
+
     table_stack_.push_back(state);
 }
 
@@ -1263,7 +1305,7 @@ void HtmlGenerator::pushListState(const std::string& type) {
     ListState state;
     state.type = type;
     state.item_count = 0;
-    
+
     list_stack_.push_back(state);
 }
 
@@ -1287,7 +1329,7 @@ void HtmlGenerator::pushFloatState(const std::string& type, const char* position
     state.type = type;
     state.position = position ? position : "";
     state.has_caption = false;
-    
+
     float_stack_.push_back(state);
 }
 
@@ -1309,10 +1351,10 @@ HtmlGenerator::FloatState& HtmlGenerator::currentFloat() {
 std::vector<std::string> HtmlGenerator::parseColumnSpec(const char* spec) {
     // Parse LaTeX column specification
     // Examples: "lrc", "l|c|r", "p{3cm}c"
-    
+
     std::vector<std::string> cols;
     if (!spec) return cols;
-    
+
     for (const char* p = spec; *p; p++) {
         switch (*p) {
             case 'l':
@@ -1337,7 +1379,7 @@ std::vector<std::string> HtmlGenerator::parseColumnSpec(const char* spec) {
                 break;
         }
     }
-    
+
     return cols;
 }
 
@@ -1361,19 +1403,19 @@ std::string HtmlGenerator::endCapture() {
         log_error("endCapture: not in capture mode");
         return "";
     }
-    
+
     CaptureState state = capture_stack_.back();
     capture_stack_.pop_back();
-    
+
     const char* html = state.capture_writer->getHtml();
     std::string result = html ? html : "";
-    
+
     // Restore previous writer
     writer_ = state.previous_writer;
-    
+
     // Clean up capture writer
     delete state.capture_writer;
-    
+
     log_debug("endCapture: depth=%zu, captured=%zu chars", capture_stack_.size(), result.size());
     return result;
 }
@@ -1381,50 +1423,50 @@ std::string HtmlGenerator::endCapture() {
 void HtmlGenerator::createItemWithHtmlLabel(const char* html_label) {
     // Create list item with pre-rendered HTML as the custom label
     // This is used for enumerate/itemize with \item[...] where the label contains formatting
-    
+
     if (list_stack_.empty()) {
         log_error("createItemWithHtmlLabel: not in a list environment");
         return;
     }
-    
+
     ListState& state = currentList();
     state.item_count++;
-    
+
     if (state.type == "itemize") {
         const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
         writer_->openTag("li", li_class);
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
-        
+
         // Write the pre-rendered HTML label directly (no extra wrapper for itemize)
         if (html_label && html_label[0]) {
             writer_->writeRawHtml(html_label);
         }
-        
+
         writer_->closeTag("span");  // close hbox llap
         writer_->closeTag("span");  // close itemlabel
-        
+
         const char* p_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
         writer_->openTag("p", p_class);
     } else if (state.type == "enumerate") {
         // For enumerate with custom label, do NOT step the counter
         // The custom label replaces the number but the next regular item continues the count
-        
+
         const char* li_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
         writer_->openTag("li", li_class);
         writer_->openTag("span", "itemlabel");
         writer_->openTag("span", "hbox llap");
-        
+
         // Write the pre-rendered HTML label wrapped in a span (custom label replaces number)
         writer_->openTag("span", nullptr);
         if (html_label && html_label[0]) {
             writer_->writeRawHtml(html_label);
         }
         writer_->closeTag("span");
-        
+
         writer_->closeTag("span");  // close hbox llap
         writer_->closeTag("span");  // close itemlabel
-        
+
         const char* p_class = state.alignment.empty() ? nullptr : state.alignment.c_str();
         writer_->openTag("p", p_class);
     } else if (state.type == "description") {

@@ -1,0 +1,31 @@
+{
+  "category": "sizing",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "\\\\text{a \\\\tiny x y}b",
+      "description": "SIZING COMMANDS test case 1",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 2,
+      "latex": "\\\\mbox{a \\\\tiny x y}b",
+      "description": "SIZING COMMANDS test case 2",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 3,
+      "latex": "\\\\binom12  \\\\sqrt[3]{x}  \\\\Huge \\\\sqrt[3]{x} \\\\binom56 x \\\\text{text is huge}",
+      "description": "SIZING COMMANDS test case 3",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 1,
+      "latex": "a\\\\Large bc",
+      "description": "Sizing are modal commands",
+      "source": "mathlive/static/index.html",
+      "reference_image": null
+    }
+  ]
+}
