@@ -1221,7 +1221,16 @@ void dom_element_set_pseudo_state(DomElement* element, uint32_t pseudo_state) {
         return;
     }
 
+    uint32_t old_state = element->pseudo_state;
     element->pseudo_state |= pseudo_state;
+    
+    // If pseudo-state actually changed, invalidate styles
+    if (element->pseudo_state != old_state) {
+        element->needs_style_recompute = true;
+        element->style_version++;
+        log_debug("dom_element_set_pseudo_state: %s added state 0x%x, invalidated style",
+                  element->tag_name, pseudo_state);
+    }
 }
 
 void dom_element_clear_pseudo_state(DomElement* element, uint32_t pseudo_state) {
@@ -1229,7 +1238,16 @@ void dom_element_clear_pseudo_state(DomElement* element, uint32_t pseudo_state) 
         return;
     }
 
+    uint32_t old_state = element->pseudo_state;
     element->pseudo_state &= ~pseudo_state;
+    
+    // If pseudo-state actually changed, invalidate styles
+    if (element->pseudo_state != old_state) {
+        element->needs_style_recompute = true;
+        element->style_version++;
+        log_debug("dom_element_clear_pseudo_state: %s removed state 0x%x, invalidated style",
+                  element->tag_name, pseudo_state);
+    }
 }
 
 bool dom_element_has_pseudo_state(DomElement* element, uint32_t pseudo_state) {
