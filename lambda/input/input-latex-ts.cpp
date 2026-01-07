@@ -95,6 +95,7 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"inline_math", NODE_CONTAINER},
     {"display_math", NODE_CONTAINER},
     {"math_text", NODE_TEXT},
+    {"math_single_char", NODE_TEXT},  // Single char in sub/superscript
     {"subscript", NODE_CONTAINER},
     {"superscript", NODE_CONTAINER},
 
@@ -824,6 +825,61 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 size_t len = end - start;
                 MarkBuilder& builder = ctx.builder;
                 return {.item = y2it(builder.createSymbol(source + start, len))};
+            }
+
+            // Special case: inline_math and display_math - store original source as attribute
+            if (strcmp(node_type, "inline_math") == 0 || strcmp(node_type, "display_math") == 0 ||
+                strcmp(node_type, "math") == 0) {
+                MarkBuilder& builder = ctx.builder;
+                ElementBuilder elem_builder = builder.element(node_type);
+
+                // Store the original source text as 'source' attribute (strip $ delimiters)
+                uint32_t source_start = ts_node_start_byte(node);
+                uint32_t source_end = ts_node_end_byte(node);
+                size_t source_len = source_end - source_start;
+
+                // Strip delimiters: $...$ or $$...$$ or \(...\) or \[...\]
+                const char* text = source + source_start;
+                if (source_len >= 2) {
+                    if (text[0] == '$' && text[source_len - 1] == '$') {
+                        // $...$ or $$...$$
+                        if (source_len >= 4 && text[1] == '$' && text[source_len - 2] == '$') {
+                            // $$...$$
+                            text += 2;
+                            source_len -= 4;
+                        } else {
+                            // $...$
+                            text += 1;
+                            source_len -= 2;
+                        }
+                    } else if (source_len >= 4 && text[0] == '\\' && text[1] == '(' &&
+                               text[source_len - 2] == '\\' && text[source_len - 1] == ')') {
+                        // \(...\)
+                        text += 2;
+                        source_len -= 4;
+                    } else if (source_len >= 4 && text[0] == '\\' && text[1] == '[' &&
+                               text[source_len - 2] == '\\' && text[source_len - 1] == ']') {
+                        // \[...\]
+                        text += 2;
+                        source_len -= 4;
+                    }
+                }
+
+                String* src_str = builder.createString(text, source_len);
+                Item src_item = {.item = s2it(src_str)};
+                elem_builder.attr("source", src_item);
+
+                // Also process children for the tree structure
+                uint32_t child_count = ts_node_child_count(node);
+                for (uint32_t i = 0; i < child_count; i++) {
+                    TSNode child = ts_node_child(node, i);
+                    Item child_item = convert_latex_node(ctx, child, source);
+                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                        elem_builder.child(child_item);
+                    }
+                }
+
+                return elem_builder.final();
             }
 
             // Special case: linebreak_command (\\ with optional [<length>])
