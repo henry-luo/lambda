@@ -108,6 +108,11 @@
     }
   },
   {
+    "type": "caret_char",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "char_command",
     "named": true,
     "fields": {}
@@ -451,6 +456,10 @@
           "named": true
         },
         {
+          "type": "caret_char",
+          "named": true
+        },
+        {
           "type": "char_command",
           "named": true
         },
@@ -567,6 +576,10 @@
           "named": true
         },
         {
+          "type": "caret_char",
+          "named": true
+        },
+        {
           "type": "char_command",
           "named": true
         },
@@ -628,10 +641,14 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "curly_group",
+          "named": true
+        },
+        {
+          "type": "math_single_char",
           "named": true
         }
       ]
@@ -643,10 +660,14 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "curly_group",
+          "named": true
+        },
+        {
+          "type": "math_single_char",
           "named": true
         }
       ]
@@ -779,6 +800,10 @@
   },
   {
     "type": "line_comment",
+    "named": true
+  },
+  {
+    "type": "math_single_char",
     "named": true
   },
   {

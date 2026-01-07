@@ -1,0 +1,13 @@
+{
+  "category": "styling",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "\\\\gothicCapitalC\\\\gothicCapitalH\\\\scriptCapitalE\\\\doubleStruckCapitalQ\\\\Bbbk",
+      "description": "Variants",
+      "source": "mathlive/static/index.html",
+      "reference_image": null
+    }
+  ]
+}

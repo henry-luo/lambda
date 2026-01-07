@@ -91,6 +91,8 @@
         "radiant/layout_grid.cpp",
         "radiant/layout_grid_multipass.cpp",
         "radiant/layout_multicol.cpp",
+        "radiant/layout_math.cpp",
+        "radiant/math_integration.cpp",
         "radiant/grid_utils.cpp",
         "radiant/grid_sizing.cpp",
         "radiant/grid_positioning.cpp",
@@ -111,6 +113,7 @@
         "radiant/render_border.cpp",
         "radiant/render_background.cpp",
         "radiant/render_filter.cpp",
+        "radiant/render_math.cpp",
         "radiant/render_svg.cpp",
         "radiant/render_pdf.cpp",
         "radiant/render_img.cpp",
@@ -2480,6 +2483,36 @@
                 "type": "lambda",
                 "uses_build_config": true,
                 "requires_lambda_exe": true,
+                "parallel": true
+            },
+            {
+                "suite": "math",
+                "name": "📐 Math Layout Tests",
+                "category": "extended",
+                "tests": [
+                    {
+                        "source": "test/math/test_math_layout.cpp",
+                        "name": "Math Layout Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_math_layout.exe",
+                        "additional_sources": [
+                            "test/math/math_fixture_loader.cpp"
+                        ],
+                        "includes": [
+                            "test/math"
+                        ],
+                        "icon": "📐"
+                    }
+                ],
+                "type": "math",
+                "uses_build_config": true,
                 "parallel": true
             },
             {

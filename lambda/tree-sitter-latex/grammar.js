@@ -1,7 +1,7 @@
 /// <reference types="tree-sitter-cli/dsl" />
 // Hybrid LaTeX Tree-sitter Grammar
 // Based on LaTeX.js PEG.js structure, optimized for Tree-sitter size
-// 
+//
 // Design principles:
 // 1. Match LaTeX.js structure for compatibility
 // 2. Use generic command/macro handling (semantic interpretation at runtime)
@@ -24,6 +24,7 @@ module.exports = grammar({
     $._end_document,          // \end{document} - higher priority than command
     $._verb_command,          // \verb<delim>text<delim> - must use external to override command_name token
     $._char_command,          // \char<number> - decimal/hex/octal number token
+    $._caret_char,            // ^^XX (2 hex) or ^^^^XXXX (4 hex) - TeX caret notation
   ],
 
   word: $ => $.command_name,
@@ -45,18 +46,19 @@ module.exports = grammar({
     // ========================================================================
     // Document structure (matches LaTeX.js: latex, document)
     // ========================================================================
-    
+
     // Top level: sequence of items, some may be preamble, one may be document
     source_file: $ => repeat($._top_level_item),
-    
+
     // Each top-level item can be either document or a preamble item
     _top_level_item: $ => choice(
       $.document,       // Full document with \begin{document}...\end{document}
       $.environment,    // Environments can appear at top level (e.g., in fragments)
       $.verb_command,   // \verb can appear at top level
       $.char_command,   // \char can appear at top level
+      $.caret_char,     // ^^XX or ^^^^XXXX - TeX caret notation
       $.linebreak_command, // \\ with optional [<length>]
-      $.control_symbol, // Escape sequences like \%, \& 
+      $.control_symbol, // Escape sequences like \%, \&
       $.command,        // Commands can appear at top level (e.g., \textellipsis)
       $.curly_group,    // Curly braces can appear at top level
       $.brack_group,    // Restored: [ ... ] bracket groups at top level
@@ -118,6 +120,7 @@ module.exports = grammar({
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
       $.verb_command,   // \verb|text| - must be before command (context-gated)
       $.char_command,   // \char<number> - must be before command (context-gated)
+      $.caret_char,     // ^^XX or ^^^^XXXX - TeX caret notation
       $.linebreak_command, // \\ with optional [<length>]
       $.command,
       $.curly_group,
@@ -130,8 +133,8 @@ module.exports = grammar({
     ),
 
     // Text is everything that's not a special character
-    // NOTE: ^ and _ are allowed here (subscript/superscript only special in math mode)
-    text: $ => /[^\\{}$%\[\]\n~&#]+/,
+    // NOTE: ^ is excluded for caret notation (^^XX), _ is allowed (only special in math mode)
+    text: $ => /[^\\{}$%\[\]\n~&#^]+/,
 
     // Space: horizontal whitespace and single newlines only
     // Paragraph break (higher precedence) will match \n\n sequences
@@ -160,9 +163,9 @@ module.exports = grammar({
       )
     )),
 
-    // Control symbols (matches LaTeX.js: ctrl_sym) 
+    // Control symbols (matches LaTeX.js: ctrl_sym)
     // High precedence to match before line_comment sees the %
-    // Includes: escape chars ($%#&{}_-), spacing (\! \, \; \: \/ \@), 
+    // Includes: escape chars ($%#&{}_-), spacing (\! \, \; \: \/ \@),
     // punctuation (\. \' \` \^ \" \~ \=), control space (\ )
     // Note: \<tab> and \<newline> are handled by external scanner (controlspace_command)
     // Note: line break (\\) is handled by linebreak_command to capture optional [<length>]
@@ -171,7 +174,7 @@ module.exports = grammar({
     // ========================================================================
     // Line break command - \\ with optional [<length>] argument
     // ========================================================================
-    
+
     // Matches: \\, \\*, \\[<length>], \\*[<length>]
     // LaTeX.js: nl = escape escape_char opt_star opt_length
     // Use prec.right to greedily consume optional brack_group
@@ -184,7 +187,7 @@ module.exports = grammar({
     // ========================================================================
     // Verb command - inline verbatim with arbitrary delimiter
     // ========================================================================
-    
+
     // External scanner token - required because command_name token would match \verb first
     // The external scanner runs before tokenization and can claim \verb pattern
     verb_command: $ => $._verb_command,
@@ -192,11 +195,15 @@ module.exports = grammar({
     // ========================================================================
     // Char command - TeX character code with decimal/hex/octal number
     // ========================================================================
-    
+
     // Context-gated external token (Pattern 2)
     // The external scanner will only emit this token when valid_symbols[CHAR_COMMAND] is true
     // Matches: \char<decimal>, \char"<hex>, \char'<octal>
     char_command: $ => $._char_command,
+
+    // TeX caret notation for character input
+    // Matches: ^^XX (2 hex digits) or ^^^^XXXX (4 hex digits) or ^^c (char +/- 64)
+    caret_char: $ => $._caret_char,
 
     // ========================================================================
     // Commands/Macros (matches LaTeX.js: macro, macro_args)
@@ -284,8 +291,11 @@ module.exports = grammar({
 
     math_text: $ => /[^\\{}$^_&|]+/,
 
-    subscript: $ => seq('_', choice($.curly_group, /[a-zA-Z0-9]/)),
-    superscript: $ => seq('^', choice($.curly_group, /[a-zA-Z0-9]/)),
+    subscript: $ => seq('_', choice($.curly_group, $.math_single_char)),
+    superscript: $ => seq('^', choice($.curly_group, $.math_single_char)),
+
+    // Named rule for single character in sub/superscript (so it appears in tree)
+    math_single_char: $ => /[a-zA-Z0-9]/,
 
     // ========================================================================
     // Environments (matches LaTeX.js: environment, begin_env, end_env)

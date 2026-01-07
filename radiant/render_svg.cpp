@@ -1,7 +1,9 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "math_box.hpp"
 #include "font_face.h"
+#include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -37,6 +39,8 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span);
 void render_children_svg(SvgRenderContext* ctx, View* view);
 void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
 void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block);
+void render_math_view_svg(SvgRenderContext* ctx, radiant::ViewMath* math);
+void render_math_element_svg(SvgRenderContext* ctx, DomElement* elem);  // new: render math from DomElement
 void calculate_content_bounds(View* view, int* max_x, int* max_y);
 
 // Helper functions for SVG output
@@ -557,6 +561,13 @@ void render_children_svg(SvgRenderContext* ctx, View* view) {
                 render_text_view_svg(ctx, (ViewText*)view);
                 break;
 
+            case RDT_VIEW_MATH:
+                // Math views are DomElements with math data in elem->embed
+                if (view->is_element()) {
+                    render_math_element_svg(ctx, static_cast<DomElement*>(view));
+                }
+                break;
+
             default:
                 log_debug("Unknown view type in SVG rendering: %d", view->view_type);
                 break;
@@ -793,4 +804,273 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     url_destroy(cwd);
     ui_context_cleanup(&ui_context);
     return 1;
+}
+
+// ============================================================================
+// Math Rendering Functions for SVG
+// ============================================================================
+
+using namespace radiant;
+
+// Helper to escape XML special characters for SVG text content
+static void escape_xml_text(const char* text, StrBuf* buf) {
+    while (*text) {
+        switch (*text) {
+            case '<': strbuf_append_str(buf, "&lt;"); break;
+            case '>': strbuf_append_str(buf, "&gt;"); break;
+            case '&': strbuf_append_str(buf, "&amp;"); break;
+            default: strbuf_append_char(buf, *text); break;
+        }
+        text++;
+    }
+}
+
+// Forward declarations for recursive rendering
+static void render_math_box_svg(SvgRenderContext* ctx, MathBox* box, float x, float y);
+static void render_math_hbox_svg(SvgRenderContext* ctx, MathBox* box, float x, float y);
+static void render_math_vbox_svg(SvgRenderContext* ctx, MathBox* box, float x, float y);
+
+// Render a single math glyph as SVG text
+static void render_math_glyph_svg(SvgRenderContext* ctx, MathBox* box, float x, float y) {
+    if (!box || box->content_type != MathBoxContentType::Glyph) return;
+
+    int codepoint = box->content.glyph.codepoint;
+    FT_Face face = box->content.glyph.face;
+
+    if (!face) {
+        log_debug("render_math_glyph_svg: no face for codepoint %d", codepoint);
+        return;
+    }
+
+    // Get font properties
+    const char* font_family = face->family_name ? face->family_name : "serif";
+    // Calculate font size from face metrics (in pixels)
+    float font_size = (face->size && face->size->metrics.y_ppem > 0)
+        ? face->size->metrics.y_ppem * box->scale
+        : 16.0f * box->scale;
+
+    // Load glyph to get metrics
+    FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
+    if (glyph_index == 0) {
+        log_debug("render_math_glyph_svg: glyph not found for codepoint 0x%04X", codepoint);
+        return;
+    }
+
+    if (FT_Load_Glyph(face, glyph_index, FT_LOAD_DEFAULT) != 0) {
+        log_debug("render_math_glyph_svg: failed to load glyph for codepoint 0x%04X", codepoint);
+        return;
+    }
+
+    FT_GlyphSlot slot = face->glyph;
+    float scale = box->scale;
+
+    // Calculate render position (SVG uses baseline as y coordinate)
+    float render_x = x + slot->metrics.horiBearingX * scale / 64.0f;
+    float render_y = y;  // y is already on baseline
+
+    // Convert codepoint to UTF-8
+    char utf8_char[8];
+    if (codepoint < 0x80) {
+        utf8_char[0] = (char)codepoint;
+        utf8_char[1] = '\0';
+    } else if (codepoint < 0x800) {
+        utf8_char[0] = (char)(0xC0 | (codepoint >> 6));
+        utf8_char[1] = (char)(0x80 | (codepoint & 0x3F));
+        utf8_char[2] = '\0';
+    } else if (codepoint < 0x10000) {
+        utf8_char[0] = (char)(0xE0 | (codepoint >> 12));
+        utf8_char[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        utf8_char[2] = (char)(0x80 | (codepoint & 0x3F));
+        utf8_char[3] = '\0';
+    } else {
+        utf8_char[0] = (char)(0xF0 | (codepoint >> 18));
+        utf8_char[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        utf8_char[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        utf8_char[3] = (char)(0x80 | (codepoint & 0x3F));
+        utf8_char[4] = '\0';
+    }
+
+    // Get color
+    char color_str[64];
+    svg_color_to_string(ctx->color, color_str);
+
+    // Output SVG text element
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content, "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.2f\"",
+                         render_x, render_y, font_family, font_size);
+    strbuf_append_format(ctx->svg_content, " fill=\"%s\">", color_str);
+    escape_xml_text(utf8_char, ctx->svg_content);
+    strbuf_append_str(ctx->svg_content, "</text>\n");
+}
+
+// Render a horizontal box (sequence of children)
+static void render_math_hbox_svg(SvgRenderContext* ctx, MathBox* box, float x, float y) {
+    if (!box || box->content_type != MathBoxContentType::HBox) return;
+
+    float current_x = x;
+    for (int i = 0; i < box->content.hbox.count; i++) {
+        MathBox* child = box->content.hbox.children[i];
+        if (!child) continue;
+
+        render_math_box_svg(ctx, child, current_x, y);
+        current_x += child->width;
+    }
+}
+
+// Render a vertical box (stack of children)
+static void render_math_vbox_svg(SvgRenderContext* ctx, MathBox* box, float x, float y) {
+    if (!box || box->content_type != MathBoxContentType::VBox) return;
+
+    for (int i = 0; i < box->content.vbox.count; i++) {
+        MathBox* child = box->content.vbox.children[i];
+        if (!child) continue;
+
+        float shift = box->content.vbox.shifts[i];
+        // shift is relative to the vbox baseline
+        // positive shift = child baseline is above vbox baseline
+        render_math_box_svg(ctx, child, x, y - shift);
+    }
+}
+
+// Render a rule (fraction bar, etc.)
+static void render_math_rule_svg(SvgRenderContext* ctx, MathBox* box, float x, float y) {
+    if (!box || box->content_type != MathBoxContentType::Rule) return;
+
+    float thickness = box->content.rule.thickness;
+    float width = box->width;
+
+    // The rule is centered on the axis (y position is the baseline)
+    float rule_y = y - box->height + thickness / 2;
+
+    // Get color
+    char color_str[64];
+    svg_color_to_string(ctx->color, color_str);
+
+    // Output SVG rectangle
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content,
+        "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\"/>\n",
+        x, rule_y, width, thickness, color_str);
+}
+
+// Render a radical (square root)
+static void render_math_radical_svg(SvgRenderContext* ctx, MathBox* box, float x, float y) {
+    if (!box || box->content_type != MathBoxContentType::Radical) return;
+
+    MathBox* radicand = box->content.radical.radicand;
+    MathBox* index = box->content.radical.index;
+    float rule_thickness = box->content.radical.rule_thickness;
+    float rule_y = box->content.radical.rule_y;
+
+    // Render the overline
+    if (radicand) {
+        float rule_x = x;
+        float rule_width = radicand->width;
+
+        char color_str[64];
+        svg_color_to_string(ctx->color, color_str);
+
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content,
+            "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\"/>\n",
+            rule_x, y - rule_y, rule_width, rule_thickness, color_str);
+
+        // Render radicand
+        render_math_box_svg(ctx, radicand, x, y);
+    }
+
+    // Render index if present
+    if (index) {
+        render_math_box_svg(ctx, index, x, y);
+    }
+}
+
+// Main dispatcher for MathBox rendering
+static void render_math_box_svg(SvgRenderContext* ctx, MathBox* box, float x, float y) {
+    if (!box) return;
+
+    switch (box->content_type) {
+        case MathBoxContentType::Empty:
+            // Nothing to render
+            break;
+
+        case MathBoxContentType::Glyph:
+            render_math_glyph_svg(ctx, box, x, y);
+            break;
+
+        case MathBoxContentType::HBox:
+            render_math_hbox_svg(ctx, box, x, y);
+            break;
+
+        case MathBoxContentType::VBox:
+            render_math_vbox_svg(ctx, box, x, y);
+            break;
+
+        case MathBoxContentType::Kern:
+            // Kerns are just spacing, nothing to render
+            break;
+
+        case MathBoxContentType::Rule:
+            render_math_rule_svg(ctx, box, x, y);
+            break;
+
+        case MathBoxContentType::Radical:
+            render_math_radical_svg(ctx, box, x, y);
+            break;
+
+        case MathBoxContentType::Delimiter:
+            // Delimiters are rendered as glyphs
+            render_math_glyph_svg(ctx, box, x, y);
+            break;
+
+        default:
+            log_debug("render_math_box_svg: unknown content type %d", (int)box->content_type);
+            break;
+    }
+}
+
+// Entry point for rendering ViewMath to SVG
+void render_math_view_svg(SvgRenderContext* ctx, ViewMath* view_math) {
+    if (!view_math || !view_math->math_box) return;
+
+    // Calculate absolute position
+    float x = ctx->block.x + view_math->x;
+    float y = ctx->block.y + view_math->y + view_math->baseline_offset;
+
+    // Group math content
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "<g class=\"math\">\n");
+    ctx->indent_level++;
+
+    // Render the math box tree
+    render_math_box_svg(ctx, view_math->math_box, x, y);
+
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+}
+
+// Entry point for rendering math from DomElement (new architecture)
+// Math data is stored in elem->embed instead of separate ViewMath struct
+void render_math_element_svg(SvgRenderContext* ctx, DomElement* elem) {
+    if (!elem || !elem->embed || !elem->embed->math_box) {
+        log_debug("render_math_element_svg: no math data in element");
+        return;
+    }
+
+    // Calculate absolute position
+    float x = ctx->block.x + elem->x;
+    float y = ctx->block.y + elem->y + elem->embed->math_baseline_offset;
+
+    // Group math content
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "<g class=\"math\">\n");
+    ctx->indent_level++;
+
+    // Render the math box tree
+    render_math_box_svg(ctx, elem->embed->math_box, x, y);
+
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
 }
