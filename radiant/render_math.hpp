@@ -38,7 +38,7 @@ void render_math_view(RenderContext* rdcon, ViewMath* view_math);
  * @param rdcon Render context
  * @param block The block view containing math data in embed
  */
-void render_math_from_embed(RenderContext* rdcon, ViewBlock* block);
+void render_math_from_embed(RenderContext* rdcon, DomElement* elem);
 
 /**
  * Render a single glyph from a MathBox.

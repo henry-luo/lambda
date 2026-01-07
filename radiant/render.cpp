@@ -1455,8 +1455,8 @@ void render_children(RenderContext* rdcon, View* view) {
         }
         else if (view->view_type == RDT_VIEW_MATH) {
             // Math view - renders MathBox trees from DomElement's embed prop
-            ViewBlock* block = (ViewBlock*)view;
-            radiant::render_math_from_embed(rdcon, block);
+            DomElement* elem = static_cast<DomElement*>(view);
+            radiant::render_math_from_embed(rdcon, elem);
         }
         else {
             log_debug("unknown view in rendering: %d", view->view_type);

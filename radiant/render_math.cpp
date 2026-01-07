@@ -324,20 +324,21 @@ void render_math_view(RenderContext* rdcon, ViewMath* view_math) {
     render_math_box(rdcon, view_math->math_box, x, y);
 }
 
-void render_math_from_embed(RenderContext* rdcon, ViewBlock* block) {
-    if (!block || !block->embed || !block->embed->math_box) {
+void render_math_from_embed(RenderContext* rdcon, DomElement* elem) {
+    if (!elem || !elem->embed || !elem->embed->math_box) {
         log_debug("render_math_from_embed: missing math_box in embed");
         return;
     }
 
-    // Get position from block
-    float x = block->x;
-    float y = block->y + block->embed->math_baseline_offset;
+    // Get absolute position by adding render context block offset
+    float x = rdcon->block.x + elem->x;
+    float y = rdcon->block.y + elem->y + elem->embed->math_baseline_offset;
 
-    log_debug("render_math_from_embed: rendering at (%.1f, %.1f)", x, y);
+    log_debug("render_math_from_embed: rendering at (%.1f, %.1f) elem pos=(%.1f, %.1f) block offset=(%.1f, %.1f)",
+              x, y, elem->x, elem->y, rdcon->block.x, rdcon->block.y);
 
     // Render the math box tree
-    render_math_box(rdcon, block->embed->math_box, x, y);
+    render_math_box(rdcon, elem->embed->math_box, x, y);
 }
 
 } // namespace radiant
