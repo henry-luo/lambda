@@ -1,0 +1,66 @@
+{
+  "category": "operators",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "a+b",
+      "description": "BINARY OPERATORS test case 1",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 2,
+      "latex": "f(a)+f(b)",
+      "description": "BINARY OPERATORS test case 2",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 3,
+      "latex": "x^n+y^n",
+      "description": "BINARY OPERATORS test case 3",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 4,
+      "latex": "+b",
+      "description": "BINARY OPERATORS test case 4",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 5,
+      "latex": "(+b",
+      "description": "BINARY OPERATORS test case 5",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 6,
+      "latex": "=+b",
+      "description": "BINARY OPERATORS test case 6",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 7,
+      "latex": "\\\\sin+b",
+      "description": "BINARY OPERATORS test case 7",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 8,
+      "latex": ", +b",
+      "description": "BINARY OPERATORS test case 8",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 9,
+      "latex": "\\\\textcolor{red}{a}+b",
+      "description": "BINARY OPERATORS test case 9",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 10,
+      "latex": "\\\\textcolor{red}{a=}+b",
+      "description": "BINARY OPERATORS test case 10",
+      "source": "mathlive/markup.test.ts"
+    }
+  ]
+}

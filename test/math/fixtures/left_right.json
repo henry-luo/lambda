@@ -1,0 +1,27 @@
+{
+  "category": "left_right",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "\\\\left\\\\lbrace a \\\\middle\\\\mid \\\\frac12 \\\\right \\\\rbrace",
+      "description": "<kbd>\\\\left</kbd>...<kbd>\\\\middle</kbd>...<kbd>\\\\right</kbd>",
+      "source": "mathlive/static/index.html",
+      "reference_image": null
+    },
+    {
+      "id": 2,
+      "latex": "\\\\left(x\\\\right)^2",
+      "description": "<kbd>\\\\left</kbd>......<kbd>\\\\right</kbd> with superscript",
+      "source": "mathlive/static/index.html",
+      "reference_image": null
+    },
+    {
+      "id": 3,
+      "latex": "a\\\\right) b \\\\left(c",
+      "description": "Unbalanced <kbd>\\\\left</kbd> <kbd>\\\\right</kbd>",
+      "source": "mathlive/static/index.html",
+      "reference_image": null
+    }
+  ]
+}

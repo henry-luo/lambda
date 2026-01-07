@@ -31,6 +31,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "caret_char"
+        },
+        {
+          "type": "SYMBOL",
           "name": "linebreak_command"
         },
         {
@@ -219,6 +223,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "caret_char"
+        },
+        {
+          "type": "SYMBOL",
           "name": "linebreak_command"
         },
         {
@@ -257,7 +265,7 @@
     },
     "text": {
       "type": "PATTERN",
-      "value": "[^\\\\{}$%\\[\\]\\n~&#]+"
+      "value": "[^\\\\{}$%\\[\\]\\n~&#^]+"
     },
     "space": {
       "type": "PATTERN",
@@ -402,6 +410,10 @@
     "char_command": {
       "type": "SYMBOL",
       "name": "_char_command"
+    },
+    "caret_char": {
+      "type": "SYMBOL",
+      "name": "_caret_char"
     },
     "command": {
       "type": "PREC_RIGHT",
@@ -728,8 +740,8 @@
               "name": "curly_group"
             },
             {
-              "type": "PATTERN",
-              "value": "[a-zA-Z0-9]"
+              "type": "SYMBOL",
+              "name": "math_single_char"
             }
           ]
         }
@@ -750,12 +762,16 @@
               "name": "curly_group"
             },
             {
-              "type": "PATTERN",
-              "value": "[a-zA-Z0-9]"
+              "type": "SYMBOL",
+              "name": "math_single_char"
             }
           ]
         }
       ]
+    },
+    "math_single_char": {
+      "type": "PATTERN",
+      "value": "[a-zA-Z0-9]"
     },
     "environment": {
       "type": "CHOICE",
@@ -1166,6 +1182,10 @@
     {
       "type": "SYMBOL",
       "name": "_char_command"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_caret_char"
     }
   ],
   "inline": [],
