@@ -244,7 +244,15 @@ extern "C" int get_font_metrics_platform(const char* font_family, float font_siz
 static float get_font_cell_height(FT_Face face, float pixel_ratio) {
     const char* family = face->family_name;
     // y_ppem is in physical pixels, divide by pixel_ratio to get CSS font size
-    float font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+    // CRITICAL: Some WOFF fonts have y_ppem=0, derive from height if needed
+    float font_size;
+    if (face->size && face->size->metrics.y_ppem != 0) {
+        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+    } else {
+        // Fallback: derive from height metric (height ≈ ppem * 1.2 * 64)
+        float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
+        font_size = height_px / 1.2f / pixel_ratio;
+    }
 
     // Check if this is one of Apple's classic fonts that needs the 15% hack
     // These are the only fonts where CoreText metrics differ significantly from FreeType
