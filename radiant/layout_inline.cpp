@@ -175,6 +175,12 @@ static void layout_math_span(LayoutContext* lycon, DomElement* elem, bool is_dis
         return;
     }
 
+    // Link the element into the view tree - this is critical for proper rendering!
+    // The element already has view_type set to RDT_VIEW_MATH by setup_math_element
+    View* view = (View*)elem;
+    if (!lycon->line.start_view) lycon->line.start_view = view;
+    lycon->view = view;
+
     // Position the inline math element
     // Check if it fits on current line
     if (lycon->line.advance_x + elem->width > lycon->line.effective_right) {
