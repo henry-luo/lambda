@@ -228,6 +228,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
     float physical_font_size = font_style->font_size * pixel_ratio;
     
+    log_debug("[FONT LOAD] font=%s, css_size=%.2f, pixel_ratio=%.2f, physical_size=%.2f",
+              font_name, font_style->font_size, pixel_ratio, physical_font_size);
+    
     // Create cache key with (family, weight, style, physical_size) - deterministic based on input parameters
     StrBuf* style_cache_key = strbuf_create(font_name);
     strbuf_append_str(style_cache_key, font_style->font_weight == CSS_VALUE_BOLD ? ":bold:" : ":normal:");
@@ -331,6 +334,18 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
 FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
     FT_GlyphSlot slot = NULL;  FT_Error error;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
+    
+    // Debug: Log the face's current pixel size and glyph metrics
+    static int debug_count = 0;
+    if (for_rendering && debug_count < 10) {
+        log_debug("[GLYPH LOAD] face=%s, y_ppem=%d, height=%ld, css_size=%.2f, codepoint=U+%04X",
+                  face->family_name, 
+                  face->size ? (face->size->metrics.y_ppem >> 6) : 0,
+                  face->size ? face->size->metrics.height : 0,
+                  font_style ? font_style->font_size : 0.0f, codepoint);
+        debug_count++;
+    }
+    
     // FT_LOAD_NO_HINTING matches browser closely, whereas FT_LOAD_FORCE_AUTOHINT makes the text narrower
     // FT_LOAD_COLOR is required for color emoji fonts (Apple Color Emoji, Noto Color Emoji, etc.)
     FT_Int32 load_flags = for_rendering ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR) : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
@@ -476,7 +491,13 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
     if (FT_Load_Char(fbox->ft_face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", family_to_load);
-        fbox->style->space_width = (fbox->ft_face->size->metrics.y_ppem / 64.0) / pixel_ratio;
+        // Fallback: use y_ppem if available, otherwise derive from font_size
+        float ppem = fbox->ft_face->size->metrics.y_ppem / 64.0f;
+        if (ppem <= 0) {
+            // y_ppem is 0 (common with WOFF fonts), use requested font size
+            ppem = fprop->font_size * pixel_ratio;
+        }
+        fbox->style->space_width = ppem / pixel_ratio;
     } else {
         // Use float precision for space width calculation
         // Metrics from FreeType are in physical pixels, scale back to CSS pixels for layout

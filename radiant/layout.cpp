@@ -380,7 +380,17 @@ TypoMetrics get_os2_typo_metrics(FT_Face face, float pixel_ratio) {
 
     // Convert from font units to CSS pixels
     // scale = ppem / units_per_EM, then divide by pixel_ratio for CSS pixels
-    float scale = (float)face->size->metrics.y_ppem / face->units_per_EM / pixel_ratio;
+    // CRITICAL: Some WOFF fonts have y_ppem=0, derive scale from height if needed
+    float scale;
+    if (face->size && face->size->metrics.y_ppem != 0) {
+        scale = (float)face->size->metrics.y_ppem / face->units_per_EM / pixel_ratio;
+    } else {
+        // Fallback: derive ppem from height (height ≈ ppem * 1.2 * 64 in 26.6 format)
+        float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
+        float approx_ppem = height_px / 1.2f;
+        scale = approx_ppem / face->units_per_EM / pixel_ratio;
+        log_debug("y_ppem=0 for %s, derived scale from height: %.6f", face->family_name, scale);
+    }
 
     // Check fsSelection bit 7 (USE_TYPO_METRICS)
     result.use_typo_metrics = (os2->fsSelection & OS2_FS_SELECTION_USE_TYPO_METRICS) != 0;
@@ -416,10 +426,24 @@ extern "C" int get_font_metrics_platform(const char* font_family, float font_siz
 //    ascent += floorf(((ascent + descent) * 0.15f) + 0.5f)
 // 4. LineSpacing = lroundf(ascent) + lroundf(descent) + lroundf(line_gap)
 // pixel_ratio: fonts are loaded at physical size, divide by pixel_ratio to get CSS pixels
-float calc_normal_line_height(FT_Face face, float pixel_ratio) {
+// css_font_size: optional CSS font size, used when y_ppem=0 (WOFF fonts)
+float calc_normal_line_height(FT_Face face, float pixel_ratio, float css_font_size) {
     const char* family = face->family_name;
     // y_ppem is in physical pixels, divide by pixel_ratio to get CSS font size
-    float font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+    // CRITICAL: Some WOFF fonts have y_ppem=0 despite correct metrics, use fallback
+    float font_size;
+    if (face->size && face->size->metrics.y_ppem != 0) {
+        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+    } else {
+        // y_ppem is 0 (common with WOFF fonts) - use the provided CSS font size
+        font_size = css_font_size;
+        if (font_size <= 0) {
+            // Last resort: derive from height metric (height ≈ ppem * 1.2 for typical fonts)
+            float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
+            font_size = height_px / 1.2f / pixel_ratio;
+            log_warn("y_ppem=0 and no css_font_size provided for %s, derived font_size=%.1f from height", family, font_size);
+        }
+    }
 
     // Try platform-specific implementation first (CoreText on macOS)
     // Pass CSS font size, platform metrics return CSS pixel values
@@ -483,6 +507,16 @@ float calc_normal_line_height(FT_Face face, float pixel_ratio) {
 
     log_debug("Normal line height: %.0f for %s", line_height, family);
     return line_height;
+}
+
+// Wrapper for backwards compatibility - uses 0 as css_font_size (will derive from height if needed)
+float calc_normal_line_height(FT_Face face, float pixel_ratio) {
+    return calc_normal_line_height(face, pixel_ratio, 0);
+}
+
+// Single-argument version for backwards compatibility (assumes pixel_ratio=1)
+float calc_normal_line_height(FT_Face face) {
+    return calc_normal_line_height(face, 1.0f, 0);
 }
 
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
