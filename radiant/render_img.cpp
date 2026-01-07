@@ -145,22 +145,28 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 }
 
 // Main function to layout HTML and render to PNG
-// scale: User-specified scale factor (default 1.0, use 2.0 for high-DPI output)
-int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height, float scale) {
+// scale: User-specified zoom factor (default 1.0)
+// pixel_ratio: Device pixel ratio for HiDPI (default 1.0, use 2.0 for Retina displays)
+// Final output size is (viewport_width * scale * pixel_ratio) x (viewport_height * scale * pixel_ratio)
+int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height, float scale, float pixel_ratio) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
-    log_debug("render_html_to_png called with html_file='%s', png_file='%s', viewport=%dx%d, scale=%.2f",
-              html_file, png_file, viewport_width, viewport_height, scale);
+    log_debug("render_html_to_png called with html_file='%s', png_file='%s', viewport=%dx%d, scale=%.2f, pixel_ratio=%.2f",
+              html_file, png_file, viewport_width, viewport_height, scale, pixel_ratio);
 
-    // Validate scale
+    // Validate scale and pixel_ratio
     if (scale <= 0) scale = 1.0f;
+    if (pixel_ratio <= 0) pixel_ratio = 1.0f;
+
+    // Combined scale factor for physical output
+    float total_scale = scale * pixel_ratio;
 
     // Remember if we need to auto-size (viewport was 0)
     bool auto_width = (viewport_width == 0);
     bool auto_height = (viewport_height == 0);
 
-    // Use reasonable defaults for layout if auto-sizing
+    // Use reasonable defaults for layout if auto-sizing (CSS pixels)
     int layout_width = viewport_width > 0 ? viewport_width : 1200;
     int layout_height = viewport_height > 0 ? viewport_height : 800;
 
@@ -171,12 +177,20 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         return 1;
     }
 
-    // Create a surface for rendering with layout dimensions
-    ui_context_create_surface(&ui_context, layout_width, layout_height);
+    // Set pixel_ratio for HiDPI font rendering (crisp text)
+    // This ensures fonts are loaded at the correct physical size
+    ui_context.pixel_ratio = pixel_ratio;
 
-    // Update UI context viewport dimensions for layout calculations
-    ui_context.window_width = layout_width;
-    ui_context.window_height = layout_height;
+    // Create a surface for rendering with total_scale dimensions (physical pixels)
+    int surface_width = (int)(layout_width * total_scale);
+    int surface_height = (int)(layout_height * total_scale);
+    ui_context_create_surface(&ui_context, surface_width, surface_height);
+
+    // Update UI context dimensions
+    ui_context.window_width = surface_width;    // physical pixels
+    ui_context.window_height = surface_height;  // physical pixels
+    ui_context.viewport_width = layout_width;   // CSS pixels
+    ui_context.viewport_height = layout_height; // CSS pixels
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -203,8 +217,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     ui_context.document = doc;
 
     // Set document scale for rendering
+    // given_scale is the user zoom, scale is the combined total_scale for physical rendering
     doc->given_scale = scale;
-    doc->scale = scale;  // In headless mode, pixel_ratio is always 1.0
+    doc->scale = total_scale;  // Combined scale * pixel_ratio for physical output
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
@@ -221,9 +236,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     log_info("[TIMING] Layout: %.1fms", duration<double, std::milli>(t_layout - t_fonts).count());
 
     // Calculate content bounds if auto-sizing
-    // Layout is in CSS logical pixels, so apply scale for physical output dimensions
-    int output_width = (int)(layout_width * scale);
-    int output_height = (int)(layout_height * scale);
+    // Layout is in CSS logical pixels, so apply total_scale for physical output dimensions
+    int output_width = (int)(layout_width * total_scale);
+    int output_height = (int)(layout_height * total_scale);
     if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
         extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
         int content_max_x = 0, content_max_y = 0;
@@ -231,11 +246,11 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         // Add padding to ensure nothing is cut off
         content_max_x += 50;
         content_max_y += 50;
-        // Apply scale to content bounds
-        if (auto_width) output_width = (int)(content_max_x * scale);
-        if (auto_height) output_height = (int)(content_max_y * scale);
-        log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, scale=%.2f)",
-                 output_width, output_height, scale);
+        // Apply total_scale to content bounds
+        if (auto_width) output_width = (int)(content_max_x * total_scale);
+        if (auto_height) output_height = (int)(content_max_y * total_scale);
+        log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, scale=%.2f, pixel_ratio=%.2f)",
+                 output_width, output_height, scale, pixel_ratio);
 
         // Recreate surface with correct output dimensions
         ui_context_create_surface(&ui_context, output_width, output_height);
@@ -263,13 +278,18 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 }
 
 // Main function to layout HTML and render to JPEG
-// scale: User-specified scale factor (default 1.0, use 2.0 for high-DPI output)
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height, float scale) {
-    log_debug("render_html_to_jpeg called with html_file='%s', jpeg_file='%s', quality=%d, viewport=%dx%d, scale=%.2f",
-              html_file, jpeg_file, quality, viewport_width, viewport_height, scale);
+// scale: User-specified zoom factor (default 1.0)
+// pixel_ratio: Device pixel ratio for HiDPI (default 1.0, use 2.0 for Retina displays)
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height, float scale, float pixel_ratio) {
+    log_debug("render_html_to_jpeg called with html_file='%s', jpeg_file='%s', quality=%d, viewport=%dx%d, scale=%.2f, pixel_ratio=%.2f",
+              html_file, jpeg_file, quality, viewport_width, viewport_height, scale, pixel_ratio);
 
-    // Validate scale
+    // Validate scale and pixel_ratio
     if (scale <= 0) scale = 1.0f;
+    if (pixel_ratio <= 0) pixel_ratio = 1.0f;
+
+    // Combined scale factor for physical output
+    float total_scale = scale * pixel_ratio;
 
     // Initialize UI context in headless mode
     UiContext ui_context;
@@ -278,16 +298,21 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
         return 1;
     }
 
-    // Calculate physical output dimensions (CSS pixels * scale)
-    int output_width = (int)(viewport_width * scale);
-    int output_height = (int)(viewport_height * scale);
+    // Set pixel_ratio for HiDPI font rendering
+    ui_context.pixel_ratio = pixel_ratio;
+
+    // Calculate physical output dimensions (CSS pixels * total_scale)
+    int output_width = (int)(viewport_width * total_scale);
+    int output_height = (int)(viewport_height * total_scale);
 
     // Create a surface for rendering with scaled dimensions
     ui_context_create_surface(&ui_context, output_width, output_height);
 
-    // Update UI context viewport dimensions for layout calculations (CSS logical pixels)
-    ui_context.window_width = viewport_width;
-    ui_context.window_height = viewport_height;
+    // Update UI context dimensions
+    ui_context.window_width = output_width;     // physical pixels
+    ui_context.window_height = output_height;   // physical pixels
+    ui_context.viewport_width = viewport_width;   // CSS pixels
+    ui_context.viewport_height = viewport_height; // CSS pixels
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -309,7 +334,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
 
     // Set document scale for rendering
     doc->given_scale = scale;
-    doc->scale = scale;  // In headless mode, pixel_ratio is always 1.0
+    doc->scale = total_scale;  // Combined scale * pixel_ratio
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);

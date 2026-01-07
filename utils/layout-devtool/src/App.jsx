@@ -10,6 +10,7 @@ function App() {
   const [leftPanelWidth, setLeftPanelWidth] = useState(300);
   const [terminalHeight, setTerminalHeight] = useState(250);
   const [lambdaRenderPath, setLambdaRenderPath] = useState(null);
+  const [lambdaPixelRatio, setLambdaPixelRatio] = useState(1);
   const [recentTests, setRecentTests] = useState([]);
   const [showRecentTests, setShowRecentTests] = useState(false);
   const [viewportPreset, setViewportPreset] = useState('desktop'); // desktop, tablet, mobile, custom
@@ -113,10 +114,11 @@ function App() {
       // Render the Lambda view with browser panel dimensions
       terminalRef.current?.writeln('Rendering Lambda view...');
       try {
-        const renderPath = await window.electronAPI.renderLambdaView(testPath, viewportWidth, viewportHeight);
-        console.log('Render path:', renderPath);
-        setLambdaRenderPath(renderPath);
-        terminalRef.current?.writeln('\x1b[32m✓ Render completed\x1b[0m');
+        const renderResult = await window.electronAPI.renderLambdaView(testPath, viewportWidth, viewportHeight);
+        console.log('Render result:', renderResult);
+        setLambdaRenderPath(renderResult.path);
+        setLambdaPixelRatio(renderResult.pixelRatio || 1);
+        terminalRef.current?.writeln(`\x1b[32m✓ Render completed (pixel ratio: ${renderResult.pixelRatio})\x1b[0m`);
       } catch (renderError) {
         console.error('Render error:', renderError);
         terminalRef.current?.writeln(`\x1b[31m✗ Render failed: ${renderError.message}\x1b[0m`);
@@ -307,7 +309,7 @@ function App() {
 
         <div className="right-content">
           <div className="top-panel">
-            <ComparisonPanel ref={comparisonPanelRef} test={selectedTest} lambdaRenderPath={lambdaRenderPath} />
+            <ComparisonPanel ref={comparisonPanelRef} test={selectedTest} lambdaRenderPath={lambdaRenderPath} lambdaPixelRatio={lambdaPixelRatio} />
           </div>
           <div className="resize-handle-horizontal" onMouseDown={handleBottomMouseDown} />
           <div className="bottom-panel" style={{ height: `${terminalHeight}px` }}>
