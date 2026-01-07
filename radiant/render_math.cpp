@@ -78,8 +78,10 @@ void render_math_glyph(RenderContext* rdcon, MathBox* box, float x, float y) {
         return;
     }
 
-    // Apply scaling
-    float scale = box->scale;
+    // The font face was sized during layout to physical pixels
+    // x, y are in physical pixels (scaled by caller)
+    // box->width, box->height are in CSS pixels
+    // box->scale is the math style scaling factor (1.0, 0.7, 0.5)
 
     // Load glyph
     FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
@@ -88,8 +90,7 @@ void render_math_glyph(RenderContext* rdcon, MathBox* box, float x, float y) {
         return;
     }
 
-    // Set size and load glyph for rendering
-    // The size should already be set from layout, but we ensure consistency
+    // Load glyph for rendering - font is already at physical pixel size from layout
     if (FT_Load_Glyph(face, glyph_index, FT_LOAD_RENDER) != 0) {
         log_debug("render_math_glyph: failed to load glyph for codepoint 0x%04X", codepoint);
         return;
@@ -103,112 +104,56 @@ void render_math_glyph(RenderContext* rdcon, MathBox* box, float x, float y) {
         return;
     }
 
-    // Calculate render position
-    // y is baseline, bitmap_top is offset from baseline to top of bitmap
-    float render_x = x + slot->bitmap_left * scale;
-    float render_y = y - slot->bitmap_top * scale;
+    // Calculate render position - bitmap metrics are in physical pixels
+    // y is baseline in physical pixels, bitmap_top is offset from baseline to top of bitmap
+    float render_x = x + slot->bitmap_left;
+    float render_y = y - slot->bitmap_top;
 
     // Get color
     uint8_t r = rdcon->color.r;
     uint8_t g = rdcon->color.g;
     uint8_t b = rdcon->color.b;
 
-    // Render bitmap to surface
+    // Render bitmap to surface (font is already at physical pixel size)
     ImageSurface* surface = rdcon->ui_context->surface;
     if (!surface || !surface->pixels) return;
 
-    // Handle scaled rendering
-    if (scale != 1.0f) {
-        // For scaled glyphs, we need to scale the bitmap
-        // This is a simple nearest-neighbor implementation
-        int scaled_width = (int)(bitmap->width * scale);
-        int scaled_height = (int)(bitmap->rows * scale);
+    // Direct rendering - bitmap is at correct physical size
+    for (unsigned int row = 0; row < bitmap->rows; row++) {
+        int dst_y = (int)render_y + row;
+        if (dst_y < 0 || dst_y >= surface->height) continue;
 
-        for (int sy = 0; sy < scaled_height; sy++) {
-            int src_y = (int)(sy / scale);
-            if (src_y >= (int)bitmap->rows) src_y = bitmap->rows - 1;
+        uint8_t* dst_row = (uint8_t*)surface->pixels + dst_y * surface->pitch;
 
-            int dst_y = (int)render_y + sy;
-            if (dst_y < 0 || dst_y >= surface->height) continue;
+        for (unsigned int col = 0; col < bitmap->width; col++) {
+            int dst_x = (int)render_x + col;
+            if (dst_x < 0 || dst_x >= surface->width) continue;
 
-            uint8_t* dst_row = (uint8_t*)surface->pixels + dst_y * surface->pitch;
-
-            for (int sx = 0; sx < scaled_width; sx++) {
-                int src_x = (int)(sx / scale);
-                if (src_x >= (int)bitmap->width) src_x = bitmap->width - 1;
-
-                int dst_x = (int)render_x + sx;
-                if (dst_x < 0 || dst_x >= surface->width) continue;
-
-                // Get alpha from bitmap
-                uint8_t alpha;
-                if (bitmap->pixel_mode == FT_PIXEL_MODE_GRAY) {
-                    alpha = bitmap->buffer[src_y * bitmap->pitch + src_x];
-                } else if (bitmap->pixel_mode == FT_PIXEL_MODE_MONO) {
-                    // Monochrome bitmap
-                    int byte_offset = src_x / 8;
-                    int bit_offset = 7 - (src_x % 8);
-                    alpha = (bitmap->buffer[src_y * bitmap->pitch + byte_offset] >> bit_offset) & 1 ? 255 : 0;
-                } else {
-                    alpha = 255;
-                }
-
-                if (alpha == 0) continue;
-
-                // Blend with background
-                uint8_t* dst = dst_row + dst_x * 4;
-                if (alpha == 255) {
-                    dst[0] = r;
-                    dst[1] = g;
-                    dst[2] = b;
-                    dst[3] = 255;
-                } else {
-                    uint32_t inv_alpha = 255 - alpha;
-                    dst[0] = (dst[0] * inv_alpha + r * alpha) / 255;
-                    dst[1] = (dst[1] * inv_alpha + g * alpha) / 255;
-                    dst[2] = (dst[2] * inv_alpha + b * alpha) / 255;
-                    dst[3] = 255;
-                }
+            uint8_t alpha;
+            if (bitmap->pixel_mode == FT_PIXEL_MODE_GRAY) {
+                alpha = bitmap->buffer[row * bitmap->pitch + col];
+            } else if (bitmap->pixel_mode == FT_PIXEL_MODE_MONO) {
+                int byte_offset = col / 8;
+                int bit_offset = 7 - (col % 8);
+                alpha = (bitmap->buffer[row * bitmap->pitch + byte_offset] >> bit_offset) & 1 ? 255 : 0;
+            } else {
+                alpha = 255;
             }
-        }
-    } else {
-        // Unscaled rendering (simpler, faster)
-        for (unsigned int row = 0; row < bitmap->rows; row++) {
-            int dst_y = (int)render_y + row;
-            if (dst_y < 0 || dst_y >= surface->height) continue;
 
-            uint8_t* dst_row = (uint8_t*)surface->pixels + dst_y * surface->pitch;
+            if (alpha == 0) continue;
 
-            for (unsigned int col = 0; col < bitmap->width; col++) {
-                int dst_x = (int)render_x + col;
-                if (dst_x < 0 || dst_x >= surface->width) continue;
-
-                uint8_t alpha;
-                if (bitmap->pixel_mode == FT_PIXEL_MODE_GRAY) {
-                    alpha = bitmap->buffer[row * bitmap->pitch + col];
-                } else if (bitmap->pixel_mode == FT_PIXEL_MODE_MONO) {
-                    int byte_offset = col / 8;
-                    int bit_offset = 7 - (col % 8);
-                    alpha = (bitmap->buffer[row * bitmap->pitch + byte_offset] >> bit_offset) & 1 ? 255 : 0;
-                } else {
-                    alpha = 255;
-                }
-
-                if (alpha == 0) continue;
-
-                uint8_t* dst = dst_row + dst_x * 4;
-                if (alpha == 255) {
-                    dst[0] = r;
-                    dst[1] = g;
-                    dst[2] = b;
-                    dst[3] = 255;
-                } else {
-                    uint32_t inv_alpha = 255 - alpha;
-                    dst[0] = (dst[0] * inv_alpha + r * alpha) / 255;
-                    dst[1] = (dst[1] * inv_alpha + g * alpha) / 255;
-                    dst[2] = (dst[2] * inv_alpha + b * alpha) / 255;
-                    dst[3] = 255;
-                }
+            uint8_t* dst = dst_row + dst_x * 4;
+            if (alpha == 255) {
+                dst[0] = r;
+                dst[1] = g;
+                dst[2] = b;
+                dst[3] = 255;
+            } else {
+                uint32_t inv_alpha = 255 - alpha;
+                dst[0] = (dst[0] * inv_alpha + r * alpha) / 255;
+                dst[1] = (dst[1] * inv_alpha + g * alpha) / 255;
+                dst[2] = (dst[2] * inv_alpha + b * alpha) / 255;
+                dst[3] = 255;
             }
         }
     }
@@ -221,6 +166,7 @@ void render_math_glyph(RenderContext* rdcon, MathBox* box, float x, float y) {
 static void render_hbox(RenderContext* rdcon, MathBox* box, float x, float y) {
     if (!box || box->content_type != MathBoxContentType::HBox) return;
 
+    float s = rdcon->scale;  // pixel_ratio for HiDPI - math box widths are in CSS pixels
     float current_x = x;
 
     for (int i = 0; i < box->content.hbox.count; i++) {
@@ -228,7 +174,7 @@ static void render_hbox(RenderContext* rdcon, MathBox* box, float x, float y) {
         if (!child) continue;
 
         render_math_box(rdcon, child, current_x, y);
-        current_x += child->width;
+        current_x += child->width * s;  // Scale CSS pixels to physical pixels
     }
 }
 
@@ -239,14 +185,16 @@ static void render_hbox(RenderContext* rdcon, MathBox* box, float x, float y) {
 static void render_vbox(RenderContext* rdcon, MathBox* box, float x, float y) {
     if (!box || box->content_type != MathBoxContentType::VBox) return;
 
+    float s = rdcon->scale;  // pixel_ratio for HiDPI - shifts are in CSS pixels
+
     for (int i = 0; i < box->content.vbox.count; i++) {
         MathBox* child = box->content.vbox.children[i];
         if (!child) continue;
 
         float shift = box->content.vbox.shifts[i];
-        // shift is relative to the vbox baseline
+        // shift is relative to the vbox baseline (CSS pixels)
         // positive shift = child baseline is above vbox baseline
-        render_math_box(rdcon, child, x, y - shift);
+        render_math_box(rdcon, child, x, y - shift * s);  // Scale shift to physical pixels
     }
 }
 
@@ -257,12 +205,13 @@ static void render_vbox(RenderContext* rdcon, MathBox* box, float x, float y) {
 void render_math_rule(RenderContext* rdcon, MathBox* box, float x, float y) {
     if (!box || box->content_type != MathBoxContentType::Rule) return;
 
-    float thickness = box->content.rule.thickness;
-    float width = box->width;
+    float s = rdcon->scale;  // pixel_ratio for HiDPI - box dimensions are in CSS pixels
+    float thickness = box->content.rule.thickness * s;
+    float width = box->width * s;
 
     // The rule is centered on the axis (y position is the baseline)
     // box->height and box->depth encode the position
-    float rule_y = y - box->height + thickness / 2;
+    float rule_y = y - box->height * s + thickness / 2;
 
     // Create a filled rectangle using ThorVG
     Tvg_Paint* shape = tvg_shape_new();
@@ -282,17 +231,18 @@ void render_math_rule(RenderContext* rdcon, MathBox* box, float x, float y) {
 void render_math_radical(RenderContext* rdcon, MathBox* box, float x, float y) {
     if (!box || box->content_type != MathBoxContentType::Radical) return;
 
+    float s = rdcon->scale;  // pixel_ratio for HiDPI
     MathBox* radicand = box->content.radical.radicand;
     MathBox* index = box->content.radical.index;
-    float rule_thickness = box->content.radical.rule_thickness;
-    float rule_y = box->content.radical.rule_y;
+    float rule_thickness = box->content.radical.rule_thickness * s;
+    float rule_y = box->content.radical.rule_y * s;
 
     // Render the radical symbol (already done in hbox rendering)
 
     // Render the overline
     if (radicand) {
         float rule_x = x;
-        float rule_width = radicand->width;
+        float rule_width = radicand->width * s;
 
         Tvg_Paint* shape = tvg_shape_new();
         tvg_shape_append_rect(shape, rule_x, y - rule_y, rule_width, rule_thickness, 0, 0);
@@ -331,11 +281,13 @@ void render_math_from_embed(RenderContext* rdcon, DomElement* elem) {
     }
 
     // Get absolute position by adding render context block offset
-    float x = rdcon->block.x + elem->x;
-    float y = rdcon->block.y + elem->y + elem->embed->math_baseline_offset;
+    // Math layout uses CSS pixels, need to scale to physical pixels for rendering
+    float s = rdcon->scale;  // pixel_ratio for HiDPI
+    float x = rdcon->block.x + elem->x * s;
+    float y = rdcon->block.y + (elem->y + elem->embed->math_baseline_offset) * s;
 
-    log_debug("render_math_from_embed: rendering at (%.1f, %.1f) elem pos=(%.1f, %.1f) block offset=(%.1f, %.1f)",
-              x, y, elem->x, elem->y, rdcon->block.x, rdcon->block.y);
+    log_debug("render_math_from_embed: rendering at (%.1f, %.1f) elem pos=(%.1f, %.1f) block offset=(%.1f, %.1f) scale=%.1f",
+              x, y, elem->x, elem->y, rdcon->block.x, rdcon->block.y, s);
 
     // Render the math box tree
     render_math_box(rdcon, elem->embed->math_box, x, y);

@@ -80,14 +80,18 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     Tvg_Paint* v_scroll_handle = tvg_shape_new();
     if (content_height > 0) {
         tvg_shape_set_fill_color(v_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
-        sp->v_max_scroll = content_height > view_height ? content_height - view_height : 0;
+        // NOTE: Do NOT recalculate v_max_scroll here!
+        // v_max_scroll is set by update_scroller() in CSS pixels, and is used by scroll event handlers
+        // which compare against scroll_position (also in CSS pixels).
+        // content_height and view_height here are in physical pixels (for rendering).
         float bar_height = view_height - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
         log_debug("bar height: %f", bar_height);
         float v_ratio = min(view_height * 100 / content_height, 100.0f);
         sp->v_handle_height = (v_ratio * bar_height) / 100;
         sp->v_handle_height = max(sc.MIN_HANDLE_SIZE, sp->v_handle_height);
-        sp->v_handle_y = sc.SCROLL_BORDER_MAIN + (sp->v_max_scroll > 0 ?
-            (sp->v_scroll_position * (bar_height - sp->v_handle_height)) / sp->v_max_scroll : 0);
+        // v_scroll_position and v_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
+        float scroll_ratio = (sp->v_max_scroll > 0) ? (sp->v_scroll_position / sp->v_max_scroll) : 0;
+        sp->v_handle_y = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - sp->v_handle_height);
         float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
         tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + sp->v_handle_y,
             sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS);
@@ -108,15 +112,17 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     Tvg_Paint* h_scroll_handle = tvg_shape_new();
     if (content_width > 0) {
         tvg_shape_set_fill_color(h_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
-        sp->h_max_scroll = content_width > view_width ? content_width - view_width : 0;
+        // NOTE: Do NOT recalculate h_max_scroll here! Same reason as v_max_scroll above.
+        // h_max_scroll is set by update_scroller() in CSS pixels.
         log_debug("h_max_scroll: %f (content_width=%.1f, view_width=%.1f)", sp->h_max_scroll, content_width, view_width);
         float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
         log_debug("bar width: %f", bar_width);
         float h_ratio = min(view_width * 100 / content_width, 100.0f);
         sp->h_handle_width = (h_ratio * bar_width) / 100;
         sp->h_handle_width = max(sc.MIN_HANDLE_SIZE, sp->h_handle_width);
-        sp->h_handle_x = sc.SCROLL_BORDER_MAIN + (sp->h_max_scroll > 0 ?
-            (sp->h_scroll_position * (bar_width - sp->h_handle_width)) / sp->h_max_scroll : 0);
+        // h_scroll_position and h_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
+        float scroll_ratio = (sp->h_max_scroll > 0) ? (sp->h_scroll_position / sp->h_max_scroll) : 0;
+        sp->h_handle_x = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - sp->h_handle_width);
         int h_scroll_y = view_y + view_height - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
         tvg_shape_append_rect(h_scroll_handle, view_x + sp->h_handle_x, h_scroll_y,
             sp->h_handle_width, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS);

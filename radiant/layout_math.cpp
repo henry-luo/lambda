@@ -91,55 +91,61 @@ FT_Face load_math_font(MathContext& ctx) {
     return face;
 }
 
-void get_glyph_metrics(FT_Face face, int codepoint, float font_size,
+void get_glyph_metrics(FT_Face face, int codepoint, float css_font_size, float pixel_ratio,
                        float* width, float* height, float* depth, float* italic) {
     if (!face) {
         *width = *height = *depth = *italic = 0;
         return;
     }
 
-    // Set font size
-    FT_Set_Pixel_Sizes(face, 0, (FT_UInt)font_size);
+    // CRITICAL: Set font size in PHYSICAL pixels for HiDPI displays
+    // The face may have been loaded at a different size, so we must set it correctly
+    float physical_font_size = css_font_size * pixel_ratio;
+    FT_Set_Pixel_Sizes(face, 0, (FT_UInt)physical_font_size);
 
     // Load glyph without rendering
     FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
     if (glyph_index == 0) {
-        // Glyph not found
-        *width = font_size * 0.5f;
-        *height = font_size * 0.7f;
+        // Glyph not found - return CSS pixel metrics
+        *width = css_font_size * 0.5f;
+        *height = css_font_size * 0.7f;
         *depth = 0;
         *italic = 0;
         return;
     }
 
     if (FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_BITMAP) != 0) {
-        *width = font_size * 0.5f;
-        *height = font_size * 0.7f;
+        *width = css_font_size * 0.5f;
+        *height = css_font_size * 0.7f;
         *depth = 0;
         *italic = 0;
         return;
     }
 
     FT_GlyphSlot glyph = face->glyph;
-    float scale = font_size / face->units_per_EM;
 
-    *width = glyph->metrics.horiAdvance / 64.0f;
-    *height = glyph->metrics.horiBearingY / 64.0f;
-    *depth = (glyph->metrics.height - glyph->metrics.horiBearingY) / 64.0f;
+    // Metrics from FreeType are in physical pixels (26.6 fixed point)
+    // Convert to CSS pixels by dividing by pixel_ratio
+    *width = (glyph->metrics.horiAdvance / 64.0f) / pixel_ratio;
+    *height = (glyph->metrics.horiBearingY / 64.0f) / pixel_ratio;
+    *depth = ((glyph->metrics.height - glyph->metrics.horiBearingY) / 64.0f) / pixel_ratio;
     if (*depth < 0) *depth = 0;
 
-    // Italic correction (approximation)
+    // Italic correction (approximation) - also in CSS pixels
     *italic = 0;
     if (glyph->metrics.horiBearingX + glyph->metrics.width > glyph->metrics.horiAdvance) {
-        *italic = (glyph->metrics.horiBearingX + glyph->metrics.width - glyph->metrics.horiAdvance) / 64.0f;
+        *italic = ((glyph->metrics.horiBearingX + glyph->metrics.width - glyph->metrics.horiAdvance) / 64.0f) / pixel_ratio;
     }
 }
 
 MathBox* make_glyph(MathContext& ctx, int codepoint, MathBoxType type, Arena* arena) {
     FT_Face face = load_math_font(ctx);
 
+    // Get pixel_ratio for HiDPI support
+    float pixel_ratio = (ctx.ui_context && ctx.ui_context->pixel_ratio > 0) ? ctx.ui_context->pixel_ratio : 1.0f;
+
     float width, height, depth, italic;
-    get_glyph_metrics(face, codepoint, ctx.font_size(), &width, &height, &depth, &italic);
+    get_glyph_metrics(face, codepoint, ctx.font_size(), pixel_ratio, &width, &height, &depth, &italic);
 
     MathBox* box = make_glyph_box(arena, codepoint, face, width, height, depth, type);
     box->italic = italic;
