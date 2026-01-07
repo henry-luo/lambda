@@ -367,8 +367,15 @@ class LayoutDevTool {
       console.log('  outputPath:', outputPath);
       console.log('  viewport:', width, 'x', height);
 
-      // Run: ./lambda.exe render <testPath> -o output.png -vw <width> -vh <height>
-      const args = ['render', absoluteTestPath, '-o', outputPath, '-vw', String(width), '-vh', String(height)];
+      // Detect pixel ratio for HiDPI displays (Retina on macOS)
+      // Electron's screen module can provide devicePixelRatio
+      const { screen } = require('electron');
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const pixelRatio = primaryDisplay.scaleFactor || 1;
+      console.log('  pixelRatio:', pixelRatio);
+
+      // Run: ./lambda.exe render <testPath> -o output.png -vw <width> -vh <height> --pixel-ratio <ratio>
+      const args = ['render', absoluteTestPath, '-o', outputPath, '-vw', String(width), '-vh', String(height), '--pixel-ratio', String(pixelRatio)];
       const renderProcess = spawn(this.lambdaExe, args, {
         cwd: this.projectRoot
       });
@@ -394,9 +401,12 @@ class LayoutDevTool {
           // Check if output file exists
           try {
             await fs.access(outputPath);
-            // Return the file path with a cache-busting timestamp
+            // Return the file path with a cache-busting timestamp and the pixel ratio
             const timestamp = Date.now();
-            resolve(`file://${outputPath}?t=${timestamp}`);
+            resolve({
+              path: `file://${outputPath}?t=${timestamp}`,
+              pixelRatio: pixelRatio
+            });
           } catch (e) {
             console.error('Output file not found:', outputPath);
             reject(new Error('Render output file not created'));

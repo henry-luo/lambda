@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 
-const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRenderPath }, ref) {
+const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRenderPath, lambdaPixelRatio = 1 }, ref) {
   const [browserView, setBrowserView] = useState(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [splitPos, setSplitPos] = useState(50);
@@ -192,6 +192,10 @@ const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRender
               src={lambdaRenderPath}
               alt="Lambda Render"
               className="lambda-render"
+              style={{
+                transform: `scale(${1 / lambdaPixelRatio})`,
+                transformOrigin: 'top left'
+              }}
             />
           ) : (
             <div className="empty-state">
