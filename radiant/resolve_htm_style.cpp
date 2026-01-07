@@ -710,11 +710,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_BUTTON: {
         // button: centered text, some padding, inline-block display with flow inner
         // All values in CSS logical pixels
-        block->item_prop_type = DomElement::ITEM_PROP_FORM;
-        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-        new (block->form) FormControlProp();
-        block->form->control_type = FORM_CONTROL_BUTTON;
-        if (block->get_attribute("disabled")) block->form->disabled = 1;
+        // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
+        if (!block->form) {
+            block->item_prop_type = DomElement::ITEM_PROP_FORM;
+            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+            new (block->form) FormControlProp();
+            block->form->control_type = FORM_CONTROL_BUTTON;
+            if (block->get_attribute("disabled")) block->form->disabled = 1;
+        }
 
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->display.inner = CSS_VALUE_FLOW;  // button has flow children
@@ -731,32 +734,35 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_INPUT: {
         // Allocate form control prop - all values in CSS logical pixels
-        block->item_prop_type = DomElement::ITEM_PROP_FORM;
-        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-        new (block->form) FormControlProp();  // placement new for constructor
+        // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
+        if (!block->form) {
+            block->item_prop_type = DomElement::ITEM_PROP_FORM;
+            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+            new (block->form) FormControlProp();  // placement new for constructor
 
-        // Parse type attribute
-        const char* type = block->get_attribute("type");
-        block->form->input_type = type;
-        block->form->control_type = get_input_control_type(type);
+            // Parse type attribute
+            const char* type = block->get_attribute("type");
+            block->form->input_type = type;
+            block->form->control_type = get_input_control_type(type);
 
-        // Parse common attributes
-        block->form->value = block->get_attribute("value");
-        block->form->placeholder = block->get_attribute("placeholder");
-        block->form->name = block->get_attribute("name");
+            // Parse common attributes
+            block->form->value = block->get_attribute("value");
+            block->form->placeholder = block->get_attribute("placeholder");
+            block->form->name = block->get_attribute("name");
 
-        // Parse size attribute for text inputs
-        const char* size_attr = block->get_attribute("size");
-        if (size_attr) {
-            block->form->size = atoi(size_attr);
-            if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
+            // Parse size attribute for text inputs
+            const char* size_attr = block->get_attribute("size");
+            if (size_attr) {
+                block->form->size = atoi(size_attr);
+                if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
+            }
+
+            // Parse state attributes
+            if (block->get_attribute("disabled")) block->form->disabled = 1;
+            if (block->get_attribute("readonly")) block->form->readonly = 1;
+            if (block->get_attribute("checked")) block->form->checked = 1;
+            if (block->get_attribute("required")) block->form->required = 1;
         }
-
-        // Parse state attributes
-        if (block->get_attribute("disabled")) block->form->disabled = 1;
-        if (block->get_attribute("readonly")) block->form->readonly = 1;
-        if (block->get_attribute("checked")) block->form->checked = 1;
-        if (block->get_attribute("required")) block->form->required = 1;
 
         // Set display and intrinsic size based on control type
         switch (block->form->control_type) {
@@ -827,13 +833,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_SELECT: {
         // All values in CSS logical pixels
-        block->item_prop_type = DomElement::ITEM_PROP_FORM;
-        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-        new (block->form) FormControlProp();
-        block->form->control_type = FORM_CONTROL_SELECT;
-        block->form->name = block->get_attribute("name");
-        if (block->get_attribute("disabled")) block->form->disabled = 1;
-        if (block->get_attribute("multiple")) block->form->multiple = 1;
+        // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
+        if (!block->form) {
+            block->item_prop_type = DomElement::ITEM_PROP_FORM;
+            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+            new (block->form) FormControlProp();
+            block->form->control_type = FORM_CONTROL_SELECT;
+            block->form->name = block->get_attribute("name");
+            if (block->get_attribute("disabled")) block->form->disabled = 1;
+            if (block->get_attribute("multiple")) block->form->multiple = 1;
+        }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->form->intrinsic_width = FormDefaults::SELECT_WIDTH;
         block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
@@ -849,19 +858,22 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_TEXTAREA: {
         // All values in CSS logical pixels
-        block->item_prop_type = DomElement::ITEM_PROP_FORM;
-        block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
-        new (block->form) FormControlProp();
-        block->form->control_type = FORM_CONTROL_TEXTAREA;
-        block->form->name = block->get_attribute("name");
-        block->form->placeholder = block->get_attribute("placeholder");
-        if (block->get_attribute("disabled")) block->form->disabled = 1;
-        if (block->get_attribute("readonly")) block->form->readonly = 1;
-        // Parse cols/rows
-        const char* cols_attr = block->get_attribute("cols");
-        const char* rows_attr = block->get_attribute("rows");
-        if (cols_attr) block->form->cols = atoi(cols_attr);
-        if (rows_attr) block->form->rows = atoi(rows_attr);
+        // Guard: only allocate if not already allocated (avoid re-allocating on repeated style resolution)
+        if (!block->form) {
+            block->item_prop_type = DomElement::ITEM_PROP_FORM;
+            block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
+            new (block->form) FormControlProp();
+            block->form->control_type = FORM_CONTROL_TEXTAREA;
+            block->form->name = block->get_attribute("name");
+            block->form->placeholder = block->get_attribute("placeholder");
+            if (block->get_attribute("disabled")) block->form->disabled = 1;
+            if (block->get_attribute("readonly")) block->form->readonly = 1;
+            // Parse cols/rows
+            const char* cols_attr = block->get_attribute("cols");
+            const char* rows_attr = block->get_attribute("rows");
+            if (cols_attr) block->form->cols = atoi(cols_attr);
+            if (rows_attr) block->form->rows = atoi(rows_attr);
+        }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         // Intrinsic size based on cols/rows - computed in layout with font metrics
         block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;  // placeholder

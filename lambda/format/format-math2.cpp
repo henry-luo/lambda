@@ -94,15 +94,11 @@ static void format_command_latex(StringBuf* sb, Map* map, int depth) {
     // Format any arguments (groups following the command)
     // Commands can have args field which is a list of groups
     Item args = get_field_item(map, "args");
-    log_debug("format_command_latex: cmd=%s, args type=%d", cmd ? cmd : "NULL", get_type_id(args));
     if (args.item != ItemNull.item && get_type_id(args) == LMD_TYPE_LIST) {
         List* args_list = args.list;
-        log_debug("format_command_latex: formatting %d args", args_list->length);
         for (int i = 0; i < args_list->length; i++) {
             Item arg = args_list->items[i];
             if (arg.item != ItemNull.item) {
-                const char* arg_node_type = get_node_type_string(arg.map);
-                log_debug("format_command_latex: arg %d node_type=%s", i, arg_node_type ? arg_node_type : "NULL");
                 format_node_latex(sb, arg, depth + 1);
             }
         }
@@ -171,8 +167,28 @@ static bool item_starts_with_letter(Item item) {
             return (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z');
         }
     }
+    
+    // Groups: check the content
+    if (strcmp(node_type, "group") == 0) {
+        Item content = get_field_item(map, "content");
+        if (content.item != ItemNull.item) {
+            return item_starts_with_letter(content);
+        }
+    }
+    
+    // Rows: check the first item
+    if (strcmp(node_type, "row") == 0) {
+        Item items = get_field_item(map, "items");
+        if (items.item != ItemNull.item && get_type_id(items) == LMD_TYPE_LIST) {
+            List* list = items.list;
+            if (list->length > 0) {
+                return item_starts_with_letter(list->items[0]);
+            }
+        }
+    }
+    
     // Commands start with backslash, not letter
-    // Rows, groups, etc. - need to check recursively but for safety return false
+    // Other node types: return false for safety
     return false;
 }
 
@@ -223,12 +239,12 @@ static void format_row_latex(StringBuf* sb, Map* map, int depth) {
         if (!is_unary && needs_space_after(atom_type) && i < list->length - 1) {
             stringbuf_append_char(sb, ' ');
         }
-        // Add space after commands that end with letter if followed by letter
+        // Add space after commands that end with letter if followed by any item
         else if (i < list->length - 1) {
-            bool is_space_or_cmd = is_space_command(current) || is_command_node(current);
-            if (is_space_or_cmd) {
+            if (is_command_node(current)) {
                 const char* cmd = get_node_cmd(current);
-                if (command_ends_with_letter(cmd) && item_starts_with_letter(list->items[i+1])) {
+                // Always add space after commands ending with letters
+                if (command_ends_with_letter(cmd)) {
                     stringbuf_append_char(sb, ' ');
                 }
             }
@@ -582,6 +598,11 @@ static void format_node_latex(StringBuf* sb, Item node, int depth) {
     }
     else if (strcmp(node_type, "number") == 0) {
         format_number_latex(sb, map);
+    }
+    else if (strcmp(node_type, "punct") == 0) {
+        // Punctuation - just output the value
+        const char* value = get_field_string(map, "value");
+        if (value) stringbuf_append_str(sb, value);
     }
     else if (strcmp(node_type, "command") == 0) {
         format_command_latex(sb, map, depth);
