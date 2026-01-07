@@ -1,0 +1,132 @@
+{
+  "category": "environments",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "\\\\begin{bmatrix}a & b & c\\\\end{bmatrix}",
+      "description": "ENVIRONMENTS test case 1",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 2,
+      "latex": "\\\\begin{bmatrix}a & b & c\\\\\\\\ d & e & f\\\\end{bmatrix}",
+      "description": "ENVIRONMENTS test case 2",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 3,
+      "latex": "\\\\begin{bmatrix}a & b & c\\\\\\\\ d \\\\end{bmatrix}",
+      "description": "ENVIRONMENTS test case 3",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 4,
+      "latex": "\\\\begin{bmatrix}a & b & c\\\\\\\\ d \\\\\\\\ g & h & i & j\\\\end{bmatrix}",
+      "description": "ENVIRONMENTS test case 4",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 5,
+      "latex": "\\\\begin{array}{ll}xyz & abc & 123 \\\\\\\\ cde & fgh \\\\end{array}",
+      "description": "ENVIRONMENTS test case 5",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 6,
+      "latex": "\\\\begin{Bmatrix}a & b & c\\\\end{Bmatrix}",
+      "description": "ENVIRONMENTS test case 6",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 7,
+      "latex": "\\\\begin{pmatrix}a & b & c\\\\end{pmatrix}",
+      "description": "ENVIRONMENTS test case 7",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 8,
+      "latex": "\\\\begin{cases}\\\\sum_n^{100}+\\\\frac{x-y}{4}=\\\\frac{4-y}{8}\\\\\\\\-\\\\frac{y+3}{8}=\\\\frac{1-2x}{8}+\\\\sum_n^{100}\\\\end{cases}",
+      "description": "ENVIRONMENTS test case 8",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 9,
+      "latex": "\\\\begin{dcases}\\\\sum_n^{100}+\\\\frac{x-y}{4}=\\\\frac{4-y}{8}\\\\\\\\-\\\\frac{y+3}{8}=\\\\frac{1-2x}{8}+\\\\sum_n^{100}\\\\end{dcases}",
+      "description": "ENVIRONMENTS test case 9",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 10,
+      "latex": "\\\\begin",
+      "description": "ENVIRONMENTS test case 10",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 11,
+      "latex": "\\\\begin{bmatrix}",
+      "description": "ENVIRONMENTS test case 11",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 12,
+      "latex": "\\\\begin{bmatrix}\\\\end",
+      "description": "ENVIRONMENTS test case 12",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 13,
+      "latex": "\\\\begin{bmatrix}\\\\end{Bmatrix}",
+      "description": "ENVIRONMENTS test case 13",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 14,
+      "latex": "\\\\begin{a}\\\\end{a}",
+      "description": "ENVIRONMENTS test case 14",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 15,
+      "latex": "\\\\begin{array}{ll}\\\\end{bmatrix}",
+      "description": "ENVIRONMENTS test case 15",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 16,
+      "latex": "\\\\begin{array}{ll}xyz\\\\end{bmatrix}",
+      "description": "ENVIRONMENTS test case 16",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 17,
+      "latex": "\\\\begin{array}{ll}xyz",
+      "description": "ENVIRONMENTS test case 17",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 18,
+      "latex": "\\\\begin{array}{ll}xyz",
+      "description": "ENVIRONMENTS test case 18",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 19,
+      "latex": "\\\\begin{\\\\alpha}\\\\end{\\\\alpha}",
+      "description": "ENVIRONMENTS test case 19",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 20,
+      "latex": "\\\\begin{.}\\\\end{.}",
+      "description": "ENVIRONMENTS test case 20",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 21,
+      "latex": "\\\\begin{(}\\\\end{(}",
+      "description": "ENVIRONMENTS test case 21",
+      "source": "mathlive/markup.test.ts"
+    }
+  ]
+}

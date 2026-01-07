@@ -9,6 +9,7 @@ Thumbs.db
 
 # Compiled binaries and objects
 premake5.lua
+premake5.*.lua
 *.o
 *.d
 *.a
@@ -137,4 +138,3 @@ gumbo-parser/
 taffy/
 latex-js/
 mathlive/
-

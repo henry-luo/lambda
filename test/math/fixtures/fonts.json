@@ -1,0 +1,36 @@
+{
+  "category": "fonts",
+  "source": "mathlive",
+  "tests": [
+    {
+      "id": 1,
+      "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+      "description": "FONTS test case 1",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 2,
+      "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+      "description": "FONTS test case 2",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 3,
+      "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+      "description": "FONTS test case 3",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 4,
+      "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+      "description": "FONTS test case 4",
+      "source": "mathlive/markup.test.ts"
+    },
+    {
+      "id": 5,
+      "latex": "\\\\mathfrak{\\\\sin}",
+      "description": "FONTS test case 5",
+      "source": "mathlive/markup.test.ts"
+    }
+  ]
+}

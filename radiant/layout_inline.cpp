@@ -1,11 +1,21 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
 #include "layout_table.hpp"
+#include "layout_math.hpp"
+#include "math_box.hpp"
+#include "math_context.hpp"
+#include "math_integration.hpp"
+#include "../lambda/input/input.hpp"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lib/strbuf.h"
 
 // Forward declarations from layout_block.cpp for pseudo-element handling
 extern PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block);
 extern void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
 extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
+
+// Forward declarations for math parsing
+extern "C" void parse_math(Input* input, const char* math_string, const char* flavor);
 
 // Compute bounding box of a ViewSpan based on union of child views
 // The bounding box includes the span's own border and padding
@@ -58,6 +68,153 @@ void compute_span_bounding_box(ViewSpan* span) {
     span->y = min_y - (int)border_top;
     span->width = max_x - min_x;
     span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
+}
+
+// ============================================================================
+// Math Element Handling
+// ============================================================================
+
+/**
+ * Recursively collect text content from a DOM element and its children.
+ * Used to extract LaTeX math source from <span class="math inline"> elements.
+ */
+static void collect_text_content(DomNode* node, StrBuf* sb) {
+    if (!node) return;
+
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (text->text && text->length > 0) {
+            strbuf_append_str_n(sb, text->text, text->length);
+        }
+    } else if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        DomNode* child = elem->first_child;
+        while (child) {
+            collect_text_content(child, sb);
+            child = child->next_sibling;
+        }
+    }
+}
+
+/**
+ * Check if an element is a math element (has class "math" with "inline" or "display" subclass).
+ * Returns: 0 = not math, 1 = inline math, 2 = display math
+ */
+static int detect_math_element(DomElement* elem) {
+    if (!elem) return 0;
+
+    // check for class="math inline" or class="math display"
+    if (dom_element_has_class(elem, "math")) {
+        if (dom_element_has_class(elem, "inline")) {
+            return 1;  // inline math
+        }
+        if (dom_element_has_class(elem, "display")) {
+            return 2;  // display math
+        }
+        // just "math" class defaults to inline
+        return 1;
+    }
+
+    // check for tag <math>
+    if (elem->tag() == HTM_TAG_MATH) {
+        return 1;  // MathML element
+    }
+
+    return 0;
+}
+
+/**
+ * Layout a math element by extracting its LaTeX content, parsing it,
+ * and creating a ViewMath with the typeset formula.
+ */
+static void layout_math_span(LayoutContext* lycon, DomElement* elem, bool is_display) {
+    log_debug("layout_math_span: processing math element, is_display=%d", is_display);
+
+    // First try to get LaTeX source from data-latex attribute (preferred)
+    const char* latex_source = dom_element_get_attribute(elem, "data-latex");
+
+    StrBuf* sb = nullptr;
+    if (!latex_source || !*latex_source) {
+        // Fallback: collect text content from the element
+        sb = strbuf_new();
+        collect_text_content(elem, sb);
+
+        if (sb->length == 0) {
+            log_debug("layout_math_span: no text content in math element");
+            strbuf_free(sb);
+            return;
+        }
+        latex_source = sb->str;
+    }
+
+    log_debug("layout_math_span: LaTeX source: '%s'", latex_source);
+
+    // parse the math content
+    // we need an Input to parse math - use the document's input if available
+    Input* input = lycon->doc ? lycon->doc->input : nullptr;
+    if (!input) {
+        // create a temporary input for parsing
+        input = InputManager::create_input(nullptr);
+    }
+
+    // parse LaTeX math
+    parse_math(input, latex_source, "latex");
+
+    // get the parsed math node tree from input's root
+    Item math_node = input->root;
+    if (math_node.item == ItemNull.item) {
+        log_debug("layout_math_span: failed to parse math content");
+        if (sb) strbuf_free(sb);
+        return;
+    }
+
+    // Set up math on the DOM element (stores in elem->embed and marks as math view)
+    if (!radiant::setup_math_element(lycon, elem, math_node, is_display)) {
+        log_debug("layout_math_span: failed to set up math element");
+        if (sb) strbuf_free(sb);
+        return;
+    }
+
+    // Link the element into the view tree - this is critical for proper rendering!
+    // The element already has view_type set to RDT_VIEW_MATH by setup_math_element
+    View* view = (View*)elem;
+    if (!lycon->line.start_view) lycon->line.start_view = view;
+    lycon->view = view;
+
+    // Position the inline math element
+    // Check if it fits on current line
+    if (lycon->line.advance_x + elem->width > lycon->line.effective_right) {
+        line_break(lycon);
+    }
+
+    elem->x = lycon->line.advance_x;
+
+    // Vertical alignment: center on x-height
+    float x_height = lycon->font.style ? lycon->font.style->font_size * 0.43f : 8.0f;
+    float axis = x_height / 2;  // math axis
+
+    // Position so math axis aligns with text baseline + axis height
+    float baseline_offset = elem->embed ? elem->embed->math_baseline_offset : 0;
+    elem->y = lycon->block.advance_y - axis + baseline_offset;
+
+    // Update line box metrics
+    float above_baseline = elem->embed && elem->embed->math_box ? elem->embed->math_box->height : elem->height;
+    float below_baseline = elem->embed && elem->embed->math_box ? elem->embed->math_box->depth : 0;
+
+    if (above_baseline > lycon->line.max_ascender) {
+        lycon->line.max_ascender = above_baseline;
+    }
+    if (below_baseline > lycon->line.max_descender) {
+        lycon->line.max_descender = below_baseline;
+    }
+
+    // Advance horizontal position
+    lycon->line.advance_x += elem->width;
+
+    log_debug("layout_math_span: set up math view %.1fx%.1f at (%.1f, %.1f)",
+              elem->width, elem->height, elem->x, elem->y);
+
+    if (sb) strbuf_free(sb);
 }
 
 /**
@@ -164,6 +321,23 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         br_view->width = 0;  br_view->height = lycon->block.line_height;
         line_break(lycon);
         return;
+    }
+
+    // check for math elements (class="math inline" or class="math display")
+    if (elmt->is_element()) {
+        DomElement* elem = static_cast<DomElement*>(elmt);
+        // debug: check what classes this element has
+        bool has_math = dom_element_has_class(elem, "math");
+        bool has_inline = dom_element_has_class(elem, "inline");
+        log_debug("layout_inline: checking %s has_math=%d has_inline=%d",
+                  elem->node_name(), has_math, has_inline);
+        int math_type = detect_math_element(elem);
+        if (math_type > 0) {
+            bool is_display = (math_type == 2);
+            log_debug("layout_inline: detected math element, type=%d", math_type);
+            layout_math_span(lycon, elem, is_display);
+            return;
+        }
     }
 
     // save parent context
