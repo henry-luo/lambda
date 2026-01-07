@@ -28,13 +28,13 @@ module.exports = grammar({
     // ========================================================================
     // Entry point
     // ========================================================================
-    
+
     math: $ => repeat($._expression),
 
     // ========================================================================
     // Expressions
     // ========================================================================
-    
+
     _expression: $ => choice(
       $._atom,
       $.group,
@@ -44,7 +44,7 @@ module.exports = grammar({
     // ========================================================================
     // Atoms - the basic building blocks
     // ========================================================================
-    
+
     _atom: $ => choice(
       $.symbol,
       $.number,
@@ -85,21 +85,28 @@ module.exports = grammar({
       '=', '<', '>', '!',
       '\\leq', '\\le', '\\geq', '\\ge',
       '\\neq', '\\ne', '\\equiv', '\\sim', '\\simeq',
-      '\\approx', '\\cong', '\\propto',
+      '\\approx', '\\cong', '\\propto', '\\asymp',
       '\\subset', '\\supset', '\\subseteq', '\\supseteq',
       '\\in', '\\ni', '\\notin',
-      '\\ll', '\\gg', '\\prec', '\\succ',
+      '\\ll', '\\gg', '\\prec', '\\succ', '\\preceq', '\\succeq',
       '\\perp', '\\parallel', '\\mid',
       '\\vdash', '\\dashv', '\\models',
     ),
 
-    // Punctuation
-    punctuation: $ => choice(',', ';', ':', '.', '?'),
+    // Punctuation (including standalone delimiters)
+    punctuation: $ => choice(
+      ',', ';', ':', '.', '?',
+      '(', ')',                    // Parentheses
+      '|',                         // Vertical bar (absolute value, divides)
+      '\\{', '\\}',                // Escaped braces
+      '\\lbrace', '\\rbrace',      // Alternative brace commands
+      '\'',                        // Prime (for derivatives like f')
+    ),
 
     // ========================================================================
     // Groups
     // ========================================================================
-    
+
     // Curly brace group
     group: $ => seq('{', repeat($._expression), '}'),
 
@@ -109,7 +116,7 @@ module.exports = grammar({
     // ========================================================================
     // Sub/Superscript (TeXBook Rules 18)
     // ========================================================================
-    
+
     subsup: $ => prec.right(1, seq(
       field('base', $._atom),
       choice(
@@ -133,7 +140,7 @@ module.exports = grammar({
     // ========================================================================
     // Fractions (TeXBook Rule 15)
     // ========================================================================
-    
+
     fraction: $ => seq(
       field('cmd', choice(
         '\\frac',     // Standard fraction
@@ -155,7 +162,7 @@ module.exports = grammar({
     // ========================================================================
     // Radicals (Square roots, etc.)
     // ========================================================================
-    
+
     radical: $ => seq(
       '\\sqrt',
       optional(field('index', $.brack_group)),  // Optional root index
@@ -165,7 +172,7 @@ module.exports = grammar({
     // ========================================================================
     // Delimiters: \left( ... \right)
     // ========================================================================
-    
+
     delimiter_group: $ => seq(
       '\\left', field('left_delim', $.delimiter),
       repeat($._expression),
@@ -187,7 +194,7 @@ module.exports = grammar({
     // ========================================================================
     // Accents
     // ========================================================================
-    
+
     accent: $ => seq(
       field('cmd', choice(
         // Standard accents
@@ -208,7 +215,7 @@ module.exports = grammar({
     // ========================================================================
     // Big Operators (with limits)
     // ========================================================================
-    
+
     big_operator: $ => prec.right(seq(
       field('op', choice(
         '\\sum', '\\prod', '\\coprod',
@@ -229,7 +236,7 @@ module.exports = grammar({
     // ========================================================================
     // Environments: \begin{...} ... \end{...}
     // ========================================================================
-    
+
     environment: $ => seq(
       '\\begin', '{', field('name', $.env_name), '}',
       optional(field('columns', $.env_columns)),  // For array: {ccc}
@@ -269,7 +276,7 @@ module.exports = grammar({
     // ========================================================================
     // Text mode in math
     // ========================================================================
-    
+
     text_command: $ => seq(
       field('cmd', choice(
         '\\text', '\\textrm', '\\textit', '\\textbf', '\\textsf', '\\texttt',
@@ -285,7 +292,7 @@ module.exports = grammar({
     // ========================================================================
     // Style commands
     // ========================================================================
-    
+
     style_command: $ => prec.right(seq(
       field('cmd', choice(
         // Math variants
@@ -302,7 +309,7 @@ module.exports = grammar({
     // ========================================================================
     // Spacing commands
     // ========================================================================
-    
+
     space_command: $ => choice(
       '\\,', '\\:', '\\;', '\\!',  // Thin, medium, thick, negative thin
       '\\quad', '\\qquad',
@@ -313,7 +320,7 @@ module.exports = grammar({
     // ========================================================================
     // Generic command (fallback for Greek letters, symbols, etc.)
     // ========================================================================
-    
+
     command: $ => prec.right(-1, seq(
       field('name', $.command_name),
       repeat(field('arg', choice($.group, $.brack_group))),

@@ -1211,6 +1211,10 @@
     "named": false
   },
   {
+    "type": "'",
+    "named": false
+  },
+  {
     "type": "(",
     "named": false
   },
@@ -1308,6 +1312,10 @@
   },
   {
     "type": "\\ast",
+    "named": false
+  },
+  {
+    "type": "\\asymp",
     "named": false
   },
   {
@@ -1515,6 +1523,10 @@
     "named": false
   },
   {
+    "type": "\\lbrace",
+    "named": false
+  },
+  {
     "type": "\\lceil",
     "named": false
   },
@@ -1699,6 +1711,10 @@
     "named": false
   },
   {
+    "type": "\\preceq",
+    "named": false
+  },
+  {
     "type": "\\prod",
     "named": false
   },
@@ -1720,6 +1736,10 @@
   },
   {
     "type": "\\rangle",
+    "named": false
+  },
+  {
+    "type": "\\rbrace",
     "named": false
   },
   {
@@ -1784,6 +1804,10 @@
   },
   {
     "type": "\\succ",
+    "named": false
+  },
+  {
+    "type": "\\succeq",
     "named": false
   },
   {
