@@ -396,6 +396,7 @@ project "lambda"
         "radiant/pdf/fonts.cpp",
         "radiant/pdf/pages.cpp",
         "lambda/input/pdf_decompress.cpp",
+        "radiant/state_store.cpp",
         "radiant/event.cpp",
         "radiant/cmd_layout.cpp",
         "radiant/window.cpp",

@@ -164,7 +164,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             // This ensures intrinsic sizing uses the same fallback fonts as layout_text.cpp
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
             if (glyph) {
-                float advance = glyph->advance.x / 64.0f;
+                // Font is loaded at physical pixel size, so advance is in physical pixels
+                // Divide by pixel_ratio to convert back to CSS pixels for layout
+                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                float advance = glyph->advance.x / 64.0f / pixel_ratio;
                 // Apply letter-spacing
                 if (i + bytes < length && lycon->font.style) {
                     advance += lycon->font.style->letter_spacing;
@@ -182,12 +185,14 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
 
         // Apply kerning if available
+        // Kerning is in physical pixels, divide by pixel_ratio for CSS pixels
+        float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
         float kerning = 0.0f;
         if (has_kerning && prev_glyph) {
             FT_Vector kern;
             FT_Get_Kerning(lycon->font.ft_face, prev_glyph, glyph_index,
                           FT_KERNING_DEFAULT, &kern);
-            kerning = kern.x / 64.0f;
+            kerning = kern.x / 64.0f / pixel_ratio;
         }
 
         // Load glyph and get advance width
@@ -195,7 +200,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // Different load flags give different advance widths, causing measurement/layout mismatch
         FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
         if (FT_Load_Glyph(lycon->font.ft_face, glyph_index, load_flags) == 0) {
-            float advance = lycon->font.ft_face->glyph->advance.x / 64.0f + kerning;
+            // Advance is in physical pixels, divide by pixel_ratio for CSS pixels
+            float advance = lycon->font.ft_face->glyph->advance.x / 64.0f / pixel_ratio + kerning;
 
             // Apply letter-spacing (CSS spec: applied between characters, not after last)
             // Check if there are more characters after this one

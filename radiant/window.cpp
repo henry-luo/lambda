@@ -265,8 +265,9 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     log_debug("Cursor position: (%.1f, %.1f)", xpos, ypos);
     event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
     event.mouse_position.timestamp = glfwGetTime();
-    event.mouse_position.x = xpos * ui_context.pixel_ratio;
-    event.mouse_position.y = ypos * ui_context.pixel_ratio;
+    // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
+    event.mouse_position.x = xpos;
+    event.mouse_position.y = ypos;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
 }
 
@@ -288,8 +289,9 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
         glfwGetCursorPos(window, &xpos, &ypos);
         log_debug("Mouse position: (%.2f, %.2f)", xpos, ypos);
         ui_context.mouse_state.is_mouse_down = 1;
-        ui_context.mouse_state.down_x = event.mouse_button.x = xpos * ui_context.pixel_ratio;
-        ui_context.mouse_state.down_y = event.mouse_button.y = ypos * ui_context.pixel_ratio;
+        // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
+        ui_context.mouse_state.down_x = event.mouse_button.x = xpos;
+        ui_context.mouse_state.down_y = event.mouse_button.y = ypos;
     }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         log_debug("Left mouse button released");
@@ -306,15 +308,17 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     log_enter();
     event.scroll.type = RDT_EVENT_SCROLL;
     event.scroll.timestamp = glfwGetTime();
-    event.scroll.xoffset = xoffset * ui_context.pixel_ratio;
-    event.scroll.yoffset = yoffset * ui_context.pixel_ratio;
+    // Scroll offset can stay as-is (relative motion)
+    event.scroll.xoffset = xoffset;
+    event.scroll.yoffset = yoffset;
     log_debug("Scroll offset: (%.1f, %.1f)", xoffset, yoffset);
     assert(xoffset != 0 || yoffset != 0);
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
     log_debug("Mouse position: (%.1f, %.1f)", xpos, ypos);
-    event.scroll.x = xpos * ui_context.pixel_ratio;
-    event.scroll.y = ypos * ui_context.pixel_ratio;
+    // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
+    event.scroll.x = xpos;
+    event.scroll.y = ypos;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
     log_leave();
 }
