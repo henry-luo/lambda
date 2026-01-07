@@ -53,8 +53,8 @@ enum ts_symbol_identifiers {
   aux_sym__math_content_token1 = 35,
   sym_math_text = 36,
   anon_sym__ = 37,
-  aux_sym_subscript_token1 = 38,
-  anon_sym_CARET = 39,
+  anon_sym_CARET = 38,
+  sym_math_single_char = 39,
   anon_sym_BSLASHbegin = 40,
   anon_sym_BSLASHend = 41,
   sym_nbsp = 42,
@@ -141,8 +141,8 @@ static const char * const ts_symbol_names[] = {
   [aux_sym__math_content_token1] = "_math_content_token1",
   [sym_math_text] = "math_text",
   [anon_sym__] = "_",
-  [aux_sym_subscript_token1] = "subscript_token1",
   [anon_sym_CARET] = "^",
+  [sym_math_single_char] = "math_single_char",
   [anon_sym_BSLASHbegin] = "\\begin",
   [anon_sym_BSLASHend] = "\\end",
   [sym_nbsp] = "nbsp",
@@ -229,8 +229,8 @@ static const TSSymbol ts_symbol_map[] = {
   [aux_sym__math_content_token1] = aux_sym__math_content_token1,
   [sym_math_text] = sym_math_text,
   [anon_sym__] = anon_sym__,
-  [aux_sym_subscript_token1] = aux_sym_subscript_token1,
   [anon_sym_CARET] = anon_sym_CARET,
+  [sym_math_single_char] = sym_math_single_char,
   [anon_sym_BSLASHbegin] = anon_sym_BSLASHbegin,
   [anon_sym_BSLASHend] = anon_sym_BSLASHend,
   [sym_nbsp] = sym_nbsp,
@@ -431,13 +431,13 @@ static const TSSymbolMetadata ts_symbol_metadata[] = {
     .visible = true,
     .named = false,
   },
-  [aux_sym_subscript_token1] = {
-    .visible = false,
-    .named = false,
-  },
   [anon_sym_CARET] = {
     .visible = true,
     .named = false,
+  },
+  [sym_math_single_char] = {
+    .visible = true,
+    .named = true,
   },
   [anon_sym_BSLASHbegin] = {
     .visible = true,
@@ -998,7 +998,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 129,
         '\\', 76,
         ']', 131,
-        '^', 153,
+        '^', 152,
         '_', 150,
         '`', 27,
         '{', 127,
@@ -1008,7 +1008,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '|', 146,
       );
       if (('0' <= lookahead && lookahead <= '9') ||
-          ('A' <= lookahead && lookahead <= 'z')) ADVANCE(152);
+          ('A' <= lookahead && lookahead <= 'z')) ADVANCE(154);
       END_STATE();
     case 1:
       ADVANCE_MAP(
@@ -1287,7 +1287,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '[', 130,
         '\\', 19,
         ']', 132,
-        '^', 154,
+        '^', 153,
         '_', 151,
         '`', 47,
         '{', 127,
@@ -1308,7 +1308,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '*', 89,
         '[', 130,
         '\\', 22,
-        '^', 153,
+        '^', 152,
         '_', 150,
         '{', 127,
         '&', 146,
@@ -1320,7 +1320,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
     case 15:
       if (lookahead == '$') ADVANCE(139);
       if (lookahead == '\\') ADVANCE(22);
-      if (lookahead == '^') ADVANCE(153);
+      if (lookahead == '^') ADVANCE(152);
       if (lookahead == '_') ADVANCE(150);
       if (lookahead == '{') ADVANCE(127);
       if (lookahead == '&' ||
@@ -1334,7 +1334,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
         '*', 89,
         '[', 130,
         '\\', 22,
-        '^', 153,
+        '^', 152,
         '_', 150,
         '{', 127,
         '&', 146,
@@ -1346,7 +1346,7 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
     case 17:
       if (lookahead == '$') ADVANCE(13);
       if (lookahead == '\\') ADVANCE(29);
-      if (lookahead == '^') ADVANCE(153);
+      if (lookahead == '^') ADVANCE(152);
       if (lookahead == '_') ADVANCE(150);
       if (lookahead == '{') ADVANCE(127);
       if (lookahead == '&' ||
@@ -2565,12 +2565,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != '~') ADVANCE(51);
       END_STATE();
     case 152:
-      ACCEPT_TOKEN(aux_sym_subscript_token1);
-      END_STATE();
-    case 153:
       ACCEPT_TOKEN(anon_sym_CARET);
       END_STATE();
-    case 154:
+    case 153:
       ACCEPT_TOKEN(anon_sym_CARET);
       if (lookahead != 0 &&
           lookahead != '\n' &&
@@ -2579,6 +2576,9 @@ static bool ts_lex(TSLexer *lexer, TSStateId state) {
           lookahead != '{' &&
           lookahead != '}' &&
           lookahead != '~') ADVANCE(51);
+      END_STATE();
+    case 154:
+      ACCEPT_TOKEN(sym_math_single_char);
       END_STATE();
     case 155:
       ACCEPT_TOKEN(anon_sym_BSLASHbegin);
@@ -2927,8 +2927,8 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_BSLASH_RBRACK] = ACTIONS(1),
     [aux_sym__math_content_token1] = ACTIONS(1),
     [anon_sym__] = ACTIONS(1),
-    [aux_sym_subscript_token1] = ACTIONS(1),
     [anon_sym_CARET] = ACTIONS(1),
+    [sym_math_single_char] = ACTIONS(1),
     [anon_sym_BSLASHbegin] = ACTIONS(1),
     [anon_sym_BSLASHend] = ACTIONS(1),
     [sym_nbsp] = ACTIONS(1),
@@ -11257,28 +11257,28 @@ static const uint16_t ts_small_parse_table[] = {
     ACTIONS(878), 1,
       anon_sym_LBRACE,
     ACTIONS(985), 1,
-      aux_sym_subscript_token1,
+      sym_math_single_char,
     STATE(247), 1,
       sym_curly_group,
   [9079] = 3,
     ACTIONS(860), 1,
       anon_sym_LBRACE,
     ACTIONS(987), 1,
-      aux_sym_subscript_token1,
+      sym_math_single_char,
     STATE(239), 1,
       sym_curly_group,
   [9089] = 3,
     ACTIONS(878), 1,
       anon_sym_LBRACE,
     ACTIONS(989), 1,
-      aux_sym_subscript_token1,
+      sym_math_single_char,
     STATE(249), 1,
       sym_curly_group,
   [9099] = 3,
     ACTIONS(860), 1,
       anon_sym_LBRACE,
     ACTIONS(991), 1,
-      aux_sym_subscript_token1,
+      sym_math_single_char,
     STATE(244), 1,
       sym_curly_group,
   [9109] = 2,
