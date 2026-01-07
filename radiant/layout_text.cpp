@@ -240,9 +240,11 @@ extern "C" int get_font_metrics_platform(const char* font_family, float font_siz
 // This matches browser's Range.getClientRects() which uses font metrics, not CSS line-height
 // Note: For most fonts, browser uses FreeType metrics.height. But for Apple's classic fonts
 // (Times, Helvetica, Courier), Chrome applies a 15% ascent hack on macOS for web compatibility.
-static float get_font_cell_height(FT_Face face) {
+// pixel_ratio: fonts are loaded at physical size, divide by pixel_ratio for CSS pixels
+static float get_font_cell_height(FT_Face face, float pixel_ratio) {
     const char* family = face->family_name;
-    float font_size = (float)face->size->metrics.y_ppem;
+    // y_ppem is in physical pixels, divide by pixel_ratio to get CSS font size
+    float font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
 
     // Check if this is one of Apple's classic fonts that needs the 15% hack
     // These are the only fonts where CoreText metrics differ significantly from FreeType
@@ -254,6 +256,7 @@ static float get_font_cell_height(FT_Face face) {
 
     if (needs_mac_hack) {
         // Use CoreText with 15% hack for Apple's classic fonts
+        // Pass CSS font size, platform metrics return CSS pixel values
         float ascent, descent, line_height;
         if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
             // Return ascent + descent (without leading) - ascent already has the 15% adjustment
@@ -263,7 +266,8 @@ static float get_font_cell_height(FT_Face face) {
 
     // For all other fonts, use FreeType metrics.height directly
     // This matches browser's Range.getClientRects() behavior
-    return face->size->metrics.height / 64.0f;
+    // Divide by pixel_ratio to convert from physical to CSS pixels
+    return face->size->metrics.height / 64.0f / pixel_ratio;
 }
 
 // ============================================================================
@@ -557,8 +561,10 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
                 return RDT_LINE_NOT_FILLED;
             }
             FT_GlyphSlot slot = lycon->font.ft_face->glyph;
-            // Use precise float calculation for advance
-            text_width += (float)(slot->advance.x) / 64.0f;
+            // Font is loaded at physical pixel size, so advance is in physical pixels
+            // Divide by pixel_ratio to convert back to CSS pixels for layout
+            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+            text_width += (float)(slot->advance.x) / 64.0f / pixel_ratio;
         }
         // Apply letter-spacing (but not after the last character)
         str++;
@@ -629,13 +635,16 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->width = text_width;
     lycon->line.advance_x += text_width;
     // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face);
+    // Pass pixel_ratio to get CSS pixel values
+    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face, pixel_ratio);
     if (typo.valid && typo.use_typo_metrics) {
         lycon->line.max_ascender = max(lycon->line.max_ascender, typo.ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, typo.descender);
     } else {
-        lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0);
-        lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0);
+        // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
+        lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0 / pixel_ratio);
+        lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0 / pixel_ratio);
     }
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length, text->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
@@ -771,12 +780,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         last_rect->next = rect;
     }
     rect->start_index = str - text_start;
-    float font_height = lycon->font.ft_face->size->metrics.height / 64.0;
+    // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
+    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+    float font_height = lycon->font.ft_face->size->metrics.height / 64.0 / pixel_ratio;
     rect->x = lycon->line.advance_x;
     // browser text rect height uses font metrics (ascent+descent), NOT CSS line-height
     // CSS line-height affects line spacing/positioning, but text rect height is font-based
     // Use platform-specific metrics (CoreText on macOS) for accurate ascent+descent
-    rect->height = get_font_cell_height(lycon->font.ft_face);
+    rect->height = get_font_cell_height(lycon->font.ft_face, pixel_ratio);
 
     // Text rect y-position based on vertical alignment
     // CSS half-leading model: text is centered within the line box
@@ -888,7 +899,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 wd = unicode_space_em * lycon->font.current_font_size;
             } else {
                 FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
-                wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
+                // Font is loaded at physical pixel size, so advance is in physical pixels
+                // Divide by pixel_ratio to convert back to CSS pixels for layout
+                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                wd = glyph ? ((float)glyph->advance.x / 64.0f / pixel_ratio) : lycon->font.style->space_width;
             }
             // Apply letter-spacing (add to character width)
             // Note: letter-spacing is NOT applied after the last character (CSS spec)
@@ -904,13 +918,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 FT_Vector kerning;
                 FT_Get_Kerning(lycon->font.ft_face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
                 if (kerning.x) {
+                    // Kerning is in physical pixels, divide by pixel_ratio for CSS pixels
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                    float kerning_css = (float)kerning.x / 64.0f / pixel_ratio;
                     if (str == text_start + rect->start_index) {
-                        rect->x += ((float)kerning.x / 64.0);
+                        rect->x += kerning_css;
                     }
                     else {
-                        rect->width += ((float)kerning.x / 64.0);
+                        rect->width += kerning_css;
                     }
-                    log_debug("apply kerning: %f to char '%c'", (float)kerning.x / 64.0, *str);
+                    log_debug("apply kerning: %f to char '%c'", kerning_css, *str);
                 }
             }
             lycon->line.prev_glyph_index = glyph_index;

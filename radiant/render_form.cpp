@@ -85,18 +85,18 @@ static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, floa
  * Render a text input control (text, password, email, etc.)
  */
 void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float x = rdcon->block.x + block->x;
-    float y = rdcon->block.y + block->y;
-    float w = block->width;
-    float h = block->height;
-    float pr = rdcon->ui_context->pixel_ratio;
+    float s = rdcon->scale;  // scale factor for CSS -> physical pixels
+    float x = rdcon->block.x + block->x * s;
+    float y = rdcon->block.y + block->y * s;
+    float w = block->width * s;
+    float h = block->height * s;
 
     // Background (white)
     Color bg = make_color(255, 255, 255);
     fill_rect(rdcon, x, y, w, h, bg);
 
     // 3D inset border (text inputs have inset appearance)
-    draw_3d_border(rdcon, x, y, w, h, true, 1 * pr);
+    draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
 
     // Draw value or placeholder text
     const char* text = form->value;
@@ -107,12 +107,15 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     }
 
     if (text && *text && block->font) {
-        float pr = rdcon->ui_context->pixel_ratio;
-        float padding = block->bound ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H * pr;
-        float border = block->bound && block->bound->border ? block->bound->border->width.left : 1 * pr;
+        // Scale padding/border from CSS pixels
+        float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H) * s;
+        float border = (block->bound && block->bound->border ? block->bound->border->width.left : 1) * s;
 
         float text_x = x + border + padding;
-        float text_y = y + border + (h - 2*border - block->font->font_size) / 2 + block->font->ascender;
+        // font_size and ascender are in CSS pixels, need scaling for physical coordinates
+        float font_size_scaled = block->font->font_size * s;
+        float ascender_scaled = block->font->ascender * s;
+        float text_y = y + border + (h - 2*border - font_size_scaled) / 2 + ascender_scaled;
 
         // Set text color
         if (is_placeholder) {
@@ -128,11 +131,11 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         if (form->input_type && strcmp(form->input_type, "password") == 0) {
             // Draw dots for each character
             size_t len = strlen(text);
-            float dot_spacing = block->font->font_size * 0.6f;
+            float dot_spacing = font_size_scaled * 0.6f;
             for (size_t i = 0; i < len; i++) {
                 float cx = text_x + i * dot_spacing + dot_spacing / 2;
                 float cy = y + h / 2;
-                float radius = 3 * pr;
+                float radius = 3 * s;
                 // Simple filled circle approximation
                 fill_rect(rdcon, cx - radius, cy - radius, radius * 2, radius * 2, rdcon->color);
             }
@@ -150,41 +153,41 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
  * Render a checkbox control.
  */
 void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float x = rdcon->block.x + block->x;
-    float y = rdcon->block.y + block->y;
-    float size = block->width;
-    float pr = rdcon->ui_context->pixel_ratio;
+    float s = rdcon->scale;
+    float x = rdcon->block.x + block->x * s;
+    float y = rdcon->block.y + block->y * s;
+    float size = block->width * s;
 
     // Background
     Color bg = form->disabled ? make_color(224, 224, 224) : make_color(255, 255, 255);
     fill_rect(rdcon, x, y, size, size, bg);
 
     // 3D inset border
-    draw_3d_border(rdcon, x, y, size, size, true, 1 * pr);
+    draw_3d_border(rdcon, x, y, size, size, true, 1 * s);
 
     // Checkmark if checked
     if (form->checked) {
         Color check_color = make_color(0, 0, 0);
-        float inset = 3 * pr;
+        float inset = 3 * s;
         float inner_size = size - 2 * inset;
 
         // Draw simple checkmark (two lines forming a V)
         // Line 1: from top-left to center-bottom
         float x1 = x + inset;
         float y1 = y + size / 2;
-        float x2 = x + size / 2 - 1 * pr;
-        float y2 = y + size - inset - 1 * pr;
+        float x2 = x + size / 2 - 1 * s;
+        float y2 = y + size - inset - 1 * s;
 
         // Line 2: from center-bottom to top-right
         float x3 = x + size - inset;
-        float y3 = y + inset + 1 * pr;
+        float y3 = y + inset + 1 * s;
 
         // Approximate lines with small rectangles
-        float line_width = 2 * pr;
+        float line_width = 2 * s;
         // Left part of check
         fill_rect(rdcon, x1, y1, inner_size / 2, line_width, check_color);
         // Right part of check (diagonal up)
-        fill_rect(rdcon, x2, y3, inner_size / 2 + 1 * pr, line_width, check_color);
+        fill_rect(rdcon, x2, y3, inner_size / 2 + 1 * s, line_width, check_color);
     }
 
     log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, form->checked);
@@ -194,10 +197,10 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
  * Render a radio button control.
  */
 void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float x = rdcon->block.x + block->x;
-    float y = rdcon->block.y + block->y;
-    float size = block->width;
-    float pr = rdcon->ui_context->pixel_ratio;
+    float s = rdcon->scale;
+    float x = rdcon->block.x + block->x * s;
+    float y = rdcon->block.y + block->y * s;
+    float size = block->width * s;
 
     // Calculate center and radius
     float cx = x + size / 2;
@@ -210,7 +213,7 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
 
     // Border circle
     Color border_color = make_color(118, 118, 118);
-    float bw = 1 * pr;
+    float bw = 1 * s;
     stroke_circle(rdcon, cx, cy, radius - bw / 2, border_color, bw);
 
     // Inner dot if checked
@@ -229,11 +232,11 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
  * we skip the default gray background. Otherwise, render default button appearance.
  */
 void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float x = rdcon->block.x + block->x;
-    float y = rdcon->block.y + block->y;
-    float w = block->width;
-    float h = block->height;
-    float pr = rdcon->ui_context->pixel_ratio;
+    float s = rdcon->scale;
+    float x = rdcon->block.x + block->x * s;
+    float y = rdcon->block.y + block->y * s;
+    float w = block->width * s;
+    float h = block->height * s;
 
     // Check if button has CSS-specified background (from author stylesheet)
     bool has_css_background = block->bound && block->bound->background &&
@@ -246,7 +249,7 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
         fill_rect(rdcon, x, y, w, h, bg);
 
         // 3D outset border (raised button appearance)
-        draw_3d_border(rdcon, x, y, w, h, false, 1 * pr);
+        draw_3d_border(rdcon, x, y, w, h, false, 1 * s);
     }
     // If CSS background is present, it's already rendered by render_block_view
 
@@ -260,11 +263,11 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
  * Render a select dropdown (closed state).
  */
 void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float x = rdcon->block.x + block->x;
-    float y = rdcon->block.y + block->y;
-    float w = block->width;
-    float h = block->height;
-    float pr = rdcon->ui_context->pixel_ratio;
+    float s = rdcon->scale;
+    float x = rdcon->block.x + block->x * s;
+    float y = rdcon->block.y + block->y * s;
+    float w = block->width * s;
+    float h = block->height * s;
 
     // Background
     Color bg = make_color(255, 255, 255);
@@ -272,14 +275,14 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
 
     // Border
     Color border_color = make_color(118, 118, 118);
-    float bw = 1 * pr;
+    float bw = 1 * s;
     fill_rect(rdcon, x, y, w, bw, border_color);
     fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
     fill_rect(rdcon, x, y, bw, h, border_color);
     fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
 
     // Dropdown arrow area
-    float arrow_width = FormDefaults::SELECT_ARROW_WIDTH * pr;
+    float arrow_width = FormDefaults::SELECT_ARROW_WIDTH * s;
     Color arrow_bg = make_color(240, 240, 240);
     fill_rect(rdcon, x + w - arrow_width, y + bw, arrow_width - bw, h - 2 * bw, arrow_bg);
 
@@ -287,11 +290,11 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     Color arrow_color = make_color(0, 0, 0);
     float arrow_x = x + w - arrow_width / 2;
     float arrow_y = y + h / 2;
-    float arrow_size = 4 * pr;
+    float arrow_size = 4 * s;
     // Approximate triangle with small rectangles
     for (int i = 0; i < (int)arrow_size; i++) {
         float line_width = (arrow_size - i) * 2;
-        fill_rect(rdcon, arrow_x - line_width / 2, arrow_y - arrow_size / 2 + i, line_width, 1 * pr, arrow_color);
+        fill_rect(rdcon, arrow_x - line_width / 2, arrow_y - arrow_size / 2 + i, line_width, 1 * s, arrow_color);
     }
 
     // Selected option text would be rendered via child content
@@ -303,18 +306,18 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
  * Render a textarea control.
  */
 void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float x = rdcon->block.x + block->x;
-    float y = rdcon->block.y + block->y;
-    float w = block->width;
-    float h = block->height;
-    float pr = rdcon->ui_context->pixel_ratio;
+    float s = rdcon->scale;
+    float x = rdcon->block.x + block->x * s;
+    float y = rdcon->block.y + block->y * s;
+    float w = block->width * s;
+    float h = block->height * s;
 
     // Background
     Color bg = make_color(255, 255, 255);
     fill_rect(rdcon, x, y, w, h, bg);
 
     // Border (inset style)
-    draw_3d_border(rdcon, x, y, w, h, true, 1 * pr);
+    draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
 
     // Text content would be rendered via child nodes or value
     // Placeholder shown if no content
@@ -326,25 +329,25 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
  * Render a range slider control.
  */
 void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
-    float x = rdcon->block.x + block->x;
-    float y = rdcon->block.y + block->y;
-    float w = block->width;
-    float h = block->height;
-    float pr = rdcon->ui_context->pixel_ratio;
+    float s = rdcon->scale;
+    float x = rdcon->block.x + block->x * s;
+    float y = rdcon->block.y + block->y * s;
+    float w = block->width * s;
+    float h = block->height * s;
 
     // Track
-    float track_height = FormDefaults::RANGE_TRACK_HEIGHT * pr;
+    float track_height = FormDefaults::RANGE_TRACK_HEIGHT * s;
     float track_y = y + (h - track_height) / 2;
     Color track_color = make_color(200, 200, 200);
     fill_rect(rdcon, x, track_y, w, track_height, track_color);
 
     // Thumb
-    float thumb_size = FormDefaults::RANGE_THUMB_SIZE * pr;
+    float thumb_size = FormDefaults::RANGE_THUMB_SIZE * s;
     float thumb_x = x + form->range_value * (w - thumb_size);
     float thumb_y = y + (h - thumb_size) / 2;
     Color thumb_color = make_color(240, 240, 240);
     fill_rect(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, thumb_color);
-    draw_3d_border(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, false, 1 * pr);
+    draw_3d_border(rdcon, thumb_x, thumb_y, thumb_size, thumb_size, false, 1 * s);
 
     log_debug("[FORM] render_range at (%.1f, %.1f) value=%.2f", x, y, form->range_value);
 }

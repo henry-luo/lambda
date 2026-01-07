@@ -224,11 +224,15 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
 }
 
 FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style) {
-    // Create cache key with (family, weight, style, size) - deterministic based on input parameters
+    // Apply pixel ratio to get physical pixel size for HiDPI displays
+    float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
+    float physical_font_size = font_style->font_size * pixel_ratio;
+    
+    // Create cache key with (family, weight, style, physical_size) - deterministic based on input parameters
     StrBuf* style_cache_key = strbuf_create(font_name);
     strbuf_append_str(style_cache_key, font_style->font_weight == CSS_VALUE_BOLD ? ":bold:" : ":normal:");
     strbuf_append_str(style_cache_key, font_style->font_style == CSS_VALUE_ITALIC ? "italic:" : "normal:");
-    strbuf_append_int(style_cache_key, (int)font_style->font_size);
+    strbuf_append_int(style_cache_key, (int)physical_font_size);
 
     // Initialize fontface map if needed
     if (uicon->fontface_map == NULL) {
@@ -270,15 +274,15 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                 int best_idx = 0, best_diff = INT_MAX;
                 for (int i = 0; i < face->num_fixed_sizes; i++) {
                     int ppem = face->available_sizes[i].y_ppem >> 6;
-                    int diff = abs(ppem - (int)font_style->font_size);
+                    int diff = abs(ppem - (int)physical_font_size);
                     if (diff < best_diff) { best_diff = diff; best_idx = i; }
                 }
                 FT_Select_Size(face, best_idx);
             } else {
-                FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+                FT_Set_Pixel_Sizes(face, 0, physical_font_size);
             }
-            log_info("Loading styled font: %s (family: %s, weight: %d, style: %s)",
-                font_name, font->family_name, font->weight, font_style_to_string(font->style));
+            log_info("Loading styled font: %s (family: %s, weight: %d, style: %s, physical_size: %.0f)",
+                font_name, font->family_name, font->weight, font_style_to_string(font->style), physical_font_size);
         } else {
             log_error("Failed to load font face for: %s (found font: %s)", font_name, font->file_path);
         }
@@ -294,14 +298,14 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                     int best_idx = 0, best_diff = INT_MAX;
                     for (int i = 0; i < face->num_fixed_sizes; i++) {
                         int ppem = face->available_sizes[i].y_ppem >> 6;
-                        int diff = abs(ppem - (int)font_style->font_size);
+                        int diff = abs(ppem - (int)physical_font_size);
                         if (diff < best_diff) { best_diff = diff; best_idx = i; }
                     }
                     FT_Select_Size(face, best_idx);
                 } else {
-                    FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+                    FT_Set_Pixel_Sizes(face, 0, physical_font_size);
                 }
-                log_info("Loaded font via platform lookup: %s (path: %s)", font_name, font_path);
+                log_info("Loaded font via platform lookup: %s (path: %s, physical_size: %.0f)", font_name, font_path, physical_font_size);
             } else {
                 log_error("Failed to load font face via platform lookup: %s (path: %s)", font_name, font_path);
             }
@@ -465,20 +469,25 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         return;
     }
 
+    // Pixel ratio for converting physical font metrics back to CSS pixels for layout
+    float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
+    
     // Use sub-pixel rendering flags for better quality
     FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
     if (FT_Load_Char(fbox->ft_face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", family_to_load);
-        fbox->style->space_width = fbox->ft_face->size->metrics.y_ppem / 64.0;
+        fbox->style->space_width = (fbox->ft_face->size->metrics.y_ppem / 64.0) / pixel_ratio;
     } else {
         // Use float precision for space width calculation
-        fbox->style->space_width = fbox->ft_face->glyph->advance.x / 64.0;
+        // Metrics from FreeType are in physical pixels, scale back to CSS pixels for layout
+        fbox->style->space_width = (fbox->ft_face->glyph->advance.x / 64.0) / pixel_ratio;
     }
     FT_Bool use_kerning = FT_HAS_KERNING(fbox->ft_face);
     fbox->style->has_kerning = use_kerning;
-    fbox->style->ascender = fbox->ft_face->size->metrics.ascender / 64.0;
-    fbox->style->descender = -fbox->ft_face->size->metrics.descender / 64.0;
-    fbox->style->font_height = fbox->ft_face->size->metrics.height / 64.0;
+    // Scale font metrics from physical pixels back to CSS pixels for layout
+    fbox->style->ascender = (fbox->ft_face->size->metrics.ascender / 64.0) / pixel_ratio;
+    fbox->style->descender = (-fbox->ft_face->size->metrics.descender / 64.0) / pixel_ratio;
+    fbox->style->font_height = (fbox->ft_face->size->metrics.height / 64.0) / pixel_ratio;
     // Font setup complete - logging removed to avoid hot path overhead
 }
 

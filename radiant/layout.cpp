@@ -363,7 +363,8 @@ constexpr uint16_t OS2_FS_SELECTION_USE_TYPO_METRICS = 0x0080;
 // Read OS/2 table metrics using FreeType
 // Reference: Chrome Blink simple_font_data.cc TypoAscenderAndDescender()
 // Chrome checks fsSelection bit 7 (USE_TYPO_METRICS) to decide which metrics to use
-TypoMetrics get_os2_typo_metrics(FT_Face face) {
+// pixel_ratio: fonts are loaded at physical size, divide by pixel_ratio to get CSS pixels
+TypoMetrics get_os2_typo_metrics(FT_Face face, float pixel_ratio) {
     TypoMetrics result = {0, 0, 0, false, false};
 
     if (!face) {
@@ -378,8 +379,8 @@ TypoMetrics get_os2_typo_metrics(FT_Face face) {
     }
 
     // Convert from font units to CSS pixels
-    // scale = ppem / units_per_EM
-    float scale = (float)face->size->metrics.y_ppem / face->units_per_EM;
+    // scale = ppem / units_per_EM, then divide by pixel_ratio for CSS pixels
+    float scale = (float)face->size->metrics.y_ppem / face->units_per_EM / pixel_ratio;
 
     // Check fsSelection bit 7 (USE_TYPO_METRICS)
     result.use_typo_metrics = (os2->fsSelection & OS2_FS_SELECTION_USE_TYPO_METRICS) != 0;
@@ -414,11 +415,14 @@ extern "C" int get_font_metrics_platform(const char* font_family, float font_siz
 // 3. On macOS only: for Times, Helvetica, Courier - apply 15% adjustment to ascent
 //    ascent += floorf(((ascent + descent) * 0.15f) + 0.5f)
 // 4. LineSpacing = lroundf(ascent) + lroundf(descent) + lroundf(line_gap)
-float calc_normal_line_height(FT_Face face) {
+// pixel_ratio: fonts are loaded at physical size, divide by pixel_ratio to get CSS pixels
+float calc_normal_line_height(FT_Face face, float pixel_ratio) {
     const char* family = face->family_name;
-    float font_size = (float)face->size->metrics.y_ppem;
+    // y_ppem is in physical pixels, divide by pixel_ratio to get CSS font size
+    float font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
 
     // Try platform-specific implementation first (CoreText on macOS)
+    // Pass CSS font size, platform metrics return CSS pixel values
     float ascent, descent, line_height;
     if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
         log_debug("Normal line height (platform): %.2f for %s@%.1f", line_height, family, font_size);
@@ -428,7 +432,7 @@ float calc_normal_line_height(FT_Face face) {
     // Fallback: use FreeType metrics following Chrome/Skia behavior
     // Chrome/Skia on Linux checks OS/2 USE_TYPO_METRICS flag (bit 7 of fsSelection)
     // Reference: SkScalerContext_FreeType::generateFontMetrics() in Chromium
-    TypoMetrics typo = get_os2_typo_metrics(face);
+    TypoMetrics typo = get_os2_typo_metrics(face, pixel_ratio);
     float leading;
 
     if (typo.valid && typo.use_typo_metrics) {
@@ -455,6 +459,7 @@ float calc_normal_line_height(FT_Face face) {
         // Reference: Skia SkScalerContext_FreeType::generateFontMetrics() in Chromium
         //            Blink SimpleFontData::AscentDescentWithHacks()
 
+        // Scale from font units to CSS pixels (font_size is already in CSS pixels)
         float scale = font_size / (float)face->units_per_EM;
         // face->ascender is positive, face->descender is negative
         float raw_ascent = (float)face->ascender * scale;
@@ -520,14 +525,16 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
     }
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
         // 'normal' line height
-        lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
+        float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+        lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
         log_debug("normal lineHeight: %f", lycon->block.line_height);
     } else {
         // Resolve var() if present
         const CssValue* resolved_value = resolve_var_function(lycon, &value);
         if (!resolved_value) {
             // var() couldn't be resolved, use normal
-            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
+            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
             log_debug("line-height var() unresolved, using normal: %f", lycon->block.line_height);
             return;
         }
@@ -542,7 +549,8 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         // If negative or zero/NaN, fall back to 'normal' (use default line height)
         if (resolved_height <= 0 || std::isnan(resolved_height)) {
             log_debug("invalid line-height: %f, falling back to normal", resolved_height);
-            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
+            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
         } else {
             lycon->block.line_height = resolved_height;
             log_debug("resolved line height: %f", lycon->block.line_height);
@@ -1020,8 +1028,10 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Create inline view for the marker with fixed width
                 ViewSpan* marker_span = (ViewSpan*)set_view(lycon, RDT_VIEW_MARKER, elem);
                 if (marker_span) {
+                    // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                     marker_span->width = marker_prop->width;
-                    marker_span->height = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.height / 64.0f) : 16.0f;
+                    marker_span->height = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.height / 64.0f / pixel_ratio) : 16.0f;
 
                     // Set marker position
                     marker_span->x = lycon->line.advance_x;
@@ -1031,8 +1041,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     lycon->line.advance_x += marker_prop->width;
 
                     // Update line metrics (marker contributes to line height)
-                    float ascender = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
-                    float descender = lycon->font.ft_face ? (-lycon->font.ft_face->size->metrics.descender / 64.0f) : 4.0f;
+                    float ascender = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.ascender / 64.0f / pixel_ratio) : 12.0f;
+                    float descender = lycon->font.ft_face ? (-lycon->font.ft_face->size->metrics.descender / 64.0f / pixel_ratio) : 4.0f;
                     if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
                     if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
 
@@ -1263,13 +1273,16 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
     // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face);
+    // Pass pixel_ratio to get CSS pixel values
+    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face, pixel_ratio);
     if (typo.valid && typo.use_typo_metrics) {
         lycon->block.init_ascender = typo.ascender;
         lycon->block.init_descender = typo.descender;
     } else if (lycon->font.ft_face) {
-        lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
-        lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+        // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
+        lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0 / pixel_ratio;
+        lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0 / pixel_ratio;
     } else {
         // Fallback when no font face is available - use reasonable defaults
         log_error("No font face available for layout, using fallback metrics");
@@ -1390,14 +1403,13 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     lycon->run_mode = radiant::RunMode::PerformLayout;
     lycon->sizing_mode = radiant::SizingMode::InherentSize;
 
-    // Initialize viewport dimensions for layout (in physical pixels for rendering)
-    // Layout uses physical pixels so the view tree coordinates match the rendering surface
-    // CSS vh/vw units are still resolved relative to CSS viewport, but the layout coordinates
-    // are in physical pixels to avoid needing to scale during rendering
-    lycon->width = uicon->window_width > 0 ? uicon->window_width : 1200;
-    lycon->height = uicon->window_height > 0 ? uicon->window_height : 800;
-    log_debug("layout_init: uicon=%p, window_width=%.1f, viewport=%.1fx%.1f (physical), pixel_ratio=%.2f",
-              uicon, uicon->window_width, lycon->width, lycon->height, uicon->pixel_ratio);
+    // Initialize viewport dimensions for layout (in CSS logical pixels)
+    // Layout uses CSS logical pixels. Rendering will scale by pixel_ratio
+    // to convert CSS pixels to physical surface pixels for HiDPI displays.
+    lycon->width = uicon->viewport_width > 0 ? uicon->viewport_width : 1200;
+    lycon->height = uicon->viewport_height > 0 ? uicon->viewport_height : 800;
+    log_debug("layout_init: uicon=%p, viewport=%.1fx%.1f (CSS logical pixels), pixel_ratio=%.2f",
+              uicon, lycon->width, lycon->height, uicon->pixel_ratio);
 
     // Initialize available space to indefinite (will be set properly during layout)
     lycon->available_space = AvailableSpace::make_indefinite();

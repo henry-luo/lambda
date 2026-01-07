@@ -115,8 +115,16 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->bound->border) return;
 
     BorderProp* border = view->bound->border;
+    float s = rdcon->scale;
 
-    // Constrain border radii
+    // Constrain border radii (scaled)
+    Corner scaled_radius = border->radius;  // copy
+    scaled_radius.top_left *= s;
+    scaled_radius.top_right *= s;
+    scaled_radius.bottom_left *= s;
+    scaled_radius.bottom_right *= s;
+    Corner orig_radius = border->radius;
+    border->radius = scaled_radius;
     constrain_border_radii(border, rect.width, rect.height);
 
     // Check if we need ThorVG rendering
@@ -127,11 +135,22 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                         needs_thorvg_rendering(border->bottom_style) ||
                         needs_thorvg_rendering(border->left_style);
 
+    // Scale border widths for rendering
+    Spacing orig_width = border->width;
+    border->width.top *= s;
+    border->width.right *= s;
+    border->width.bottom *= s;
+    border->width.left *= s;
+
     if (needs_thorvg) {
         render_rounded_border(rdcon, view, rect);
     } else {
         render_straight_border(rdcon, view, rect);
     }
+    
+    // Restore original values
+    border->width = orig_width;
+    border->radius = orig_radius;
 }
 
 /**
