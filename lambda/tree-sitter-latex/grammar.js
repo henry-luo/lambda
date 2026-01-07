@@ -24,6 +24,7 @@ module.exports = grammar({
     $._end_document,          // \end{document} - higher priority than command
     $._verb_command,          // \verb<delim>text<delim> - must use external to override command_name token
     $._char_command,          // \char<number> - decimal/hex/octal number token
+    $._caret_char,            // ^^XX (2 hex) or ^^^^XXXX (4 hex) - TeX caret notation
   ],
 
   word: $ => $.command_name,
@@ -55,6 +56,7 @@ module.exports = grammar({
       $.environment,    // Environments can appear at top level (e.g., in fragments)
       $.verb_command,   // \verb can appear at top level
       $.char_command,   // \char can appear at top level
+      $.caret_char,     // ^^XX or ^^^^XXXX - TeX caret notation
       $.linebreak_command, // \\ with optional [<length>]
       $.control_symbol, // Escape sequences like \%, \&
       $.command,        // Commands can appear at top level (e.g., \textellipsis)
@@ -118,6 +120,7 @@ module.exports = grammar({
       $.environment,    // Environments can appear inline (they interrupt paragraphs)
       $.verb_command,   // \verb|text| - must be before command (context-gated)
       $.char_command,   // \char<number> - must be before command (context-gated)
+      $.caret_char,     // ^^XX or ^^^^XXXX - TeX caret notation
       $.linebreak_command, // \\ with optional [<length>]
       $.command,
       $.curly_group,
@@ -130,8 +133,8 @@ module.exports = grammar({
     ),
 
     // Text is everything that's not a special character
-    // NOTE: ^ and _ are allowed here (subscript/superscript only special in math mode)
-    text: $ => /[^\\{}$%\[\]\n~&#]+/,
+    // NOTE: ^ is excluded for caret notation (^^XX), _ is allowed (only special in math mode)
+    text: $ => /[^\\{}$%\[\]\n~&#^]+/,
 
     // Space: horizontal whitespace and single newlines only
     // Paragraph break (higher precedence) will match \n\n sequences
@@ -197,6 +200,10 @@ module.exports = grammar({
     // The external scanner will only emit this token when valid_symbols[CHAR_COMMAND] is true
     // Matches: \char<decimal>, \char"<hex>, \char'<octal>
     char_command: $ => $._char_command,
+
+    // TeX caret notation for character input
+    // Matches: ^^XX (2 hex digits) or ^^^^XXXX (4 hex digits) or ^^c (char +/- 64)
+    caret_char: $ => $._caret_char,
 
     // ========================================================================
     // Commands/Macros (matches LaTeX.js: macro, macro_args)

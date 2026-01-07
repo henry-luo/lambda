@@ -31,6 +31,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "caret_char"
+        },
+        {
+          "type": "SYMBOL",
           "name": "linebreak_command"
         },
         {
@@ -219,6 +223,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "caret_char"
+        },
+        {
+          "type": "SYMBOL",
           "name": "linebreak_command"
         },
         {
@@ -257,7 +265,7 @@
     },
     "text": {
       "type": "PATTERN",
-      "value": "[^\\\\{}$%\\[\\]\\n~&#]+"
+      "value": "[^\\\\{}$%\\[\\]\\n~&#^]+"
     },
     "space": {
       "type": "PATTERN",
@@ -402,6 +410,10 @@
     "char_command": {
       "type": "SYMBOL",
       "name": "_char_command"
+    },
+    "caret_char": {
+      "type": "SYMBOL",
+      "name": "_caret_char"
     },
     "command": {
       "type": "PREC_RIGHT",
@@ -1170,6 +1182,10 @@
     {
       "type": "SYMBOL",
       "name": "_char_command"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_caret_char"
     }
   ],
   "inline": [],
