@@ -1,0 +1,1269 @@
+{
+  "source": "mathlive",
+  "categories": {
+    "mode_shift": [
+      {
+        "id": 1,
+        "latex": "\\\\text{\\\\ensuremath{\\\\frac34}}",
+        "description": "MODE SHIFT test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "1+\\\\textcolor{blue}{$ 2 $}+3+\\\\textcolor{red}{4}+\\\\text{5\\\\textcolor{purple}{6}}",
+        "description": "MODE SHIFT test case 2",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "fonts": [
+      {
+        "id": 1,
+        "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+        "description": "FONTS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+        "description": "FONTS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+        "description": "FONTS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\alpha + x - 1 - \\\\Gamma",
+        "description": "FONTS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\mathfrak{\\\\sin}",
+        "description": "FONTS test case 5",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "operators": [
+      {
+        "id": 1,
+        "latex": "a+b",
+        "description": "BINARY OPERATORS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "f(a)+f(b)",
+        "description": "BINARY OPERATORS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "x^n+y^n",
+        "description": "BINARY OPERATORS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "+b",
+        "description": "BINARY OPERATORS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "(+b",
+        "description": "BINARY OPERATORS test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "=+b",
+        "description": "BINARY OPERATORS test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\sin+b",
+        "description": "BINARY OPERATORS test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": ", +b",
+        "description": "BINARY OPERATORS test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "\\\\textcolor{red}{a}+b",
+        "description": "BINARY OPERATORS test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "\\\\textcolor{red}{a=}+b",
+        "description": "BINARY OPERATORS test case 10",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "fractions": [
+      {
+        "id": 1,
+        "latex": "\\\\frac57",
+        "description": "FRACTIONS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\frac {5} {7}",
+        "description": "FRACTIONS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\frac {\\\\frac57} {\\\\frac37}",
+        "description": "FRACTIONS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\[ 1 + \\\\frac{q^2}{(1-q)}+\\\\frac{q^6}{(1-q)(1-q^2)}+\\\\cdots = \\\\prod_{j=0}^{\\\\infty}\\\\frac{1}{(1-q^{5j+2})(1-q^{5j+3})}, \\\\quad\\\\quad \\\\text{for $|q|<1$}. \\\\]",
+        "description": "FRACTIONS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\binom{n}{k}",
+        "description": "FRACTIONS test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "\\\\dbinom{n}{k}",
+        "description": "FRACTIONS test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\tbinom{n}{k}",
+        "description": "FRACTIONS test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "n \\\\choose k",
+        "description": "FRACTIONS test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "\\\\pdiff{f(x)}{x}",
+        "description": "FRACTIONS test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 1,
+        "latex": "a \\\\over b \\\\over c",
+        "description": "Only one infix per group",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      }
+    ],
+    "negation": [
+      {
+        "id": 1,
+        "latex": "\\\\not\\\\in \\\\not{}\\\\in \\\\not{}\\\\in \\\\not\\\\in",
+        "description": "NOT test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\not= \\\\not{}= \\\\not{}= \\\\not=",
+        "description": "NOT test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\not= \\\\ne \\\\neq",
+        "description": "NOT test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\not",
+        "description": "NOT test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "a \\\\ne b",
+        "description": "NOT test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "a \\\\neq b",
+        "description": "NOT test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\not= \\\\not{=} a \\\\neq b \\\\ne c \\\\not< d \\\\not{h} e\\\\not{}",
+        "description": "NOT test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "a\\\\not= b",
+        "description": "NOT test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "a\\\\not< b",
+        "description": "NOT test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "a\\\\not{c} b",
+        "description": "NOT test case 10",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 11,
+        "latex": "a\\\\not{cd} b",
+        "description": "NOT test case 11",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 12,
+        "latex": "a\\\\not{<} b",
+        "description": "NOT test case 12",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 13,
+        "latex": "a\\\\not{<>} b",
+        "description": "NOT test case 13",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 14,
+        "latex": "a\\\\not{} b",
+        "description": "NOT test case 14",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 15,
+        "latex": "a\\\\not",
+        "description": "NOT test case 15",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "rule_and_dimensions": [
+      {
+        "id": 1,
+        "latex": "\\\\rule{1em}{2em}",
+        "description": "RULE AND DIMENSIONS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\rule[1em]{1em}{2em}",
+        "description": "RULE AND DIMENSIONS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\rule{1em}",
+        "description": "RULE AND DIMENSIONS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\rule{-1em}{+10em}",
+        "description": "RULE AND DIMENSIONS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\rule{0}{4}",
+        "description": "RULE AND DIMENSIONS test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "\\\\rule{1245.5667em}{2902929,292929em}",
+        "description": "RULE AND DIMENSIONS test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\rule{5mm}{7mm}",
+        "description": "RULE AND DIMENSIONS test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "\\\\rule{5cm}{7cm}",
+        "description": "RULE AND DIMENSIONS test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "\\\\rule{5ex}{7ex}",
+        "description": "RULE AND DIMENSIONS test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "\\\\rule{5em}{7em}",
+        "description": "RULE AND DIMENSIONS test case 10",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 11,
+        "latex": "\\\\rule{5bp}{7bp}",
+        "description": "RULE AND DIMENSIONS test case 11",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 12,
+        "latex": "\\\\rule{5dd}{7dd}",
+        "description": "RULE AND DIMENSIONS test case 12",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 13,
+        "latex": "\\\\rule{5pc}{7pc}",
+        "description": "RULE AND DIMENSIONS test case 13",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 14,
+        "latex": "\\\\rule{5in}{7in}",
+        "description": "RULE AND DIMENSIONS test case 14",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 15,
+        "latex": "\\\\rule{5mu}{7mu}",
+        "description": "RULE AND DIMENSIONS test case 15",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 16,
+        "latex": "\\\\rule{10}{10pt}",
+        "description": "RULE AND DIMENSIONS test case 16",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 17,
+        "latex": "\\\\rule{10pt}{10pt}",
+        "description": "RULE AND DIMENSIONS test case 17",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 18,
+        "latex": "\\\\rule{+10em}{+  10 em}",
+        "description": "RULE AND DIMENSIONS test case 18",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 19,
+        "latex": "\\\\rule{10em}{10em}",
+        "description": "RULE AND DIMENSIONS test case 19",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 20,
+        "latex": "\\\\rule{",
+        "description": "RULE AND DIMENSIONS test case 20",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 21,
+        "latex": ", ",
+        "description": "RULE AND DIMENSIONS test case 21",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 22,
+        "latex": "],\n    [",
+        "description": "RULE AND DIMENSIONS test case 22",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 23,
+        "latex": "12.9999em}{10em}",
+        "description": "RULE AND DIMENSIONS test case 23",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 24,
+        "latex": "\\\\rule{10pt}{10em}",
+        "description": "RULE AND DIMENSIONS test case 24",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 25,
+        "latex": "\\\\rule{",
+        "description": "RULE AND DIMENSIONS test case 25",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 26,
+        "latex": ", ",
+        "description": "RULE AND DIMENSIONS test case 26",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "boxes": [
+      {
+        "id": 1,
+        "latex": "-\\\\bbox{\\\\sqrt{\\\\frac{2}{1+x}}}-",
+        "description": "BOX test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "-\\\\bbox[border:solid 1px red]{\\\\sqrt{\\\\frac{2}{1+x}}}-",
+        "description": "BOX test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "-\\\\bbox[yellow]{\\\\sqrt{\\\\frac{2}{1+x}}}-",
+        "description": "BOX test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "-\\\\bbox[yellow]{\\\\sqrt{\\\\frac{2}{1+x}}}-",
+        "description": "BOX test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "-\\\\bbox[ yellow , border: 1px solid red, 4 em ]{\\\\sqrt{\\\\frac{2}{1+x}}}-",
+        "description": "BOX test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "-\\\\bbox[4em,border: 1px solid red,yellow]{\\\\sqrt{\\\\frac{\\\\frac{2}{\\\\frac{3}{\\\\frac{4}{\\\\frac{5}{\\\\frac{6}{\\\\frac{7}{\\\\frac{8}{\\\\frac{9}{\\\\frac{a}{\\\\frac{b}{\\\\frac{x}{\\\\frac{s}{d}}}}}}}}}}}}}{1+x}}}-",
+        "description": "BOX test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\rlap{x}o",
+        "description": "BOX test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "\\\\mathrlap{x}o",
+        "description": "BOX test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "\\\\llap{x}o",
+        "description": "BOX test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "\\\\mathllap{x}o",
+        "description": "BOX test case 10",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "overunder": [
+      {
+        "id": 1,
+        "latex": "a\\\\overline{x}b",
+        "description": "OVER/UNDERLINE test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\overline{xyz}\\\\overline{1+\\\\frac34}\\\\underline{abc}\\\\underline{\\\\frac57}",
+        "description": "OVER/UNDERLINE test case 2",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "spacing": [
+      {
+        "id": 1,
+        "latex": "a+{}b+c",
+        "description": "SPACING AND KERN test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "123\\\\colorbox{red}456",
+        "description": "SPACING AND KERN test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "a\\\\hskip 3em b",
+        "description": "SPACING AND KERN test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "a\\\\kern 3em b",
+        "description": "SPACING AND KERN test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "a\\\\hspace{3em} b",
+        "description": "SPACING AND KERN test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "a\\\\hskip 3em b",
+        "description": "SPACING AND KERN test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "+-a+b=c+-d=x^{2-\\\\frac{1}{2}}",
+        "description": "SPACING AND KERN test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "\\\\sqrt[\\\\placeholder{}]{x}\\\\scriptstyle \\\\sqrt[\\\\placeholder{}]{x}",
+        "description": "SPACING AND KERN test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "x \\\\scriptstyle x",
+        "description": "SPACING AND KERN test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "\\\\vec{x} \\\\scriptstyle \\\\vec{x}",
+        "description": "SPACING AND KERN test case 10",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 1,
+        "latex": "-1-2=\\\\frac34",
+        "description": "Displaystyle/Textstyle Spacing",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      },
+      {
+        "id": 2,
+        "latex": ")x)+)=)\\\\frac34)))();",
+        "description": "Displaystyle/Textstyle Spacing `close`",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      }
+    ],
+    "delimiter_sizing": [
+      {
+        "id": 1,
+        "latex": "\\\\bigl",
+        "description": "DELIMITER SIZING COMMANDS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\bigr",
+        "description": "DELIMITER SIZING COMMANDS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\bigm",
+        "description": "DELIMITER SIZING COMMANDS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\big",
+        "description": "DELIMITER SIZING COMMANDS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\Bigl",
+        "description": "DELIMITER SIZING COMMANDS test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "\\\\Bigr",
+        "description": "DELIMITER SIZING COMMANDS test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\Bigm",
+        "description": "DELIMITER SIZING COMMANDS test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "\\\\Big",
+        "description": "DELIMITER SIZING COMMANDS test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "\\\\biggl",
+        "description": "DELIMITER SIZING COMMANDS test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "\\\\biggr",
+        "description": "DELIMITER SIZING COMMANDS test case 10",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 11,
+        "latex": "\\\\biggm",
+        "description": "DELIMITER SIZING COMMANDS test case 11",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 12,
+        "latex": "\\\\bigg",
+        "description": "DELIMITER SIZING COMMANDS test case 12",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 13,
+        "latex": "\\\\Biggl",
+        "description": "DELIMITER SIZING COMMANDS test case 13",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 14,
+        "latex": "\\\\Biggr",
+        "description": "DELIMITER SIZING COMMANDS test case 14",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 15,
+        "latex": "\\\\Biggm",
+        "description": "DELIMITER SIZING COMMANDS test case 15",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 16,
+        "latex": "\\\\Bigg",
+        "description": "DELIMITER SIZING COMMANDS test case 16",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "sizing": [
+      {
+        "id": 1,
+        "latex": "\\\\text{a \\\\tiny x y}b",
+        "description": "SIZING COMMANDS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\mbox{a \\\\tiny x y}b",
+        "description": "SIZING COMMANDS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\binom12  \\\\sqrt[3]{x}  \\\\Huge \\\\sqrt[3]{x} \\\\binom56 x \\\\text{text is huge}",
+        "description": "SIZING COMMANDS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 1,
+        "latex": "a\\\\Large bc",
+        "description": "Sizing are modal commands",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      }
+    ],
+    "environments": [
+      {
+        "id": 1,
+        "latex": "\\\\begin{bmatrix}a & b & c\\\\end{bmatrix}",
+        "description": "ENVIRONMENTS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\begin{bmatrix}a & b & c\\\\\\\\ d & e & f\\\\end{bmatrix}",
+        "description": "ENVIRONMENTS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\begin{bmatrix}a & b & c\\\\\\\\ d \\\\end{bmatrix}",
+        "description": "ENVIRONMENTS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\begin{bmatrix}a & b & c\\\\\\\\ d \\\\\\\\ g & h & i & j\\\\end{bmatrix}",
+        "description": "ENVIRONMENTS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\begin{array}{ll}xyz & abc & 123 \\\\\\\\ cde & fgh \\\\end{array}",
+        "description": "ENVIRONMENTS test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "\\\\begin{Bmatrix}a & b & c\\\\end{Bmatrix}",
+        "description": "ENVIRONMENTS test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\begin{pmatrix}a & b & c\\\\end{pmatrix}",
+        "description": "ENVIRONMENTS test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "\\\\begin{cases}\\\\sum_n^{100}+\\\\frac{x-y}{4}=\\\\frac{4-y}{8}\\\\\\\\-\\\\frac{y+3}{8}=\\\\frac{1-2x}{8}+\\\\sum_n^{100}\\\\end{cases}",
+        "description": "ENVIRONMENTS test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "\\\\begin{dcases}\\\\sum_n^{100}+\\\\frac{x-y}{4}=\\\\frac{4-y}{8}\\\\\\\\-\\\\frac{y+3}{8}=\\\\frac{1-2x}{8}+\\\\sum_n^{100}\\\\end{dcases}",
+        "description": "ENVIRONMENTS test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "\\\\begin",
+        "description": "ENVIRONMENTS test case 10",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 11,
+        "latex": "\\\\begin{bmatrix}",
+        "description": "ENVIRONMENTS test case 11",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 12,
+        "latex": "\\\\begin{bmatrix}\\\\end",
+        "description": "ENVIRONMENTS test case 12",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 13,
+        "latex": "\\\\begin{bmatrix}\\\\end{Bmatrix}",
+        "description": "ENVIRONMENTS test case 13",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 14,
+        "latex": "\\\\begin{a}\\\\end{a}",
+        "description": "ENVIRONMENTS test case 14",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 15,
+        "latex": "\\\\begin{array}{ll}\\\\end{bmatrix}",
+        "description": "ENVIRONMENTS test case 15",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 16,
+        "latex": "\\\\begin{array}{ll}xyz\\\\end{bmatrix}",
+        "description": "ENVIRONMENTS test case 16",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 17,
+        "latex": "\\\\begin{array}{ll}xyz",
+        "description": "ENVIRONMENTS test case 17",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 18,
+        "latex": "\\\\begin{array}{ll}xyz",
+        "description": "ENVIRONMENTS test case 18",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 19,
+        "latex": "\\\\begin{\\\\alpha}\\\\end{\\\\alpha}",
+        "description": "ENVIRONMENTS test case 19",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 20,
+        "latex": "\\\\begin{.}\\\\end{.}",
+        "description": "ENVIRONMENTS test case 20",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 21,
+        "latex": "\\\\begin{(}\\\\end{(}",
+        "description": "ENVIRONMENTS test case 21",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "radicals": [
+      {
+        "id": 1,
+        "latex": "\\\\sqrt5",
+        "description": "SURDS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\sqrt{}",
+        "description": "SURDS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "ax^2+bx+c = a \\\\left( x - \\\\frac{-b + \\\\sqrt {b^2-4ac}}{2a} \\\\right) \\\\left( x - \\\\frac{-b - \\\\sqrt {b^2-4ac}}{2a} \\\\right)",
+        "description": "SURDS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\sqrt[3]{5}",
+        "description": "SURDS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\sqrt[3]5",
+        "description": "SURDS test case 5",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "accents": [
+      {
+        "id": 1,
+        "latex": "\\\\vec",
+        "description": "ACCENTS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\acute",
+        "description": "ACCENTS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\grave",
+        "description": "ACCENTS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\dot",
+        "description": "ACCENTS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\ddot",
+        "description": "ACCENTS test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "\\\\tilde",
+        "description": "ACCENTS test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\bar",
+        "description": "ACCENTS test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "\\\\breve",
+        "description": "ACCENTS test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "\\\\check",
+        "description": "ACCENTS test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "\\\\hat",
+        "description": "ACCENTS test case 10",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "phantom": [
+      {
+        "id": 1,
+        "latex": "\\\\sin x \\\\textcolor{#f00}{red} \\\\colorbox{yellow}{$x + \\\\frac1{\\\\frac34}$} \\\\textcolor{m1}{\\\\blacktriangle}\\\\textcolor{m2}{\\\\blacktriangle}\\\\textcolor{m3}{\\\\blacktriangle}\\\\textcolor{m4}{\\\\blacktriangle}\\\\textcolor{m5}{\\\\blacktriangle}\\\\textcolor{m6}{\\\\blacktriangle}\\\\textcolor{m7}{\\\\blacktriangle}\\\\textcolor{m8}{\\\\blacktriangle}\\\\textcolor{m9}{\\\\blacktriangle}",
+        "description": "PHANTOM test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "a+\\\\colorbox{#f00}{$\\\\frac1{\\\\frac{a+1}{b+c}}$}",
+        "description": "PHANTOM test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "a+\\\\colorbox{#f00}{$\\\\frac{\\\\frac{\\\\frac{1}{2}}{c}}{\\\\frac{a+1}{b+c}}$}",
+        "description": "PHANTOM test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "a+\\\\colorbox{#f00}{$\\\\frac{\\\\frac{\\\\frac{1}{2}}{c}}{a}$}",
+        "description": "PHANTOM test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "a+\\\\colorbox{#f00}{$\\\\frac1{\\\\frac{a+1}{b+c}}$}",
+        "description": "PHANTOM test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "a+\\\\colorbox{#f00}{$\\\\frac{\\\\frac{\\\\frac{1}{2}}{c}}{\\\\frac{a+1}{b+c}}$}",
+        "description": "PHANTOM test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "a{b\\\\color{#f00} c}d",
+        "description": "PHANTOM test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "a\\\\left(b\\\\color{#f00} c\\\\right)d",
+        "description": "PHANTOM test case 8",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 9,
+        "latex": "aquamarine",
+        "description": "PHANTOM test case 9",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 10,
+        "latex": "rgb(240, 10, 200)",
+        "description": "PHANTOM test case 10",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 11,
+        "latex": "#33d",
+        "description": "PHANTOM test case 11",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 12,
+        "latex": "#3130da",
+        "description": "PHANTOM test case 12",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 13,
+        "latex": "white",
+        "description": "PHANTOM test case 13",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 14,
+        "latex": "Aquamarine",
+        "description": "PHANTOM test case 14",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 15,
+        "latex": "m5",
+        "description": "PHANTOM test case 15",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 16,
+        "latex": "#fff",
+        "description": "PHANTOM test case 16",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 17,
+        "latex": "#ffffff",
+        "description": "PHANTOM test case 17",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 18,
+        "latex": "#fCFcfC",
+        "description": "PHANTOM test case 18",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 19,
+        "latex": "rgb(255, 255, 255)",
+        "description": "PHANTOM test case 19",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 20,
+        "latex": "rgb(255,255,255)",
+        "description": "PHANTOM test case 20",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 21,
+        "latex": "  rgb  (  255  ,  255  ,  255  ) ",
+        "description": "PHANTOM test case 21",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 22,
+        "latex": "rgb(3.5, 0, 0)",
+        "description": "PHANTOM test case 22",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 23,
+        "latex": "rgb(3, 5, 7",
+        "description": "PHANTOM test case 23",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 24,
+        "latex": "rgb(125.5, 0.556, -12.5)",
+        "description": "PHANTOM test case 24",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 25,
+        "latex": "rgb(xxy)",
+        "description": "PHANTOM test case 25",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 26,
+        "latex": "rgb(3, 5)",
+        "description": "PHANTOM test case 26",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 27,
+        "latex": "rgb(3, 5, 7, 11)",
+        "description": "PHANTOM test case 27",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 28,
+        "latex": "#111!50",
+        "description": "PHANTOM test case 28",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 29,
+        "latex": "#111!50!#fff",
+        "description": "PHANTOM test case 29",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 30,
+        "latex": "#111!50!#000",
+        "description": "PHANTOM test case 30",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 31,
+        "latex": "-green!40!yellow",
+        "description": "PHANTOM test case 31",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "extensions": [
+      {
+        "id": 1,
+        "latex": "\\\\htmlData{foo=green}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 1",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\htmlData{foo=green, bar}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 2",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 3,
+        "latex": "\\\\htmlData{foo=green, bar=blue}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 3",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 4,
+        "latex": "\\\\htmlData{foo bar=green, bar=blue}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 4",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\class{cssClassName}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 5",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 6,
+        "latex": "\\\\class{css class name}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 6",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\cssId{a-css-id-1234}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 7",
+        "source": "mathlive/markup.test.ts"
+      },
+      {
+        "id": 8,
+        "latex": "\\\\cssId{a css id 1234}{2+\\\\frac{1}{x}}",
+        "description": "EXTENSIONS test case 8",
+        "source": "mathlive/markup.test.ts"
+      }
+    ],
+    "ordinary_symbols": [
+      {
+        "id": 1,
+        "latex": "-+=:\\\\colon \\\\coloneq ffif",
+        "description": "Math Font",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      },
+      {
+        "id": 2,
+        "latex": "o0+\\\\frac00=\\\\sum",
+        "description": "Math axis",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      },
+      {
+        "id": 3,
+        "latex": "\\\\int_0^0",
+        "description": "Math Font: Extensible symbol sup/sub shift",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      },
+      {
+        "id": 4,
+        "latex": "(+-1234.56=0)\\\\{|/@",
+        "description": "Alphanumeric",
+        "source": "mathlive/static/index.html",
+        "reference_image": "ordinary-1.gif"
+      },
+      {
+        "id": 5,
+        "latex": "\\\\exists \\\\nexists \\\\imath \\\\alpha \\\\Omega i x fg \\\\imaginaryI ",
+        "description": "Ordinary symbols from various fonts",
+        "source": "mathlive/static/index.html",
+        "reference_image": "ordinary-2.gif"
+      },
+      {
+        "id": 6,
+        "latex": "\\\\nleqslant\\\\nshortparallel\\\\measuredangle\\\\blacklozenge\\\\Finv\\\\maltese\\\\leftrightarrows\\\\curvearrowright\\\\looparrowright\\\\hookrightarrow\\\\nearrow",
+        "description": "Extended math symbols, arrows",
+        "source": "mathlive/static/index.html",
+        "reference_image": "ordinary-4.gif"
+      },
+      {
+        "id": 7,
+        "latex": "\\\\char",
+        "description": "Emoji with \\\\char",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      },
+      {
+        "id": 9,
+        "latex": "🧑🏻‍🚀",
+        "description": "Emoji as Unicode character",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      }
+    ],
+    "styles": [
+      {
+        "id": 1,
+        "latex": "\\\\binom12 \\\\textstyle \\\\binom34 \\\\scriptstyle \\\\binom56 \\\\displaystyle \\\\binom78 \\\\scriptstyle \\\\binom90",
+        "description": "Math Styles: \\\\textstyle, \\\\displaystyle, \\\\scriptstyle, \\\\scriptscriptstyle",
+        "source": "mathlive/static/index.html",
+        "reference_image": "styling-1.gif"
+      },
+      {
+        "id": 2,
+        "latex": "\\\\prod_0^n  $\\\\sum_0^n $$ \\\\sum_0^n $$ $ ",
+        "description": "&dollar;&dollar;...&dollar;&dollar; inside &dollar;...&dollar;",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      }
+    ],
+    "styling": [
+      {
+        "id": 1,
+        "latex": "\\\\gothicCapitalC\\\\gothicCapitalH\\\\scriptCapitalE\\\\doubleStruckCapitalQ\\\\Bbbk",
+        "description": "Variants",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      }
+    ],
+    "left_right": [
+      {
+        "id": 1,
+        "latex": "\\\\left\\\\lbrace a \\\\middle\\\\mid \\\\frac12 \\\\right \\\\rbrace",
+        "description": "<kbd>\\\\left</kbd>...<kbd>\\\\middle</kbd>...<kbd>\\\\right</kbd>",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      },
+      {
+        "id": 2,
+        "latex": "\\\\left(x\\\\right)^2",
+        "description": "<kbd>\\\\left</kbd>......<kbd>\\\\right</kbd> with superscript",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      },
+      {
+        "id": 3,
+        "latex": "a\\\\right) b \\\\left(c",
+        "description": "Unbalanced <kbd>\\\\left</kbd> <kbd>\\\\right</kbd>",
+        "source": "mathlive/static/index.html",
+        "reference_image": null
+      }
+    ]
+  }
+}

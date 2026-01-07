@@ -48,6 +48,7 @@ typedef enum {
     RDT_VIEW_MARKER,  // List marker (bullet/number) - renders with fixed width
     // ViewSpan
     RDT_VIEW_INLINE,
+    RDT_VIEW_MATH,    // Math view (inline or display) - renders MathBox trees
     // ViewBlock
     RDT_VIEW_INLINE_BLOCK,
     RDT_VIEW_BLOCK,

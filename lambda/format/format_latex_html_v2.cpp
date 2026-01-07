@@ -2698,28 +2698,9 @@ static std::string codepoint_to_utf8(uint32_t codepoint) {
     return result;
 }
 
-static void cmd_char(LatexProcessor* proc, Item elem) {
-    // \char<number> or \char"<hex> - output character by code
-    // NOTE: \char is a TeX primitive that consumes the following number token.
-    // The parser creates <char/> followed by "98" as siblings, not parent-child.
-    // This command currently doesn't work correctly due to this parser limitation.
-    // TODO: Fix parser to consume following number, or implement lookahead in formatter.
-    HtmlGenerator* gen = proc->generator();
-    proc->ensureParagraph();
-
-    // Get the argument text using ElementReader
-    ElementReader elem_reader(elem);
-    Pool* pool = proc->pool();
-    StringBuf* sb = stringbuf_new(pool);
-    elem_reader.textContent(sb);
-    String* arg_str = stringbuf_to_string(sb);
-
-    if (!arg_str || arg_str->len == 0) {
-        return;
-    }
-
+// Helper function to parse and output a character code
+static void output_charcode(HtmlGenerator* gen, const char* arg) {
     // Skip leading whitespace
-    const char* arg = arg_str->chars;
     while (*arg && (*arg == ' ' || *arg == '\t' || *arg == '\n' || *arg == '\r')) {
         arg++;
     }
@@ -2732,6 +2713,9 @@ static void cmd_char(LatexProcessor* proc, Item elem) {
     // Check if hex notation (starts with " or 0x)
     if (arg[0] == '"') {
         charcode = std::strtoul(arg + 1, nullptr, 16);
+    } else if (arg[0] == '\'') {
+        // Octal notation: '77
+        charcode = std::strtoul(arg + 1, nullptr, 8);
     } else if (strlen(arg) > 2 && arg[0] == '0' && (arg[1] == 'x' || arg[1] == 'X')) {
         charcode = std::strtoul(arg + 2, nullptr, 16);
     } else {
@@ -2747,6 +2731,163 @@ static void cmd_char(LatexProcessor* proc, Item elem) {
             gen->text(utf8.c_str());
         }
     }
+}
+
+// Handler for char_command from external scanner: \char"A9, \char'77, \char98
+// The entire token is stored as a string child
+static void cmd_char_command(LatexProcessor* proc, Item elem) {
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+
+    ElementReader elem_reader(elem);
+
+    // Get the token string from the first child
+    if (elem_reader.childCount() < 1) {
+        log_warn("char_command: no children found");
+        return;
+    }
+
+    ItemReader first_child = elem_reader.childAt(0);
+    if (!first_child.isString()) {
+        log_warn("char_command: first child is not a string");
+        return;
+    }
+
+    const char* text = first_child.cstring();
+    if (!text) {
+        log_warn("char_command: first child string is null");
+        return;
+    }
+
+    log_debug("char_command: processing text='%s'", text);
+
+    // Parse: "\char<number>" or "\char"<hex>" or "\char'<octal>"
+    // Skip "\char" (5 chars)
+    if (strlen(text) < 6) {  // Minimum: \char0
+        log_warn("char_command: token too short: %s", text);
+        return;
+    }
+
+    const char* arg = text + 5;  // After "\char"
+    output_charcode(gen, arg);
+}
+
+// Handler for caret_char from external scanner: ^^A9, ^^^^00A9, ^^c
+// The entire token is stored as a string child
+// Formats:
+//   ^^XX where XX are 2 hex digits -> character with hex code XX
+//   ^^^^XXXX where XXXX are 4 hex digits -> character with hex code XXXX
+//   ^^c where c is any char -> charcode(c) < 64 ? c+64 : c-64
+static void cmd_caret_char(LatexProcessor* proc, Item elem) {
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+
+    ElementReader elem_reader(elem);
+
+    // Get the token string from the first child
+    if (elem_reader.childCount() < 1) {
+        log_warn("caret_char: no children found");
+        return;
+    }
+
+    ItemReader first_child = elem_reader.childAt(0);
+    if (!first_child.isString()) {
+        log_warn("caret_char: first child is not a string");
+        return;
+    }
+
+    const char* text = first_child.cstring();
+    if (!text) {
+        log_warn("caret_char: first child string is null");
+        return;
+    }
+
+    size_t len = strlen(text);
+    log_debug("caret_char: processing text='%s', len=%zu", text, len);
+
+    // Parse: ^^XX or ^^^^XXXX or ^^c
+    if (len < 3 || text[0] != '^' || text[1] != '^') {
+        log_warn("caret_char: invalid format: %s", text);
+        return;
+    }
+
+    unsigned int charcode = 0;
+
+    // Check for ^^^^ (4 hex digits)
+    if (len >= 6 && text[2] == '^' && text[3] == '^') {
+        // ^^^^XXXX format - 4 hex digits
+        char hex[5] = {0};
+        strncpy(hex, text + 4, 4);
+        char* endptr;
+        charcode = strtoul(hex, &endptr, 16);
+        if (endptr != hex + 4) {
+            log_warn("caret_char: invalid hex in ^^^^: %s", text);
+            return;
+        }
+    }
+    // Check for ^^ followed by 2 hex digits
+    else if (len == 4) {
+        // ^^XX format - 2 hex digits
+        char hex[3] = {0};
+        strncpy(hex, text + 2, 2);
+        // Check if both are hex digits
+        bool is_hex = true;
+        for (int i = 0; i < 2; i++) {
+            char c = hex[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) {
+                is_hex = false;
+                break;
+            }
+        }
+        if (is_hex) {
+            charcode = strtoul(hex, NULL, 16);
+        } else {
+            // Not hex - fall through to ^^c case
+            goto caret_char_single;
+        }
+    }
+    // ^^c format - single character
+    else if (len == 3) {
+caret_char_single:
+        unsigned char c = text[2];
+        charcode = (c < 64) ? (c + 64) : (c - 64);
+    }
+    else {
+        log_warn("caret_char: unexpected format: %s", text);
+        return;
+    }
+
+    // Output the character
+    if (charcode > 0) {
+        // Special case: 0xA0 is non-breaking space, output as HTML entity
+        if (charcode == 0xA0) {
+            gen->writer()->writeRawHtml("&nbsp;");
+        } else {
+            std::string utf8 = codepoint_to_utf8(charcode);
+            gen->text(utf8.c_str());
+        }
+    }
+}
+
+static void cmd_char(LatexProcessor* proc, Item elem) {
+    // \char<number> or \char"<hex> - output character by code
+    // This handler is for the generic command case where \char is parsed as a command
+    // with the number as a following sibling or child
+    HtmlGenerator* gen = proc->generator();
+    proc->ensureParagraph();
+
+    // Get the argument text using ElementReader
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* arg_str = stringbuf_to_string(sb);
+
+    if (!arg_str || arg_str->len == 0) {
+        return;
+    }
+
+    output_charcode(gen, arg_str->chars);
 }
 
 static void cmd_symbol(LatexProcessor* proc, Item elem) {
@@ -3809,8 +3950,24 @@ static void cmd_math(LatexProcessor* proc, Item elem) {
     // Inline math: $...$  or \(...\)
     HtmlGenerator* gen = proc->generator();
 
-    gen->startInlineMath();
-    proc->processChildren(elem);
+    // Get LaTeX source from 'source' attribute (set during parsing)
+    ElementReader reader(elem.element);
+    ItemReader source_attr = reader.get_attr("source");
+    const char* latex_source = nullptr;
+
+    if (source_attr.isString()) {
+        latex_source = source_attr.cstring();
+    }
+
+    if (latex_source && *latex_source) {
+        gen->startInlineMathWithSource(latex_source);
+        // Don't process children - the data-latex attribute has the source
+        // and Radiant will render the math using the math engine
+    } else {
+        gen->startInlineMath();
+        // Fallback: no source available, process children for HTML display
+        proc->processChildren(elem);
+    }
     gen->endInlineMath();
 }
 
@@ -3823,8 +3980,24 @@ static void cmd_displaymath(LatexProcessor* proc, Item elem) {
     // Display math: \[...\] or $$...$$
     HtmlGenerator* gen = proc->generator();
 
-    gen->startDisplayMath();
-    proc->processChildren(elem);
+    // Get LaTeX source from 'source' attribute (set during parsing)
+    ElementReader reader(elem.element);
+    ItemReader source_attr = reader.get_attr("source");
+    const char* latex_source = nullptr;
+
+    if (source_attr.isString()) {
+        latex_source = source_attr.cstring();
+    }
+
+    if (latex_source && *latex_source) {
+        gen->startDisplayMathWithSource(latex_source);
+        // Don't process children - the data-latex attribute has the source
+        // and Radiant will render the math using the math engine
+    } else {
+        gen->startDisplayMath();
+        // Fallback: no source available, process children for HTML display
+        proc->processChildren(elem);
+    }
     gen->endDisplayMath();
 }
 
@@ -7922,6 +8095,8 @@ void LatexProcessor::initCommandTable() {
     command_table_["ldots"] = cmd_ldots;
     command_table_["dots"] = cmd_dots;
     command_table_["char"] = cmd_char;
+    command_table_["char_command"] = cmd_char_command;  // \char"A9 from external scanner
+    command_table_["caret_char"] = cmd_caret_char;      // ^^A9 or ^^^^00A9 from external scanner
     command_table_["symbol"] = cmd_symbol;
     command_table_["makeatletter"] = cmd_makeatletter;
     command_table_["makeatother"] = cmd_makeatother;

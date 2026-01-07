@@ -310,11 +310,6 @@
     }
   },
   {
-    "type": "brace_symbol",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "brack_group",
     "named": true,
     "fields": {},
@@ -332,10 +327,6 @@
         },
         {
           "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "brace_symbol",
           "named": true
         },
         {
@@ -478,10 +469,6 @@
           "named": true
         },
         {
-          "type": "brace_symbol",
-          "named": true
-        },
-        {
           "type": "command",
           "named": true
         },
@@ -562,10 +549,6 @@
         },
         {
           "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "brace_symbol",
           "named": true
         },
         {
@@ -764,10 +747,6 @@
           "named": true
         },
         {
-          "type": "brace_symbol",
-          "named": true
-        },
-        {
           "type": "command",
           "named": true
         },
@@ -849,10 +828,6 @@
         },
         {
           "type": "binomial",
-          "named": true
-        },
-        {
-          "type": "brace_symbol",
           "named": true
         },
         {
@@ -1060,10 +1035,6 @@
           },
           {
             "type": "binomial",
-            "named": true
-          },
-          {
-            "type": "brace_symbol",
             "named": true
           },
           {
@@ -1552,6 +1523,10 @@
     "named": false
   },
   {
+    "type": "\\lbrace",
+    "named": false
+  },
+  {
     "type": "\\lceil",
     "named": false
   },
@@ -1736,6 +1711,10 @@
     "named": false
   },
   {
+    "type": "\\preceq",
+    "named": false
+  },
+  {
     "type": "\\prod",
     "named": false
   },
@@ -1757,6 +1736,10 @@
   },
   {
     "type": "\\rangle",
+    "named": false
+  },
+  {
+    "type": "\\rbrace",
     "named": false
   },
   {
@@ -1821,6 +1804,10 @@
   },
   {
     "type": "\\succ",
+    "named": false
+  },
+  {
+    "type": "\\succeq",
     "named": false
   },
   {

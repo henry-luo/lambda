@@ -51,10 +51,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "brace_symbol"
-        },
-        {
-          "type": "SYMBOL",
           "name": "fraction"
         },
         {
@@ -329,6 +325,14 @@
         },
         {
           "type": "STRING",
+          "value": "\\preceq"
+        },
+        {
+          "type": "STRING",
+          "value": "\\succeq"
+        },
+        {
+          "type": "STRING",
           "value": "\\perp"
         },
         {
@@ -378,10 +382,6 @@
         },
         {
           "type": "STRING",
-          "value": "|"
-        },
-        {
-          "type": "STRING",
           "value": "("
         },
         {
@@ -390,13 +390,8 @@
         },
         {
           "type": "STRING",
-          "value": "'"
-        }
-      ]
-    },
-    "brace_symbol": {
-      "type": "CHOICE",
-      "members": [
+          "value": "|"
+        },
         {
           "type": "STRING",
           "value": "\\{"
@@ -404,6 +399,18 @@
         {
           "type": "STRING",
           "value": "\\}"
+        },
+        {
+          "type": "STRING",
+          "value": "\\lbrace"
+        },
+        {
+          "type": "STRING",
+          "value": "\\rbrace"
+        },
+        {
+          "type": "STRING",
+          "value": "'"
         }
       ]
     },
