@@ -109,13 +109,14 @@ int get_inter_box_spacing(MathBoxType left, MathBoxType right, bool tight);
  *
  * @param face FreeType font face
  * @param codepoint Unicode codepoint
- * @param font_size Font size in pixels
- * @param width Output: advance width
- * @param height Output: height above baseline
- * @param depth Output: depth below baseline
- * @param italic Output: italic correction
+ * @param css_font_size Font size in CSS pixels
+ * @param pixel_ratio Pixel ratio for HiDPI (1.0 for standard, 2.0 for Retina)
+ * @param width Output: advance width in CSS pixels
+ * @param height Output: height above baseline in CSS pixels
+ * @param depth Output: depth below baseline in CSS pixels
+ * @param italic Output: italic correction in CSS pixels
  */
-void get_glyph_metrics(FT_Face face, int codepoint, float font_size,
+void get_glyph_metrics(FT_Face face, int codepoint, float css_font_size, float pixel_ratio,
                        float* width, float* height, float* depth, float* italic);
 
 /**

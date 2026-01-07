@@ -352,7 +352,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 g_render_glyph_count++;
                 if (!glyph) {
                     // draw a square box for missing glyph (scaled_space_width is in physical pixels)
-                    Rect rect = {x + 1, y, (float)(scaled_space_width - 2), (float)(rdcon->font.ft_face->size->metrics.y_ppem / 64.0)};
+                    // Use y_ppem if available, otherwise derive from height (y_ppem=0 for some WOFF fonts)
+                    float box_height = (rdcon->font.ft_face->size->metrics.y_ppem != 0)
+                        ? (rdcon->font.ft_face->size->metrics.y_ppem / 64.0f)
+                        : (rdcon->font.ft_face->size->metrics.height / 64.0f / 1.2f);
+                    Rect rect = {x + 1, y, (float)(scaled_space_width - 2), box_height};
                     fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
                     x += scaled_space_width;
                 }

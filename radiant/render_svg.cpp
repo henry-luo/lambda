@@ -845,9 +845,16 @@ static void render_math_glyph_svg(SvgRenderContext* ctx, MathBox* box, float x, 
     // Get font properties
     const char* font_family = face->family_name ? face->family_name : "serif";
     // Calculate font size from face metrics (in pixels)
-    float font_size = (face->size && face->size->metrics.y_ppem > 0)
-        ? face->size->metrics.y_ppem * box->scale
-        : 16.0f * box->scale;
+    // Handle WOFF fonts where y_ppem=0 by deriving from height
+    float font_size;
+    if (face->size && face->size->metrics.y_ppem > 0) {
+        font_size = face->size->metrics.y_ppem * box->scale;
+    } else if (face->size && face->size->metrics.height > 0) {
+        // Derive from height (height ≈ ppem * 1.2 * 64)
+        font_size = (face->size->metrics.height / 64.0f / 1.2f) * box->scale;
+    } else {
+        font_size = 16.0f * box->scale;
+    }
 
     // Load glyph to get metrics
     FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);

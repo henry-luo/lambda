@@ -624,19 +624,23 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
         return NULL;
     }
 
-    // Set font size
-    float font_size = style ? style->font_size : 16;
-    error = FT_Set_Pixel_Sizes(face, 0, (FT_UInt)font_size);
+    // Set font size in PHYSICAL pixels for HiDPI displays
+    // style->font_size is in CSS logical pixels, must multiply by pixel_ratio for HiDPI
+    float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
+    float css_font_size = style ? style->font_size : 16;
+    float physical_font_size = css_font_size * pixel_ratio;
+    error = FT_Set_Pixel_Sizes(face, 0, (FT_UInt)physical_font_size);
     if (error) {
-        clog_error(font_log, "FT_Set_Pixel_Sizes failed: error=%d, size=%f", error, font_size);
+        log_error("[FONT-FACE-DATAURI] FT_Set_Pixel_Sizes failed: error=%d, physical_size=%.0f", error, physical_font_size);
         FT_Done_Face(face);
         if (hash_key) free(hash_key);
         return NULL;
     }
 
-    clog_info(font_log, "Successfully loaded font from data URI: %s (size=%f, height=%f)",
+    // Verify the size was set correctly
+    log_info("[FONT-FACE-DATAURI] Loaded %s: css_size=%.1f, physical_size=%.0f, y_ppem=%d",
         face->family_name ? face->family_name : "(unknown)",
-        font_size, face->size->metrics.height / 64.0);
+        css_font_size, physical_font_size, face->size->metrics.y_ppem >> 6);
 
     if (hash_key) free(hash_key);
     return face;
@@ -668,18 +672,56 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
         return NULL;
     }
 
-    // CRITICAL FIX: Set font size - this is required for font metrics to be valid
-    // Use a default size of 16px if no size is specified
-    float font_size = style ? style->font_size : 16;
-    error = FT_Set_Pixel_Sizes(face, 0, font_size);
+    // CRITICAL FIX: Set font size in PHYSICAL pixels for HiDPI displays
+    // style->font_size is in CSS logical pixels, must multiply by pixel_ratio for HiDPI
+    float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
+    float css_font_size = style ? style->font_size : 16;
+    float physical_font_size = css_font_size * pixel_ratio;
+    
+    // Debug: log face flags to understand why size might not be set
+    log_debug("[FONT-FACE-DEBUG] %s: flags=0x%lx, scalable=%d, fixed_sizes=%d, num_fixed=%d",
+        face->family_name,
+        face->face_flags,
+        (face->face_flags & FT_FACE_FLAG_SCALABLE) != 0,
+        (face->face_flags & FT_FACE_FLAG_FIXED_SIZES) != 0,
+        face->num_fixed_sizes);
+    
+    // For fonts with fixed bitmap sizes (color emoji, bitmap fonts), use FT_Select_Size
+    if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && face->num_fixed_sizes > 0 &&
+        !(face->face_flags & FT_FACE_FLAG_SCALABLE)) {
+        // Pick the closest available size
+        int best_idx = 0, best_diff = INT_MAX;
+        for (int i = 0; i < face->num_fixed_sizes; i++) {
+            int ppem = face->available_sizes[i].y_ppem >> 6;
+            int diff = abs(ppem - (int)physical_font_size);
+            if (diff < best_diff) { best_diff = diff; best_idx = i; }
+        }
+        error = FT_Select_Size(face, best_idx);
+        log_info("[FONT-FACE] Selected fixed size %d for %s (requested %.0f)", 
+            face->available_sizes[best_idx].y_ppem >> 6, face->family_name, physical_font_size);
+    } else {
+        // Scalable font - set requested pixel size
+        error = FT_Set_Pixel_Sizes(face, 0, (FT_UInt)physical_font_size);
+    }
+    
     if (error) {
-        clog_error(font_log, "FT_Set_Pixel_Sizes failed: error=%d, size=%d", error, font_size);
+        log_error("[FONT-FACE] FT_Set_Pixel_Sizes/FT_Select_Size failed: error=%d, physical_size=%.0f", error, physical_font_size);
         FT_Done_Face(face);
         return NULL;
     }
 
-    clog_info(font_log, "Successfully loaded @font-face: %s (size=%f, height=%f)",
-        face->family_name, font_size, face->size->metrics.height / 64.0);
+    // Verify the size was set correctly
+    if (face->size && face->size->metrics.y_ppem == 0) {
+        log_warn("[FONT-FACE] WARNING: y_ppem=0 after FT_Set_Pixel_Sizes! height=%ld, ascender=%ld",
+            face->size->metrics.height, face->size->metrics.ascender);
+        // The metrics ARE set (height is non-zero), but y_ppem wasn't stored
+        // This happens with some WOFF fonts - the size is effectively set but y_ppem reports 0
+        // We can work around this by trusting that the font is sized correctly based on height
+    }
+    log_info("[FONT-FACE] Loaded %s: css_size=%.1f, physical_size=%.0f, y_ppem=%d, height=%ld",
+        face->family_name, css_font_size, physical_font_size, 
+        face->size ? (face->size->metrics.y_ppem >> 6) : 0,
+        face->size ? (face->size->metrics.height) : 0);
     log_font_loading_result(face->family_name, true, NULL);
     return face;
 }
@@ -710,8 +752,13 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                                    FontProp* style, bool* is_fallback) {
     if (!uicon || !family_name) { return NULL; }
 
-    // Create a cache key including family, weight, style, size to avoid redundant font loading
+    // Create a cache key including family, weight, style, PHYSICAL size to avoid redundant font loading
     // This is critical for performance - avoids reloading the same font file thousands of times
+    // Use physical pixel size (CSS size * pixel_ratio) for consistency with load_styled_font cache
+    float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
+    float css_font_size = style ? style->font_size : 16;
+    int physical_font_size = (int)(css_font_size * pixel_ratio);
+    
     StrBuf* cache_key = strbuf_create("@fontface:");
     if (!cache_key) {
         log_error("Failed to create cache key strbuf");
@@ -720,7 +767,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
     strbuf_append_str(cache_key, family_name);
     strbuf_append_str(cache_key, style && style->font_weight == CSS_VALUE_BOLD ? ":bold:" : ":normal:");
     strbuf_append_str(cache_key, style && style->font_style == CSS_VALUE_ITALIC ? "italic:" : "normal:");
-    strbuf_append_int(cache_key, style ? (int)style->font_size : 16);
+    strbuf_append_int(cache_key, physical_font_size);
 
     // Initialize fontface map if needed (uses same format as font.cpp)
     if (uicon->fontface_map == NULL) {
@@ -1150,7 +1197,12 @@ void setup_font_enhanced(UiContext* uicon, EnhancedFontBox* fbox,
         FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING); // FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
         if (FT_Load_Char(fbox->face, ' ', load_flags)) {
             clog_warn(font_log, "Could not load space character for %s", font_name);
-            fbox->space_width = fbox->face->size->metrics.y_ppem / 64.0;
+            // Handle WOFF fonts where y_ppem=0
+            float ppem = fbox->face->size->metrics.y_ppem / 64.0f;
+            if (ppem <= 0 && fbox->face->size && fbox->face->size->metrics.height > 0) {
+                ppem = fbox->face->size->metrics.height / 64.0f / 1.2f;
+            }
+            fbox->space_width = ppem > 0 ? ppem : fprop->font_size * fbox->pixel_ratio;
         } else {
             fbox->space_width = fbox->face->glyph->advance.x / 64.0;
         }
