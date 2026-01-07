@@ -1145,23 +1145,19 @@ struct ViewTree {
     HtmlVersion html_version;
 };
 
-typedef struct CursorState {
-    View* view;
-    float x, y;
-} CursorState;
+// Forward declaration for RadiantState (full definition in state_store.hpp)
+struct RadiantState;
+typedef struct RadiantState RadiantState;
 
-typedef struct CaretState {
-    View* view;
-    float x_offset;
-} CaretState;
+// Forward declarations for state types (full definitions in state_store.hpp)
+struct CaretState;
+struct CursorState;
+struct SelectionState;
+struct FocusState;
 
-typedef struct StateStore {
-    CaretState* caret;
-    CursorState* cursor;
-    bool is_dirty;
-    bool is_dragging;
-    View* drag_target;
-} StateStore;
+// StateStore is now an alias for RadiantState
+// Use RadiantState directly for new code
+typedef RadiantState StateStore;
 
 // rendering context structs
 typedef struct {
