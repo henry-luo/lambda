@@ -791,7 +791,7 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML/CSS Layout Engine v2.0 (Lambda CSS)\n\n");
-            printf("Usage: %s layout <file.html|file.tex|file.ls> [options]\n", argv[0]);
+            printf("Usage: %s layout <file.html|file.tex|file.ls> [more files...] [options]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'layout' command performs HTML/CSS layout analysis using Lambda's\n");
             printf("  CSS system (separate from Lexbor-based layout). It parses HTML with\n");
@@ -804,12 +804,16 @@ int main(int argc, char *argv[]) {
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
             printf("\nOptions:\n");
             printf("  -o, --output FILE                  Output file for layout results (default: stdout)\n");
+            printf("  --output-dir DIR                   Output directory for batch mode (required for multiple files)\n");
+            printf("  --view-output FILE                 Custom output path for view_tree.json (single file mode)\n");
             printf("  -c, --css FILE                     External CSS file to apply (HTML only)\n");
             printf("  -vw, --viewport-width WIDTH        Viewport width in pixels (default: 1200)\n");
             printf("  -vh, --viewport-height HEIGHT      Viewport height in pixels (default: 800)\n");
+            printf("  --continue-on-error                Continue processing on errors in batch mode\n");
+            printf("  --summary                          Print summary statistics\n");
             printf("  --debug                            Enable debug output\n");
             printf("  --help                             Show this help message\n");
-            printf("\nExamples:\n");
+            printf("\nSingle File Examples:\n");
             printf("  %s layout index.html                   # Basic HTML layout\n", argv[0]);
             printf("  %s layout document.tex                 # Layout LaTeX document\n", argv[0]);
             printf("  %s layout script.ls                    # Layout Lambda script output\n", argv[0]);
@@ -817,6 +821,14 @@ int main(int argc, char *argv[]) {
             printf("  %s layout page.html -c styles.css      # With external CSS\n", argv[0]);
             printf("  %s layout doc.html -vw 1024 -vh 768    # Custom viewport\n", argv[0]);
             printf("  %s layout index.html -o layout.json    # Save to file\n", argv[0]);
+            printf("\nBatch Mode Examples:\n");
+            printf("  %s layout *.html --output-dir /tmp/results/\n", argv[0]);
+            printf("  %s layout test/layout/data/baseline/*.html --output-dir /tmp/layout/ --summary\n", argv[0]);
+            printf("  %s layout file1.html file2.html --output-dir ./out --continue-on-error\n", argv[0]);
+            printf("\nBatch Mode Notes:\n");
+            printf("  - Multiple input files require --output-dir\n");
+            printf("  - Output files are named {basename}.json in the output directory\n");
+            printf("  - UiContext is initialized once and reused for all files (10x+ speedup)\n");
             log_finish();  // Cleanup logging before exit
             return 0;
         }

@@ -262,6 +262,178 @@ All tests pass after optimization:
 
 ---
 
+## 5. Batch Layout Mode (January 7, 2026)
+
+### Motivation
+
+Running layout tests on the 934-file baseline suite required spawning a new process for each file. This incurred significant overhead:
+
+1. **Process startup**: ~10-20ms per invocation
+2. **UiContext initialization**: GLFW init, surface creation, font cache warmup
+3. **Font database loading**: FontConfig database queries
+4. **Logging setup**: Config file parsing, file handles
+
+For 934 files at ~23ms per invocation, the baseline test suite took **~21 seconds** just in overhead.
+
+### Solution: Batch Layout CLI
+
+Enhanced `lambda layout` command to accept multiple input files with a shared `UiContext`:
+
+```bash
+# Single file (original behavior)
+./lambda.exe layout test.html
+
+# Batch mode (new)
+./lambda.exe layout file1.html file2.html ... --output-dir /tmp/results/
+./lambda.exe layout test/layout/data/baseline/*.html --output-dir /tmp/out --summary
+```
+
+**New CLI Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--output-dir DIR` | Output directory for batch results (required for multiple files) |
+| `--continue-on-error` | Continue processing on errors |
+| `--summary` | Print summary statistics |
+
+### Implementation
+
+**File:** `radiant/cmd_layout.cpp`
+
+**Architecture:**
+
+```
+cmd_layout(argc, argv)
+├─ Initialize ONCE:
+│   ├─ log_parse_config_file()
+│   ├─ ui_context_init()        ← Expensive: GLFW, font cache
+│   ├─ ui_context_create_surface()
+│   └─ Get working directory
+│
+├─ For EACH input file:
+│   ├─ pool_create()            ← Fresh pool per file
+│   ├─ load_*_doc()             ← HTML/LaTeX/MD parser
+│   ├─ process_document_font_faces()
+│   ├─ layout_html_doc()
+│   ├─ print_view_tree()        → {output_dir}/{basename}.json
+│   └─ pool_destroy()           ← Cleanup per file
+│
+└─ Cleanup ONCE:
+    └─ ui_context_cleanup()
+```
+
+**Key changes:**
+
+1. `LayoutOptions` struct extended with `input_files[]` array (up to 1024 files)
+2. New `layout_single_file()` helper function processes one file with shared context
+3. `generate_output_path()` creates output filename from input basename
+4. Statistics tracking for success/failure counts and timing
+
+### Performance Results
+
+**Test: 1,825 baseline HTML files via Node.js test runner**
+
+```bash
+# Non-batch mode (one process per file)
+node test/layout/test_radiant_layout.js -c baseline --no-batch
+
+# Batch mode (20 files per process)
+node test/layout/test_radiant_layout.js -c baseline -b 20
+
+# Batch mode (40 files per process)
+node test/layout/test_radiant_layout.js -c baseline -b 40
+```
+
+| Mode | User Time | System Time | Total CPU | Wall Time | Result |
+|------|-----------|-------------|-----------|-----------|--------|
+| **Non-batch** | 18.97s | 34.17s | 53.14s | 13.35s | 1823 pass, 2 fail |
+| **Batch (20 files)** | 5.15s | 6.80s | 11.95s | 12.82s | 1823 pass, 2 fail |
+| **Batch (40 files)** | 4.73s | 6.44s | 11.17s | 11.62s | 1823 pass, 2 fail |
+
+| Comparison | User Time | Total CPU | Wall Time |
+|------------|-----------|-----------|-----------|
+| Non-batch → Batch 20 | **3.7x faster** | **4.4x faster** | ~same |
+| Non-batch → Batch 40 | **4.0x faster** | **4.8x faster** | **15% faster** |
+| Batch 20 → Batch 40 | 8% faster | 7% faster | 9% faster |
+
+**Key insights**: 
+- Batch mode uses significantly less CPU time by amortizing initialization overhead
+- Wall clock time is similar for non-batch and batch-20 because both run tests in parallel (8 workers)
+- Batch-40 shows modest additional improvement over batch-20 (diminishing returns)
+- Default batch size of 20 provides good balance between CPU efficiency and parallelism
+
+**Direct CLI test: 934 files**
+
+```bash
+./lambda.exe layout test/layout/data/baseline/*.html --output-dir /tmp/batch_test/ --summary
+```
+
+| Mode | Total Time | Per-File Time | Files/Second |
+|------|-----------|---------------|--------------|
+| **Single-file** (estimated) | ~21.8s | ~23.4ms | 43 |
+| **Batch mode** | **7.6s** | **8.2ms** | 122 |
+| **Speedup** | **2.9x** | **2.9x** | **2.9x** |
+
+### Test Runner Integration
+
+The batch mode is integrated into the Node.js test runner (`test/layout/test_radiant_layout.js`):
+
+```bash
+# Default: batch mode with 20 files per batch
+node test/layout/test_radiant_layout.js -c baseline
+
+# Custom batch size
+node test/layout/test_radiant_layout.js -c baseline -b 50
+
+# Disable batch mode (one process per file)
+node test/layout/test_radiant_layout.js -c baseline --no-batch
+```
+
+**CLI Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-b N`, `--batch-size N` | Files per batch (default: 20) |
+| `--no-batch` | Disable batch mode |
+
+### Breakdown of Savings
+
+| Component | Single-file (per file) | Batch (amortized) | Saved |
+|-----------|------------------------|-------------------|-------|
+| Process startup | ~10ms | 0ms | 10ms |
+| GLFW/surface init | ~5ms | 0ms | 5ms |
+| FontConfig warmup | ~3ms | 0ms | 3ms |
+| Log config parsing | ~2ms | 0ms | 2ms |
+| **Total overhead** | **~20ms** | **~0ms** | **~20ms** |
+
+With 1,825 files and batch size 20, this means only ~92 process startups instead of 1,825, saving **~34.7 seconds of CPU time**.
+
+### Output
+
+Batch mode output:
+```
+Running in headless mode (no window)
+
+=== Layout Summary ===
+Files processed: 934
+Successful: 934
+Failed: 0
+Total time: 7641.4 ms
+Avg time per file: 8.2 ms
+======================
+```
+
+Each input file produces `{basename}.json` in the output directory:
+```
+/tmp/batch_test/
+├── absolute_child_with_cross_margin.json
+├── absolute_child_with_main_margin.json
+├── flex_001.json
+└── ... (934 files)
+```
+
+---
+
 ## Key Takeaways
 
 1. **Cache by request parameters, not by result** - The original code cached FT_Face by file path, but lookups still went through the database. Caching by the input parameters (family, weight, style, size) allows skipping expensive lookups entirely.
@@ -273,3 +445,6 @@ All tests pass after optimization:
 4. **Logging has cost** - Even DEBUG-level logs that are "disabled" may have runtime cost if the logging framework still evaluates arguments. Use `log.conf` to set appropriate levels for production.
 
 5. **@font-face fonts need separate caching** - System fonts and `@font-face` fonts take different code paths. The system font cache in `load_styled_font()` didn't cover `@font-face` loaded fonts, causing massive redundant I/O.
+
+6. **Amortize initialization costs** - For batch operations, initialize expensive resources (UiContext, font caches, surfaces) once and reuse across all items. This provided 2.9x speedup for layout tests by eliminating per-file startup overhead.
+

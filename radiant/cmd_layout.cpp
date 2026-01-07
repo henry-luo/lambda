@@ -3280,25 +3280,34 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 /**
  * Parse command-line arguments
  */
+#define MAX_INPUT_FILES 1024
+
 struct LayoutOptions {
-    const char* input_file;
+    const char* input_files[MAX_INPUT_FILES];  // array of input file paths
+    int input_file_count;                       // number of input files
     const char* output_file;
+    const char* output_dir;                     // output directory for batch mode
     const char* css_file;
-    const char* view_output_file;  // Custom output path for view_tree.json
+    const char* view_output_file;  // Custom output path for view_tree.json (single file mode)
     int viewport_width;
     int viewport_height;
     bool debug;
+    bool continue_on_error;                     // continue processing on errors in batch mode
+    bool summary;                               // print summary statistics
 };
 
 bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     // Initialize defaults
-    opts->input_file = nullptr;
+    opts->input_file_count = 0;
     opts->output_file = nullptr;
+    opts->output_dir = nullptr;
     opts->css_file = nullptr;
     opts->view_output_file = nullptr;  // Default to /tmp/view_tree.json
     opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
     opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
     opts->debug = false;
+    opts->continue_on_error = false;
+    opts->summary = false;
 
     // Parse arguments
     for (int i = 0; i < argc; i++) {
@@ -3307,6 +3316,14 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
                 opts->output_file = argv[++i];
             } else {
                 log_error("Error: -o requires an argument");
+                return false;
+            }
+        }
+        else if (strcmp(argv[i], "--output-dir") == 0) {
+            if (i + 1 < argc) {
+                opts->output_dir = argv[++i];
+            } else {
+                log_error("Error: --output-dir requires an argument");
                 return false;
             }
         }
@@ -3345,14 +3362,32 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         else if (strcmp(argv[i], "--debug") == 0) {
             opts->debug = true;
         }
-        else if (argv[i][0] != '-' && !opts->input_file) {
-            opts->input_file = argv[i];
+        else if (strcmp(argv[i], "--continue-on-error") == 0) {
+            opts->continue_on_error = true;
+        }
+        else if (strcmp(argv[i], "--summary") == 0) {
+            opts->summary = true;
+        }
+        else if (argv[i][0] != '-') {
+            // Collect all non-option arguments as input files
+            if (opts->input_file_count < MAX_INPUT_FILES) {
+                opts->input_files[opts->input_file_count++] = argv[i];
+            } else {
+                log_error("Error: too many input files (max %d)", MAX_INPUT_FILES);
+                return false;
+            }
         }
     }
 
-    if (!opts->input_file) {
-        log_error("Error: input file required");
-        log_error("Usage: lambda layout <input.html> [options]");
+    if (opts->input_file_count == 0) {
+        log_error("Error: at least one input file required");
+        log_error("Usage: lambda layout <input.html> [input2.html ...] [options]");
+        return false;
+    }
+
+    // Batch mode requires --output-dir
+    if (opts->input_file_count > 1 && !opts->output_dir) {
+        log_error("Error: batch mode (multiple input files) requires --output-dir");
         return false;
     }
 
@@ -3360,7 +3395,143 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
 }
 
 /**
- * Main layout command implementation using Lambda CSS and Radiant layout
+ * Load and layout a single document file.
+ * Returns true on success, false on failure.
+ * Uses shared UiContext for batch efficiency.
+ */
+static bool layout_single_file(
+    const char* input_file,
+    const char* output_path,
+    const char* css_file,
+    int viewport_width,
+    int viewport_height,
+    UiContext* ui_context,
+    Url* cwd
+) {
+    log_debug("[Layout] Processing file: %s", input_file);
+
+    // Create memory pool for this file
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("Failed to create memory pool for %s", input_file);
+        return false;
+    }
+
+    Url* input_url = url_parse_with_base(input_file, cwd);
+
+    // Detect file type by extension and load appropriate document
+    DomDocument* doc = nullptr;
+    const char* ext = strrchr(input_file, '.');
+
+    if (ext && strcmp(ext, ".ls") == 0) {
+        log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
+        doc = load_lambda_script_doc(input_url, viewport_width, viewport_height, pool);
+    } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
+        log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
+        doc = load_latex_doc(input_url, viewport_width, viewport_height, pool);
+    } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
+        log_info("[Layout] Detected Markdown file, using Markdown→HTML pipeline");
+        doc = load_markdown_doc(input_url, viewport_width, viewport_height, pool);
+    } else if (ext && strcmp(ext, ".wiki") == 0) {
+        log_info("[Layout] Detected Wiki file, using Wiki→HTML pipeline");
+        doc = load_wiki_doc(input_url, viewport_width, viewport_height, pool);
+    } else if (ext && strcmp(ext, ".xml") == 0) {
+        log_info("[Layout] Detected XML file, using XML→DOM pipeline");
+        doc = load_xml_doc(input_url, viewport_width, viewport_height, pool);
+    } else if (ext && strcmp(ext, ".pdf") == 0) {
+        log_info("[Layout] Detected PDF file, using PDF→ViewTree pipeline");
+        doc = load_pdf_doc(input_url, viewport_width, viewport_height, pool, 1.0f);
+    } else if (ext && strcmp(ext, ".svg") == 0) {
+        log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
+        doc = load_svg_doc(input_url, viewport_width, viewport_height, pool, 1.0f);
+    } else {
+        doc = load_lambda_html_doc(input_url, css_file, viewport_width, viewport_height, pool);
+    }
+
+    if (!doc) {
+        log_error("Failed to load document: %s", input_file);
+        pool_destroy(pool);
+        return false;
+    }
+
+    // Process @font-face rules from stored stylesheets
+    process_document_font_faces(ui_context, doc);
+
+    // Perform layout computation
+    ui_context->document = doc;
+    
+    if (doc->view_tree && doc->view_tree->root) {
+        log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
+    } else {
+        log_debug("[Layout] About to call layout_html_doc...");
+        layout_html_doc(ui_context, doc, false);
+        log_debug("[Layout] layout_html_doc returned");
+    }
+
+    bool success = true;
+    if (!doc->view_tree || !doc->view_tree->root) {
+        log_warn("Layout computation did not produce view tree for %s", input_file);
+        success = false;
+    } else {
+        log_info("[Layout] Layout computed successfully for %s", input_file);
+
+        // For PDF/SVG documents, disable text node combination
+        bool is_pdf = ext && strcmp(ext, ".pdf") == 0;
+        bool is_svg = ext && strcmp(ext, ".svg") == 0;
+        if (is_pdf || is_svg) {
+            set_combine_text_nodes(false);
+        }
+        
+        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, output_path);
+        log_debug("[Layout] Layout tree written to %s", output_path ? output_path : "/tmp/view_tree.json");
+        
+        if (is_pdf || is_svg) {
+            set_combine_text_nodes(true);
+        }
+    }
+
+    // Cleanup document and pool for this file
+    // Note: free_document is handled by pool_destroy since doc is allocated from pool
+    pool_destroy(pool);
+    
+    return success;
+}
+
+/**
+ * Generate output path for batch mode.
+ * Returns allocated string that caller must free.
+ */
+static char* generate_output_path(const char* input_file, const char* output_dir) {
+    // Extract basename from input file
+    const char* basename = strrchr(input_file, '/');
+    if (!basename) {
+        basename = strrchr(input_file, '\\');
+    }
+    basename = basename ? basename + 1 : input_file;
+    
+    // Find extension and replace with .json
+    const char* ext = strrchr(basename, '.');
+    size_t name_len = ext ? (size_t)(ext - basename) : strlen(basename);
+    
+    // Build output path: output_dir/basename.json
+    size_t dir_len = strlen(output_dir);
+    bool need_slash = (dir_len > 0 && output_dir[dir_len - 1] != '/' && output_dir[dir_len - 1] != '\\');
+    
+    size_t path_len = dir_len + (need_slash ? 1 : 0) + name_len + 5 + 1; // ".json" + null
+    char* output_path = (char*)malloc(path_len);
+    
+    if (need_slash) {
+        snprintf(output_path, path_len, "%s/%.*s.json", output_dir, (int)name_len, basename);
+    } else {
+        snprintf(output_path, path_len, "%s%.*s.json", output_dir, (int)name_len, basename);
+    }
+    
+    return output_path;
+}
+
+/**
+ * Main layout command implementation using Lambda CSS and Radiant layout.
+ * Supports both single-file and batch modes.
  */
 int cmd_layout(int argc, char** argv) {
     // Initialize logging system
@@ -3374,81 +3545,25 @@ int cmd_layout(int argc, char** argv) {
         return 1;
     }
 
+    bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
+    
     log_debug("Lambda Layout Command");
-    log_debug("  Input: %s", opts.input_file);
-    log_debug("  Output: %s", opts.output_file ? opts.output_file : "(stdout)");
+    log_debug("  Mode: %s", batch_mode ? "batch" : "single");
+    log_debug("  Input files: %d", opts.input_file_count);
+    if (opts.input_file_count > 0) {
+        log_debug("  First input: %s", opts.input_files[0]);
+    }
+    log_debug("  Output dir: %s", opts.output_dir ? opts.output_dir : "(none)");
     log_debug("  CSS: %s", opts.css_file ? opts.css_file : "(inline only)");
     log_debug("  Viewport: %dx%d", opts.viewport_width, opts.viewport_height);
 
-    // Create memory pool for this operation
-    Pool* pool = pool_create();
-    if (!pool) {
-        log_error("Failed to create memory pool");
-        return 1;
-    }
-
-    // get cwd
-    Url* cwd = get_current_dir();
-    Url* input_url = url_parse_with_base(opts.input_file, cwd);
-
-    // Detect file type by extension and load appropriate document
-    DomDocument* doc = nullptr;
-    const char* ext = strrchr(opts.input_file, '.');
-
-    if (ext && strcmp(ext, ".ls") == 0) {
-        // Load Lambda script: evaluate script → wrap result → layout
-        log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
-        doc = load_lambda_script_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        // Load LaTeX document: parse LaTeX → convert to HTML → layout
-        log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
-        doc = load_latex_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
-        // Load Markdown document: parse Markdown → convert to HTML → layout
-        log_info("[Layout] Detected Markdown file, using Markdown→HTML pipeline");
-        doc = load_markdown_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
-    } else if (ext && strcmp(ext, ".wiki") == 0) {
-        // Load Wiki document: parse MediaWiki → convert to HTML → layout
-        log_info("[Layout] Detected Wiki file, using Wiki→HTML pipeline");
-        doc = load_wiki_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
-    } else if (ext && strcmp(ext, ".xml") == 0) {
-        // Load XML document: parse XML → treat as custom HTML elements → apply CSS → layout
-        log_info("[Layout] Detected XML file, using XML→DOM pipeline");
-        doc = load_xml_doc(input_url, opts.viewport_width, opts.viewport_height, pool);
-    } else if (ext && strcmp(ext, ".pdf") == 0) {
-        // Load PDF document: parse PDF → convert to ViewTree directly (no CSS layout needed)
-        log_info("[Layout] Detected PDF file, using PDF→ViewTree pipeline");
-        doc = load_pdf_doc(input_url, opts.viewport_width, opts.viewport_height, pool, 1.0f);
-    } else if (ext && strcmp(ext, ".svg") == 0) {
-        // Load SVG document: render SVG → convert to ViewTree directly (no CSS layout needed)
-        log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
-        doc = load_svg_doc(input_url, opts.viewport_width, opts.viewport_height, pool, 1.0f);
-    } else {
-        // Load HTML document with Lambda CSS system
-        doc = load_lambda_html_doc(
-            input_url,
-            opts.css_file,
-            opts.viewport_width,
-            opts.viewport_height,
-            pool
-        );
-    }
-
-    if (!doc) {
-        log_error("Failed to load document");
-        pool_destroy(pool);
-        return 1;
-    }
-
-    // Initialize UI context in headless mode for layout computation
+    // Initialize UI context once (shared across all files in batch mode)
     log_debug("[Layout] Initializing UI context (headless mode)...");
     UiContext ui_context;
     memset(&ui_context, 0, sizeof(UiContext));
 
     if (ui_context_init(&ui_context, true) != 0) {
         log_error("Failed to initialize UI context");
-        free_document(doc);
-        pool_destroy(pool);
         return 1;
     }
 
@@ -3461,67 +3576,77 @@ int cmd_layout(int argc, char** argv) {
     ui_context_create_surface(&ui_context, opts.viewport_width, opts.viewport_height);
     log_debug("[Layout] Surface created");
 
-    // Process @font-face rules from stored stylesheets
-    // This must happen after UiContext is initialized but before layout
-    process_document_font_faces(&ui_context, doc);
+    // Get current working directory
+    Url* cwd = get_current_dir();
 
-    // Perform layout computation
-    // Skip layout_html_doc for documents that already have a view_tree (PDF, SVG, image)
-    // These loaders produce the view_tree directly without CSS layout
-    ui_context.document = doc;
-    
-    if (doc->view_tree && doc->view_tree->root) {
-        // Document already has a view tree (PDF, SVG, image) - skip CSS layout
-        log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
-    } else {
-        // HTML document - perform CSS layout
-        log_debug("[Layout] About to call layout_html_doc...");
-        log_debug("[Layout] lambda_html_root=%p, dom_root=%p",
-                (void*)doc->html_root, (void*)doc->root);
-        layout_html_doc(&ui_context, doc, false);
-        log_debug("[Layout] layout_html_doc returned");
+    // Track statistics for batch mode
+    int success_count = 0;
+    int failure_count = 0;
+    auto batch_start = std::chrono::high_resolution_clock::now();
+
+    // Process all input files
+    for (int i = 0; i < opts.input_file_count; i++) {
+        const char* input_file = opts.input_files[i];
+        const char* output_path = nullptr;
+        char* allocated_output = nullptr;
+
+        if (batch_mode && opts.output_dir) {
+            // Generate output path for batch mode
+            allocated_output = generate_output_path(input_file, opts.output_dir);
+            output_path = allocated_output;
+        } else {
+            // Single file mode: use view_output_file if specified
+            output_path = opts.view_output_file;
+        }
+
+        bool success = layout_single_file(
+            input_file,
+            output_path,
+            opts.css_file,
+            opts.viewport_width,
+            opts.viewport_height,
+            &ui_context,
+            cwd
+        );
+
+        if (success) {
+            success_count++;
+        } else {
+            failure_count++;
+            if (!opts.continue_on_error && opts.input_file_count > 1) {
+                log_error("Stopping batch due to error (use --continue-on-error to continue)");
+                if (allocated_output) free(allocated_output);
+                break;
+            }
+        }
+
+        if (allocated_output) {
+            free(allocated_output);
+        }
     }
 
-    if (!doc->view_tree || !doc->view_tree->root) {
-        log_warn("Layout computation did not produce view tree");
-    } else {
-        log_info("[Layout] Layout computed successfully!");
-    }
+    auto batch_end = std::chrono::high_resolution_clock::now();
+    double total_time_ms = std::chrono::duration<double, std::milli>(batch_end - batch_start).count();
 
-    // Write output using Radiant's print_view_tree function
-    log_debug("[Layout] Preparing output...");
-
-    // Use print_view_tree to generate complete layout tree JSON
-    // It writes to /tmp/view_tree.json or custom path if --view-output is specified
-    if (doc->view_tree && doc->view_tree->root) {
-        // For PDF/SVG documents, disable text node combination to preserve individual text items
-        // This is important for comparison testing against pdf.js reference
-        bool is_pdf = ext && strcmp(ext, ".pdf") == 0;
-        bool is_svg = ext && strcmp(ext, ".svg") == 0;
-        if (is_pdf || is_svg) {
-            set_combine_text_nodes(false);
-            log_debug("[Layout] Disabled text node combination for %s output", is_pdf ? "PDF" : "SVG");
+    // Print summary if requested or in batch mode
+    if (opts.summary || (batch_mode && opts.input_file_count > 1)) {
+        printf("\n=== Layout Summary ===\n");
+        printf("Files processed: %d\n", success_count + failure_count);
+        printf("Successful: %d\n", success_count);
+        printf("Failed: %d\n", failure_count);
+        printf("Total time: %.1f ms\n", total_time_ms);
+        if (success_count + failure_count > 0) {
+            printf("Avg time per file: %.1f ms\n", total_time_ms / (success_count + failure_count));
         }
-        
-        log_debug("[Layout] Calling print_view_tree for complete layout output...");
-        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, opts.view_output_file);
-        log_debug("[Layout] Layout tree written to %s", opts.view_output_file ? opts.view_output_file : "/tmp/view_tree.json");
-        
-        // Restore default text combination setting
-        if (is_pdf || is_svg) {
-            set_combine_text_nodes(true);
-        }
-    } else {
-        log_warn("No view tree available to output");
+        printf("======================\n");
     }
 
     // Cleanup
     log_debug("[Cleanup] Starting cleanup...");
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);
-    log_debug("[Cleanup] Destroying pool...");
-    pool_destroy(pool);
     log_debug("[Cleanup] Complete");
-    log_notice("Completed layout command successfully");
-    return 0;
+    
+    log_notice("Completed layout command: %d success, %d failed", success_count, failure_count);
+    return failure_count > 0 ? 1 : 0;
 }
