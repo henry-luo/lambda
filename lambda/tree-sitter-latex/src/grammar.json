@@ -728,8 +728,8 @@
               "name": "curly_group"
             },
             {
-              "type": "PATTERN",
-              "value": "[a-zA-Z0-9]"
+              "type": "SYMBOL",
+              "name": "math_single_char"
             }
           ]
         }
@@ -750,12 +750,16 @@
               "name": "curly_group"
             },
             {
-              "type": "PATTERN",
-              "value": "[a-zA-Z0-9]"
+              "type": "SYMBOL",
+              "name": "math_single_char"
             }
           ]
         }
       ]
+    },
+    "math_single_char": {
+      "type": "PATTERN",
+      "value": "[a-zA-Z0-9]"
     },
     "environment": {
       "type": "CHOICE",

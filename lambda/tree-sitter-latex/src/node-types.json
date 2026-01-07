@@ -628,10 +628,14 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "curly_group",
+          "named": true
+        },
+        {
+          "type": "math_single_char",
           "named": true
         }
       ]
@@ -643,10 +647,14 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "curly_group",
+          "named": true
+        },
+        {
+          "type": "math_single_char",
           "named": true
         }
       ]
@@ -779,6 +787,10 @@
   },
   {
     "type": "line_comment",
+    "named": true
+  },
+  {
+    "type": "math_single_char",
     "named": true
   },
   {

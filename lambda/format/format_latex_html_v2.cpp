@@ -3809,8 +3809,24 @@ static void cmd_math(LatexProcessor* proc, Item elem) {
     // Inline math: $...$  or \(...\)
     HtmlGenerator* gen = proc->generator();
 
-    gen->startInlineMath();
-    proc->processChildren(elem);
+    // Get LaTeX source from 'source' attribute (set during parsing)
+    ElementReader reader(elem.element);
+    ItemReader source_attr = reader.get_attr("source");
+    const char* latex_source = nullptr;
+
+    if (source_attr.isString()) {
+        latex_source = source_attr.cstring();
+    }
+
+    if (latex_source && *latex_source) {
+        gen->startInlineMathWithSource(latex_source);
+        // Don't process children - the data-latex attribute has the source
+        // and Radiant will render the math using the math engine
+    } else {
+        gen->startInlineMath();
+        // Fallback: no source available, process children for HTML display
+        proc->processChildren(elem);
+    }
     gen->endInlineMath();
 }
 
@@ -3823,8 +3839,24 @@ static void cmd_displaymath(LatexProcessor* proc, Item elem) {
     // Display math: \[...\] or $$...$$
     HtmlGenerator* gen = proc->generator();
 
-    gen->startDisplayMath();
-    proc->processChildren(elem);
+    // Get LaTeX source from 'source' attribute (set during parsing)
+    ElementReader reader(elem.element);
+    ItemReader source_attr = reader.get_attr("source");
+    const char* latex_source = nullptr;
+
+    if (source_attr.isString()) {
+        latex_source = source_attr.cstring();
+    }
+
+    if (latex_source && *latex_source) {
+        gen->startDisplayMathWithSource(latex_source);
+        // Don't process children - the data-latex attribute has the source
+        // and Radiant will render the math using the math engine
+    } else {
+        gen->startDisplayMath();
+        // Fallback: no source available, process children for HTML display
+        proc->processChildren(elem);
+    }
     gen->endDisplayMath();
 }
 
