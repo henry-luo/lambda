@@ -185,6 +185,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         log_debug("font face is null");
         return;
     }
+    
+    float s = rdcon->scale;  // scale factor for CSS -> physical pixels
     unsigned char* str = text_view->text_data();
     TextRect* text_rect = text_view->rect;
 
@@ -247,11 +249,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     }
 
     while (text_rect) {
-        float x = rdcon->block.x + text_rect->x, y = rdcon->block.y + text_rect->y;
+        // Apply scale to convert CSS pixel positions to physical surface pixels
+        float x = rdcon->block.x + text_rect->x * s, y = rdcon->block.y + text_rect->y * s;
 
         // Render background for inline element if present
         if (bg_color) {
-            Rect bg_rect = {x, y, text_rect->width, text_rect->height};
+            Rect bg_rect = {x, y, text_rect->width * s, text_rect->height * s};
             fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip);
         }
 
@@ -261,6 +264,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             white_space, preserve_spaces, rdcon->color.c);
 
         // Calculate natural text width and space count for justify rendering
+        // Note: space_width is in CSS pixels (scaled down for layout), need to scale up for render
+        float scaled_space_width = rdcon->font.style->space_width * s;
         float natural_width = 0.0f;
         int space_count = 0;
         unsigned char* scan = p;
@@ -276,7 +281,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             if (is_space(*scan)) {
                 if (preserve_spaces || !scan_has_space) {
                     scan_has_space = true;
-                    natural_width += rdcon->font.style->space_width;
+                    natural_width += scaled_space_width;
                     space_count++;
                 }
                 scan++;
@@ -294,21 +299,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
                 if (glyph) {
-                    natural_width += glyph->advance.x / 64.0;
+                    natural_width += glyph->advance.x / 64.0;  // already in physical pixels
                 } else {
-                    natural_width += rdcon->font.style->space_width;  // fallback width
+                    natural_width += scaled_space_width;  // fallback width in physical pixels
                 }
             }
         }
 
-        // Calculate adjusted space width for justified text
-        float space_width = rdcon->font.style->space_width;
-        if (text_align == CSS_VALUE_JUSTIFY && space_count > 0 && natural_width > 0 && text_rect->width > natural_width) {
+        // Calculate adjusted space width for justified text (in physical pixels)
+        float space_width = scaled_space_width;
+        if (text_align == CSS_VALUE_JUSTIFY && space_count > 0 && natural_width > 0 && text_rect->width * s > natural_width) {
             // This text is explicitly justified - distribute extra space across spaces
-            float extra_space = text_rect->width - natural_width;
+            float extra_space = (text_rect->width * s) - natural_width;
             space_width += (extra_space / space_count);
             log_debug("apply justification: text_align=JUSTIFY, natural_width=%f, text_rect->width=%f, space_count=%d, space_width=%f -> %f",
-                natural_width, text_rect->width, space_count, rdcon->font.style->space_width, space_width);
+                natural_width, text_rect->width * s, space_count, scaled_space_width, space_width);
         }
 
         // Render the text with adjusted spacing
@@ -344,10 +349,10 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
                 if (!glyph) {
-                    // draw a square box for missing glyph
-                    Rect rect = {x + 1, y, (float)(rdcon->font.style->space_width - 2), (float)(rdcon->font.ft_face->size->metrics.y_ppem / 64.0)};
+                    // draw a square box for missing glyph (scaled_space_width is in physical pixels)
+                    Rect rect = {x + 1, y, (float)(scaled_space_width - 2), (float)(rdcon->font.ft_face->size->metrics.y_ppem / 64.0)};
                     fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
-                    x += rdcon->font.style->space_width;
+                    x += scaled_space_width;
                 }
                 else {
                     // draw the glyph to the image buffer
@@ -362,23 +367,23 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 }
             }
         }
-        // render text deco
+        // render text deco (positions in physical pixels)
         if (rdcon->font.style->text_deco != CSS_VALUE_NONE) {
             float thinkness = max(rdcon->font.ft_face->underline_thickness / 64.0, 1);
             Rect rect;
             // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
             if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
                 // underline drawn at baseline, with a gap of thickness
-                rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y +
+                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s +
                     (rdcon->font.ft_face->size->metrics.ascender / 64.0) + thinkness;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
-                rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y;
+                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
-                rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y + text_rect->height / 2;
+                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s + (text_rect->height * s) / 2;
             }
-            rect.width = text_rect->width;  rect.height = thinkness; // corrected the variable name from h to height
+            rect.width = text_rect->width * s;  rect.height = thinkness; // corrected the variable name from h to height
             log_debug("text deco: %d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f", rdcon->font.style->text_deco,
                 rect.x, rect.y, rect.width, rect.height); // corrected w to width
             fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
@@ -806,9 +811,10 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
 
 // Helper function to render linear gradient
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
+    float s = rdcon->scale;
     Rect rect;
-    rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-    rect.width = view->width;  rect.height = view->height;
+    rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
+    rect.width = view->width * s;  rect.height = view->height * s;
 
     // Render box-shadow BEFORE background (shadows go underneath the element)
     if (view->bound->box_shadow) {
@@ -910,26 +916,27 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
 
         if (use_resolved) {
             // Render collapsed borders using resolved border data (table cells)
+            // Scale border widths from CSS pixels to physical pixels
             if (resolved_left && resolved_left->style != CSS_VALUE_NONE && resolved_left->color.a) {
                 Rect border_rect = rect;
-                border_rect.width = resolved_left->width;
+                border_rect.width = resolved_left->width * s;
                 fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_left->color.c, &rdcon->block.clip);
             }
             if (resolved_right && resolved_right->style != CSS_VALUE_NONE && resolved_right->color.a) {
                 Rect border_rect = rect;
-                border_rect.x = rect.x + rect.width - resolved_right->width;
-                border_rect.width = resolved_right->width;
+                border_rect.x = rect.x + rect.width - resolved_right->width * s;
+                border_rect.width = resolved_right->width * s;
                 fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_right->color.c, &rdcon->block.clip);
             }
             if (resolved_top && resolved_top->style != CSS_VALUE_NONE && resolved_top->color.a) {
                 Rect border_rect = rect;
-                border_rect.height = resolved_top->width;
+                border_rect.height = resolved_top->width * s;
                 fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_top->color.c, &rdcon->block.clip);
             }
             if (resolved_bottom && resolved_bottom->style != CSS_VALUE_NONE && resolved_bottom->color.a) {
                 Rect border_rect = rect;
-                border_rect.y = rect.y + rect.height - resolved_bottom->width;
-                border_rect.height = resolved_bottom->width;
+                border_rect.y = rect.y + rect.height - resolved_bottom->width * s;
+                border_rect.height = resolved_bottom->width * s;
                 fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_bottom->color.c, &rdcon->block.clip);
             }
         } else {
@@ -965,48 +972,53 @@ void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
 }
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
+    float s = rdcon->scale;
     if (block->scroller->has_clip) {
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
             block->scroller->clip.left, block->scroller->clip.top, block->scroller->clip.right, block->scroller->clip.bottom);
-        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + block->scroller->clip.left);
-        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top);
-        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right);
-        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + block->scroller->clip.bottom);
+        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + block->scroller->clip.left * s);
+        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top * s);
+        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right * s);
+        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + block->scroller->clip.bottom * s);
 
-        // Copy border-radius for rounded corner clipping when overflow:hidden
+        // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
         if (block->bound && block->bound->border) {
             BorderProp* border = block->bound->border;
             if (border->radius.top_left > 0 || border->radius.top_right > 0 ||
                 border->radius.bottom_left > 0 || border->radius.bottom_right > 0) {
                 rdcon->block.has_clip_radius = true;
-                rdcon->block.clip_radius = border->radius;
+                rdcon->block.clip_radius.top_left = border->radius.top_left * s;
+                rdcon->block.clip_radius.top_right = border->radius.top_right * s;
+                rdcon->block.clip_radius.bottom_left = border->radius.bottom_left * s;
+                rdcon->block.clip_radius.bottom_right = border->radius.bottom_right * s;
                 log_debug("setup rounded clip: tl=%f, tr=%f, bl=%f, br=%f",
-                    border->radius.top_left, border->radius.top_right,
-                    border->radius.bottom_left, border->radius.bottom_right);
+                    rdcon->block.clip_radius.top_left, rdcon->block.clip_radius.top_right,
+                    rdcon->block.clip_radius.bottom_left, rdcon->block.clip_radius.bottom_right);
             }
         }
     }
     if (block->scroller->pane) {
-        rdcon->block.x -= block->scroller->pane->h_scroll_position;
-        rdcon->block.y -= block->scroller->pane->v_scroll_position;
+        rdcon->block.x -= block->scroller->pane->h_scroll_position * s;
+        rdcon->block.y -= block->scroller->pane->v_scroll_position * s;
     }
 }
 
 void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
     log_debug("render scrollbars");
     // need to reset block.x and y, which was changed by the scroller
-    rdcon->block.x = pa_block->x + block->x;  rdcon->block.y = pa_block->y + block->y;
+    float s = rdcon->scale;
+    rdcon->block.x = pa_block->x + block->x * s;  rdcon->block.y = pa_block->y + block->y * s;
     if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
-        Rect rect = {rdcon->block.x, rdcon->block.y, block->width, block->height};
+        Rect rect = {rdcon->block.x, rdcon->block.y, block->width * s, block->height * s};
         if (block->bound && block->bound->border) {
-            rect.x += block->bound->border->width.left;
-            rect.y += block->bound->border->width.top;
-            rect.width -= block->bound->border->width.left + block->bound->border->width.right;
-            rect.height -= block->bound->border->width.top + block->bound->border->width.bottom;
+            rect.x += block->bound->border->width.left * s;
+            rect.y += block->bound->border->width.top * s;
+            rect.width -= (block->bound->border->width.left + block->bound->border->width.right) * s;
+            rect.height -= (block->bound->border->width.top + block->bound->border->width.bottom) * s;
         }
         if (block->scroller->pane) {
             scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
-                block->content_width, block->content_height, &rdcon->block.clip);
+                block->content_width * s, block->content_height * s, &rdcon->block.clip);
         } else {
             log_error("scroller has no scroll pane");
         }
@@ -1097,13 +1109,15 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         render_vector_path(rdcon, block);
     }
 
-    rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
+    // Propagate position with scale applied (CSS logical pixels -> physical surface pixels)
+    float s = rdcon->scale;
+    rdcon->block.x = pa_block.x + block->x * s;  rdcon->block.y = pa_block.y + block->y * s;
     if (DEBUG_RENDER) {  // debugging outline around the block margin border
         Rect rc;
-        rc.x = rdcon->block.x - (block->bound ? block->bound->margin.left : 0);
-        rc.y = rdcon->block.y - (block->bound ? block->bound->margin.top : 0);
-        rc.width = block->width + (block->bound ? block->bound->margin.left + block->bound->margin.right : 0);
-        rc.height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
+        rc.x = rdcon->block.x - (block->bound ? block->bound->margin.left * s : 0);
+        rc.y = rdcon->block.y - (block->bound ? block->bound->margin.top * s : 0);
+        rc.width = block->width * s + (block->bound ? (block->bound->margin.left + block->bound->margin.right) * s : 0);
+        rc.height = block->height * s + (block->bound ? (block->bound->margin.top + block->bound->margin.bottom) * s : 0);
         draw_debug_rect(rdcon->canvas, rc, &rdcon->block.clip);
     }
 
@@ -1247,10 +1261,11 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embed->img) return;
 
     log_debug("render image content");
+    float s = rdcon->scale;
     ImageSurface* img = view->embed->img;
     Rect rect;
-    rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-    rect.width = view->width;  rect.height = view->height;
+    rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
+    rect.width = view->width * s;  rect.height = view->height * s;
     log_debug("[IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f), clip=(%.0f,%.0f,%.0f,%.0f)",
               img->url && img->url->href ? img->url->href->chars : "unknown",
               img->format, img->width, img->height,
@@ -1300,21 +1315,22 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
 
-    rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
+    float s = rdcon->scale;
+    rdcon->block.x = pa_block.x + block->x * s;  rdcon->block.y = pa_block.y + block->y * s;
 
     // Constrain clip region to iframe content box (before scroller setup)
     // This ensures embedded documents (SVG, PDF, etc.) don't render outside iframe bounds
     float content_left = rdcon->block.x;
     float content_top = rdcon->block.y;
-    float content_right = rdcon->block.x + block->width;
-    float content_bottom = rdcon->block.y + block->height;
+    float content_right = rdcon->block.x + block->width * s;
+    float content_bottom = rdcon->block.y + block->height * s;
 
     // Adjust for borders if present
     if (block->bound && block->bound->border) {
-        content_left += block->bound->border->width.left;
-        content_top += block->bound->border->width.top;
-        content_right -= block->bound->border->width.right;
-        content_bottom -= block->bound->border->width.bottom;
+        content_left += block->bound->border->width.left * s;
+        content_top += block->bound->border->width.top * s;
+        content_right -= block->bound->border->width.right * s;
+        content_bottom -= block->bound->border->width.bottom * s;
     }
 
     // Intersect with parent clip region
@@ -1477,14 +1493,15 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     if (focused->view_type != RDT_VIEW_BLOCK) return;
     
     ViewBlock* block = (ViewBlock*)focused;
+    float s = rdcon->scale;
     
-    // Calculate absolute position of the focused element
+    // Calculate absolute position of the focused element (in CSS pixels)
     float x = block->x;
     float y = block->y;
     float width = block->width;
     float height = block->height;
     
-    // Walk up the tree to get absolute coordinates
+    // Walk up the tree to get absolute coordinates (CSS pixels)
     View* parent = block->parent;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
@@ -1494,9 +1511,13 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
         parent = parent->parent;
     }
     
-    // Outline offset (outside border box)
-    float outline_offset = 2.0f;
-    float outline_width = 2.0f;
+    // Scale to physical pixels
+    x *= s;  y *= s;
+    width *= s;  height *= s;
+    
+    // Outline offset (outside border box) - in physical pixels
+    float outline_offset = 2.0f * s;
+    float outline_width = 2.0f * s;
     
     // Create outline shape
     Tvg_Paint* shape = tvg_shape_new();
@@ -1515,8 +1536,8 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     tvg_shape_set_stroke_color(shape, 0x00, 0x5F, 0xCC, 0xFF);
     tvg_shape_set_stroke_width(shape, outline_width);
     
-    // Dotted pattern: dash length 4, gap 2
-    float dash_pattern[] = {4.0f, 2.0f};
+    // Dotted pattern: dash length 4, gap 2 (scaled)
+    float dash_pattern[] = {4.0f * s, 2.0f * s};
     tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
     
     tvg_canvas_push(rdcon->canvas, shape);
@@ -1532,12 +1553,13 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     
     CaretState* caret = state->caret;
     View* view = caret->view;
+    float s = rdcon->scale;
     
-    // Calculate absolute position
+    // Calculate absolute position (CSS pixels)
     float x = caret->x;
     float y = caret->y;
     
-    // Walk up the tree to get absolute coordinates
+    // Walk up the tree to get absolute coordinates (CSS pixels)
     View* parent = view;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
@@ -1547,20 +1569,24 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         parent = parent->parent;
     }
     
+    // Scale to physical pixels
+    x *= s;  y *= s;
+    float height = caret->height * s;
+    
     // Create caret line shape
     Tvg_Paint* shape = tvg_shape_new();
     if (!shape) return;
     
     // Caret is a vertical line at x, from y to y+height
     tvg_shape_move_to(shape, x, y);
-    tvg_shape_line_to(shape, x, y + caret->height);
+    tvg_shape_line_to(shape, x, y + height);
     
     // Caret color: black
     tvg_shape_set_stroke_color(shape, 0x00, 0x00, 0x00, 0xFF);
-    tvg_shape_set_stroke_width(shape, 1.5f);
+    tvg_shape_set_stroke_width(shape, 1.5f * s);
     
     tvg_canvas_push(rdcon->canvas, shape);
-    log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, caret->height);
+    log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, height);
 }
 
 /**
@@ -1574,17 +1600,18 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     
     SelectionState* sel = state->selection;
     View* view = sel->view;
+    float s = rdcon->scale;
     
     // For single-line selection, draw a single rectangle
     // Multi-line selection would require multiple rectangles per line
     
-    // Calculate absolute position
+    // Calculate absolute position (CSS pixels)
     float start_x = sel->start_x;
     float start_y = sel->start_y;
     float end_x = sel->end_x;
     float end_y = sel->end_y;
     
-    // Walk up to get absolute coordinates
+    // Walk up to get absolute coordinates (CSS pixels)
     View* parent = view;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
@@ -1597,6 +1624,10 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
         parent = parent->parent;
     }
     
+    // Scale to physical pixels
+    start_x *= s;  start_y *= s;
+    end_x *= s;  end_y *= s;
+    
     // Normalize coordinates (anchor can be after focus)
     float min_x = start_x < end_x ? start_x : end_x;
     float max_x = start_x > end_x ? start_x : end_x;
@@ -1605,7 +1636,7 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     // For now, simple single-line selection rect
     float sel_width = max_x - min_x;
     float sel_height = end_y - start_y;  // Use line height approximation
-    if (sel_height <= 0) sel_height = 20;  // default line height if not set
+    if (sel_height <= 0) sel_height = 20 * s;  // default line height if not set (scaled)
     
     // Create selection highlight shape
     Tvg_Paint* shape = tvg_shape_new();
@@ -1651,6 +1682,10 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     // Initialize transform state (identity matrix, not active)
     rdcon->transform = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     rdcon->has_transform = false;
+
+    // Initialize HiDPI scale factor for converting CSS logical pixels to physical surface pixels
+    rdcon->scale = uicon->pixel_ratio > 0 ? uicon->pixel_ratio : 1.0f;
+    log_debug("render_init: scale factor = %.2f (pixel_ratio)", rdcon->scale);
 
     // load default font
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;

@@ -18,6 +18,9 @@ typedef struct {
     // Transform state
     Tvg_Matrix transform;          // Current combined transform matrix
     bool has_transform;            // True if non-identity transform is active
+
+    // HiDPI scaling: CSS logical pixels -> physical surface pixels
+    float scale;                   // pixel_ratio (1.0 for standard, 2.0 for Retina, etc.)
 } RenderContext;
 
 // Function declarations

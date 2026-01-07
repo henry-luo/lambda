@@ -51,6 +51,8 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
         str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, evcon->block.x);
     bool has_space = false;
+    // Get pixel_ratio for converting physical pixels to CSS pixels
+    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0) ? evcon->ui_context->pixel_ratio : 1.0f;
     for (; p < end; p++) {
         int wd = 0;
         if (is_space(*p)) {
@@ -66,11 +68,12 @@ void target_text_view(EventContext* evcon, ViewText* text) {
                 log_error("Could not load character '%c'", *p);
                 continue;
             }
-            // draw the glyph to the image buffer
-            // printf("target_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (evcon->font.face->glyph->advance.x / 64.0), y);
-            wd = evcon->font.ft_face->glyph->advance.x / 64.0;  // changed from rdcon to evcon
+            // Font is loaded at physical pixel size, so advance is in physical pixels
+            // Divide by pixel_ratio to convert back to CSS pixels for hit testing
+            wd = evcon->font.ft_face->glyph->advance.x / 64.0 / pixel_ratio;
         }
-        float char_right = x + wd;  float char_bottom = y + (evcon->font.ft_face->height / 64.0);
+        // Font height is also in physical pixels, divide by pixel_ratio
+        float char_right = x + wd;  float char_bottom = y + (evcon->font.ft_face->height / 64.0 / pixel_ratio);
         MousePositionEvent* event = &evcon->event.mouse_position;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
             log_debug("hit on text: %c", *p);

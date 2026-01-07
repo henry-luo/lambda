@@ -472,11 +472,13 @@ struct TypoMetrics {
 
 // Get OS/2 sTypo metrics for a font face
 // Returns metrics with valid=false if no OS/2 table is available
-TypoMetrics get_os2_typo_metrics(FT_Face face);
+// pixel_ratio: divide physical pixel metrics by this to get CSS pixels
+TypoMetrics get_os2_typo_metrics(FT_Face face, float pixel_ratio = 1.0f);
 
 // Calculate normal line height following Chrome's algorithm
 // Uses OS/2 sTypo* metrics when available, otherwise HHEA metrics
-float calc_normal_line_height(FT_Face face);
+// pixel_ratio: divide physical pixel metrics by this to get CSS pixels
+float calc_normal_line_height(FT_Face face, float pixel_ratio = 1.0f);
 
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
