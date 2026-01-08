@@ -1,4 +1,5 @@
 #include "input.hpp"
+#include "../../lib/memtrack.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
@@ -63,7 +64,7 @@ static bool is_table_start(const char* line) {
 static bool is_list_item(const char* line) {
     char* trimmed = trim_whitespace(line);
     bool result = (trimmed && strncmp(trimmed, "* ", 2) == 0);
-    if (trimmed) free(trimmed);
+    if (trimmed) mem_free(trimmed);
     return result;
 }
 
@@ -98,7 +99,7 @@ static Item parse_asciidoc_heading(Input *input, const char* line) {
             list_push((List*)header, inline_content);
             ((TypeElmt*)header->type)->content_length++;
         }
-        if (content) free(content);
+        if (content) mem_free(content);
     }
 
     return {.item = (uint64_t)header};
@@ -150,7 +151,7 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
             total_len += strlen(lines[i]) + 1; // +1 for newline
         }
 
-        char* content = (char*)malloc(total_len + 1);
+        char* content = (char*)mem_alloc(total_len + 1, MEM_CAT_INPUT_ADOC);
         content[0] = '\0';
 
         for (int i = *current_line; i < end_line; i++) {
@@ -164,7 +165,7 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
             ((TypeElmt*)code_block->type)->content_length++;
         }
 
-        free(content);
+        mem_free(content);
     }
 
     // Add code block to pre block
@@ -198,7 +199,7 @@ static Item parse_asciidoc_list(Input *input, char** lines, int* current_line, i
             }
         }
 
-        if (trimmed) free(trimmed);
+        if (trimmed) mem_free(trimmed);
         (*current_line)++;
     }
 
@@ -294,12 +295,12 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                         cell_len++; // Include last character if not |
                     }
 
-                    char* cell_text = (char*)malloc(cell_len + 1);
+                    char* cell_text = (char*)mem_alloc(cell_len + 1, MEM_CAT_INPUT_ADOC);
                     strncpy(cell_text, cell_start, cell_len);
                     cell_text[cell_len] = '\0';
 
                     char* trimmed_cell = trim_whitespace(cell_text);
-                    free(cell_text);
+                    mem_free(cell_text);
 
                     // Create cell element
                     const char* cell_tag = (!header_parsed) ? "th" : "td";
@@ -314,7 +315,7 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                         ((TypeElmt*)row->type)->content_length++;
                     }
 
-                    if (trimmed_cell) free(trimmed_cell);
+                    if (trimmed_cell) mem_free(trimmed_cell);
 
                     if (*ptr == '|') {
                         ptr++;
@@ -395,7 +396,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 // Add text before bold
                 if (ptr > start) {
                     int len = ptr - start;
-                    char* before_text = (char*)malloc(len + 1);
+                    char* before_text = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_ADOC);
                     strncpy(before_text, start, len);
                     before_text[len] = '\0';
                     String* before_str = create_string(input, before_text);
@@ -403,14 +404,14 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                         list_push((List*)container, {.item = s2it(before_str)});
                         ((TypeElmt*)container->type)->content_length++;
                     }
-                    free(before_text);
+                    mem_free(before_text);
                 }
 
                 // Create bold element
                 Element* bold = create_asciidoc_element(input, "strong");
                 if (bold) {
                     int bold_len = bold_end - bold_start;
-                    char* bold_text = (char*)malloc(bold_len + 1);
+                    char* bold_text = (char*)mem_alloc(bold_len + 1, MEM_CAT_INPUT_ADOC);
                     strncpy(bold_text, bold_start, bold_len);
                     bold_text[bold_len] = '\0';
                     String* bold_str = create_string(input, bold_text);
@@ -420,7 +421,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     }
                     list_push((List*)container, {.item = (uint64_t)bold});
                     ((TypeElmt*)container->type)->content_length++;
-                    free(bold_text);
+                    mem_free(bold_text);
                 }
 
                 ptr = bold_end + 1;
@@ -435,7 +436,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 // Add text before italic
                 if (ptr > start) {
                     int len = ptr - start;
-                    char* before_text = (char*)malloc(len + 1);
+                    char* before_text = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_ADOC);
                     strncpy(before_text, start, len);
                     before_text[len] = '\0';
                     String* before_str = create_string(input, before_text);
@@ -443,14 +444,14 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                         list_push((List*)container, {.item = s2it(before_str)});
                         ((TypeElmt*)container->type)->content_length++;
                     }
-                    free(before_text);
+                    mem_free(before_text);
                 }
 
                 // Create italic element
                 Element* italic = create_asciidoc_element(input, "em");
                 if (italic) {
                     int italic_len = italic_end - italic_start;
-                    char* italic_text = (char*)malloc(italic_len + 1);
+                    char* italic_text = (char*)mem_alloc(italic_len + 1, MEM_CAT_INPUT_ADOC);
                     strncpy(italic_text, italic_start, italic_len);
                     italic_text[italic_len] = '\0';
                     String* italic_str = create_string(input, italic_text);
@@ -460,7 +461,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     }
                     list_push((List*)container, {.item = (uint64_t)italic});
                     ((TypeElmt*)container->type)->content_length++;
-                    free(italic_text);
+                    mem_free(italic_text);
                 }
 
                 ptr = italic_end + 1;
@@ -475,7 +476,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 // Add text before code
                 if (ptr > start) {
                     int len = ptr - start;
-                    char* before_text = (char*)malloc(len + 1);
+                    char* before_text = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_ADOC);
                     strncpy(before_text, start, len);
                     before_text[len] = '\0';
                     String* before_str = create_string(input, before_text);
@@ -483,14 +484,14 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                         list_push((List*)container, {.item = s2it(before_str)});
                         ((TypeElmt*)container->type)->content_length++;
                     }
-                    free(before_text);
+                    mem_free(before_text);
                 }
 
                 // Create code element
                 Element* code = create_asciidoc_element(input, "code");
                 if (code) {
                     int code_len = code_end - code_start;
-                    char* code_text = (char*)malloc(code_len + 1);
+                    char* code_text = (char*)mem_alloc(code_len + 1, MEM_CAT_INPUT_ADOC);
                     strncpy(code_text, code_start, code_len);
                     code_text[code_len] = '\0';
                     String* code_str = create_string(input, code_text);
@@ -500,7 +501,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     }
                     list_push((List*)container, {.item = (uint64_t)code});
                     ((TypeElmt*)container->type)->content_length++;
-                    free(code_text);
+                    mem_free(code_text);
                 }
 
                 ptr = code_end + 1;
@@ -515,7 +516,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
     // Add remaining text
     if (ptr > start) {
         int len = ptr - start;
-        char* remaining_text = (char*)malloc(len + 1);
+        char* remaining_text = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_ADOC);
         strncpy(remaining_text, start, len);
         remaining_text[len] = '\0';
         String* remaining_str = create_string(input, remaining_text);
@@ -523,7 +524,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
             list_push((List*)container, {.item = s2it(remaining_str)});
             ((TypeElmt*)container->type)->content_length++;
         }
-        free(remaining_text);
+        mem_free(remaining_text);
     }
 
     // If container has only one child, return the child directly
