@@ -273,13 +273,17 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-    fprintf(stderr, ">>> MOUSE BUTTON: button=%d action=%d mods=%d\n", button, action, mods);
-    fflush(stderr);
     log_info("MOUSE_BUTTON_CALLBACK: button=%d action=%d mods=%d", button, action, mods);
     RdtEvent event;
     event.mouse_button.type = action == GLFW_PRESS ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
     event.mouse_button.timestamp = glfwGetTime();
     event.mouse_button.button = button;
+    
+    // Get cursor position for all mouse button events
+    double xpos, ypos;
+    glfwGetCursorPos(window, &xpos, &ypos);
+    event.mouse_button.x = xpos;
+    event.mouse_button.y = ypos;
     
     // Map GLFW modifiers to RDT modifiers
     event.mouse_button.mods = 0;
@@ -295,23 +299,18 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         log_debug("Right mouse button released");
     }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-        log_debug("Left mouse button pressed");
-        double xpos, ypos;
-        glfwGetCursorPos(window, &xpos, &ypos);
-        log_debug("Mouse position: (%.2f, %.2f)", xpos, ypos);
+        log_debug("Left mouse button pressed at (%.2f, %.2f)", xpos, ypos);
         ui_context.mouse_state.is_mouse_down = 1;
         // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
-        ui_context.mouse_state.down_x = event.mouse_button.x = xpos;
-        ui_context.mouse_state.down_y = event.mouse_button.y = ypos;
+        ui_context.mouse_state.down_x = xpos;
+        ui_context.mouse_state.down_y = ypos;
     }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         log_debug("Left mouse button released");
 
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
-        fprintf(stderr, ">>> Calling handle_event with type=%d x=%.1f y=%.1f\n", 
-                event.mouse_button.type, (double)event.mouse_button.x, (double)event.mouse_button.y);
-        fflush(stderr);
         handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
+        do_redraw = 1;  // trigger repaint after mouse click
     }
 }
 
@@ -438,9 +437,11 @@ void render(GLFWwindow* window) {
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
     
-    // rerender if the document is dirty
-    if (ui_context.document && ui_context.document->state && ui_context.document->state->is_dirty) {
+    // rerender if the document is dirty or needs repaint (e.g., caret changed)
+    if (ui_context.document && ui_context.document->state && 
+        (ui_context.document->state->is_dirty || ui_context.document->state->needs_repaint)) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
+        ui_context.document->state->needs_repaint = false;
     }
 
     // repaint to screen
