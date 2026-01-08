@@ -12,6 +12,7 @@
 #include "layout.hpp"
 #include "font_face.h"
 #include "state_store.hpp"
+#include "event_sim.hpp"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -271,11 +272,21 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
 }
 
-void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    fprintf(stderr, ">>> MOUSE BUTTON: button=%d action=%d mods=%d\n", button, action, mods);
+    fflush(stderr);
+    log_info("MOUSE_BUTTON_CALLBACK: button=%d action=%d mods=%d", button, action, mods);
     RdtEvent event;
     event.mouse_button.type = action == GLFW_PRESS ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
     event.mouse_button.timestamp = glfwGetTime();
     event.mouse_button.button = button;
+    
+    // Map GLFW modifiers to RDT modifiers
+    event.mouse_button.mods = 0;
+    if (mods & GLFW_MOD_SHIFT) event.mouse_button.mods |= RDT_MOD_SHIFT;
+    if (mods & GLFW_MOD_CONTROL) event.mouse_button.mods |= RDT_MOD_CTRL;
+    if (mods & GLFW_MOD_ALT) event.mouse_button.mods |= RDT_MOD_ALT;
+    if (mods & GLFW_MOD_SUPER) event.mouse_button.mods |= RDT_MOD_SUPER;
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
         log_debug("Right mouse button pressed");
@@ -297,6 +308,9 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
         log_debug("Left mouse button released");
 
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
+        fprintf(stderr, ">>> Calling handle_event with type=%d x=%.1f y=%.1f\n", 
+                event.mouse_button.type, (double)event.mouse_button.x, (double)event.mouse_button.y);
+        fflush(stderr);
         handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
     }
 }
@@ -503,8 +517,11 @@ int run_layout(const char* html_file) {
 }
 
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
-int view_doc_in_window(const char* doc_file) {
+// event_file: optional JSON file with simulated events for automated testing
+int view_doc_in_window_with_events(const char* doc_file, const char* event_file) {
     log_init_wrapper();
+    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s", 
+             doc_file ? doc_file : "NULL", event_file ? event_file : "NULL");
     ui_context_init(&ui_context, false);
     log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, pixel_ratio=%.2f",
               ui_context.window_width, ui_context.window_height, ui_context.pixel_ratio);
@@ -512,6 +529,18 @@ int view_doc_in_window(const char* doc_file) {
     if (!window) {
         ui_context_cleanup(&ui_context);
         return -1;
+    }
+    
+    // Load event simulation if specified
+    EventSimContext* sim_ctx = NULL;
+    if (event_file) {
+        sim_ctx = event_sim_load(event_file);
+        if (!sim_ctx) {
+            log_error("Failed to load event file: %s", event_file);
+            // Continue without simulation
+        } else {
+            log_info("Event simulation loaded: %d events", sim_ctx->events->length);
+        }
     }
 
     glfwMakeContextCurrent(window);
@@ -523,6 +552,7 @@ int view_doc_in_window(const char* doc_file) {
     glfwSetCharCallback(window, character_callback);  // receive character input
     glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor/mouse position
     glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
+    log_info("Mouse button callback registered: %p", mouse_button_callback);
     glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetWindowRefreshCallback(window, window_refresh_callback);
@@ -628,6 +658,10 @@ int view_doc_in_window(const char* doc_file) {
     double caretBlinkTime = 0.0;
     const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
     int frames = 0;
+    
+    // Give the window a moment to render before starting simulation
+    double sim_start_delay = sim_ctx ? 0.5 : 0.0;  // 500ms delay before starting simulation
+    double sim_start_time = glfwGetTime() + sim_start_delay;
 
     while (!glfwWindowShouldClose(window)) {
         // calculate deltaTime
@@ -637,6 +671,17 @@ int view_doc_in_window(const char* doc_file) {
 
         // poll for new events
         glfwPollEvents();
+        
+        // Process simulated events if simulation is active
+        if (sim_ctx && sim_ctx->is_running && currentTime >= sim_start_time) {
+            bool sim_running = event_sim_update(sim_ctx, &ui_context, window, currentTime);
+            if (!sim_running && sim_ctx->auto_close) {
+                // Simulation complete, auto-close window
+                log_info("Simulation complete, auto-closing window");
+                glfwSetWindowShouldClose(window, GLFW_TRUE);
+            }
+            do_redraw = 1;  // redraw after each simulated event
+        }
 
         // Handle caret blinking
         RadiantState* state = ui_context.document ? ui_context.document->state : nullptr;
@@ -661,10 +706,24 @@ int view_doc_in_window(const char* doc_file) {
         frames++;
     }
 
+    // Get simulation results before cleanup
+    int sim_fail_count = 0;
+    if (sim_ctx) {
+        sim_fail_count = sim_ctx->fail_count;
+        event_sim_free(sim_ctx);
+    }
+
     log_info("End of document viewer");
     ui_context_cleanup(&ui_context);
     log_cleanup();
-    return 0;
+    
+    // Return non-zero if simulation had failures
+    return sim_fail_count > 0 ? 1 : 0;
+}
+
+// Wrapper for backward compatibility
+int view_doc_in_window(const char* doc_file) {
+    return view_doc_in_window_with_events(doc_file, NULL);
 }
 
 int window_main(int argc, char* argv[]) {
