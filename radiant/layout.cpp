@@ -10,6 +10,10 @@
 #include FT_TRUETYPE_TABLES_H
 #include <chrono>
 
+extern "C" {
+#include "../lib/memtrack.h"
+}
+
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -1509,7 +1513,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         // if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
         // view_pool_destroy(doc->view_tree);
     } else {
-        doc->view_tree = (ViewTree*)calloc(1, sizeof(ViewTree));
+        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
         log_debug("allocated view tree");
     }
     view_pool_init(doc->view_tree);

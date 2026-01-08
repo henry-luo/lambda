@@ -7,6 +7,7 @@
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/pdf_writer.h"
+#include "../lib/memtrack.h"
 }
 #include <stdio.h>
 #include <string.h>
@@ -146,7 +147,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
 
     // Apply text-transform if needed
-    char* text_content = (char*)malloc(text_rect->length * 4 + 1);  // Extra space for UTF-8 expansion
+    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 1, MEM_CAT_RENDER);  // Extra space for UTF-8 expansion
     if (text_transform != CSS_VALUE_NONE) {
         unsigned char* src = str + text_rect->start_index;
         unsigned char* src_end = src + text_rect->length;
@@ -197,7 +198,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     }
 
     if (strlen(text_content) == 0) {
-        free(text_content);
+        mem_free(text_content);
         return;
     }
 
@@ -284,7 +285,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         }
     }
 
-    free(text_content);
+    mem_free(text_content);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
