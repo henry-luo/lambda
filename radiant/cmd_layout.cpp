@@ -32,6 +32,7 @@ extern "C" {
 #include "../lib/url.h"
 #include "../lib/log.h"
 #include "../lib/image.h"
+#include "../lib/memtrack.h"
 }
 
 #include "../lambda/input/css/css_engine.hpp"
@@ -1342,19 +1343,19 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_info("[TIMING] load: read file: %.1fms", duration<double, std::milli>(t_read - t_start).count());
 
     // Create type string for HTML
-    String* type_str = (String*)malloc(sizeof(String) + 5);
+    String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     type_str->len = 4;
     strcpy(type_str->chars, "html");
 
     Input* input = input_from_source(html_content, html_url, type_str, nullptr);
-    free(html_content);
+    free(html_content);  // from read_text_file, uses stdlib
 
     auto t_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
 
     if (!input) {
         log_error("Failed to create input for file: %s", html_filepath);
-        free(type_str);
+        mem_free(type_str);
         return nullptr;
     }
 
@@ -2083,10 +2084,10 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     }
 
     // allocate escaped string
-    char* escaped_content = (char*)malloc(escaped_len + 1);
+    char* escaped_content = (char*)mem_alloc(escaped_len + 1, MEM_CAT_LAYOUT);
     if (!escaped_content) {
         log_error("Failed to allocate escaped content buffer");
-        free(text_content);
+        free(text_content);  // from read_text_file, uses stdlib
         return nullptr;
     }
 
@@ -2108,7 +2109,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         }
     }
     escaped_content[j] = '\0';
-    free(text_content);
+    free(text_content);  // from read_text_file, uses stdlib
 
     auto step2_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 2 - Escape HTML: %.1fms",
@@ -2152,14 +2153,14 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 
     // Calculate buffer size and format HTML
     size_t html_len = strlen(html_template) + strlen(filename) + escaped_len + 1;
-    char* html_content = (char*)malloc(html_len);
+    char* html_content = (char*)mem_alloc(html_len, MEM_CAT_LAYOUT);
     if (!html_content) {
         log_error("Failed to allocate HTML buffer");
-        free(escaped_content);
+        mem_free(escaped_content);
         return nullptr;
     }
     snprintf(html_content, html_len, html_template, filename, escaped_content);
-    free(escaped_content);
+    mem_free(escaped_content);
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - Build HTML: %.1fms",
@@ -2168,12 +2169,12 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     // Step 4: Parse HTML using Lambda parser
     auto step4_start = std::chrono::high_resolution_clock::now();
 
-    String* type_str = (String*)malloc(sizeof(String) + 5);
+    String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     type_str->len = 4;
     strcpy(type_str->chars, "html");
 
     Input* input = input_from_source(html_content, text_url, type_str, nullptr);
-    free(html_content);
+    mem_free(html_content);
 
     if (!input || !input->root.item || input->root.item == ITEM_ERROR) {
         log_error("Failed to parse HTML wrapper for text file");
@@ -2277,13 +2278,13 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     }
 
     // Create type string for markdown
-    String* type_str = (String*)malloc(sizeof(String) + 9);
+    String* type_str = (String*)mem_alloc(sizeof(String) + 9, MEM_CAT_LAYOUT);
     type_str->len = 8;
     strcpy(type_str->chars, "markdown");
 
     // Parse markdown to Lambda Element tree
     Input* input = input_from_source(markdown_content, markdown_url, type_str, nullptr);
-    free(markdown_content);
+    free(markdown_content);  // from read_text_file, uses stdlib
 
     if (!input) {
         log_error("Failed to parse markdown file: %s", markdown_filepath);
@@ -2431,13 +2432,13 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     }
 
     // Create type string for wiki
-    String* type_str = (String*)malloc(sizeof(String) + 5);
+    String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     type_str->len = 4;
     strcpy(type_str->chars, "wiki");
 
     // Parse wiki to Lambda Element tree
     Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
-    free(wiki_content);
+    free(wiki_content);  // from read_text_file, uses stdlib
 
     if (!input) {
         log_error("Failed to parse wiki file: %s", wiki_filepath);
@@ -2582,13 +2583,13 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     }
 
     // Create type string for LaTeX
-    String* type_str = (String*)malloc(sizeof(String) + 6);
+    String* type_str = (String*)mem_alloc(sizeof(String) + 6, MEM_CAT_LAYOUT);
     type_str->len = 5;
     strcpy(type_str->chars, "latex");
 
     // Parse LaTeX to Lambda Element tree using input_from_source
     Input* latex_input = input_from_source(latex_content, latex_url, type_str, nullptr);
-    free(latex_content);
+    free(latex_content);  // from read_text_file, uses stdlib
 
     if (!latex_input || !latex_input->root.item) {
         log_error("Failed to parse LaTeX file: %s", latex_filepath);
@@ -2671,7 +2672,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     log_debug("[Lambda LaTeX] Parsing generated HTML for layout...");
 
     // Create new input for HTML parsing
-    String* html_type_str = (String*)malloc(sizeof(String) + 5);
+    String* html_type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     html_type_str->len = 4;
     strcpy(html_type_str->chars, "html");
 
@@ -2838,12 +2839,12 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
              duration_cast<duration<double, std::milli>>(t_parse - t_read).count());
 
     // Step 2: Parse XML into Lambda elements using input_from_source
-    String* type_str = (String*)malloc(sizeof(String) + 4);
+    String* type_str = (String*)mem_alloc(sizeof(String) + 4, MEM_CAT_LAYOUT);
     type_str->len = 3;
     strcpy(type_str->chars, "xml");
 
     Input* xml_input = input_from_source(xml_content, xml_url, type_str, nullptr);
-    free(xml_content);
+    free(xml_content);  // from read_text_file, uses stdlib
 
     if (!xml_input || !xml_input->root.item || xml_input->root.item == ITEM_ERROR) {
         log_error("[Lambda XML] Failed to parse XML");
@@ -3459,7 +3460,7 @@ static bool layout_single_file(
 
     // Perform layout computation
     ui_context->document = doc;
-    
+
     if (doc->view_tree && doc->view_tree->root) {
         log_info("[Layout] Document already has view_tree (PDF/SVG/image), skipping CSS layout");
     } else {
@@ -3481,10 +3482,10 @@ static bool layout_single_file(
         if (is_pdf || is_svg) {
             set_combine_text_nodes(false);
         }
-        
+
         print_view_tree((ViewElement*)doc->view_tree->root, doc->url, output_path);
         log_debug("[Layout] Layout tree written to %s", output_path ? output_path : "/tmp/view_tree.json");
-        
+
         if (is_pdf || is_svg) {
             set_combine_text_nodes(true);
         }
@@ -3493,7 +3494,7 @@ static bool layout_single_file(
     // Cleanup document and pool for this file
     // Note: free_document is handled by pool_destroy since doc is allocated from pool
     pool_destroy(pool);
-    
+
     return success;
 }
 
@@ -3508,24 +3509,24 @@ static char* generate_output_path(const char* input_file, const char* output_dir
         basename = strrchr(input_file, '\\');
     }
     basename = basename ? basename + 1 : input_file;
-    
+
     // Find extension and replace with .json
     const char* ext = strrchr(basename, '.');
     size_t name_len = ext ? (size_t)(ext - basename) : strlen(basename);
-    
+
     // Build output path: output_dir/basename.json
     size_t dir_len = strlen(output_dir);
     bool need_slash = (dir_len > 0 && output_dir[dir_len - 1] != '/' && output_dir[dir_len - 1] != '\\');
-    
+
     size_t path_len = dir_len + (need_slash ? 1 : 0) + name_len + 5 + 1; // ".json" + null
-    char* output_path = (char*)malloc(path_len);
-    
+    char* output_path = (char*)mem_alloc(path_len, MEM_CAT_LAYOUT);
+
     if (need_slash) {
         snprintf(output_path, path_len, "%s/%.*s.json", output_dir, (int)name_len, basename);
     } else {
         snprintf(output_path, path_len, "%s%.*s.json", output_dir, (int)name_len, basename);
     }
-    
+
     return output_path;
 }
 
@@ -3546,12 +3547,12 @@ int cmd_layout(int argc, char** argv) {
     }
 
     bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
-    
+
     // Disable all logging in batch mode for better performance
     if (batch_mode) {
         log_disable_all();
     }
-    
+
     log_debug("Lambda Layout Command");
     log_debug("  Mode: %s", batch_mode ? "batch" : "single");
     log_debug("  Input files: %d", opts.input_file_count);
@@ -3620,13 +3621,13 @@ int cmd_layout(int argc, char** argv) {
             failure_count++;
             if (!opts.continue_on_error && opts.input_file_count > 1) {
                 log_error("Stopping batch due to error (use --continue-on-error to continue)");
-                if (allocated_output) free(allocated_output);
+                if (allocated_output) mem_free(allocated_output);
                 break;
             }
         }
 
         if (allocated_output) {
-            free(allocated_output);
+            mem_free(allocated_output);
         }
     }
 
@@ -3651,7 +3652,7 @@ int cmd_layout(int argc, char** argv) {
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);
     log_debug("[Cleanup] Complete");
-    
+
     log_notice("Completed layout command: %d success, %d failed", success_count, failure_count);
     return failure_count > 0 ? 1 : 0;
 }

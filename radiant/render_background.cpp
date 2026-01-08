@@ -1,6 +1,7 @@
 #include "render_background.hpp"
 #include "render_border.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <math.h>
 
 /**
@@ -23,7 +24,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BackgroundProp* bg = view->bound->background;
 
     log_debug("[RENDER BG] Element <%s>: color=#%08x gradient_type=%d linear=%p radial=%p",
-              view->node_name(), bg->color.c, bg->gradient_type, 
+              view->node_name(), bg->color.c, bg->gradient_type,
               (void*)bg->linear_gradient, (void*)bg->radial_gradient);
 
     // Render base color first (if any)
@@ -300,7 +301,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
 
     // Add color stops
     // ThorVG color stops are in RGBA format with position 0.0-1.0
-    Tvg_Color_Stop* stops = (Tvg_Color_Stop*)malloc(sizeof(Tvg_Color_Stop) * gradient->stop_count);
+    Tvg_Color_Stop* stops = (Tvg_Color_Stop*)mem_alloc(sizeof(Tvg_Color_Stop) * gradient->stop_count, MEM_CAT_RENDER);
     for (int i = 0; i < gradient->stop_count; i++) {
         GradientStop* gs = &gradient->stops[i];
         stops[i].offset = gs->position >= 0 ? gs->position : (float)i / (gradient->stop_count - 1);
@@ -314,7 +315,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     }
 
     tvg_gradient_set_color_stops(grad, stops, gradient->stop_count);
-    free(stops);
+    mem_free(stops);
 
     // Apply gradient fill to shape
     tvg_shape_set_gradient(shape, grad);
@@ -429,7 +430,7 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
     tvg_radial_gradient_set(grad, cx, cy, radius, cx, cy, 0);
 
     // Add color stops
-    Tvg_Color_Stop* stops = (Tvg_Color_Stop*)malloc(sizeof(Tvg_Color_Stop) * gradient->stop_count);
+    Tvg_Color_Stop* stops = (Tvg_Color_Stop*)mem_alloc(sizeof(Tvg_Color_Stop) * gradient->stop_count, MEM_CAT_RENDER);
     for (int i = 0; i < gradient->stop_count; i++) {
         GradientStop* gs = &gradient->stops[i];
         stops[i].offset = gs->position;
@@ -443,7 +444,7 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
     }
 
     tvg_gradient_set_color_stops(grad, stops, gradient->stop_count);
-    free(stops);
+    mem_free(stops);
 
     // Apply gradient fill to shape
     tvg_shape_set_gradient(shape, grad);

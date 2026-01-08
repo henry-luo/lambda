@@ -6,6 +6,7 @@ extern "C" {
 #include <string.h>
 #include <math.h>
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 }
 
 // Initialize track sizes
@@ -21,7 +22,7 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
 
     // Allocate computed tracks
     if (grid_layout->computed_row_count > 0) {
-        grid_layout->computed_rows = (GridTrack*)calloc(grid_layout->computed_row_count, sizeof(GridTrack));
+        grid_layout->computed_rows = (GridTrack*)mem_calloc(grid_layout->computed_row_count, sizeof(GridTrack), MEM_CAT_LAYOUT);
         log_debug("  Allocated %d row tracks", grid_layout->computed_row_count);
 
         // Initialize row tracks
@@ -93,7 +94,7 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
     }
 
     if (grid_layout->computed_column_count > 0) {
-        grid_layout->computed_columns = (GridTrack*)calloc(grid_layout->computed_column_count, sizeof(GridTrack));
+        grid_layout->computed_columns = (GridTrack*)mem_calloc(grid_layout->computed_column_count, sizeof(GridTrack), MEM_CAT_LAYOUT);
         log_debug("  Allocated %d column tracks", grid_layout->computed_column_count);
 
         // Initialize column tracks

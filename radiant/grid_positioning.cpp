@@ -8,6 +8,7 @@ extern "C" {
 #include <string.h>
 #include <math.h>
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 }
 
 // Position grid items based on computed track sizes
@@ -23,8 +24,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     log_debug("Positioning grid items\n");
 
     // Calculate track positions
-    int* row_positions = (int*)calloc(grid_layout->computed_row_count + 1, sizeof(int));
-    int* column_positions = (int*)calloc(grid_layout->computed_column_count + 1, sizeof(int));
+    int* row_positions = (int*)mem_calloc(grid_layout->computed_row_count + 1, sizeof(int), MEM_CAT_LAYOUT);
+    int* column_positions = (int*)mem_calloc(grid_layout->computed_column_count + 1, sizeof(int), MEM_CAT_LAYOUT);
 
     // First, calculate the total grid content size (all tracks + gaps)
     int total_row_size = 0;
@@ -260,8 +261,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
                   row_start + 1, row_end, col_start + 1, col_end);
     }
 
-    free(row_positions);
-    free(column_positions);
+    mem_free(row_positions);
+    mem_free(column_positions);
 
     log_debug("Grid items positioned\n");
 }

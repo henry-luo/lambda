@@ -6,16 +6,17 @@ extern "C" {
 #include <string.h>
 #include <math.h>
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 }
 
 // Create a new grid track list
 GridTrackList* create_grid_track_list(int initial_capacity) {
-    GridTrackList* track_list = (GridTrackList*)calloc(1, sizeof(GridTrackList));
+    GridTrackList* track_list = (GridTrackList*)mem_calloc(1, sizeof(GridTrackList), MEM_CAT_LAYOUT);
     if (!track_list) return nullptr;
 
     track_list->allocated_tracks = initial_capacity;
-    track_list->tracks = (GridTrackSize**)calloc(initial_capacity, sizeof(GridTrackSize*));
-    track_list->line_names = (char**)calloc(initial_capacity + 1, sizeof(char*)); // +1 for end line
+    track_list->tracks = (GridTrackSize**)mem_calloc(initial_capacity, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+    track_list->line_names = (char**)mem_calloc(initial_capacity + 1, sizeof(char*), MEM_CAT_LAYOUT); // +1 for end line
     track_list->track_count = 0;
     track_list->line_name_count = 0;
     track_list->is_repeat = false;
@@ -32,20 +33,20 @@ void destroy_grid_track_list(GridTrackList* track_list) {
     for (int i = 0; i < track_list->track_count; i++) {
         destroy_grid_track_size(track_list->tracks[i]);
     }
-    free(track_list->tracks);
+    mem_free(track_list->tracks);
 
     // Free line names
     for (int i = 0; i < track_list->line_name_count; i++) {
-        free(track_list->line_names[i]);
+        mem_free(track_list->line_names[i]);
     }
-    free(track_list->line_names);
+    mem_free(track_list->line_names);
 
-    free(track_list);
+    mem_free(track_list);
 }
 
 // Create a new grid track size
 GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value) {
-    GridTrackSize* track_size = (GridTrackSize*)calloc(1, sizeof(GridTrackSize));
+    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
     if (!track_size) return nullptr;
 
     track_size->type = type;
@@ -69,15 +70,15 @@ void destroy_grid_track_size(GridTrackSize* track_size) {
         destroy_grid_track_size(track_size->max_size);
     }
 
-    free(track_size);
+    mem_free(track_size);
 }
 
 // Create a new grid area
 GridArea* create_grid_area(const char* name, int row_start, int row_end, int column_start, int column_end) {
-    GridArea* area = (GridArea*)calloc(1, sizeof(GridArea));
+    GridArea* area = (GridArea*)mem_calloc(1, sizeof(GridArea), MEM_CAT_LAYOUT);
     if (!area) return nullptr;
 
-    area->name = strdup(name);
+    area->name = mem_strdup(name, MEM_CAT_LAYOUT);
     area->row_start = row_start;
     area->row_end = row_end;
     area->column_start = column_start;
@@ -90,7 +91,7 @@ GridArea* create_grid_area(const char* name, int row_start, int row_end, int col
 void destroy_grid_area(GridArea* area) {
     if (!area) return;
 
-    free(area->name);
+    mem_free(area->name);
     // Don't free the area itself if it's part of an array
 }
 
@@ -106,7 +107,7 @@ void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_nu
     }
 
     GridLineName* line_name = &grid->line_names[grid->line_name_count];
-    line_name->name = strdup(name);
+    line_name->name = mem_strdup(name, MEM_CAT_LAYOUT);
     line_name->line_number = line_number;
     line_name->is_row = is_row;
 
@@ -170,7 +171,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
     // Free existing area names before clearing
     for (int i = 0; i < grid->area_count; i++) {
         if (grid->grid_areas && grid->grid_areas[i].name) {
-            free(grid->grid_areas[i].name);
+            mem_free(grid->grid_areas[i].name);
             grid->grid_areas[i].name = nullptr;
         }
     }
@@ -182,21 +183,21 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
     const int MAX_AREAS = 32;       // Max unique named areas
 
     // Heap-allocated grid cell storage to avoid stack overflow
-    char*** grid_cells = (char***)calloc(MAX_GRID_SIZE, sizeof(char**));
+    char*** grid_cells = (char***)mem_calloc(MAX_GRID_SIZE, sizeof(char**), MEM_CAT_LAYOUT);
     if (!grid_cells) {
         log_debug("parse_grid_template_areas: allocation failed");
         return;
     }
     for (int r = 0; r < MAX_GRID_SIZE; r++) {
-        grid_cells[r] = (char**)calloc(MAX_GRID_SIZE, sizeof(char*));
+        grid_cells[r] = (char**)mem_calloc(MAX_GRID_SIZE, sizeof(char*), MEM_CAT_LAYOUT);
         if (!grid_cells[r]) {
             // cleanup and return
-            for (int j = 0; j < r; j++) free(grid_cells[j]);
-            free(grid_cells);
+            for (int j = 0; j < r; j++) mem_free(grid_cells[j]);
+            mem_free(grid_cells);
             return;
         }
         for (int c = 0; c < MAX_GRID_SIZE; c++) {
-            grid_cells[r][c] = (char*)calloc(MAX_NAME_LEN, sizeof(char));
+            grid_cells[r][c] = (char*)mem_calloc(MAX_NAME_LEN, sizeof(char), MEM_CAT_LAYOUT);
         }
     }
 
@@ -242,10 +243,10 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
     if (rows == 0 || cols == 0) {
         // cleanup
         for (int r = 0; r < MAX_GRID_SIZE; r++) {
-            for (int c = 0; c < MAX_GRID_SIZE; c++) free(grid_cells[r][c]);
-            free(grid_cells[r]);
+            for (int c = 0; c < MAX_GRID_SIZE; c++) mem_free(grid_cells[r][c]);
+            mem_free(grid_cells[r]);
         }
-        free(grid_cells);
+        mem_free(grid_cells);
         return;
     }
 
@@ -254,7 +255,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
     grid->computed_column_count = cols;
 
     // Collect unique area names (excluding "." which means empty cell)
-    char** unique_names = (char**)calloc(MAX_AREAS, sizeof(char*));
+    char** unique_names = (char**)mem_calloc(MAX_AREAS, sizeof(char*), MEM_CAT_LAYOUT);
     int unique_count = 0;
 
     for (int r = 0; r < rows; r++) {
@@ -271,7 +272,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
                 }
             }
             if (!found && unique_count < MAX_AREAS) {
-                unique_names[unique_count] = strdup(name);
+                unique_names[unique_count] = mem_strdup(name, MEM_CAT_LAYOUT);
                 unique_count++;
             }
         }
@@ -315,7 +316,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
         if (is_rectangle && min_row <= max_row && min_col <= max_col) {
             GridArea* area = &grid->grid_areas[grid->area_count];
             // Allocate and copy name (GridArea.name is char*)
-            area->name = strdup(area_name);
+            area->name = mem_strdup(area_name, MEM_CAT_LAYOUT);
             // Convert to 1-based CSS grid line numbers
             area->row_start = min_row + 1;
             area->row_end = max_row + 2;      // +2 because end line is exclusive
@@ -330,15 +331,15 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
 
     // Cleanup
     for (int i = 0; i < unique_count; i++) {
-        free(unique_names[i]);
+        mem_free(unique_names[i]);
     }
-    free(unique_names);
+    mem_free(unique_names);
 
     for (int r = 0; r < MAX_GRID_SIZE; r++) {
-        for (int c = 0; c < MAX_GRID_SIZE; c++) free(grid_cells[r][c]);
-        free(grid_cells[r]);
+        for (int c = 0; c < MAX_GRID_SIZE; c++) mem_free(grid_cells[r][c]);
+        mem_free(grid_cells[r]);
     }
-    free(grid_cells);
+    mem_free(grid_cells);
 
     log_debug("parse_grid_template_areas: successfully parsed %d areas", grid->area_count);
 }
