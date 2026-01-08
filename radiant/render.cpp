@@ -174,6 +174,7 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
             if (intensity > 0) {
                 // blend the pixel with the background
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
+                
                 // important to use 32bit int for computation below
                 uint32_t v = 255 - intensity;
                 // can further optimize if background is a fixed color
@@ -541,6 +542,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             tvg_canvas_push(canvas, shape);
             tvg_canvas_draw(canvas, false);
             tvg_canvas_sync(canvas);
+            tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
             log_debug("[MARKER RENDER] Drew disc at (%.1f, %.1f) r=%.1f", cx, cy, radius);
             break;
         }
@@ -562,6 +564,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             tvg_canvas_push(canvas, shape);
             tvg_canvas_draw(canvas, false);
             tvg_canvas_sync(canvas);
+            tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
             log_debug("[MARKER RENDER] Drew circle outline at (%.1f, %.1f) r=%.1f", cx, cy, radius);
             break;
         }
@@ -580,6 +583,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             tvg_canvas_push(canvas, shape);
             tvg_canvas_draw(canvas, false);
             tvg_canvas_sync(canvas);
+            tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
             log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
             break;
         }
@@ -688,6 +692,7 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
     tvg_canvas_push(canvas, shape);
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
+    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
 
     log_info("[VPATH] Rendered vector path successfully");
 }
@@ -929,6 +934,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                         tvg_canvas_push(rdcon->canvas, pic);
                         tvg_canvas_draw(rdcon->canvas, false);
                         tvg_canvas_sync(rdcon->canvas);
+                        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
                     } else {
                         log_error("[RENDER] background-image: failed to load '%s'", file_path);
                         tvg_paint_del(pic);
@@ -1016,6 +1022,7 @@ void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
     tvg_canvas_push(canvas, shape);
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
+    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
 }
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
@@ -1223,6 +1230,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         // Sync canvas to ensure all content is rendered to the surface
         tvg_canvas_draw(rdcon->canvas, false);
         tvg_canvas_sync(rdcon->canvas);
+        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
 
         // Calculate the element's bounding rect
         Rect filter_rect;
@@ -1338,6 +1346,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
             tvg_canvas_push(rdcon->canvas, pic);
             tvg_canvas_draw(rdcon->canvas, false);
             tvg_canvas_sync(rdcon->canvas);
+            tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
         } else {
             log_debug("failed to load svg picture");
         }
