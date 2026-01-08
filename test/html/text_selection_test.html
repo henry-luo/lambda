@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Text Selection Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        h1 {
+            color: #333;
+        }
+        
+        .instructions {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .test-text {
+            background: white;
+            padding: 20px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            user-select: text;
+        }
+        
+        p {
+            margin: 10px 0;
+        }
+        
+        ::selection {
+            background: rgba(0, 120, 255, 0.3);
+            color: inherit;
+        }
+    </style>
+</head>
+<body>
+    <h1>Text Selection & Caret Test</h1>
+    
+    <div class="instructions">
+        <h2>Test Instructions:</h2>
+        <ul>
+            <li>Click on any text below to position the caret</li>
+            <li>Click and drag to select text</li>
+            <li>Use Shift+Click to extend selection</li>
+            <li>Press Ctrl+A / Cmd+A to select all text</li>
+            <li>Press Ctrl+C / Cmd+C to copy selected text to clipboard</li>
+            <li>Use arrow keys to move the caret</li>
+            <li>Hold Shift while using arrow keys to extend selection</li>
+        </ul>
+    </div>
+    
+    <div class="test-text">
+        <p>This is a simple paragraph of text that you can click on to position the text cursor (caret). Try clicking at different positions within the text.</p>
+        
+        <p>You can also click and drag your mouse to select portions of text. The selected text should be highlighted with a blue background.</p>
+        
+        <p>Once you have text selected, press Ctrl+C (or Cmd+C on macOS) to copy it to the clipboard. Then you can paste it in another application to verify the copy worked!</p>
+        
+        <p><strong>Bold text selection test:</strong> This paragraph contains <strong>some bold words</strong> that should be selectable just like normal text.</p>
+        
+        <p><em>Italic text selection test:</em> This paragraph has <em>italic text mixed in</em> with regular text for testing selection across different styles.</p>
+        
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</p>
+    </div>
+    
+    <div class="test-text" style="margin-top: 20px;">
+        <h3>Multi-line Selection Test</h3>
+        <p>First line of text for selection testing.</p>
+        <p>Second line of text that can be selected together with the first line.</p>
+        <p>Third line of text to complete the multi-line selection test.</p>
+    </div>
+</body>
+</html>
