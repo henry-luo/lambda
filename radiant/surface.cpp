@@ -2,6 +2,7 @@
 
 #include "../lib/image.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <algorithm>  // for std::max, std::min
 typedef struct ImageEntry {
     // ImageFormat format;
@@ -60,14 +61,14 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     // load image data
     log_debug("loading image at: %s", file_path);
     if (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0) {
-        surface = (ImageSurface *)calloc(1, sizeof(ImageSurface));
+        surface = (ImageSurface *)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
         surface->format = IMAGE_FORMAT_SVG;
         surface->pic = tvg_picture_new();
         Tvg_Result ret = tvg_picture_load(surface->pic, file_path);
         if (ret != TVG_RESULT_SUCCESS) {
             log_debug("failed to load SVG image: %s", file_path);
             tvg_paint_del(surface->pic);
-            free(surface);
+            mem_free(surface);
             return NULL;
         }
         float svg_w, svg_h;
@@ -128,13 +129,13 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
         fprintf(stderr, "Error: Invalid image surface dimensions.\n");
         return NULL;
     }
-    ImageSurface* img_surface = (ImageSurface*)calloc(1, sizeof(ImageSurface));
+    ImageSurface* img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
     img_surface->width = pixel_width;  img_surface->height = pixel_height;
     img_surface->pitch = pixel_width * 4;
-    img_surface->pixels = calloc(pixel_width * pixel_height * 4, sizeof(uint32_t));
+    img_surface->pixels = mem_calloc(pixel_width * pixel_height * 4, sizeof(uint32_t), MEM_CAT_IMAGE);
     if (!img_surface->pixels) {
         fprintf(stderr, "Error: Could not allocate memory for the image surface.\n");
-        free(img_surface);
+        mem_free(img_surface);
         return NULL;
     }
     return img_surface;
@@ -145,7 +146,7 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
         fprintf(stderr, "Error: Invalid image surface dimensions or pixels.\n");
         return NULL;
     }
-    ImageSurface* img_surface = (ImageSurface*)calloc(1, sizeof(ImageSurface));
+    ImageSurface* img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
     if (img_surface) {
         img_surface->width = pixel_width;  img_surface->height = pixel_height;
         img_surface->pitch = pixel_width * 4;
@@ -157,10 +158,10 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
 void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
     uint32_t* pixel = (uint32_t*)pixels + x;
     uint32_t* end = pixel + wd;
-    
+
     // Extract source alpha from color (ABGR format: alpha in high byte)
     uint8_t src_a = (color >> 24) & 0xFF;
-    
+
     if (src_a == 255) {
         // Fully opaque - fast path, just copy
         while (pixel < end) { *pixel++ = color; }
@@ -170,18 +171,18 @@ void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
         uint8_t src_g = (color >> 8) & 0xFF;
         uint8_t src_b = (color >> 16) & 0xFF;
         uint8_t inv_a = 255 - src_a;
-        
+
         while (pixel < end) {
             uint32_t dst = *pixel;
             uint8_t dst_r = dst & 0xFF;
             uint8_t dst_g = (dst >> 8) & 0xFF;
             uint8_t dst_b = (dst >> 16) & 0xFF;
-            
+
             // Alpha blend: result = src * src_a + dst * (1 - src_a)
             uint8_t out_r = (src_r * src_a + dst_r * inv_a) / 255;
             uint8_t out_g = (src_g * src_a + dst_g * inv_a) / 255;
             uint8_t out_b = (src_b * src_a + dst_b * inv_a) / 255;
-            
+
             *pixel++ = (255 << 24) | (out_b << 16) | (out_g << 8) | out_r;
         }
     }
@@ -193,7 +194,7 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     if (!surface || !surface->pixels) return;
     if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
     log_debug("fill rect: x:%.0f, y:%.0f, wd:%.0f, hg:%.0f, color:%x", rect->x, rect->y, rect->width, rect->height, color);
-    
+
     // Use explicit std::max/min to avoid template resolution issues
     int left = (int)std::max(clip->left, rect->x);
     int right = (int)std::min(clip->right, rect->x + rect->width);
@@ -329,10 +330,10 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
 
 void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
-        if (img_surface->pixels) free(img_surface->pixels);
+        if (img_surface->pixels) mem_free(img_surface->pixels);
         if (img_surface->pic) {
             tvg_paint_del(img_surface->pic);
         }
-        free(img_surface);
+        mem_free(img_surface);
     }
 }
