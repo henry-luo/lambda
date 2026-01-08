@@ -23,6 +23,7 @@
         "lib/cmdedit_utf8.c",
         "lib/mempool.c",
         "lib/arena.c",
+        "lib/memtrack.c",
         "lib/avl_tree.c",
         "lib/pdf_writer.c",
         "lib/url.c",

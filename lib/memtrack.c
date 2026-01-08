@@ -41,34 +41,33 @@
 // Category Names
 // ============================================================================
 
-const char* memtrack_category_names[LMEM_CAT_COUNT] = {
-    [LMEM_CAT_UNKNOWN]      = "unknown",
-    [LMEM_CAT_AST]          = "ast",
-    [LMEM_CAT_PARSER]       = "parser",
-    [LMEM_CAT_EVAL]         = "eval",
-    [LMEM_CAT_STRING]       = "string",
-    [LMEM_CAT_CONTAINER]    = "container",
-    [LMEM_CAT_NAMEPOOL]     = "namepool",
-    [LMEM_CAT_SHAPEPOOL]    = "shapepool",
-    [LMEM_CAT_INPUT_JSON]   = "input-json",
-    [LMEM_CAT_INPUT_XML]    = "input-xml",
-    [LMEM_CAT_INPUT_HTML]   = "input-html",
-    [LMEM_CAT_INPUT_CSS]    = "input-css",
-    [LMEM_CAT_INPUT_MD]     = "input-md",
-    [LMEM_CAT_INPUT_PDF]    = "input-pdf",
-    [LMEM_CAT_INPUT_OTHER]  = "input-other",
-    [LMEM_CAT_FORMAT]       = "format",
-    [LMEM_CAT_DOM]          = "dom",
-    [LMEM_CAT_LAYOUT]       = "layout",
-    [LMEM_CAT_STYLE]        = "style",
-    [LMEM_CAT_FONT]         = "font",
-    [LMEM_CAT_IMAGE]        = "image",
-    [LMEM_CAT_RENDER]       = "render",
-    [LMEM_CAT_CACHE_FONT]   = "cache-font",
-    [LMEM_CAT_CACHE_IMAGE]  = "cache-image",
-    [LMEM_CAT_CACHE_LAYOUT] = "cache-layout",
-    [LMEM_CAT_CACHE_OTHER]  = "cache-other",
-    [LMEM_CAT_TEMP]         = "temp",
+const char* memtrack_category_names[MEM_CAT_COUNT] = {
+    [MEM_CAT_UNKNOWN]      = "unknown",
+    [MEM_CAT_AST]          = "ast",
+    [MEM_CAT_PARSER]       = "parser",
+    [MEM_CAT_EVAL]         = "eval",
+    [MEM_CAT_STRING]       = "string",
+    [MEM_CAT_CONTAINER]    = "container",
+    [MEM_CAT_NAMEPOOL]     = "namepool",
+    [MEM_CAT_SHAPEPOOL]    = "shapepool",
+    [MEM_CAT_INPUT_JSON]   = "input-json",
+    [MEM_CAT_INPUT_XML]    = "input-xml",
+    [MEM_CAT_INPUT_HTML]   = "input-html",
+    [MEM_CAT_INPUT_CSS]    = "input-css",
+    [MEM_CAT_INPUT_MD]     = "input-md",
+    [MEM_CAT_INPUT_PDF]    = "input-pdf",    [MEM_CAT_INPUT_INI]     = "input-ini",    [MEM_CAT_INPUT_OTHER]  = "input-other",
+    [MEM_CAT_FORMAT]       = "format",
+    [MEM_CAT_DOM]          = "dom",
+    [MEM_CAT_LAYOUT]       = "layout",
+    [MEM_CAT_STYLE]        = "style",
+    [MEM_CAT_FONT]         = "font",
+    [MEM_CAT_IMAGE]        = "image",
+    [MEM_CAT_RENDER]       = "render",
+    [MEM_CAT_CACHE_FONT]   = "cache-font",
+    [MEM_CAT_CACHE_IMAGE]  = "cache-image",
+    [MEM_CAT_CACHE_LAYOUT] = "cache-layout",
+    [MEM_CAT_CACHE_OTHER]  = "cache-other",
+    [MEM_CAT_TEMP]         = "temp",
 };
 
 // ============================================================================
@@ -76,8 +75,8 @@ const char* memtrack_category_names[LMEM_CAT_COUNT] = {
 // ============================================================================
 
 // Allocation record (debug mode only)
-typedef struct AllocRecord {
-    void* user_ptr;             // Pointer returned to user
+typedef struct AllocInfo {
+    void* ptr;                  // User pointer (key for hashmap)
     void* real_ptr;             // Actual allocation (with guards)
     size_t size;                // User-requested size
     size_t real_size;           // Actual allocated size (with guards)
@@ -87,7 +86,7 @@ typedef struct AllocRecord {
     const char* file;
     int line;
 #endif
-} AllocRecord;
+} AllocInfo;
 
 // Pressure callback entry
 typedef struct PressureCallbackEntry {
@@ -117,7 +116,7 @@ typedef struct MemtrackState {
     pthread_mutex_t lock;
 
     // Allocation registry (debug mode only)
-    HashMap* alloc_map;         // ptr -> AllocRecord*
+    HashMap* alloc_map;         // ptr -> AllocInfo*
     uint64_t next_alloc_id;
 
     // Pressure management
@@ -151,12 +150,19 @@ static inline void unlock_tracker(void) {
     pthread_mutex_unlock(&g_memtrack.lock);
 }
 
-static uint64_t hash_ptr(const void* key) {
-    return (uint64_t)key * 0x9E3779B97F4A7C15ULL;
+static uint64_t hash_ptr(const void* item, uint64_t seed0, uint64_t seed1) {
+    // Item is a pointer to AllocInfo, we want to hash the pointer field
+    const AllocInfo* info = (const AllocInfo*)item;
+    (void)seed0; (void)seed1;
+    return (uint64_t)info->ptr * 0x9E3779B97F4A7C15ULL;
 }
 
-static int cmp_ptr(const void* a, const void* b) {
-    return (a == b) ? 0 : ((a < b) ? -1 : 1);
+static int cmp_ptr(const void* a, const void* b, void* udata) {
+    const AllocInfo* ia = (const AllocInfo*)a;
+    const AllocInfo* ib = (const AllocInfo*)b;
+    (void)udata;
+    if (ia->ptr == ib->ptr) return 0;
+    return (ia->ptr < ib->ptr) ? -1 : 1;
 }
 
 static MemPressureLevel compute_pressure_level(size_t current_bytes) {
@@ -267,7 +273,15 @@ bool memtrack_init(MemtrackMode mode) {
     g_memtrack.critical_limit = 768 * 1024 * 1024;  // 768 MB
 
     if (mode == MEMTRACK_MODE_DEBUG) {
-        g_memtrack.alloc_map = hashmap_new(hash_ptr, cmp_ptr, MAX_TRACKED_ALLOCS);
+        g_memtrack.alloc_map = hashmap_new(
+            sizeof(AllocInfo),    // Element size
+            MAX_TRACKED_ALLOCS,  // Initial capacity
+            0, 0,                // Random seeds
+            hash_ptr,            // Hash function
+            cmp_ptr,             // Compare function
+            NULL,                // No element free function
+            NULL                 // No user data
+        );
         if (!g_memtrack.alloc_map) {
             log_error("memtrack: failed to create allocation map");
             return false;
@@ -291,7 +305,7 @@ void memtrack_shutdown(void) {
 
     // Report leaks in debug mode
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
-        size_t leak_count = hashmap_size(g_memtrack.alloc_map);
+        size_t leak_count = hashmap_count(g_memtrack.alloc_map);
         if (leak_count > 0) {
             log_warn("memtrack: %zu memory leaks detected!", leak_count);
             memtrack_log_allocations();
@@ -320,7 +334,15 @@ void memtrack_set_mode(MemtrackMode mode) {
 
     // Transitioning to debug mode requires creating the allocation map
     if (mode == MEMTRACK_MODE_DEBUG && !g_memtrack.alloc_map) {
-        g_memtrack.alloc_map = hashmap_new(hash_ptr, cmp_ptr, MAX_TRACKED_ALLOCS);
+        g_memtrack.alloc_map = hashmap_new(
+            sizeof(AllocInfo),    // Element size
+            MAX_TRACKED_ALLOCS,  // Initial capacity
+            0, 0,                // Random seeds
+            hash_ptr,            // Hash function
+            cmp_ptr,             // Compare function
+            NULL,                // No element free function
+            NULL                 // No user data
+        );
     }
 
     g_memtrack.mode = mode;
@@ -332,9 +354,9 @@ void memtrack_set_mode(MemtrackMode mode) {
 // ============================================================================
 
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-void* lmem_alloc_loc(size_t size, MemCategory category, const char* file, int line)
+void* mem_alloc_loc(size_t size, MemCategory category, const char* file, int line)
 #else
-void* lmem_alloc(size_t size, MemCategory category)
+void* mem_alloc(size_t size, MemCategory category)
 #endif
 {
     if (!g_memtrack.initialized || g_memtrack.mode == MEMTRACK_MODE_OFF || !tls_tracking_enabled) {
@@ -372,18 +394,19 @@ void* lmem_alloc(size_t size, MemCategory category)
 
     // Record allocation in debug mode
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG) {
-        AllocRecord* record = (AllocRecord*)malloc(sizeof(AllocRecord));
-        record->user_ptr = user_ptr;
-        record->real_ptr = real_ptr;
-        record->size = size;
-        record->real_size = real_size;
-        record->category = category;
-        record->alloc_id = g_memtrack.next_alloc_id++;
+        AllocInfo info = {
+            .ptr = user_ptr,
+            .real_ptr = real_ptr,
+            .size = size,
+            .real_size = real_size,
+            .category = category,
+            .alloc_id = g_memtrack.next_alloc_id++
+        };
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-        record->file = file;
-        record->line = line;
+        info.file = file;
+        info.line = line;
 #endif
-        hashmap_put(g_memtrack.alloc_map, user_ptr, record);
+        hashmap_set(g_memtrack.alloc_map, &info);
     }
 
     // Check memory pressure
@@ -398,16 +421,16 @@ void* lmem_alloc(size_t size, MemCategory category)
 }
 
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-void* lmem_calloc_loc(size_t count, size_t size, MemCategory category, const char* file, int line)
+void* mem_calloc_loc(size_t count, size_t size, MemCategory category, const char* file, int line)
 #else
-void* lmem_calloc(size_t count, size_t size, MemCategory category)
+void* mem_calloc(size_t count, size_t size, MemCategory category)
 #endif
 {
     size_t total = count * size;
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-    void* ptr = lmem_alloc_loc(total, category, file, line);
+    void* ptr = mem_alloc_loc(total, category, file, line);
 #else
-    void* ptr = lmem_alloc(total, category);
+    void* ptr = mem_alloc(total, category);
 #endif
     if (ptr) {
         memset(ptr, 0, total);
@@ -416,24 +439,24 @@ void* lmem_calloc(size_t count, size_t size, MemCategory category)
 }
 
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-void* lmem_realloc_loc(void* ptr, size_t new_size, MemCategory category, const char* file, int line)
+void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, const char* file, int line)
 #else
-void* lmem_realloc(void* ptr, size_t new_size, MemCategory category)
+void* mem_realloc(void* ptr, size_t new_size, MemCategory category)
 #endif
 {
     if (!ptr) {
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-        return lmem_alloc_loc(new_size, category, file, line);
+        return mem_alloc_loc(new_size, category, file, line);
 #else
-        return lmem_alloc(new_size, category);
+        return mem_alloc(new_size, category);
 #endif
     }
 
     if (new_size == 0) {
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-        lmem_free_loc(ptr, file, line);
+        mem_free_loc(ptr, file, line);
 #else
-        lmem_free(ptr);
+        mem_free(ptr);
 #endif
         return NULL;
     }
@@ -448,19 +471,20 @@ void* lmem_realloc(void* ptr, size_t new_size, MemCategory category)
 
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG) {
         lock_tracker();
-        AllocRecord* record = (AllocRecord*)hashmap_get(g_memtrack.alloc_map, ptr);
-        if (record) {
-            old_size = record->size;
-            old_category = record->category;
+        AllocInfo key = {.ptr = ptr};
+        const AllocInfo* info = (const AllocInfo*)hashmap_get(g_memtrack.alloc_map, &key);
+        if (info) {
+            old_size = info->size;
+            old_category = info->category;
         }
         unlock_tracker();
     }
 
     // Allocate new
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-    void* new_ptr = lmem_alloc_loc(new_size, category, file, line);
+    void* new_ptr = mem_alloc_loc(new_size, category, file, line);
 #else
-    void* new_ptr = lmem_alloc(new_size, category);
+    void* new_ptr = mem_alloc(new_size, category);
 #endif
 
     if (new_ptr && old_size > 0) {
@@ -469,18 +493,18 @@ void* lmem_realloc(void* ptr, size_t new_size, MemCategory category)
 
     // Free old
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-    lmem_free_loc(ptr, file, line);
+    mem_free_loc(ptr, file, line);
 #else
-    lmem_free(ptr);
+    mem_free(ptr);
 #endif
 
     return new_ptr;
 }
 
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-void lmem_free_loc(void* ptr, const char* file, int line)
+void mem_free_loc(void* ptr, const char* file, int line)
 #else
-void lmem_free(void* ptr)
+void mem_free(void* ptr)
 #endif
 {
     if (!ptr) return;
@@ -493,9 +517,10 @@ void lmem_free(void* ptr)
     lock_tracker();
 
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG) {
-        AllocRecord* record = (AllocRecord*)hashmap_get(g_memtrack.alloc_map, ptr);
+        AllocInfo key = {.ptr = ptr};
+        const AllocInfo* info = (const AllocInfo*)hashmap_get(g_memtrack.alloc_map, &key);
 
-        if (!record) {
+        if (!info) {
             g_memtrack.stats.invalid_frees++;
 #ifdef MEMTRACK_DEBUG_LOCATIONS
             log_error("memtrack: invalid free at %s:%d - pointer %p not tracked", file, line, ptr);
@@ -507,8 +532,8 @@ void lmem_free(void* ptr)
         }
 
         // Verify guard bytes
-        bool head_ok = verify_guard_bytes(record->real_ptr, GUARD_SIZE, GUARD_BYTE_HEAD);
-        bool tail_ok = verify_guard_bytes((char*)record->real_ptr + GUARD_SIZE + record->size,
+        bool head_ok = verify_guard_bytes(info->real_ptr, GUARD_SIZE, GUARD_BYTE_HEAD);
+        bool tail_ok = verify_guard_bytes((char*)info->real_ptr + GUARD_SIZE + info->size,
                                           GUARD_SIZE, GUARD_BYTE_TAIL);
 
         if (!head_ok || !tail_ok) {
@@ -516,27 +541,26 @@ void lmem_free(void* ptr)
 #ifdef MEMTRACK_DEBUG_LOCATIONS
             log_error("memtrack: buffer overflow detected at %s:%d for allocation %p "
                      "(alloc'd at %s:%d, size=%zu, category=%s)",
-                     file, line, ptr, record->file, record->line, record->size,
-                     memtrack_category_names[record->category]);
+                     file, line, ptr, info->file, info->line, info->size,
+                     memtrack_category_names[info->category]);
 #else
             log_error("memtrack: buffer overflow detected for allocation %p (size=%zu, category=%s)",
-                     ptr, record->size, memtrack_category_names[record->category]);
+                     ptr, info->size, memtrack_category_names[info->category]);
 #endif
         }
 
         // Update stats
-        update_category_stats_free(record->category, record->size);
-        update_global_stats_free(record->size);
+        update_category_stats_free(info->category, info->size);
+        update_global_stats_free(info->size);
 
         // Fill freed memory with pattern (helps detect use-after-free)
-        memset(record->real_ptr, FILL_BYTE_FREE, record->real_size);
+        memset(info->real_ptr, FILL_BYTE_FREE, info->real_size);
 
         // Free the actual memory
-        free(record->real_ptr);
+        free(info->real_ptr);
 
         // Remove from tracking
-        hashmap_remove(g_memtrack.alloc_map, ptr);
-        free(record);
+        hashmap_delete(g_memtrack.alloc_map, &key);
 
     } else {
         // Stats-only mode: we don't know the size, so we can't update accurately
@@ -549,21 +573,21 @@ void lmem_free(void* ptr)
     unlock_tracker();
 }
 
-char* lmem_strdup(const char* str, MemCategory category) {
+char* mem_strdup(const char* str, MemCategory category) {
     if (!str) return NULL;
     size_t len = strlen(str) + 1;
-    char* dup = (char*)lmem_alloc(len, category);
+    char* dup = (char*)mem_alloc(len, category);
     if (dup) {
         memcpy(dup, str, len);
     }
     return dup;
 }
 
-char* lmem_strndup(const char* str, size_t max_len, MemCategory category) {
+char* mem_strndup(const char* str, size_t max_len, MemCategory category) {
     if (!str) return NULL;
     size_t len = strlen(str);
     if (len > max_len) len = max_len;
-    char* dup = (char*)lmem_alloc(len + 1, category);
+    char* dup = (char*)mem_alloc(len + 1, category);
     if (dup) {
         memcpy(dup, str, len);
         dup[len] = '\0';
@@ -591,10 +615,11 @@ bool memtrack_get_alloc_info(void* ptr, size_t* out_size, MemCategory* out_categ
     if (g_memtrack.mode != MEMTRACK_MODE_DEBUG) return false;
 
     lock_tracker();
-    AllocRecord* record = (AllocRecord*)hashmap_get(g_memtrack.alloc_map, ptr);
-    if (record) {
-        if (out_size) *out_size = record->size;
-        if (out_category) *out_category = record->category;
+    AllocInfo key = {.ptr = ptr};
+    const AllocInfo* info = (const AllocInfo*)hashmap_get(g_memtrack.alloc_map, &key);
+    if (info) {
+        if (out_size) *out_size = info->size;
+        if (out_category) *out_category = info->category;
         unlock_tracker();
         return true;
     }
@@ -606,7 +631,8 @@ bool memtrack_is_allocated(void* ptr) {
     if (g_memtrack.mode != MEMTRACK_MODE_DEBUG) return false;
 
     lock_tracker();
-    bool found = hashmap_get(g_memtrack.alloc_map, ptr) != NULL;
+    AllocInfo key = {.ptr = ptr};
+    bool found = hashmap_get(g_memtrack.alloc_map, &key) != NULL;
     unlock_tracker();
     return found;
 }
@@ -725,7 +751,7 @@ void memtrack_log_usage(void) {
              g_memtrack.stats.total_allocs, g_memtrack.stats.total_frees);
 
     log_info("memtrack: --- By Category ---");
-    for (int i = 0; i < LMEM_CAT_COUNT; i++) {
+    for (int i = 0; i < MEM_CAT_COUNT; i++) {
         MemtrackCategoryStats* cs = &g_memtrack.stats.categories[i];
         if (cs->current_bytes > 0 || cs->total_allocs > 0) {
             log_info("memtrack: %-15s: %10zu bytes (%zu allocs), peak: %zu",
@@ -743,23 +769,23 @@ typedef struct LogAllocCtx {
     int max_show;
 } LogAllocCtx;
 
-static bool log_alloc_iter(const void* key, void* value, void* ctx) {
-    LogAllocCtx* log_ctx = (LogAllocCtx*)ctx;
-    AllocRecord* record = (AllocRecord*)value;
+static bool log_alloc_iter(const void* item, void* udata) {
+    LogAllocCtx* ctx = (LogAllocCtx*)udata;
+    const AllocInfo* info = (const AllocInfo*)item;
 
-    if (log_ctx->count < log_ctx->max_show) {
+    if (ctx->count < ctx->max_show) {
 #ifdef MEMTRACK_DEBUG_LOCATIONS
         log_warn("memtrack: leak #%d: %p, %zu bytes, category=%s, alloc'd at %s:%d",
-                log_ctx->count + 1, record->user_ptr, record->size,
-                memtrack_category_names[record->category],
-                record->file, record->line);
+                ctx->count + 1, info->ptr, info->size,
+                memtrack_category_names[info->category],
+                info->file, info->line);
 #else
         log_warn("memtrack: leak #%d: %p, %zu bytes, category=%s",
-                log_ctx->count + 1, record->user_ptr, record->size,
-                memtrack_category_names[record->category]);
+                ctx->count + 1, info->ptr, info->size,
+                memtrack_category_names[info->category]);
 #endif
     }
-    log_ctx->count++;
+    ctx->count++;
     return true;  // Continue iteration
 }
 
@@ -771,11 +797,11 @@ void memtrack_log_allocations(void) {
 
     lock_tracker();
 
-    size_t count = hashmap_size(g_memtrack.alloc_map);
+    size_t count = hashmap_count(g_memtrack.alloc_map);
     log_info("memtrack: === Active Allocations (%zu) ===", count);
 
     LogAllocCtx ctx = {0, 100};  // Show first 100
-    hashmap_iterate(g_memtrack.alloc_map, log_alloc_iter, &ctx);
+    hashmap_scan(g_memtrack.alloc_map, log_alloc_iter, &ctx);
 
     if (ctx.count > ctx.max_show) {
         log_info("memtrack: ... and %d more", ctx.count - ctx.max_show);
@@ -799,27 +825,27 @@ size_t memtrack_check_leaks(void) {
     if (g_memtrack.mode != MEMTRACK_MODE_DEBUG) return 0;
 
     lock_tracker();
-    size_t leaks = hashmap_size(g_memtrack.alloc_map);
+    size_t leaks = hashmap_count(g_memtrack.alloc_map);
     unlock_tracker();
 
     return leaks;
 }
 
-static bool verify_guards_iter(const void* key, void* value, void* ctx) {
-    AllocRecord* record = (AllocRecord*)value;
-    size_t* violations = (size_t*)ctx;
+static bool verify_guards_iter(const void* item, void* udata) {
+    const AllocInfo* info = (const AllocInfo*)item;
+    size_t* violations = (size_t*)udata;
 
-    bool head_ok = verify_guard_bytes(record->real_ptr, GUARD_SIZE, GUARD_BYTE_HEAD);
-    bool tail_ok = verify_guard_bytes((char*)record->real_ptr + GUARD_SIZE + record->size,
+    bool head_ok = verify_guard_bytes(info->real_ptr, GUARD_SIZE, GUARD_BYTE_HEAD);
+    bool tail_ok = verify_guard_bytes((char*)info->real_ptr + GUARD_SIZE + info->size,
                                       GUARD_SIZE, GUARD_BYTE_TAIL);
 
     if (!head_ok || !tail_ok) {
         (*violations)++;
 #ifdef MEMTRACK_DEBUG_LOCATIONS
         log_error("memtrack: guard violation at %p (alloc'd at %s:%d)",
-                 record->user_ptr, record->file, record->line);
+                 info->ptr, info->file, info->line);
 #else
-        log_error("memtrack: guard violation at %p", record->user_ptr);
+        log_error("memtrack: guard violation at %p", info->ptr);
 #endif
     }
 
@@ -831,7 +857,7 @@ size_t memtrack_verify_guards(void) {
 
     lock_tracker();
     size_t violations = 0;
-    hashmap_iterate(g_memtrack.alloc_map, verify_guards_iter, &violations);
+    hashmap_scan(g_memtrack.alloc_map, verify_guards_iter, &violations);
     unlock_tracker();
 
     return violations;
@@ -885,7 +911,7 @@ void memtrack_compare_snapshot(uint32_t snapshot_handle) {
              count_diff, snap->stats.current_count, g_memtrack.stats.current_count);
 
     log_info("memtrack: --- Category Changes ---");
-    for (int i = 0; i < LMEM_CAT_COUNT; i++) {
+    for (int i = 0; i < MEM_CAT_COUNT; i++) {
         int64_t cat_diff = (int64_t)g_memtrack.stats.categories[i].current_bytes -
                           (int64_t)snap->stats.categories[i].current_bytes;
         if (cat_diff != 0) {
