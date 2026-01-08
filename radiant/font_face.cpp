@@ -121,7 +121,7 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     if (css_desc->src_url && base_path) {
         char* resolved = css_resolve_font_url(css_desc->src_url, base_path, nullptr);
         if (resolved) {
-            free(css_desc->src_url);
+            mem_free(css_desc->src_url);
             css_desc->src_url = resolved;
         }
     }
@@ -201,7 +201,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         css_font_face_descriptor_free(css_desc);
     }
 
-    free(css_descs);
+    mem_free(css_descs);
     clog_info(font_log, "Registered %d @font-face descriptors", count);
 }
 
