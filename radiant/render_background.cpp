@@ -22,6 +22,10 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     BackgroundProp* bg = view->bound->background;
 
+    log_debug("[RENDER BG] Element <%s>: color=#%08x gradient_type=%d linear=%p radial=%p",
+              view->node_name(), bg->color.c, bg->gradient_type, 
+              (void*)bg->linear_gradient, (void*)bg->radial_gradient);
+
     // Render base color first (if any)
     if (bg->color.a > 0) {
         render_background_color(rdcon, view, bg->color, rect);
@@ -40,6 +44,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Render main gradient (if any)
     if (bg->gradient_type != GRADIENT_NONE &&
         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
+        log_debug("[GRADIENT] Rendering gradient type=%d", bg->gradient_type);
         render_background_gradient(rdcon, view, bg, rect);
     }
 }
@@ -201,6 +206,7 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
         push_with_transform(rdcon, shape);
         tvg_canvas_draw(canvas, false);
         tvg_canvas_sync(canvas);
+        tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
     } else {
         // Simple rectangular fill
         ImageSurface* surface = rdcon->ui_context->surface;
@@ -253,6 +259,9 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
         log_debug("[GRADIENT] Invalid gradient (need at least 2 stops)");
         return;
     }
+
+    log_debug("[GRADIENT] render_linear_gradient <%s> rect=(%.0f,%.0f,%.0f,%.0f)",
+              view->node_name(), rect.x, rect.y, rect.width, rect.height);
 
     Tvg_Canvas* canvas = rdcon->canvas;
     Tvg_Paint* shape = tvg_shape_new();
@@ -318,6 +327,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     push_with_transform(rdcon, shape);
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
+    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
 }
 
 /**
@@ -446,6 +456,7 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
     push_with_transform(rdcon, shape);
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
+    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
 }
 
 /**
@@ -780,6 +791,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Draw all shadows
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
+    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
 
     log_debug("[BOX-SHADOW] Rendered %d outer shadow(s)", shadow_count);
 }
