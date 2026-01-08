@@ -179,6 +179,7 @@ void log_default_finish(void);
 /* Utility functions */
 void log_enable_timestamps(int enable);
 void log_enable_colors(int enable);
+void log_disable_all(void);  // Disable all logging categories
 const char* log_level_to_string(int level);
 
 /* Format management */

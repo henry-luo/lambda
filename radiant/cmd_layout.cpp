@@ -3547,6 +3547,11 @@ int cmd_layout(int argc, char** argv) {
 
     bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
     
+    // Disable all logging in batch mode for better performance
+    if (batch_mode) {
+        log_disable_all();
+    }
+    
     log_debug("Lambda Layout Command");
     log_debug("  Mode: %s", batch_mode ? "batch" : "single");
     log_debug("  Input files: %d", opts.input_file_count);

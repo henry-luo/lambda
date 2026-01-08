@@ -16,6 +16,10 @@ const os = require('os');
 // Get current platform for loading platform-specific references
 const CURRENT_PLATFORM = os.platform(); // 'linux', 'darwin', or 'win32'
 
+// Detect CPU cores and calculate default concurrency (cores - 1, minimum 1)
+const CPU_CORES = os.cpus().length;
+const DEFAULT_CONCURRENCY = Math.max(1, CPU_CORES - 1);
+
 class RadiantLayoutTester {
     constructor(options = {}) {
         this.engine = options.engine || 'lambda-css'; // Default to 'lambda-css'
@@ -29,7 +33,7 @@ class RadiantLayoutTester {
         this.verbose = options.verbose || false;
         this.json = options.json || false; // JSON output mode
         this.projectRoot = options.projectRoot || process.cwd();
-        this.maxConcurrency = options.maxConcurrency || 5; // Max parallel tests
+        this.maxConcurrency = options.maxConcurrency || DEFAULT_CONCURRENCY; // Max parallel tests (auto-detect: cores - 1)
         this.testIdCounter = 0; // Counter for unique test IDs
         this.singleTestMode = options.singleTestMode || false; // Single test mode for detailed failure reports
         this.batchSize = options.batchSize || 0; // Batch size for layout (0 = disabled, use single file mode)
@@ -103,14 +107,6 @@ class RadiantLayoutTester {
      * @returns {Promise<Map<string, string>>} - Map of input file -> output JSON file path
      */
     async runBatchLayout(htmlFiles) {
-        // Ensure batch output directory exists
-        const { mkdir } = require('fs').promises;
-        try {
-            await mkdir(this.batchOutputDir, { recursive: true });
-        } catch (e) {
-            // Directory may already exist
-        }
-
         return new Promise((resolve, reject) => {
             // Build command: layout file1.html file2.html ... --output-dir /tmp/layout_batch/
             const args = ['layout', ...htmlFiles, '--output-dir', this.batchOutputDir, '--continue-on-error'];
@@ -1485,6 +1481,13 @@ class RadiantLayoutTester {
         const results = [];
         const batchSize = this.batchSize;
 
+        // Ensure batch output directory exists (once per test job)
+        try {
+            await fs.mkdir(this.batchOutputDir, { recursive: true });
+        } catch (e) {
+            // Directory may already exist
+        }
+
         if (this.verbose) {
             console.log(`\n🚀 Batch mode: processing ${testTasks.length} files in batches of ${batchSize}`);
         }
@@ -1889,7 +1892,7 @@ async function main() {
         verbose: false,
         engine: 'radiant', // default to radiant engine
         json: false, // JSON output mode
-        maxConcurrency: 5, // Max parallel tests
+        maxConcurrency: DEFAULT_CONCURRENCY, // Max parallel tests (auto-detect: cores - 1)
         batchSize: 20 // Default batch size for layout (20 files at once)
     };
 
