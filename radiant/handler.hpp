@@ -1,6 +1,10 @@
 #include "view.hpp"
 #include "event.hpp"
 
+// Forward declaration
+struct ViewText;
+struct TextRect;
+
 typedef struct EventContext {
     RdtEvent event;
     View* target;
@@ -19,3 +23,10 @@ typedef struct EventContext {
 
     UiContext* ui_context;
 } EventContext;
+
+/**
+ * Calculate character offset from mouse click position within a text rect
+ * Returns the character offset closest to the click position
+ */
+int calculate_char_offset_from_position(EventContext* evcon, ViewText* text, 
+    TextRect* rect, int mouse_x, int mouse_y);
