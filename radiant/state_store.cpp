@@ -898,7 +898,9 @@ void caret_update_visual(RadiantState* state) {
 void caret_toggle_blink(RadiantState* state) {
     if (!state || !state->caret) return;
     
-    state->caret->visible = !state->caret->visible;
+    // DISABLED for debugging - keep caret always visible
+    // state->caret->visible = !state->caret->visible;
+    state->caret->visible = true;  // always visible
     state->needs_repaint = true;
 }
 

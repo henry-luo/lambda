@@ -11,6 +11,8 @@ The Radiant Event Simulator provides automated testing capabilities for the `lam
 - **Timing Control**: Configure delays between events for realistic interaction patterns
 - **Results Reporting**: Summary of passed/failed assertions with detailed error logging
 - **Auto-close**: Window automatically closes when simulation completes
+- **Render Capture**: Capture current view state to PNG/SVG including caret and selection
+- **State Debugging**: Dump caret/selection state to text files for inspection
 
 ## Architecture
 
@@ -41,7 +43,9 @@ enum SimEventType {
     SIM_EVENT_ASSERT_CARET,   // Verify caret state
     SIM_EVENT_ASSERT_SELECTION, // Verify selection state
     SIM_EVENT_ASSERT_TARGET,  // Verify target view type
-    SIM_EVENT_LOG             // Log message to stderr
+    SIM_EVENT_LOG,            // Log message to stderr
+    SIM_EVENT_RENDER,         // Render to PNG/SVG file
+    SIM_EVENT_DUMP_CARET      // Dump caret state to file
 };
 
 // Individual event command
@@ -58,6 +62,7 @@ struct SimEvent {
     bool expected_is_collapsed;  // for assertions
     float scroll_dx, scroll_dy;  // scroll offsets
     char* message;               // for log events
+    char* file_path;             // for render/dump_caret events
 };
 
 // Simulation context
@@ -122,16 +127,29 @@ Move the mouse cursor to a position.
 {"type": "mouse_move", "x": 100, "y": 200}
 ```
 
+Alternatively, use `target_text` to move to text content:
+
+```json
+{"type": "mouse_move", "target_text": "Hover here"}
+```
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `x` | int | X coordinate (pixels from left) |
 | `y` | int | Y coordinate (pixels from top) |
+| `target_text` | string | Text content to find and move to (alternative to x/y) |
 
 ### mouse_down
 Press a mouse button at a position.
 
 ```json
 {"type": "mouse_down", "x": 100, "y": 200, "button": 0, "mods": 0}
+```
+
+Alternatively, use `target_text` to click on text content:
+
+```json
+{"type": "mouse_down", "target_text": "Click here"}
 ```
 
 | Field | Type | Description |
@@ -141,6 +159,7 @@ Press a mouse button at a position.
 | `button` | int | Button index: 0=left, 1=right, 2=middle |
 | `mods` | int | Modifier flags (optional) |
 | `mods_str` | string | Modifier string like "shift", "ctrl", "alt", "super" |
+| `target_text` | string | Text content to find and click on (alternative to x/y) |
 
 ### mouse_up
 Release a mouse button at a position.
@@ -273,6 +292,40 @@ Print a message to stderr.
 | Field | Type | Description |
 |-------|------|-------------|
 | `message` | string | Message to print |
+
+### render
+Render the current view (including caret and selection) to an image file.
+
+```json
+{"type": "render", "file": "/tmp/output.png"}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `file` | string | Path to output file (.png or .svg) |
+
+**Supported formats:**
+- `.png` - PNG image (includes caret/selection overlays)
+- `.svg` - SVG vector output
+
+### dump_caret
+Dump the current caret and selection state to a text file for debugging.
+
+```json
+{"type": "dump_caret", "file": "./caret_state.txt"}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `file` | string | Path to output file (optional, defaults to `./view_tree.txt`) |
+
+The output includes:
+- Caret view pointer and type
+- Character offset, line, column
+- Visual position (x, y) and height
+- Visibility state
+- Selection anchor/focus offsets
+- Selection collapsed state
 
 ## Key Names
 
