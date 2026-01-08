@@ -317,13 +317,13 @@ void memtrack_shutdown(void) {
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
         leak_count = hashmap_count(g_memtrack.alloc_map);
     }
-    
+
     // Capture stats while holding lock
     size_t peak_bytes = g_memtrack.stats.peak_bytes;
     size_t total_allocs = g_memtrack.stats.total_allocs;
-    
+
     unlock_tracker();
-    
+
     // Report leaks WITHOUT holding lock to avoid deadlock if logging allocates
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
         if (leak_count > 0) {
@@ -333,14 +333,14 @@ void memtrack_shutdown(void) {
             log_info("memtrack: no memory leaks detected");
         }
     }
-    
+
     // Log final stats WITHOUT holding lock
     log_info("memtrack: shutdown - peak usage: %zu bytes, total allocs: %zu",
              peak_bytes, total_allocs);
-    
+
     // Now safely clean up with lock
     lock_tracker();
-    
+
     if (g_memtrack.alloc_map) {
         hashmap_free(g_memtrack.alloc_map);
     }
