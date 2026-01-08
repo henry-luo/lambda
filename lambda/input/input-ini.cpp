@@ -3,6 +3,7 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "lib/log.h"
+#include "lib/memtrack.h"
 
 using namespace lambda;
 
@@ -198,8 +199,8 @@ static Item parse_typed_value(InputContext& ctx, String* value_str) {
     }
 
     if (is_number && len > 0) {
-        // Create null-terminated string for parsing
-        char* temp_str = (char*)pool_calloc(input->pool, len + 1);
+        // Create null-terminated string for parsing (temporary allocation)
+        char* temp_str = (char*)mem_calloc(1, len + 1, MEM_CAT_INPUT_INI);
         if (temp_str) {
             memcpy(temp_str, str, len);
             temp_str[len] = '\0';
@@ -212,7 +213,7 @@ static Item parse_typed_value(InputContext& ctx, String* value_str) {
                     dval_ptr = (double*)pool_calloc(input->pool, sizeof(double));
                     if (dval_ptr != NULL) {
                         *dval_ptr = dval;
-                        pool_free(input->pool, temp_str);
+                        mem_free(temp_str);
                         return {.item = d2it(dval_ptr)};
                     }
                 }
@@ -224,13 +225,13 @@ static Item parse_typed_value(InputContext& ctx, String* value_str) {
                     lval_ptr = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
                     if (lval_ptr != NULL) {
                         *lval_ptr = lval;
-                        pool_free(input->pool, temp_str);
+                        mem_free(temp_str);
                         return {.item = l2it(lval_ptr)};
                     }
                 }
             }
 
-            pool_free(input->pool, temp_str);
+            mem_free(temp_str);
         }
     }
     return {.item = s2it(value_str)};
@@ -331,7 +332,7 @@ void parse_ini(Input* input, const char* ini_string) {
         } else {
             // key-value pair outside of any section (global)
             if (!global_section) {
-                // Create a global section name
+                // Create a global section name (output data - use pool)
                 String* global_name;
                 global_name = (String*)pool_calloc(input->pool, sizeof(String) + 7);
                 if (global_name != NULL) {

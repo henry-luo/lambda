@@ -2,6 +2,7 @@
 #include "format/format.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
+#include "../lib/memtrack.h"
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
@@ -600,10 +601,11 @@ int main(int argc, char *argv[]) {
 
     // Add trace statement at start of main
     log_debug("main() started with %d arguments", argc);
-    // Note: rpmalloc is initialized lazily when mempool is first used
 
-    // Run basic assertions
-    log_debug("About to run assertions");
+    // Initialize memory tracker early in program lifecycle
+    log_debug("initializing memory tracker");
+    memtrack_init(MEMTRACK_MODE_DEBUG);
+    atexit(memtrack_shutdown);  // Ensure shutdown is called on exit
     run_assertions();
     log_debug("Assertions completed");
 
@@ -1253,6 +1255,8 @@ int main(int argc, char *argv[]) {
     }
 
     cleanup_utf8proc_support();
+
+    // Note: memtrack_shutdown is called via atexit handler
 
     // Note: rpmalloc cleanup is handled automatically when process exits
     // since it's only used within mempool (not as global malloc replacement)
