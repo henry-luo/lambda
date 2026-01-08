@@ -10,6 +10,8 @@ View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void to_repaint();
 
+// Forward declarations for event targeting
+void target_html_doc(EventContext* evcon, ViewTree* view_tree);
 void target_block_view(EventContext* evcon, ViewBlock* block);
 void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
@@ -124,6 +126,32 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         // setup scrolling offset
         evcon->block.x -= block->scroller->pane->h_scroll_position;
         evcon->block.y -= block->scroller->pane->v_scroll_position;
+    }
+
+    // Check if this block contains an embedded iframe document
+    // If so, target into the iframe's document instead of treating it as a normal block
+    if (block->embed && block->embed->doc) {
+        DomDocument* iframe_doc = block->embed->doc;
+        if (iframe_doc->view_tree && iframe_doc->view_tree->root) {
+            log_debug("targeting into iframe embedded document: %s", block->node_name());
+            
+            // Save current state
+            View* prev_target = evcon->target;
+            
+            // Target into the embedded document's view tree
+            // The coordinate system is already set up correctly (evcon->block.x/y)
+            // since we added block->x and block->y above
+            target_html_doc(evcon, iframe_doc->view_tree);
+            
+            // If we found a target inside the iframe, we're done
+            if (evcon->target && evcon->target != prev_target) {
+                log_debug("found target inside iframe: %s", 
+                    evcon->target->is_element() ? ((ViewElement*)evcon->target)->node_name() : "text");
+                goto RETURN;
+            }
+            
+            log_debug("no target found inside iframe, will target iframe block itself");
+        }
     }
 
     // target absolute/fixed positioned children
@@ -607,8 +635,67 @@ View* find_view(View* view, DomNode* node) {
     return NULL;
 }
 
+/**
+ * Calculate character offset from mouse click position within a text rect
+ * Returns the character offset closest to the click position
+ */
+int calculate_char_offset_from_position(EventContext* evcon, ViewText* text, 
+    TextRect* rect, int mouse_x, int mouse_y) {
+    unsigned char* str = text->text_data();
+    float x = evcon->block.x + rect->x;
+    float y = evcon->block.y + rect->y;
+    
+    unsigned char* p = str + rect->start_index;
+    unsigned char* end = p + max(rect->length, 0);
+    int char_offset = rect->start_index;
+    
+    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0) 
+        ? evcon->ui_context->pixel_ratio : 1.0f;
+    
+    bool has_space = false;
+    float prev_x = x;
+    
+    for (; p < end; p++, char_offset++) {
+        int wd = 0;
+        
+        if (is_space(*p)) {
+            if (has_space) continue;
+            has_space = true;
+            wd = evcon->font.style->space_width;
+        } else {
+            has_space = false;
+            FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
+            if (FT_Load_Char(evcon->font.ft_face, *p, load_flags)) {
+                log_error("Could not load character '%c'", *p);
+                continue;
+            }
+            wd = evcon->font.ft_face->glyph->advance.x / 64.0 / pixel_ratio;
+        }
+        
+        float char_mid = x + wd / 2.0f;
+        
+        // If mouse is before the midpoint of this character, return previous offset
+        if (mouse_x < char_mid) {
+            return char_offset;
+        }
+        
+        prev_x = x;
+        x += wd;
+    }
+    
+    // Mouse is after all characters - return end offset
+    return char_offset;
+}
+
+// ============================================================================
+// Main Event Handler
+// ============================================================================
+
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     EventContext evcon;
+    fprintf(stderr, ">>> handle_event: type=%d\n", event->type);
+    fflush(stderr);
+    log_info("HANDLE_EVENT: type=%d", event->type);
     log_debug("Handling event %d", event->type);
     // PDF documents don't have html_root - they only have view_tree
     // For PDFs, we can still handle basic events using the view_tree
@@ -654,6 +741,38 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // fire drag event if dragging in progress
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+        
+        // Handle text selection drag
+        if (state && state->selection && state->selection->is_selecting) {
+            View* sel_view = state->selection->view;
+            if (sel_view && sel_view->view_type == RDT_VIEW_TEXT) {
+                // Find which text rect we're hovering over
+                ViewText* text = (ViewText*)sel_view;
+                TextRect* rect = text->rect;
+                
+                // Convert mouse position to character offset
+                EventContext temp_evcon = evcon;
+                temp_evcon.target = nullptr;
+                temp_evcon.target_text_rect = nullptr;
+                
+                // Re-target to find the text rect under mouse
+                target_html_doc(&temp_evcon, doc->view_tree);
+                
+                if (temp_evcon.target == sel_view && temp_evcon.target_text_rect) {
+                    int char_offset = calculate_char_offset_from_position(
+                        &temp_evcon, text, temp_evcon.target_text_rect, 
+                        motion->x, motion->y);
+                    
+                    // Extend selection to new position
+                    selection_extend(state, char_offset);
+                    caret_set(state, sel_view, char_offset);
+                    
+                    log_debug("Dragging selection to offset %d", char_offset);
+                    evcon.need_repaint = true;
+                }
+            }
+        }
+        
         if (state && state->drag_target) {
             log_debug("Dragging in progress");
             ArrayList* target_list = build_view_stack(&evcon, (View*)state->drag_target);
@@ -684,14 +803,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {
         MouseButtonEvent* btn_event = &event->mouse_button;
+        fprintf(stderr, ">>> MOUSE_DOWN/UP: x=%d y=%d\n", btn_event->x, btn_event->y);
+        fflush(stderr);
         log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
+        
+        fprintf(stderr, ">>> After targeting: target=%p\n", evcon.target);
+        if (evcon.target) {
+            fprintf(stderr, ">>> Target view_type=%d (TEXT=4), target_text_rect=%p\n", 
+                    evcon.target->view_type, evcon.target_text_rect);
+        }
+        fflush(stderr);
         
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
         
         // Update active and focus states
         if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target) {
+            log_info("MOUSE_DOWN: target=%p view_type=%d", evcon.target, evcon.target->view_type);
+            if (evcon.target->view_type == RDT_VIEW_TEXT) {
+                log_info("Target is ViewText, target_text_rect=%p", evcon.target_text_rect);
+            }
+            
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
             
@@ -699,9 +832,40 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
             }
+            
+            // Handle click in text - position caret or start selection
+            if (evcon.target->view_type == RDT_VIEW_TEXT && evcon.target_text_rect) {
+                ViewText* text = (ViewText*)evcon.target;
+                TextRect* rect = evcon.target_text_rect;
+                
+                // Calculate character offset from click position
+                int char_offset = calculate_char_offset_from_position(
+                    &evcon, text, rect, btn_event->x, btn_event->y);
+                
+                log_info("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
+                
+                // Set caret at clicked position
+                caret_set(state, evcon.target, char_offset);
+                
+                // Start new selection if shift not pressed, otherwise extend
+                if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    selection_start(state, evcon.target, char_offset);
+                    state->selection->is_selecting = true;  // enter selection mode
+                } else if (state->selection && !state->selection->is_collapsed) {
+                    // Shift-click extends selection
+                    selection_extend(state, char_offset);
+                }
+                
+                evcon.need_repaint = true;
+            }
         } else if (event->type == RDT_EVENT_MOUSE_UP) {
             // Clear :active state
             update_active_state(&evcon, NULL, false);
+            
+            // End selection mode
+            if (state && state->selection) {
+                state->selection->is_selecting = false;
+            }
         }
         
         if (evcon.target) {
@@ -937,6 +1101,45 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (ctrl || cmd) {
                         selection_select_all(state);
                         evcon.need_repaint = true;
+                    }
+                    break;
+                    
+                case RDT_KEY_C:
+                    // Copy selection (Ctrl+C / Cmd+C)
+                    if (ctrl || cmd) {
+                        if (selection_has(state)) {
+                            Pool* temp_pool = pool_create();
+                            Arena* temp_arena = arena_create_default(temp_pool);
+                            char* text = extract_selected_text(state, temp_arena);
+                            if (text) {
+                                clipboard_copy_text(text);
+                                log_debug("Copied text to clipboard: %zu chars", strlen(text));
+                            }
+                            arena_destroy(temp_arena);
+                            pool_destroy(temp_pool);
+                        }
+                    }
+                    break;
+                    
+                case RDT_KEY_X:
+                    // Cut selection (Ctrl+X / Cmd+X)
+                    if (ctrl || cmd) {
+                        if (selection_has(state)) {
+                            // Copy to clipboard
+                            Pool* temp_pool = pool_create();
+                            Arena* temp_arena = arena_create_default(temp_pool);
+                            char* text = extract_selected_text(state, temp_arena);
+                            if (text) {
+                                clipboard_copy_text(text);
+                                log_debug("Cut text to clipboard: %zu chars", strlen(text));
+                            }
+                            arena_destroy(temp_arena);
+                            pool_destroy(temp_pool);
+                            
+                            // TODO: delete selected text
+                            selection_clear(state);
+                            evcon.need_repaint = true;
+                        }
                     }
                     break;
                     

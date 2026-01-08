@@ -127,6 +127,7 @@
         "lambda/input/pdf_decompress.cpp",
         "radiant/state_store.cpp",
         "radiant/event.cpp",
+        "radiant/event_sim.cpp",
         "radiant/cmd_layout.cpp",
         "radiant/window.cpp",
         "lambda/main-repl.cpp",
