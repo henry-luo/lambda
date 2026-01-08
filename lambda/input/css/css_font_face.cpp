@@ -6,6 +6,7 @@
 
 #include "css_font_face.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/memtrack.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -36,7 +37,7 @@ static char* trim_and_unquote(const char* str, size_t len, Pool* pool) {
     if (pool) {
         result = (char*)pool_alloc(pool, len + 1);
     } else {
-        result = (char*)malloc(len + 1);
+        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
     }
     if (result) {
         memcpy(result, str, len);
@@ -78,7 +79,7 @@ static char* extract_format_value(const char* str, Pool* pool) {
     if (pool) {
         result = (char*)pool_alloc(pool, len + 1);
     } else {
-        result = (char*)malloc(len + 1);
+        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
     }
     if (result) {
         memcpy(result, fmt_start, len);
@@ -124,7 +125,7 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
     if (pool) {
         result = (char*)pool_alloc(pool, len + 1);
     } else {
-        result = (char*)malloc(len + 1);
+        result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_CSS);
     }
     if (result) {
         memcpy(result, url_start, len);
@@ -230,7 +231,7 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         if (pool) {
             entry_str = (char*)pool_alloc(pool, entry_len + 1);
         } else {
-            entry_str = (char*)malloc(entry_len + 1);
+            entry_str = (char*)mem_alloc(entry_len + 1, MEM_CAT_INPUT_CSS);
         }
         if (!entry_str) break;
 
@@ -241,7 +242,7 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
         entries[count].url = extract_url_value(entry_str, pool);
         entries[count].format = extract_format_value(entry_str, pool);
 
-        if (!pool) free(entry_str);
+        if (!pool) mem_free(entry_str);
 
         if (entries[count].url) {
             // Only log first 60 chars of URL to avoid huge log messages for data URIs
@@ -281,7 +282,7 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         if (pool) {
             return pool_strdup(pool, url);
         } else {
-            return strdup(url);
+            return mem_strdup(url, MEM_CAT_INPUT_CSS);
         }
     }
 
@@ -290,7 +291,7 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         if (pool) {
             return pool_strdup(pool, url);
         } else {
-            return strdup(url);
+            return mem_strdup(url, MEM_CAT_INPUT_CSS);
         }
     }
 
@@ -299,7 +300,7 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         if (pool) {
             return pool_strdup(pool, url);
         } else {
-            return strdup(url);
+            return mem_strdup(url, MEM_CAT_INPUT_CSS);
         }
     }
 
@@ -313,7 +314,7 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
     if (pool) {
         result = (char*)pool_alloc(pool, result_size);
     } else {
-        result = (char*)malloc(result_size);
+        result = (char*)mem_alloc(result_size, MEM_CAT_INPUT_CSS);
     }
     if (!result) return nullptr;
 
@@ -396,7 +397,7 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
     if (pool) {
         descriptor = (CssFontFaceDescriptor*)pool_calloc(pool, sizeof(CssFontFaceDescriptor));
     } else {
-        descriptor = (CssFontFaceDescriptor*)calloc(1, sizeof(CssFontFaceDescriptor));
+        descriptor = (CssFontFaceDescriptor*)mem_calloc(1, sizeof(CssFontFaceDescriptor), MEM_CAT_INPUT_CSS);
     }
     if (!descriptor) {
         log_error("css_parse_font_face_content: allocation failed");
@@ -471,7 +472,7 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
             if (pool) {
                 descriptor->src_urls = (CssFontFaceSrc*)pool_calloc(pool, CSS_FONT_FACE_MAX_SRC * sizeof(CssFontFaceSrc));
             } else {
-                descriptor->src_urls = (CssFontFaceSrc*)calloc(CSS_FONT_FACE_MAX_SRC, sizeof(CssFontFaceSrc));
+                descriptor->src_urls = (CssFontFaceSrc*)mem_calloc(CSS_FONT_FACE_MAX_SRC, sizeof(CssFontFaceSrc), MEM_CAT_INPUT_CSS);
             }
 
             if (descriptor->src_urls) {
@@ -481,7 +482,7 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
 
             // Also keep first URL in src_url for backwards compatibility
             descriptor->src_url = extract_url_value(temp_val, pool);
-            if (!pool && temp_val) free(temp_val);
+            if (!pool && temp_val) mem_free(temp_val);
             log_debug("[CSS FontFace]   src (first): '%s'", descriptor->src_url);
         }
         else if (prop_len >= 10 && strncmp(prop_start, "font-style", 10) == 0) {
@@ -492,7 +493,7 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
                 } else if (strcmp(val, "oblique") == 0) {
                     descriptor->font_style = CSS_VALUE_OBLIQUE;
                 }
-                if (!pool) free(val);
+                if (!pool) mem_free(val);
             }
         }
         else if (prop_len >= 11 && strncmp(prop_start, "font-weight", 11) == 0) {
@@ -501,7 +502,7 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
                 if (strcmp(val, "bold") == 0 || strcmp(val, "700") == 0) {
                     descriptor->font_weight = CSS_VALUE_BOLD;
                 }
-                if (!pool) free(val);
+                if (!pool) mem_free(val);
             }
         }
         else if (prop_len >= 12 && strncmp(prop_start, "font-display", 12) == 0) {
@@ -516,10 +517,10 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
     if (!descriptor->family_name) {
         log_warn("[CSS FontFace] Incomplete @font-face: missing font-family");
         if (!pool) {
-            if (descriptor->src_url) free(descriptor->src_url);
-            if (descriptor->src_local) free(descriptor->src_local);
-            if (descriptor->src_urls) free(descriptor->src_urls);
-            free(descriptor);
+            if (descriptor->src_url) mem_free(descriptor->src_url);
+            if (descriptor->src_local) mem_free(descriptor->src_local);
+            if (descriptor->src_urls) mem_free(descriptor->src_urls);
+            mem_free(descriptor);
         }
         return nullptr;
     }
@@ -558,7 +559,7 @@ CssFontFaceDescriptor** css_extract_font_faces(CssStylesheet* stylesheet,
     if (pool) {
         result = (CssFontFaceDescriptor**)pool_calloc(pool, count * sizeof(CssFontFaceDescriptor*));
     } else {
-        result = (CssFontFaceDescriptor**)calloc(count, sizeof(CssFontFaceDescriptor*));
+        result = (CssFontFaceDescriptor**)mem_calloc(count, sizeof(CssFontFaceDescriptor*), MEM_CAT_INPUT_CSS);
     }
     if (!result) {
         return nullptr;
@@ -585,12 +586,12 @@ CssFontFaceDescriptor** css_extract_font_faces(CssStylesheet* stylesheet,
                     if (descriptor->src_urls[j].url) {
                         char* resolved = css_resolve_font_url(descriptor->src_urls[j].url, base_path, pool);
                         if (resolved) {
-                            if (!pool) free(descriptor->src_urls[j].url);
+                            if (!pool) mem_free(descriptor->src_urls[j].url);
                             descriptor->src_urls[j].url = resolved;
                             log_debug("[CSS FontFace]   resolved src[%d]: '%s'", j, resolved);
                         } else {
                             // URL could not be resolved (e.g., remote URL) - clear it
-                            if (!pool) free(descriptor->src_urls[j].url);
+                            if (!pool) mem_free(descriptor->src_urls[j].url);
                             descriptor->src_urls[j].url = nullptr;
                         }
                     }
@@ -601,12 +602,12 @@ CssFontFaceDescriptor** css_extract_font_faces(CssStylesheet* stylesheet,
             if (descriptor->src_url && base_path) {
                 char* resolved = css_resolve_font_url(descriptor->src_url, base_path, pool);
                 if (resolved) {
-                    if (!pool) free(descriptor->src_url);
+                    if (!pool) mem_free(descriptor->src_url);
                     descriptor->src_url = resolved;
                     log_debug("[CSS FontFace]   resolved src: '%s'", descriptor->src_url);
                 } else {
                     // URL could not be resolved (e.g., remote URL) - clear it
-                    if (!pool) free(descriptor->src_url);
+                    if (!pool) mem_free(descriptor->src_url);
                     descriptor->src_url = nullptr;
                 }
             }
@@ -623,18 +624,18 @@ CssFontFaceDescriptor** css_extract_font_faces(CssStylesheet* stylesheet,
 void css_font_face_descriptor_free(CssFontFaceDescriptor* descriptor) {
     if (!descriptor) return;
 
-    if (descriptor->family_name) free(descriptor->family_name);
-    if (descriptor->src_url) free(descriptor->src_url);
-    if (descriptor->src_local) free(descriptor->src_local);
+    if (descriptor->family_name) mem_free(descriptor->family_name);
+    if (descriptor->src_url) mem_free(descriptor->src_url);
+    if (descriptor->src_local) mem_free(descriptor->src_local);
 
     // Free src_urls array and its contents
     if (descriptor->src_urls) {
         for (int i = 0; i < descriptor->src_count; i++) {
-            if (descriptor->src_urls[i].url) free(descriptor->src_urls[i].url);
-            if (descriptor->src_urls[i].format) free(descriptor->src_urls[i].format);
+            if (descriptor->src_urls[i].url) mem_free(descriptor->src_urls[i].url);
+            if (descriptor->src_urls[i].format) mem_free(descriptor->src_urls[i].format);
         }
-        free(descriptor->src_urls);
+        mem_free(descriptor->src_urls);
     }
 
-    free(descriptor);
+    mem_free(descriptor);
 }

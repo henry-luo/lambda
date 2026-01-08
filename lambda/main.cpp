@@ -2,6 +2,7 @@
 #include "format/format.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
+#include "../lib/memtrack.h"
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
@@ -601,10 +602,20 @@ int main(int argc, char *argv[]) {
 
     // Add trace statement at start of main
     log_debug("main() started with %d arguments", argc);
-    // Note: rpmalloc is initialized lazily when mempool is first used
 
-    // Run basic assertions
-    log_debug("About to run assertions");
+    // Initialize memory tracker early in program lifecycle
+    log_debug("initializing memory tracker");
+    // Check environment variable for debug mode
+    const char* memtrack_env = getenv("MEMTRACK_MODE");
+    MemtrackMode mode = MEMTRACK_MODE_STATS;  // Default to stats mode
+    if (memtrack_env && strcmp(memtrack_env, "DEBUG") == 0) {
+        mode = MEMTRACK_MODE_DEBUG;
+        log_debug("memory tracker in DEBUG mode");
+    } else if (memtrack_env && strcmp(memtrack_env, "OFF") == 0) {
+        mode = MEMTRACK_MODE_OFF;
+    }
+    memtrack_init(mode);
+    atexit(memtrack_shutdown);  // Ensure shutdown is called on exit
     run_assertions();
     log_debug("Assertions completed");
 
@@ -1096,7 +1107,7 @@ int main(int argc, char *argv[]) {
         // Parse arguments for view command
         const char* filename = NULL;
         const char* event_file = NULL;
-        
+
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
                 event_file = argv[++i];
@@ -1104,7 +1115,7 @@ int main(int argc, char *argv[]) {
                 filename = argv[i];
             }
         }
-        
+
         // Default to test/html/index.html if no file specified (like radiant.exe)
         if (filename == NULL) {
             filename = "test/html/index.html";
@@ -1266,6 +1277,8 @@ int main(int argc, char *argv[]) {
     }
 
     cleanup_utf8proc_support();
+
+    // Note: memtrack_shutdown is called via atexit handler
 
     // Note: rpmalloc cleanup is handled automatically when process exits
     // since it's only used within mempool (not as global malloc replacement)
