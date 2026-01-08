@@ -372,12 +372,12 @@ int render_uicontext_to_png(UiContext* uicon, const char* png_file) {
         log_error("render_uicontext_to_png: invalid uicontext or no view tree");
         return 1;
     }
-    
+
     log_info("render_uicontext_to_png: rendering to %s", png_file);
-    
+
     // Render the document (this will include caret/selection via render_ui_overlays)
     render_html_doc(uicon, uicon->document->view_tree, png_file);
-    
+
     log_info("render_uicontext_to_png: completed successfully");
     return 0;
 }
@@ -398,22 +398,22 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
         log_error("render_uicontext_to_svg: invalid uicontext or no view tree");
         return 1;
     }
-    
+
     log_info("render_uicontext_to_svg: rendering to %s", svg_file);
-    
+
     // Get content dimensions
     int content_max_x = uicon->viewport_width;
     int content_max_y = uicon->viewport_height;
-    
+
     extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
     calculate_content_bounds(uicon->document->view_tree->root, &content_max_x, &content_max_y);
     content_max_x += 50;
     content_max_y += 50;
-    
+
     // Render to SVG (now includes caret if present)
     extern char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, RadiantState* state);
     extern bool save_svg_to_file(const char* svg_content, const char* filename);
-    
+
     char* svg_content = render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
                                                 content_max_x, content_max_y,
                                                 uicon->document->state);
@@ -421,14 +421,14 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
         log_error("render_uicontext_to_svg: failed to render view tree");
         return 1;
     }
-    
+
     if (!save_svg_to_file(svg_content, svg_file)) {
         log_error("render_uicontext_to_svg: failed to save SVG to %s", svg_file);
-        free(svg_content);
+        mem_free(svg_content);
         return 1;
     }
-    
-    free(svg_content);
+
+    mem_free(svg_content);
     log_info("render_uicontext_to_svg: completed successfully");
     return 0;
 }
