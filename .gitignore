@@ -131,7 +131,8 @@ test/layout/data/css2.1
 test/wpt
 test/pdf/output
 
-test/events
+test/event/
+test/events/
 
 analysis-results*/
 
