@@ -1,6 +1,7 @@
 #include "input.hpp"
 #include "input-context.hpp"
 #include "../mark_builder.hpp"
+#include "../../lib/memtrack.h"
 
 using namespace lambda;
 
@@ -10,7 +11,7 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
 static char* strip_yaml_comments(const char* line) {
     if (!line) return NULL;
 
-    char* result = strdup(line);
+    char* result = mem_strdup(line, MEM_CAT_INPUT_YAML);
     char* comment_pos = strchr(result, '#');
 
     if (comment_pos) {
@@ -67,27 +68,27 @@ void trim_string_inplace(char* str) {
 Item parse_scalar_value(InputContext* ctx, const char* str) {
     if (!str) return ctx->builder.createNull();
 
-    char* copy = strdup(str);
+    char* copy = mem_strdup(str, MEM_CAT_INPUT_YAML);
     trim_string_inplace(copy);
 
     if (strlen(copy) == 0) {
-        free(copy);
+        mem_free(copy);
         return ctx->builder.createNull();
     }
 
     // Check for null
     if (strcmp(copy, "null") == 0 || strcmp(copy, "~") == 0) {
-        free(copy);
+        mem_free(copy);
         return ctx->builder.createNull();
     }
 
     // Check for boolean
     if (strcmp(copy, "true") == 0 || strcmp(copy, "yes") == 0) {
-        free(copy);
+        mem_free(copy);
         return ctx->builder.createBool(true);
     }
     if (strcmp(copy, "false") == 0 || strcmp(copy, "no") == 0) {
-        free(copy);
+        mem_free(copy);
         return ctx->builder.createBool(false);
     }
 
@@ -95,13 +96,13 @@ Item parse_scalar_value(InputContext* ctx, const char* str) {
     char* end;
     int64_t int_val = strtol(copy, &end, 10);
     if (*end == '\0') {
-        free(copy);
+        mem_free(copy);
         return ctx->builder.createInt(int_val);
     }
 
     double float_val = strtod(copy, &end);
     if (*end == '\0') {
-        free(copy);
+        mem_free(copy);
         return ctx->builder.createFloat(float_val);
     }
 
@@ -109,13 +110,13 @@ Item parse_scalar_value(InputContext* ctx, const char* str) {
     if (copy[0] == '"' && copy[strlen(copy) - 1] == '"') {
         copy[strlen(copy) - 1] = '\0';
         String* str_result = ctx->builder.createString(copy + 1);
-        free(copy);
+        mem_free(copy);
         return (Item){.item = s2it(str_result)};
     }
 
     // Default to string
     String* str_result = ctx->builder.createString(copy);
-    free(copy);
+    mem_free(copy);
     return (Item){.item = s2it(str_result)};
 }
 
@@ -128,14 +129,14 @@ Array* parse_flow_array(InputContext* ctx, const char* str) {
     }
 
     // Make a copy and remove brackets
-    char* copy = strdup(str);
+    char* copy = mem_strdup(str, MEM_CAT_INPUT_YAML);
     if (copy[0] == '[') copy++;
     if (copy[strlen(copy) - 1] == ']') copy[strlen(copy) - 1] = '\0';
 
     trim_string_inplace(copy);
 
     if (strlen(copy) == 0) {
-        free(copy - (str[0] == '[' ? 1 : 0));
+        mem_free(copy - (str[0] == '[' ? 1 : 0));
         return array_builder.final().array;
     }
 
@@ -159,7 +160,7 @@ Array* parse_flow_array(InputContext* ctx, const char* str) {
         token = next;
     }
 
-    free(copy - (str[0] == '[' ? 1 : 0));
+    mem_free(copy - (str[0] == '[' ? 1 : 0));
     return array_builder.final().array;
 }
 
@@ -267,7 +268,7 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
 
             // Extract key
             int key_len = colon_pos - content;
-            char* key_str = (char*)malloc(key_len + 1);
+            char* key_str = (char*)mem_alloc(key_len + 1, MEM_CAT_INPUT_YAML);
             strncpy(key_str, content, key_len);
             key_str[key_len] = '\0';
             trim_string_inplace(key_str);
@@ -275,13 +276,13 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
             // Validate key is not empty
             if (strlen(key_str) == 0) {
                 ctx->addError("Empty key in YAML mapping");
-                free(key_str);
+                mem_free(key_str);
                 continue;
             }
 
             // Create name object for map key (always pooled)
             String* key = ctx->builder.createName(key_str);
-            free(key_str);
+            mem_free(key_str);
             if (!key) continue;
 
             // Extract value
@@ -319,8 +320,8 @@ void parse_yaml(Input *input, const char* yaml_str) {
     InputContext ctx(input, yaml_str, strlen(yaml_str));
 
     // Split into lines
-    char* yaml_copy = strdup(yaml_str);
-    char** all_lines = (char**)malloc(1000 * sizeof(char*));
+    char* yaml_copy = mem_strdup(yaml_str, MEM_CAT_INPUT_YAML);
+    char** all_lines = (char**)mem_alloc(1000 * sizeof(char*), MEM_CAT_INPUT_YAML);
     int total_line_count = 0;
 
     char* saveptr;
@@ -332,16 +333,16 @@ void parse_yaml(Input *input, const char* yaml_str) {
         line = strtok_r(NULL, "\n", &saveptr);
     }
 
-    free(yaml_copy);
+    mem_free(yaml_copy);
 
     if (total_line_count == 0) {
-        free(all_lines);
+        mem_free(all_lines);
         ctx.addWarning("Empty YAML document");
         return;
     }
 
     // Find document boundaries
-    int* doc_starts = (int*)malloc(100 * sizeof(int));
+    int* doc_starts = (int*)mem_alloc(100 * sizeof(int), MEM_CAT_INPUT_YAML);
     int doc_count = 0;
     bool has_doc_markers = false;
 
@@ -390,13 +391,13 @@ void parse_yaml(Input *input, const char* yaml_str) {
         }
 
         // Create lines array for this document, excluding document markers and empty lines
-        char** doc_lines = (char**)malloc(1000 * sizeof(char*));
+        char** doc_lines = (char**)mem_alloc(1000 * sizeof(char*), MEM_CAT_INPUT_YAML);
         int doc_line_count = 0;
 
         for (int i = start_line; i < end_line; i++) {
             // Skip document markers and empty lines
             if (strlen(all_lines[i]) > 0 && strncmp(all_lines[i], "---", 3) != 0) {
-                doc_lines[doc_line_count++] = strdup(all_lines[i]);
+                doc_lines[doc_line_count++] = mem_strdup(all_lines[i], MEM_CAT_INPUT_YAML);
             }
         }
 
@@ -425,8 +426,8 @@ void parse_yaml(Input *input, const char* yaml_str) {
         }
 
         // cleanup document lines
-        for (int i = 0; i < doc_line_count; i++) { free(doc_lines[i]); }
-        free(doc_lines);
+        for (int i = 0; i < doc_line_count; i++) { mem_free(doc_lines[i]); }
+        mem_free(doc_lines);
     }
 
     // Set the final result
@@ -440,7 +441,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
     ctx.logErrors();
 
     // cleanup
-    for (int i = 0; i < total_line_count; i++) { free(all_lines[i]); }
-    free(all_lines);
-    free(doc_starts);
+    for (int i = 0; i < total_line_count; i++) { mem_free(all_lines[i]); }
+    mem_free(all_lines);
+    mem_free(doc_starts);
 }

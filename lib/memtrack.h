@@ -65,6 +65,11 @@ typedef enum MemCategory {
     MEM_CAT_INPUT_MD,
     MEM_CAT_INPUT_PDF,
     MEM_CAT_INPUT_INI,
+    MEM_CAT_INPUT_YAML,
+    MEM_CAT_INPUT_TOML,
+    MEM_CAT_INPUT_CSV,
+    MEM_CAT_INPUT_PROPS,
+    MEM_CAT_INPUT_MARKUP,
     MEM_CAT_INPUT_OTHER,
 
     // Formatters
