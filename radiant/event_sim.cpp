@@ -74,6 +74,100 @@ static int parse_mods_string(const char* mods_str) {
     return mods;
 }
 
+// Helper: recursively find text view containing target string and get its absolute position
+// Returns true if found, sets out_x and out_y to center of first match
+static bool find_text_position_recursive(View* view, const char* target_text, 
+                                         float parent_abs_x, float parent_abs_y,
+                                         float* out_x, float* out_y) {
+    if (!view || !target_text) return false;
+    
+    // calculate absolute position of this view
+    // For text views, x/y are the same as the first TextRect's x/y (relative to parent block)
+    // For block views, x/y are relative to parent block's border box
+    float abs_x = parent_abs_x + view->x;
+    float abs_y = parent_abs_y + view->y;
+    
+    log_debug("find_text: view_type=%d, x=%.1f, y=%.1f, parent_abs=(%.1f, %.1f), abs=(%.1f, %.1f)", 
+              view->view_type, view->x, view->y, parent_abs_x, parent_abs_y, abs_x, abs_y);
+    
+    // check if this is a text view with matching text
+    if (view->view_type == RDT_VIEW_TEXT) {
+        DomText* text_view = view->as_text();
+        if (text_view && text_view->text) {
+            log_debug("find_text: text='%.30s...', searching for '%s'", text_view->text, target_text);
+            const char* match = strstr(text_view->text, target_text);
+            if (match) {
+                // Found a match - calculate position of the target text within the TextRect
+                TextRect* rect = text_view->rect;
+                if (rect) {
+                    // Find the character offset of the match within the text
+                    int match_offset = match - text_view->text;
+                    int target_len = strlen(target_text);
+                    
+                    // Walk through TextRects to find which one contains the match
+                    while (rect) {
+                        int rect_start = rect->start_index;
+                        int rect_end = rect_start + rect->length;
+                        
+                        if (match_offset >= rect_start && match_offset < rect_end) {
+                            // Match is in this TextRect - calculate x position
+                            // Since we can't get exact glyph widths here, position near
+                            // the START of the target text with a small offset
+                            float text_x = parent_abs_x + rect->x;
+                            int chars_before = match_offset - rect_start;
+                            
+                            // Use average char width, but only to find the start position
+                            // (not the center) to minimize error
+                            float avg_char_width = rect->width / rect->length;
+                            float match_start_x = text_x + chars_before * avg_char_width;
+                            
+                            // Position a few pixels into the first character of target
+                            // This ensures we hit the target text reliably
+                            float click_x = match_start_x + 3.0f;  // 3 pixels into first char
+                            
+                            *out_x = click_x;
+                            *out_y = parent_abs_y + rect->y + rect->height / 2;
+                            log_info("event_sim: found target_text '%s' at (%.1f, %.1f), match_offset=%d, rect=(%.1f, %.1f, %.1f, %.1f)", 
+                                     target_text, *out_x, *out_y, match_offset, rect->x, rect->y, rect->width, rect->height);
+                            return true;
+                        }
+                        rect = rect->next;
+                    }
+                    // Match not found in any rect - fallback to first rect center
+                    rect = text_view->rect;
+                    *out_x = parent_abs_x + rect->x + rect->width / 2;
+                    *out_y = parent_abs_y + rect->y + rect->height / 2;
+                    log_warn("event_sim: target_text '%s' found in text but not in any TextRect, using center", target_text);
+                    return true;
+                } else {
+                    log_warn("event_sim: text found but no TextRect");
+                }
+            }
+        }
+    }
+    
+    // For block elements, pass absolute position to children
+    // Note: text view children don't exist, only element children
+    DomElement* elem = view->as_element();
+    if (elem) {
+        View* child = (View*)elem->first_child;
+        while (child) {
+            if (find_text_position_recursive(child, target_text, abs_x, abs_y, out_x, out_y)) {
+                return true;
+            }
+            child = (View*)child->next_sibling;
+        }
+    }
+    
+    return false;
+}
+
+// Find position of text in document
+static bool find_text_position(DomDocument* doc, const char* target_text, float* out_x, float* out_y) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root) return false;
+    return find_text_position_recursive((View*)doc->view_tree->root, target_text, 0, 0, out_x, out_y);
+}
+
 // Parse a single event from MapReader
 static SimEvent* parse_sim_event(MapReader& reader) {
     SimEvent* ev = (SimEvent*)calloc(1, sizeof(SimEvent));
@@ -96,6 +190,9 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_MOUSE_MOVE;
         ev->x = reader.get("x").asInt32();
         ev->y = reader.get("y").asInt32();
+        // also support target_text for mouse_move
+        const char* target = reader.get("target_text").cstring();
+        if (target) ev->target_text = strdup(target);
     }
     else if (strcmp(type_str, "mouse_down") == 0) {
         ev->type = SIM_EVENT_MOUSE_DOWN;
@@ -105,6 +202,9 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->mods = reader.get("mods").asInt32();
         const char* mods_str = reader.get("mods_str").cstring();
         if (mods_str) ev->mods = parse_mods_string(mods_str);
+        // support target_text to find text and click on it
+        const char* target = reader.get("target_text").cstring();
+        if (target) ev->target_text = strdup(target);
     }
     else if (strcmp(type_str, "mouse_up") == 0) {
         ev->type = SIM_EVENT_MOUSE_UP;
@@ -173,6 +273,22 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_LOG;
         const char* msg = reader.get("message").cstring();
         if (msg) ev->message = strdup(msg);
+    }
+    else if (strcmp(type_str, "render") == 0) {
+        ev->type = SIM_EVENT_RENDER;
+        const char* file = reader.get("file").cstring();
+        if (file) ev->file_path = strdup(file);
+        else {
+            log_error("event_sim: render event missing 'file' field");
+            free(ev);
+            return NULL;
+        }
+    }
+    else if (strcmp(type_str, "dump_caret") == 0) {
+        ev->type = SIM_EVENT_DUMP_CARET;
+        const char* file = reader.get("file").cstring();
+        if (file) ev->file_path = strdup(file);
+        // file is optional, defaults to ./view_tree.txt
     }
     else {
         log_error("event_sim: unknown event type '%s'", type_str);
@@ -269,6 +385,8 @@ void event_sim_free(EventSimContext* ctx) {
         for (int i = 0; i < ctx->events->length; i++) {
             SimEvent* ev = (SimEvent*)ctx->events->data[i];
             if (ev->message) free(ev->message);
+            if (ev->file_path) free(ev->file_path);
+            if (ev->target_text) free(ev->target_text);
             free(ev);
         }
         arraylist_free(ctx->events);
@@ -435,15 +553,41 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: wait %d ms", ev->wait_ms);
             break;
             
-        case SIM_EVENT_MOUSE_MOVE:
-            log_info("event_sim: mouse_move to (%d, %d)", ev->x, ev->y);
-            sim_mouse_move(uicon, ev->x, ev->y);
+        case SIM_EVENT_MOUSE_MOVE: {
+            int x = ev->x, y = ev->y;
+            // resolve target_text to coordinates if specified
+            if (ev->target_text && uicon->document) {
+                float fx, fy;
+                if (find_text_position(uicon->document, ev->target_text, &fx, &fy)) {
+                    x = (int)fx;
+                    y = (int)fy;
+                } else {
+                    log_error("event_sim: target_text '%s' not found", ev->target_text);
+                }
+            }
+            log_info("event_sim: mouse_move to (%d, %d)", x, y);
+            sim_mouse_move(uicon, x, y);
             break;
+        }
             
-        case SIM_EVENT_MOUSE_DOWN:
-            log_info("event_sim: mouse_down at (%d, %d) button=%d", ev->x, ev->y, ev->button);
-            sim_mouse_button(uicon, ev->x, ev->y, ev->button, ev->mods, true);
+        case SIM_EVENT_MOUSE_DOWN: {
+            int x = ev->x, y = ev->y;
+            // resolve target_text to coordinates if specified
+            if (ev->target_text && uicon->document) {
+                float fx, fy;
+                if (find_text_position(uicon->document, ev->target_text, &fx, &fy)) {
+                    x = (int)fx;
+                    y = (int)fy;
+                    fprintf(stderr, "[EVENT_SIM] Resolved target_text '%s' to (%d, %d)\n", ev->target_text, x, y);
+                } else {
+                    log_error("event_sim: target_text '%s' not found", ev->target_text);
+                    fprintf(stderr, "[EVENT_SIM] ERROR: target_text '%s' not found\n", ev->target_text);
+                }
+            }
+            log_info("event_sim: mouse_down at (%d, %d) button=%d", x, y, ev->button);
+            sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
             break;
+        }
             
         case SIM_EVENT_MOUSE_UP:
             log_info("event_sim: mouse_up at (%d, %d) button=%d", ev->x, ev->y, ev->button);
@@ -507,6 +651,38 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             
         case SIM_EVENT_LOG:
             fprintf(stderr, "[EVENT_SIM] %s\n", ev->message ? ev->message : "(no message)");
+            break;
+            
+        case SIM_EVENT_RENDER:
+            {
+                log_info("event_sim: render to %s", ev->file_path);
+                fprintf(stderr, "[EVENT_SIM] Rendering to: %s\n", ev->file_path);
+                // Determine format from extension
+                const char* ext = strrchr(ev->file_path, '.');
+                if (ext && (strcmp(ext, ".svg") == 0 || strcmp(ext, ".SVG") == 0)) {
+                    extern int render_uicontext_to_svg(UiContext* uicon, const char* svg_file);
+                    render_uicontext_to_svg(uicon, ev->file_path);
+                } else {
+                    // Default to PNG
+                    extern int render_uicontext_to_png(UiContext* uicon, const char* png_file);
+                    render_uicontext_to_png(uicon, ev->file_path);
+                }
+            }
+            break;
+            
+        case SIM_EVENT_DUMP_CARET:
+            {
+                const char* path = ev->file_path ? ev->file_path : "./view_tree.txt";
+                log_info("event_sim: dump_caret to %s", path);
+                fprintf(stderr, "[EVENT_SIM] Dumping caret state to: %s\n", path);
+                DomDocument* doc = uicon->document;
+                if (doc && doc->state) {
+                    extern void print_caret_state(RadiantState* state, const char* output_path);
+                    print_caret_state(doc->state, path);
+                } else {
+                    log_error("event_sim: dump_caret - no document state");
+                }
+            }
             break;
     }
 }
