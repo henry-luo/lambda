@@ -2560,16 +2560,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     if (!block->pseudo->before_generated) {
                         // Create ViewMarker element for the ::marker pseudo-element
                         // Use fixed width of ~1.4em (22px at 16px font) to match browser behavior
-                        // Note: y_ppem is in 26.6 fixed-point format, divide by 64 to get pixels
-                        // CRITICAL: WOFF fonts may have y_ppem=0, derive from height if needed
+                        // Get font size from block->font (already resolved by dom_node_resolve_style)
+                        // This is more reliable than lycon->font.ft_face which is still parent context
                         float font_size = 16.0f;  // default
-                        if (lycon->font.ft_face && lycon->font.ft_face->size) {
-                            float ppem = lycon->font.ft_face->size->metrics.y_ppem / 64.0f;
-                            if (ppem <= 0 && lycon->font.ft_face->size->metrics.height > 0) {
-                                // Derive from height (26.6 fixed point) when y_ppem=0
-                                ppem = lycon->font.ft_face->size->metrics.height / 64.0f / 1.2f;
-                            }
-                            if (ppem > 0) font_size = ppem;
+                        if (block->font && block->font->font_size > 0) {
+                            font_size = block->font->font_size;
                         }
                         float fixed_marker_width = font_size * 1.375f;  // ~22px at 16px font
                         float bullet_size = font_size * 0.35f;  // ~5-6px at 16px font
