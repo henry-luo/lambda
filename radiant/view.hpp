@@ -375,8 +375,8 @@ struct FontProp {
     float descender;   // font descender in pixels
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
-    // embedded font support (PDF)
-    void* ft_face;     // FreeType face pointer for embedded fonts (FT_Face)
+    // loaded FreeType font face for this set of font properties
+    void* ft_face;     // FreeType face pointer
 };
 
 struct GridItemProp {

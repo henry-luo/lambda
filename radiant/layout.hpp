@@ -508,9 +508,15 @@ uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool i
  */
 CssEnum get_text_transform_from_block(BlockProp* blk);
 
+// Forward declaration
+struct RadiantState;
+
 // View tree printing functions (output CSS logical pixels directly)
 void print_view_tree(ViewElement* view_root, Url* url, const char* output_path = nullptr);
 void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path = nullptr);
+
+// Print caret state to view_tree.txt (appends caret info)
+void print_caret_state(RadiantState* state, const char* output_path = nullptr);
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent);
 void print_text_json(ViewText* text, StrBuf* buf, int indent);
 void print_br_json(View* br, StrBuf* buf, int indent);
