@@ -6,6 +6,7 @@
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/base64.h"
+#include "../lib/memtrack.h"
 }
 #include <string.h>
 #include <strings.h>  // for strcasecmp
@@ -126,10 +127,10 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     }
 
     // Convert to FontFaceDescriptor and register
-    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)calloc(1, sizeof(FontFaceDescriptor));
+    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
     if (descriptor) {
-        descriptor->family_name = css_desc->family_name ? strdup(css_desc->family_name) : nullptr;
-        descriptor->src_local_path = css_desc->src_url ? strdup(css_desc->src_url) : nullptr;
+        descriptor->family_name = css_desc->family_name ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr;
+        descriptor->src_local_path = css_desc->src_url ? mem_strdup(css_desc->src_url, MEM_CAT_LAYOUT) : nullptr;
         descriptor->font_style = css_desc->font_style;
         descriptor->font_weight = css_desc->font_weight;
         descriptor->font_display = css_desc->font_display;
@@ -171,10 +172,10 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         }
 
         // Convert to FontFaceDescriptor and register
-        FontFaceDescriptor* descriptor = (FontFaceDescriptor*)calloc(1, sizeof(FontFaceDescriptor));
+        FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
         if (descriptor) {
-            descriptor->family_name = css_desc->family_name ? strdup(css_desc->family_name) : nullptr;
-            descriptor->src_local_path = css_desc->src_url ? strdup(css_desc->src_url) : nullptr;
+            descriptor->family_name = css_desc->family_name ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr;
+            descriptor->src_local_path = css_desc->src_url ? mem_strdup(css_desc->src_url, MEM_CAT_LAYOUT) : nullptr;
             descriptor->font_style = css_desc->font_style;
             descriptor->font_weight = css_desc->font_weight;
             descriptor->font_display = css_desc->font_display;
@@ -182,12 +183,12 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
 
             // Copy src_urls array for multi-format fallback
             if (css_desc->src_urls && css_desc->src_count > 0) {
-                descriptor->src_entries = (FontFaceSrc*)calloc(css_desc->src_count, sizeof(FontFaceSrc));
+                descriptor->src_entries = (FontFaceSrc*)mem_calloc(css_desc->src_count, sizeof(FontFaceSrc), MEM_CAT_LAYOUT);
                 if (descriptor->src_entries) {
                     descriptor->src_count = css_desc->src_count;
                     for (int j = 0; j < css_desc->src_count; j++) {
-                        descriptor->src_entries[j].path = css_desc->src_urls[j].url ? strdup(css_desc->src_urls[j].url) : nullptr;
-                        descriptor->src_entries[j].format = css_desc->src_urls[j].format ? strdup(css_desc->src_urls[j].format) : nullptr;
+                        descriptor->src_entries[j].path = css_desc->src_urls[j].url ? mem_strdup(css_desc->src_urls[j].url, MEM_CAT_LAYOUT) : nullptr;
+                        descriptor->src_entries[j].format = css_desc->src_urls[j].format ? mem_strdup(css_desc->src_urls[j].format, MEM_CAT_LAYOUT) : nullptr;
                     }
                     clog_debug(font_log, "Copied %d src entries for @font-face '%s'",
                         descriptor->src_count, descriptor->family_name);
@@ -289,8 +290,8 @@ void parse_font_face_rule_OLD(LayoutContext* lycon, lxb_css_rule_t* rule) {
             continue;
         }
 
-        descriptor->family_name = strdup("Liberation Sans");
-        descriptor->src_local_path = strdup(liberation_sans_fonts[i]);
+        descriptor->family_name = mem_strdup("Liberation Sans", MEM_CAT_LAYOUT);
+        descriptor->src_local_path = mem_strdup(liberation_sans_fonts[i], MEM_CAT_LAYOUT);
         descriptor->font_style = styles[i];
         descriptor->font_weight = weights[i];
         descriptor->font_display = CSS_VALUE_AUTO;
@@ -310,7 +311,7 @@ FontFaceDescriptor* create_font_face_descriptor(LayoutContext* lycon) {
         return NULL;
     }
 
-    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)calloc(1, sizeof(FontFaceDescriptor));
+    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
     if (!descriptor) {
         clog_error(font_log, "Failed to allocate FontFaceDescriptor");
         return NULL;
@@ -341,7 +342,7 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     // Initialize @font-face storage if needed
     if (!uicon->font_faces) {
         uicon->font_face_capacity = 10;
-        uicon->font_faces = (FontFaceDescriptor**)calloc(uicon->font_face_capacity, sizeof(FontFaceDescriptor*));
+        uicon->font_faces = (FontFaceDescriptor**)mem_calloc(uicon->font_face_capacity, sizeof(FontFaceDescriptor*), MEM_CAT_LAYOUT);
         uicon->font_face_count = 0;
 
         if (!uicon->font_faces) {
@@ -444,7 +445,7 @@ static char* create_data_uri_hash_key(const char* data_uri) {
         // No comma - use first 64 chars of whole URI
         size_t len = strlen(data_uri);
         if (len > 64) len = 64;
-        char* key = (char*)malloc(len + 1);
+        char* key = (char*)mem_alloc(len + 1, MEM_CAT_LAYOUT);
         if (key) {
             strncpy(key, data_uri, len);
             key[len] = '\0';
@@ -458,7 +459,7 @@ static char* create_data_uri_hash_key(const char* data_uri) {
     size_t data_len = strlen(data);
     if (data_len > 64) data_len = 64;
 
-    char* key = (char*)malloc(prefix_len + data_len + 1);
+    char* key = (char*)mem_alloc(prefix_len + data_len + 1, MEM_CAT_LAYOUT);
     if (key) {
         memcpy(key, data_uri, prefix_len);
         memcpy(key + prefix_len, data, data_len);
@@ -506,7 +507,7 @@ static uint8_t* woff2_decompress_to_ttf(const uint8_t* woff2_data, size_t woff2_
 
     // Allocate output buffer and copy data
     size_t actual_size = ttf_buffer.size();
-    uint8_t* result = (uint8_t*)malloc(actual_size);
+    uint8_t* result = (uint8_t*)mem_alloc(actual_size, MEM_CAT_LAYOUT);
     if (!result) {
         clog_error(font_log, "WOFF2: failed to allocate %zu bytes for decompressed font", actual_size);
         return NULL;
@@ -563,7 +564,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
         log_debug("load_font_from_data_uri: cache hit for data URI");
         font_data = cached->font_data;
         font_data_size = cached->font_data_size;
-        free(hash_key);
+        mem_free(hash_key);
         hash_key = NULL; // don't free twice
     } else {
         // Cache miss - decode the data URI
@@ -574,7 +575,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
 
         if (!raw_data || font_data_size == 0) {
             clog_error(font_log, "Failed to decode data URI font data");
-            free(hash_key);
+            mem_free(hash_key);
             return NULL;
         }
 
@@ -589,7 +590,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
 
             if (!ttf_data || ttf_size == 0) {
                 clog_error(font_log, "WOFF2 decompression failed");
-                free(hash_key);
+                mem_free(hash_key);
                 return NULL;
             }
 
@@ -620,7 +621,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
 
     if (error) {
         clog_error(font_log, "FT_New_Memory_Face failed: error=%d (data size=%zu)", error, font_data_size);
-        if (hash_key) free(hash_key);
+        if (hash_key) mem_free(hash_key);
         return NULL;
     }
 
@@ -633,7 +634,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
     if (error) {
         log_error("[FONT-FACE-DATAURI] FT_Set_Pixel_Sizes failed: error=%d, physical_size=%.0f", error, physical_font_size);
         FT_Done_Face(face);
-        if (hash_key) free(hash_key);
+        if (hash_key) mem_free(hash_key);
         return NULL;
     }
 
@@ -642,7 +643,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
         face->family_name ? face->family_name : "(unknown)",
         css_font_size, physical_font_size, face->size->metrics.y_ppem >> 6);
 
-    if (hash_key) free(hash_key);
+    if (hash_key) mem_free(hash_key);
     return face;
 }
 
@@ -677,7 +678,7 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
     float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
     float css_font_size = style ? style->font_size : 16;
     float physical_font_size = css_font_size * pixel_ratio;
-    
+
     // Debug: log face flags to understand why size might not be set
     log_debug("[FONT-FACE-DEBUG] %s: flags=0x%lx, scalable=%d, fixed_sizes=%d, num_fixed=%d",
         face->family_name,
@@ -685,7 +686,7 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
         (face->face_flags & FT_FACE_FLAG_SCALABLE) != 0,
         (face->face_flags & FT_FACE_FLAG_FIXED_SIZES) != 0,
         face->num_fixed_sizes);
-    
+
     // For fonts with fixed bitmap sizes (color emoji, bitmap fonts), use FT_Select_Size
     if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && face->num_fixed_sizes > 0 &&
         !(face->face_flags & FT_FACE_FLAG_SCALABLE)) {
@@ -697,13 +698,13 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
             if (diff < best_diff) { best_diff = diff; best_idx = i; }
         }
         error = FT_Select_Size(face, best_idx);
-        log_info("[FONT-FACE] Selected fixed size %d for %s (requested %.0f)", 
+        log_info("[FONT-FACE] Selected fixed size %d for %s (requested %.0f)",
             face->available_sizes[best_idx].y_ppem >> 6, face->family_name, physical_font_size);
     } else {
         // Scalable font - set requested pixel size
         error = FT_Set_Pixel_Sizes(face, 0, (FT_UInt)physical_font_size);
     }
-    
+
     if (error) {
         log_error("[FONT-FACE] FT_Set_Pixel_Sizes/FT_Select_Size failed: error=%d, physical_size=%.0f", error, physical_font_size);
         FT_Done_Face(face);
@@ -719,7 +720,7 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
         // We can work around this by trusting that the font is sized correctly based on height
     }
     log_info("[FONT-FACE] Loaded %s: css_size=%.1f, physical_size=%.0f, y_ppem=%d, height=%ld",
-        face->family_name, css_font_size, physical_font_size, 
+        face->family_name, css_font_size, physical_font_size,
         face->size ? (face->size->metrics.y_ppem >> 6) : 0,
         face->size ? (face->size->metrics.height) : 0);
     log_font_loading_result(face->family_name, true, NULL);
@@ -733,7 +734,7 @@ bool resolve_font_path_from_descriptor(FontFaceDescriptor* descriptor, char** re
 
     // Try local path first
     if (descriptor->src_local_path) {
-        *resolved_path = strdup(descriptor->src_local_path);
+        *resolved_path = mem_strdup(descriptor->src_local_path, MEM_CAT_LAYOUT);
         clog_debug(font_log, "Resolved font path from local path: %s", *resolved_path);
         return true;
     }
@@ -758,7 +759,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
     float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
     float css_font_size = style ? style->font_size : 16;
     int physical_font_size = (int)(css_font_size * pixel_ratio);
-    
+
     StrBuf* cache_key = strbuf_create("@fontface:");
     if (!cache_key) {
         log_error("Failed to create cache key strbuf");
@@ -923,7 +924,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
     // Cache the @font-face result (don't cache system font results - they're cached by load_styled_font)
     // Only cache non-NULL results to avoid FT_Done_Face on NULL during cleanup
     if (uicon->fontface_map && result_face) {
-        char* name = (char*)malloc(cache_key->length + 1);
+        char* name = (char*)mem_alloc(cache_key->length + 1, MEM_CAT_LAYOUT);
         memcpy(name, cache_key->str, cache_key->length);
         name[cache_key->length] = '\0';
         FontfaceEntry new_entry = {.name = name, .face = result_face};
@@ -994,7 +995,7 @@ FontFallbackChain* build_fallback_chain(UiContext* uicon, const char* css_font_f
         return NULL;
     }
 
-    FontFallbackChain* chain = (FontFallbackChain*)malloc(sizeof(FontFallbackChain));
+    FontFallbackChain* chain = (FontFallbackChain*)mem_alloc(sizeof(FontFallbackChain), MEM_CAT_LAYOUT);
     if (!chain) {
         clog_error(font_log, "Failed to allocate FontFallbackChain");
         return NULL;
@@ -1004,8 +1005,8 @@ FontFallbackChain* build_fallback_chain(UiContext* uicon, const char* css_font_f
 
     // Simple implementation: just use the requested family + system fallbacks
     chain->family_count = 1;
-    chain->family_names = (char**)malloc(sizeof(char*));
-    chain->family_names[0] = strdup(css_font_family);
+    chain->family_names = (char**)mem_alloc(sizeof(char*), MEM_CAT_LAYOUT);
+    chain->family_names[0] = mem_strdup(css_font_family, MEM_CAT_LAYOUT);
     chain->system_fonts = uicon->fallback_fonts; // Use existing fallback fonts
     chain->cache_enabled = true;
 
