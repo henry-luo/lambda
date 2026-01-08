@@ -1609,19 +1609,26 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
  * Render the text caret (blinking cursor) in an editable element
  */
 void render_caret(RenderContext* rdcon, RadiantState* state) {
-    if (!state || !state->caret || !state->caret->visible) return;
+    if (!state || !state->caret) {
+        return;
+    }
+    // Force visible for debugging
+    state->caret->visible = true;
+    
     if (!state->caret->view) return;
     
     CaretState* caret = state->caret;
     View* view = caret->view;
     float s = rdcon->scale;
     
-    // Calculate absolute position (CSS pixels)
+    // caret->x and caret->y are relative to the parent block (from TextRect coordinates)
+    // So we start with those coordinates and walk up from the parent block
     float x = caret->x;
     float y = caret->y;
     
-    // Walk up the tree to get absolute coordinates (CSS pixels)
-    View* parent = view;
+    // Walk up from the text view's parent to get absolute coordinates
+    // The caret x/y is already relative to the text's parent block
+    View* parent = view->parent;  // Start from parent, not from view itself
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
             x += ((ViewBlock*)parent)->x;
@@ -1633,20 +1640,47 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     // Scale to physical pixels
     x *= s;  y *= s;
     float height = caret->height * s;
+    float caret_width = 3.0f * s;  // 3 CSS pixels wide
     
-    // Create caret line shape
+    // Use ThorVG to draw a filled rectangle for the caret
     Tvg_Paint* shape = tvg_shape_new();
-    if (!shape) return;
+    if (!shape) {
+        return;
+    }
     
-    // Caret is a vertical line at x, from y to y+height
-    tvg_shape_move_to(shape, x, y);
-    tvg_shape_line_to(shape, x, y + height);
+    // Draw a filled rectangle (not a stroke line)
+    tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0);
     
-    // Caret color: black
-    tvg_shape_set_stroke_color(shape, 0x00, 0x00, 0x00, 0xFF);
-    tvg_shape_set_stroke_width(shape, 1.5f * s);
+    // Fill with bright RED color
+    tvg_shape_set_fill_color(shape, 0xFF, 0x00, 0x00, 0xFF);
     
     tvg_canvas_push(rdcon->canvas, shape);
+    
+    // ALSO draw directly to surface buffer as backup
+    ImageSurface* surface = rdcon->ui_context->surface;
+    if (surface && surface->pixels) {
+        uint32_t* pixels = (uint32_t*)surface->pixels;
+        int pitch = surface->pitch / 4;  // pitch in uint32_t units
+        int ix = (int)x;
+        int iy = (int)y;
+        int iw = (int)caret_width;
+        int ih = (int)height;
+        
+        // Clamp to surface bounds
+        if (ix < 0) { iw += ix; ix = 0; }
+        if (iy < 0) { ih += iy; iy = 0; }
+        if (ix + iw > surface->width) iw = surface->width - ix;
+        if (iy + ih > surface->height) ih = surface->height - iy;
+        
+        // Draw red rectangle directly to pixel buffer (RGBA: 0xFFFF0000 = red)
+        uint32_t red_color = 0xFF0000FF;  // ABGR format: Alpha=FF, Blue=00, Green=00, Red=FF
+        for (int py = iy; py < iy + ih && py < surface->height; py++) {
+            for (int px = ix; px < ix + iw && px < surface->width; px++) {
+                pixels[py * pitch + px] = red_color;
+            }
+        }
+    }
+    
     log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, height);
 }
 

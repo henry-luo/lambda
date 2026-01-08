@@ -606,8 +606,42 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
     }
 }
 
+// Render caret to SVG
+static void render_caret_svg(SvgRenderContext* ctx, RadiantState* state) {
+    if (!state || !state->caret || !state->caret->visible) return;
+    if (!state->caret->view) return;
+    
+    CaretState* caret = state->caret;
+    View* view = caret->view;
+    
+    // Calculate absolute position (CSS pixels)
+    float x = caret->x;
+    float y = caret->y;
+    
+    // Walk up the tree to get absolute coordinates
+    View* parent = view;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK) {
+            x += ((ViewBlock*)parent)->x;
+            y += ((ViewBlock*)parent)->y;
+        }
+        parent = parent->parent;
+    }
+    
+    float height = caret->height;
+    
+    // Render caret as a line
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content,
+        "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
+        "stroke=\"black\" stroke-width=\"1.5\" id=\"caret\" />\n",
+        x, y, x, y + height);
+    
+    log_debug("[CARET SVG] Rendered caret at (%.1f, %.1f) height=%.1f", x, y, height);
+}
+
 // Main SVG rendering function
-char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height) {
+char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, RadiantState* state) {
     if (!root_view || !uicon) {
         return NULL;
     }
@@ -650,6 +684,9 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     } else {
         render_children_svg(&ctx, root_view);
     }
+
+    // Render caret if present
+    render_caret_svg(&ctx, state);
 
     ctx.indent_level--;
 
@@ -781,7 +818,7 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
         int svg_width = (int)(content_max_x * scale);
         int svg_height = (int)(content_max_y * scale);
         char* svg_content = render_view_tree_to_svg(&ui_context, doc->view_tree->root,
-                                                   svg_width, svg_height);
+                                                   svg_width, svg_height, doc->state);
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
                 printf("Successfully rendered HTML to SVG: %s\n", svg_file);
