@@ -28,10 +28,10 @@ extern "C" {
  *   memtrack_init(MEMTRACK_MODE_DEBUG);
  *
  *   // Allocate with category
- *   void* ptr = lmem_alloc(1024, LMEM_CAT_PARSER);
+ *   void* ptr = mem_alloc(1024, MEM_CAT_PARSER);
  *
  *   // Free
- *   lmem_free(ptr);
+ *   mem_free(ptr);
  *
  *   // Query stats
  *   MemtrackStats stats;
@@ -46,51 +46,52 @@ extern "C" {
 // ============================================================================
 
 typedef enum MemCategory {
-    LMEM_CAT_UNKNOWN = 0,
+    MEM_CAT_UNKNOWN = 0,
 
     // Lambda core
-    LMEM_CAT_AST,           // AST nodes
-    LMEM_CAT_PARSER,        // Parser temporaries
-    LMEM_CAT_EVAL,          // Evaluation stack/context
-    LMEM_CAT_STRING,        // String data (non-pooled)
-    LMEM_CAT_CONTAINER,     // List, Map, Element, Array
-    LMEM_CAT_NAMEPOOL,      // Name pool entries
-    LMEM_CAT_SHAPEPOOL,     // Shape pool entries
+    MEM_CAT_AST,           // AST nodes
+    MEM_CAT_PARSER,        // Parser temporaries
+    MEM_CAT_EVAL,          // Evaluation stack/context
+    MEM_CAT_STRING,        // String data (non-pooled)
+    MEM_CAT_CONTAINER,     // List, Map, Element, Array
+    MEM_CAT_NAMEPOOL,      // Name pool entries
+    MEM_CAT_SHAPEPOOL,     // Shape pool entries
 
     // Input parsers
-    LMEM_CAT_INPUT_JSON,
-    LMEM_CAT_INPUT_XML,
-    LMEM_CAT_INPUT_HTML,
-    LMEM_CAT_INPUT_CSS,
-    LMEM_CAT_INPUT_MD,
-    LMEM_CAT_INPUT_PDF,
-    LMEM_CAT_INPUT_OTHER,
+    MEM_CAT_INPUT_JSON,
+    MEM_CAT_INPUT_XML,
+    MEM_CAT_INPUT_HTML,
+    MEM_CAT_INPUT_CSS,
+    MEM_CAT_INPUT_MD,
+    MEM_CAT_INPUT_PDF,
+    MEM_CAT_INPUT_INI,
+    MEM_CAT_INPUT_OTHER,
 
     // Formatters
-    LMEM_CAT_FORMAT,
+    MEM_CAT_FORMAT,
 
     // Radiant layout/render
-    LMEM_CAT_DOM,           // DOM nodes
-    LMEM_CAT_LAYOUT,        // Layout computation
-    LMEM_CAT_STYLE,         // CSS style data
-    LMEM_CAT_FONT,          // Font data/cache
-    LMEM_CAT_IMAGE,         // Image data/cache
-    LMEM_CAT_RENDER,        // Render buffers
+    MEM_CAT_DOM,           // DOM nodes
+    MEM_CAT_LAYOUT,        // Layout computation
+    MEM_CAT_STYLE,         // CSS style data
+    MEM_CAT_FONT,          // Font data/cache
+    MEM_CAT_IMAGE,         // Image data/cache
+    MEM_CAT_RENDER,        // Render buffers
 
     // Caches (evictable under memory pressure)
-    LMEM_CAT_CACHE_FONT,    // Font glyph cache
-    LMEM_CAT_CACHE_IMAGE,   // Decoded image cache
-    LMEM_CAT_CACHE_LAYOUT,  // Layout cache
-    LMEM_CAT_CACHE_OTHER,
+    MEM_CAT_CACHE_FONT,    // Font glyph cache
+    MEM_CAT_CACHE_IMAGE,   // Decoded image cache
+    MEM_CAT_CACHE_LAYOUT,  // Layout cache
+    MEM_CAT_CACHE_OTHER,
 
     // Temporary allocations
-    LMEM_CAT_TEMP,          // Short-lived temporaries
+    MEM_CAT_TEMP,          // Short-lived temporaries
 
-    LMEM_CAT_COUNT          // Must be last
+    MEM_CAT_COUNT          // Must be last
 } MemCategory;
 
 // Category names for logging/profiling
-extern const char* memtrack_category_names[LMEM_CAT_COUNT];
+extern const char* memtrack_category_names[MEM_CAT_COUNT];
 
 // ============================================================================
 // Tracker Modes
@@ -126,7 +127,7 @@ typedef struct MemtrackStats {
     size_t total_frees;
 
     // Per-category stats
-    MemtrackCategoryStats categories[LMEM_CAT_COUNT];
+    MemtrackCategoryStats categories[MEM_CAT_COUNT];
 
     // Debug mode stats
     size_t guard_violations;    // Buffer overflow detections
@@ -191,32 +192,32 @@ void memtrack_set_mode(MemtrackMode mode);
  * @param category Memory category for tracking
  * @return Pointer to allocated memory, or NULL on failure
  */
-void* lmem_alloc(size_t size, MemCategory category);
+void* mem_alloc(size_t size, MemCategory category);
 
 /**
  * Allocate zeroed tracked memory
  */
-void* lmem_calloc(size_t count, size_t size, MemCategory category);
+void* mem_calloc(size_t count, size_t size, MemCategory category);
 
 /**
  * Reallocate tracked memory
  */
-void* lmem_realloc(void* ptr, size_t new_size, MemCategory category);
+void* mem_realloc(void* ptr, size_t new_size, MemCategory category);
 
 /**
  * Free tracked memory
  */
-void lmem_free(void* ptr);
+void mem_free(void* ptr);
 
 /**
  * Duplicate string with tracking
  */
-char* lmem_strdup(const char* str, MemCategory category);
+char* mem_strdup(const char* str, MemCategory category);
 
 /**
  * Duplicate string with length limit
  */
-char* lmem_strndup(const char* str, size_t max_len, MemCategory category);
+char* mem_strndup(const char* str, size_t max_len, MemCategory category);
 
 // ============================================================================
 // Debug Allocation API (with source location)
@@ -224,15 +225,15 @@ char* lmem_strndup(const char* str, size_t max_len, MemCategory category);
 
 #ifdef MEMTRACK_DEBUG_LOCATIONS
 
-void* lmem_alloc_loc(size_t size, MemCategory category, const char* file, int line);
-void* lmem_calloc_loc(size_t count, size_t size, MemCategory category, const char* file, int line);
-void* lmem_realloc_loc(void* ptr, size_t new_size, MemCategory category, const char* file, int line);
-void lmem_free_loc(void* ptr, const char* file, int line);
+void* mem_alloc_loc(size_t size, MemCategory category, const char* file, int line);
+void* mem_calloc_loc(size_t count, size_t size, MemCategory category, const char* file, int line);
+void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, const char* file, int line);
+void mem_free_loc(void* ptr, const char* file, int line);
 
-#define lmem_alloc(size, cat)           lmem_alloc_loc(size, cat, __FILE__, __LINE__)
-#define lmem_calloc(count, size, cat)   lmem_calloc_loc(count, size, cat, __FILE__, __LINE__)
-#define lmem_realloc(ptr, size, cat)    lmem_realloc_loc(ptr, size, cat, __FILE__, __LINE__)
-#define lmem_free(ptr)                  lmem_free_loc(ptr, __FILE__, __LINE__)
+#define mem_alloc(size, cat)           mem_alloc_loc(size, cat, __FILE__, __LINE__)
+#define mem_calloc(count, size, cat)   mem_calloc_loc(count, size, cat, __FILE__, __LINE__)
+#define mem_realloc(ptr, size, cat)    mem_realloc_loc(ptr, size, cat, __FILE__, __LINE__)
+#define mem_free(ptr)                  mem_free_loc(ptr, __FILE__, __LINE__)
 
 #endif
 
@@ -249,12 +250,12 @@ typedef struct TypeMeta TypeMeta;
  * @param category Memory category for tracking
  * @return Pointer to allocated memory, or NULL on failure
  */
-void* lmem_alloc_typed(const TypeMeta* type, MemCategory category);
+void* mem_alloc_typed(const TypeMeta* type, MemCategory category);
 
 /**
  * Allocate zeroed memory with type metadata
  */
-void* lmem_calloc_typed(const TypeMeta* type, MemCategory category);
+void* mem_calloc_typed(const TypeMeta* type, MemCategory category);
 
 /**
  * Allocate array of typed elements
@@ -262,27 +263,27 @@ void* lmem_calloc_typed(const TypeMeta* type, MemCategory category);
  * @param count Number of elements
  * @param category Memory category
  */
-void* lmem_alloc_array_typed(const TypeMeta* element_type, size_t count, MemCategory category);
+void* mem_alloc_array_typed(const TypeMeta* element_type, size_t count, MemCategory category);
 
 /**
  * Get type metadata for an allocation
  * @param ptr Pointer to allocated memory
  * @return TypeMeta pointer or NULL if not tracked or no type info
  */
-const TypeMeta* lmem_get_type(void* ptr);
+const TypeMeta* mem_get_type(void* ptr);
 
 /**
  * Convenience macros for typed allocation
  * Requires TYPEMETA_<TypeName> to be defined (from typemeta.h)
  */
-#define LMEM_NEW(type, category) \
-    ((type*)lmem_alloc_typed(&TYPEMETA_##type, category))
+#define MEM_NEW(type, category) \
+    ((type*)mem_alloc_typed(&TYPEMETA_##type, category))
 
-#define LMEM_NEW_ZEROED(type, category) \
-    ((type*)lmem_calloc_typed(&TYPEMETA_##type, category))
+#define MEM_NEW_ZEROED(type, category) \
+    ((type*)mem_calloc_typed(&TYPEMETA_##type, category))
 
-#define LMEM_NEW_ARRAY(type, count, category) \
-    ((type*)lmem_alloc_array_typed(&TYPEMETA_##type, count, category))
+#define MEM_NEW_ARRAY(type, count, category) \
+    ((type*)mem_alloc_array_typed(&TYPEMETA_##type, count, category))
 
 // ============================================================================
 // Query API
@@ -454,7 +455,7 @@ typedef bool (*MemWalkCallback)(
  * @param callback Function to call for each allocation
  * @param user_data User context
  */
-void lmem_walk_all(MemWalkCallback callback, void* user_data);
+void mem_walk_all(MemWalkCallback callback, void* user_data);
 
 /**
  * Walk allocations of a specific type
@@ -462,7 +463,7 @@ void lmem_walk_all(MemWalkCallback callback, void* user_data);
  * @param callback Function to call for each allocation
  * @param user_data User context
  */
-void lmem_walk_type(const TypeMeta* type, MemWalkCallback callback, void* user_data);
+void mem_walk_type(const TypeMeta* type, MemWalkCallback callback, void* user_data);
 
 /**
  * Walk allocations in a specific category
@@ -470,32 +471,32 @@ void lmem_walk_type(const TypeMeta* type, MemWalkCallback callback, void* user_d
  * @param callback Function to call for each allocation
  * @param user_data User context
  */
-void lmem_walk_category(MemCategory category, MemWalkCallback callback, void* user_data);
+void mem_walk_category(MemCategory category, MemWalkCallback callback, void* user_data);
 
 /**
  * Validate all typed allocations against their TypeMeta
  * @return Number of invalid allocations found
  */
-size_t lmem_validate_all_typed(void);
+size_t mem_validate_all_typed(void);
 
 /**
  * Dump allocation information to file
  * @param ptr Allocation to dump
  * @param out Output file
  */
-void lmem_dump(void* ptr, FILE* out);
+void mem_dump(void* ptr, FILE* out);
 
 /**
  * Dump all allocations to file
  * @param filename Output file path
  */
-void lmem_dump_all(const char* filename);
+void mem_dump_all(const char* filename);
 
 /**
  * Export allocation graph in DOT format (for Graphviz)
  * @param filename Output file path
  */
-void lmem_export_graph(const char* filename);
+void mem_export_graph(const char* filename);
 
 // ============================================================================
 // Integration with existing Pool/Arena allocators
