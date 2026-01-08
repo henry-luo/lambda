@@ -434,6 +434,100 @@ Each input file produces `{basename}.json` in the output directory:
 
 ---
 
+## 6. Logging Overhead in Batch Mode (January 8, 2026)
+
+### Problem Identified
+
+After implementing batch mode, profiling revealed that logging was still a significant bottleneck during test runs:
+
+**Test: 1,825 baseline files with batch size 20**
+
+| Configuration | Time | Details |
+|---------------|------|---------|
+| Layout-only (no comparison) | 12.4s | Just running layout, no JSON comparison |
+| Full test (with logging) | 13.1s | Layout + comparison + logging enabled |
+| Full test (logging disabled) | **6.0s** | Layout + comparison, logging off in batch |
+
+**Analysis:**
+- Comparison overhead: ~0.7s (13.1s - 12.4s = 5.6% of total time)
+- Logging overhead: ~7.0s (13.1s - 6.0s = **53.4% of total time**)
+
+Even though log level was set to INFO (not DEBUG), the logging system was still:
+1. Evaluating log statements (checking enabled status)
+2. Formatting messages
+3. Writing to disk
+4. Managing thread-local indentation state
+
+With hundreds of log calls per file × 1,825 files, this added up significantly.
+
+### Solution: Disable Logging in Batch Mode
+
+**Files:** `lib/log.h`, `lib/log.c`, `radiant/cmd_layout.cpp`
+
+Added `log_disable_all()` function to completely disable logging for batch operations:
+
+```cpp
+// In lib/log.h
+void log_disable_all(void);  // Disable all logging categories
+
+// In lib/log.c
+void log_disable_all(void) {
+    // Disable default category
+    if (log_default_category) {
+        log_default_category->enabled = 0;
+    }
+    // Disable all categories in the list
+    for (int i = 0; i < categories_count; i++) {
+        categories[i].enabled = 0;
+    }
+}
+
+// In radiant/cmd_layout.cpp - cmd_layout()
+bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
+
+// Disable all logging in batch mode for better performance
+if (batch_mode) {
+    log_disable_all();
+}
+```
+
+**Implementation details:**
+- Logging is initialized normally to parse config and set up default handlers
+- Immediately after detecting batch mode, all categories are disabled via `enabled = 0` flag
+- Log level checks (`log_level_enabled()`) now return false, causing all log macros to no-op
+- Single-file layout mode still has logging enabled for debugging
+
+### Performance Results
+
+| Mode | Wall Time | CPU Time | Speedup vs. Logging On |
+|------|-----------|----------|------------------------|
+| With logging | 13.1s | 11.95s | baseline |
+| Without logging | **6.0s** | 4.24s | **2.2x faster** |
+
+**Breakdown:**
+- Total speedup: **2.2x** (13.1s → 6.0s)
+- CPU time saved: **7.7 seconds** (logging overhead)
+- New bottleneck: Layout computation itself (~6s for 1,825 files with 7 parallel jobs)
+
+### Test Coverage
+
+All regression tests pass with logging disabled in batch mode:
+- Lambda baseline: **73/73** ✅
+- Radiant baseline: **1,825/1,825** ✅
+
+### Cumulative Improvements
+
+| Optimization | Before | After | Factor |
+|--------------|--------|-------|--------|
+| Font caching | ~10s | 0.78s | 12.8x |
+| @font-face cache | ~5s | 0.75s | 7x |
+| Batch layout mode | 21.8s | 13.1s | 1.7x |
+| **Logging disabled** | **13.1s** | **6.0s** | **2.2x** |
+
+**Total improvement: Non-batch with logging → Batch without logging = 21.8s → 6.0s = 3.6x faster**
+
+---
+
 ## Key Takeaways
 
 1. **Cache by request parameters, not by result** - The original code cached FT_Face by file path, but lookups still went through the database. Caching by the input parameters (family, weight, style, size) allows skipping expensive lookups entirely.
@@ -447,4 +541,6 @@ Each input file produces `{basename}.json` in the output directory:
 5. **@font-face fonts need separate caching** - System fonts and `@font-face` fonts take different code paths. The system font cache in `load_styled_font()` didn't cover `@font-face` loaded fonts, causing massive redundant I/O.
 
 6. **Amortize initialization costs** - For batch operations, initialize expensive resources (UiContext, font caches, surfaces) once and reuse across all items. This provided 2.9x speedup for layout tests by eliminating per-file startup overhead.
+
+7. **Logging has significant overhead** - Even with INFO level logging, the overhead of checking enabled status, formatting messages, and disk writes consumed 53% of batch test time. Disabling logging in batch mode provided 2.2x speedup with no functional impact on automated testing.
 

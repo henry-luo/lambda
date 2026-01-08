@@ -845,6 +845,18 @@ void log_enable_colors(int enable) {
     colors_enabled = enable;
 }
 
+/* Disable all logging categories */
+void log_disable_all(void) {
+    // Disable default category
+    if (log_default_category) {
+        log_default_category->enabled = 0;
+    }
+    // Disable all categories in the list
+    for (int i = 0; i < categories_count; i++) {
+        categories[i].enabled = 0;
+    }
+}
+
 /* Core logging functions with category parameter */
 int clog_fatal(log_category_t *category, const char *format, ...) {
     va_list args;
