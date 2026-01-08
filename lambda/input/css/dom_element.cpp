@@ -10,6 +10,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/strview.h"
 #include "../../../lib/arena.h"
+#include "../../../lib/memtrack.h"
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
 #include "../../mark_reader.hpp"  // For ElementReader
 #include "../../mark_editor.hpp"  // For MarkEditor
@@ -49,7 +50,7 @@ DomDocument* dom_document_create(Input* input) {
     }
 
     // Allocate document structure
-    DomDocument* document = (DomDocument*)calloc(1, sizeof(DomDocument));
+    DomDocument* document = (DomDocument*)mem_calloc(1, sizeof(DomDocument), MEM_CAT_INPUT_CSS);
     if (!document) {
         log_error("dom_document_create: failed to allocate document");
         return nullptr;
@@ -59,7 +60,7 @@ DomDocument* dom_document_create(Input* input) {
     document->pool = pool_create();
     if (!document->pool) {
         log_error("dom_document_create: failed to create pool");
-        free(document);
+        mem_free(document);
         return nullptr;
     }
 
@@ -68,7 +69,7 @@ DomDocument* dom_document_create(Input* input) {
     if (!document->arena) {
         log_error("dom_document_create: failed to create arena");
         pool_destroy(document->pool);
-        free(document);
+        mem_free(document);
         return nullptr;
     }
 
@@ -95,7 +96,7 @@ void dom_document_destroy(DomDocument* document) {
     }
 
     // Note: Input* is not owned by document, don't free it
-    free(document);
+    mem_free(document);
     log_debug("dom_document_destroy: destroyed document and arena");
 }
 
@@ -684,28 +685,28 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     g_apply_decl_count++;
 
     // Check if this is a custom property (CSS variable)
-    if (declaration->property_name && 
-        declaration->property_name[0] == '-' && 
+    if (declaration->property_name &&
+        declaration->property_name[0] == '-' &&
         declaration->property_name[1] == '-') {
-        
+
         // Custom property - store in linked list
         log_info("[CSS] Storing custom property: %s", declaration->property_name);
-        
+
         CssCustomProp* prop = (CssCustomProp*)pool_calloc(element->doc->pool, sizeof(CssCustomProp));
         if (!prop) {
             log_error("[CSS] Failed to allocate CssCustomProp");
             return false;
         }
-        
+
         prop->name = declaration->property_name;
         prop->value = declaration->value;
         prop->next = element->css_variables;
         element->css_variables = prop;
-        
+
         // Increment style version to invalidate caches
         element->style_version++;
         element->needs_style_recompute = true;
-        
+
         return true;
     }
 
@@ -1223,7 +1224,7 @@ void dom_element_set_pseudo_state(DomElement* element, uint32_t pseudo_state) {
 
     uint32_t old_state = element->pseudo_state;
     element->pseudo_state |= pseudo_state;
-    
+
     // If pseudo-state actually changed, invalidate styles
     if (element->pseudo_state != old_state) {
         element->needs_style_recompute = true;
@@ -1240,7 +1241,7 @@ void dom_element_clear_pseudo_state(DomElement* element, uint32_t pseudo_state) 
 
     uint32_t old_state = element->pseudo_state;
     element->pseudo_state &= ~pseudo_state;
-    
+
     // If pseudo-state actually changed, invalidate styles
     if (element->pseudo_state != old_state) {
         element->needs_style_recompute = true;
