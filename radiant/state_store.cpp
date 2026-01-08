@@ -760,6 +760,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url) {
 // ============================================================================
 
 void caret_set(RadiantState* state, View* view, int char_offset) {
+    log_info("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
     
     // Allocate caret state if needed
@@ -1172,4 +1173,244 @@ bool focus_within(RadiantState* state, View* view) {
     }
     
     return false;
+}
+
+// ============================================================================
+// Text Extraction and Clipboard Operations
+// ============================================================================
+
+#include "../lib/strbuf.h"
+#include <GLFW/glfw3.h>
+
+/**
+ * Helper: recursively extract text from view tree
+ */
+static void extract_text_recursive(View* view, StrBuf* sb) {
+    if (!view) return;
+    
+    if (view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = (ViewText*)view;
+        const char* text_data = (const char*)text->text_data();
+        if (text_data) {
+            // Extract text from all TextRects
+            TextRect* rect = text->rect;
+            while (rect) {
+                if (rect->length > 0) {
+                    strbuf_append_str_n(sb, text_data + rect->start_index, rect->length);
+                }
+                rect = rect->next;
+            }
+        }
+    }
+    
+    // Recurse into children
+    View* child = view->is_element() ? ((ViewElement*)view)->first_child : nullptr;
+    while (child) {
+        extract_text_recursive(child, sb);
+        
+        // Add space or newline between block-level elements
+        if (child->is_block()) {
+            strbuf_append_char(sb, '\n');
+        }
+        
+        child = child->next_sibling;
+    }
+}
+
+char* extract_text_from_view(View* view, Arena* arena) {
+    if (!view || !arena) return NULL;
+    
+    StrBuf* sb = strbuf_new();
+    if (!sb) return NULL;
+    
+    extract_text_recursive(view, sb);
+    
+    if (sb->length == 0) {
+        strbuf_free(sb);
+        return NULL;
+    }
+    
+    // Copy to arena
+    char* result = (char*)arena_alloc(arena, sb->length + 1);
+    if (result) {
+        memcpy(result, sb->str, sb->length);
+        result[sb->length] = '\0';
+    }
+    
+    strbuf_free(sb);
+    return result;
+}
+
+/**
+ * Helper: recursively extract HTML from view tree
+ */
+static void extract_html_recursive(View* view, StrBuf* sb) {
+    if (!view) return;
+    
+    if (view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = (ViewText*)view;
+        const char* text_data = (const char*)text->text_data();
+        if (text_data) {
+            TextRect* rect = text->rect;
+            while (rect) {
+                if (rect->length > 0) {
+                    // HTML-escape text content
+                    const char* p = text_data + rect->start_index;
+                    const char* end = p + rect->length;
+                    while (p < end) {
+                        char c = *p++;
+                        switch (c) {
+                            case '<': strbuf_append_str(sb, "&lt;"); break;
+                            case '>': strbuf_append_str(sb, "&gt;"); break;
+                            case '&': strbuf_append_str(sb, "&amp;"); break;
+                            case '"': strbuf_append_str(sb, "&quot;"); break;
+                            default: strbuf_append_char(sb, c); break;
+                        }
+                    }
+                }
+                rect = rect->next;
+            }
+        }
+    } else if (view->is_element()) {
+        ViewElement* element = (ViewElement*)view;
+        
+        // Opening tag
+        const char* tag_name = element->tag_name;
+        if (tag_name) {
+            strbuf_append_char(sb, '<');
+            strbuf_append_str(sb, tag_name);
+            // TODO: add attributes if needed
+            strbuf_append_char(sb, '>');
+        }
+        
+        // Recurse into children
+        View* child = element->first_child;
+        while (child) {
+            extract_html_recursive(child, sb);
+            child = child->next_sibling;
+        }
+        
+        // Closing tag
+        if (tag_name) {
+            strbuf_append_str(sb, "</");
+            strbuf_append_str(sb, tag_name);
+            strbuf_append_char(sb, '>');
+        }
+    }
+}
+
+char* extract_html_from_view(View* view, Arena* arena) {
+    if (!view || !arena) return NULL;
+    
+    StrBuf* sb = strbuf_new_cap(4096);
+    if (!sb) return NULL;
+    
+    extract_html_recursive(view, sb);
+    
+    if (sb->length == 0) {
+        strbuf_free(sb);
+        return NULL;
+    }
+    
+    // Copy to arena
+    char* result = (char*)arena_alloc(arena, sb->length + 1);
+    if (result) {
+        memcpy(result, sb->str, sb->length);
+        result[sb->length] = '\0';
+    }
+    
+    strbuf_free(sb);
+    return result;
+}
+
+char* extract_selected_text(RadiantState* state, Arena* arena) {
+    if (!state || !state->selection || state->selection->is_collapsed || !arena) {
+        return NULL;
+    }
+    
+    SelectionState* sel = state->selection;
+    View* view = sel->view;
+    
+    if (!view || view->view_type != RDT_VIEW_TEXT) {
+        return NULL;
+    }
+    
+    ViewText* text = (ViewText*)view;
+    const char* text_data = (const char*)text->text_data();
+    if (!text_data) return NULL;
+    
+    // Get normalized range
+    int start_offset, end_offset;
+    selection_get_range(state, &start_offset, &end_offset);
+    
+    if (start_offset >= end_offset) return NULL;
+    
+    int length = end_offset - start_offset;
+    char* result = (char*)arena_alloc(arena, length + 1);
+    if (result) {
+        memcpy(result, text_data + start_offset, length);
+        result[length] = '\0';
+    }
+    
+    return result;
+}
+
+char* extract_selected_html(RadiantState* state, Arena* arena) {
+    if (!state || !state->selection || state->selection->is_collapsed || !arena) {
+        return NULL;
+    }
+    
+    // For now, just return HTML-escaped text
+    // TODO: preserve formatting tags within selection
+    char* text = extract_selected_text(state, arena);
+    if (!text) return NULL;
+    
+    StrBuf* sb = strbuf_new_cap(strlen(text) * 2);
+    if (!sb) return NULL;
+    
+    const char* p = text;
+    while (*p) {
+        char c = *p++;
+        switch (c) {
+            case '<': strbuf_append_str(sb, "&lt;"); break;
+            case '>': strbuf_append_str(sb, "&gt;"); break;
+            case '&': strbuf_append_str(sb, "&amp;"); break;
+            case '"': strbuf_append_str(sb, "&quot;"); break;
+            default: strbuf_append_char(sb, c); break;
+        }
+    }
+    
+    char* result = (char*)arena_alloc(arena, sb->length + 1);
+    if (result) {
+        memcpy(result, sb->str, sb->length);
+        result[sb->length] = '\0';
+    }
+    
+    strbuf_free(sb);
+    return result;
+}
+
+void clipboard_copy_text(const char* text) {
+    if (!text) return;
+    
+    // Get GLFW window from UI context (assumes single window for now)
+    // In production, this should be passed as parameter
+    extern UiContext ui_context;
+    if (ui_context.window) {
+        glfwSetClipboardString(ui_context.window, text);
+        log_info("Copied %zu bytes to clipboard", strlen(text));
+    } else {
+        log_error("clipboard_copy_text: no active window");
+    }
+}
+
+void clipboard_copy_html(const char* html) {
+    if (!html) return;
+    
+    // GLFW only supports plain text clipboard
+    // For HTML, we'd need platform-specific code (NSPasteboard, Win32 API, X11)
+    // For now, just copy as plain text
+    clipboard_copy_text(html);
+    
+    log_debug("clipboard_copy_html: HTML copied as plain text (HTML clipboard not yet supported)");
 }

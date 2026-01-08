@@ -415,6 +415,54 @@ View* focus_get(RadiantState* state);
 bool focus_within(RadiantState* state, View* view);
 
 // ============================================================================
+// Text Extraction and Clipboard API
+// ============================================================================
+
+/**
+ * Extract text content from a view (recursively)
+ * @param view The view to extract text from
+ * @param arena Arena allocator for output string
+ * @return Extracted text, or NULL if no text
+ */
+char* extract_text_from_view(View* view, Arena* arena);
+
+/**
+ * Extract HTML fragment from a view (recursively)
+ * @param view The view to extract HTML from
+ * @param arena Arena allocator for output string
+ * @return Extracted HTML, or NULL if no content
+ */
+char* extract_html_from_view(View* view, Arena* arena);
+
+/**
+ * Extract the currently selected text
+ * @param state The state containing selection
+ * @param arena Arena allocator for output string
+ * @return Selected text, or NULL if no selection
+ */
+char* extract_selected_text(RadiantState* state, Arena* arena);
+
+/**
+ * Extract the currently selected content as HTML fragment
+ * @param state The state containing selection
+ * @param arena Arena allocator for output string
+ * @return Selected HTML, or NULL if no selection
+ */
+char* extract_selected_html(RadiantState* state, Arena* arena);
+
+/**
+ * Copy text to system clipboard
+ * @param text The text to copy (null-terminated)
+ */
+void clipboard_copy_text(const char* text);
+
+/**
+ * Copy HTML to system clipboard (sets both text/html and text/plain)
+ * @param html The HTML fragment to copy
+ */
+void clipboard_copy_html(const char* html);
+
+// ============================================================================
 // Dirty Tracking API
 // ============================================================================
 

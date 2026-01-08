@@ -1,5 +1,10 @@
 #pragma once
 
+#include <cstdint>
+
+// Forward declaration for GLFW cursor
+struct GLFWcursor;
+
 typedef enum  {
     RDT_EVENT_NIL = 0,
     RDT_EVENT_MOUSE_DOWN,
@@ -31,6 +36,7 @@ typedef struct MousePositionEvent : Event {
 typedef struct MouseButtonEvent : MousePositionEvent {
     uint8_t button;     // mouse button index
     uint8_t clicks;     // 1 for single-click, 2 for double-click, etc.
+    int mods;           // modifier flags (RDT_MOD_SHIFT, etc.)
 } MouseButtonEvent;
 
 // mouse/touchpad scroll event
@@ -105,6 +111,6 @@ typedef union RdtEvent {
 typedef struct {
     bool is_mouse_down;
     float down_x, down_y;  // mouse position when mouse down
-    CssEnum cursor;  // current cursor style
+    int cursor;  // current cursor style (CssEnum value)
     GLFWcursor* sys_cursor;
 } MouseState;
