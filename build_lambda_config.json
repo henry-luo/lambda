@@ -398,6 +398,7 @@
                 "lib/hashmap.c",
                 "lib/file.c",
                 "lib/log.c",
+                "lib/memtrack.c",
                 "lib/utf.c"
             ],
             "libraries": [
@@ -1247,6 +1248,25 @@
                         ],
                         "binary": "test_mempool_gtest.exe",
                         "icon": "🚀"
+                    },
+                    {
+                        "source": "test_memtrack_gtest.cpp",
+                        "name": "Memory Tracker Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c"
+                        ],
+                        "binary": "test_memtrack_gtest.exe",
+                        "icon": "🔍"
                     },
                     {
                         "source": "test_avl_tree.cpp",
