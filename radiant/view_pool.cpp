@@ -3,6 +3,7 @@
 #include "layout_flex.hpp"
 #include "grid.hpp"
 #include "transform.hpp"
+#include "state_store.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include <time.h>
 #include <cmath>  // for INFINITY
@@ -2174,4 +2175,73 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
     const char* json_output = output_path ? output_path : "/tmp/view_tree.json";
     write_string_to_file(json_output, json_buf->str);
     strbuf_free(json_buf);
+}
+
+/**
+ * Print caret and selection state to a text file.
+ * This helps debug caret positioning issues.
+ */
+void print_caret_state(RadiantState* state, const char* output_path) {
+    if (!state) {
+        log_debug("print_caret_state: no state provided");
+        return;
+    }
+    
+    StrBuf* buf = strbuf_new_cap(1024);
+    
+    strbuf_append_str(buf, "\n================== CARET STATE ==================\n");
+    
+    if (state->caret) {
+        CaretState* caret = state->caret;
+        strbuf_append_format(buf, "Caret:\n");
+        strbuf_append_format(buf, "  view: %p\n", (void*)caret->view);
+        if (caret->view) {
+            strbuf_append_format(buf, "  view_type: %d (%s)\n", 
+                caret->view->view_type, caret->view->view_name());
+            strbuf_append_format(buf, "  node_name: %s\n", caret->view->node_name() ? caret->view->node_name() : "(null)");
+        }
+        strbuf_append_format(buf, "  char_offset: %d\n", caret->char_offset);
+        strbuf_append_format(buf, "  line: %d, column: %d\n", caret->line, caret->column);
+        strbuf_append_format(buf, "  position: (%.1f, %.1f)\n", caret->x, caret->y);
+        strbuf_append_format(buf, "  height: %.1f\n", caret->height);
+        strbuf_append_format(buf, "  visible: %s\n", caret->visible ? "true" : "false");
+    } else {
+        strbuf_append_str(buf, "Caret: (none)\n");
+    }
+    
+    strbuf_append_str(buf, "\n");
+    
+    if (state->selection) {
+        SelectionState* sel = state->selection;
+        strbuf_append_format(buf, "Selection:\n");
+        strbuf_append_format(buf, "  view: %p\n", (void*)sel->view);
+        if (sel->view) {
+            strbuf_append_format(buf, "  view_type: %d (%s)\n", 
+                sel->view->view_type, sel->view->view_name());
+        }
+        strbuf_append_format(buf, "  is_collapsed: %s\n", sel->is_collapsed ? "true" : "false");
+        strbuf_append_format(buf, "  is_selecting: %s\n", sel->is_selecting ? "true" : "false");
+        strbuf_append_format(buf, "  anchor_offset: %d (line: %d)\n", sel->anchor_offset, sel->anchor_line);
+        strbuf_append_format(buf, "  focus_offset: %d (line: %d)\n", sel->focus_offset, sel->focus_line);
+        strbuf_append_format(buf, "  start: (%.1f, %.1f)\n", sel->start_x, sel->start_y);
+        strbuf_append_format(buf, "  end: (%.1f, %.1f)\n", sel->end_x, sel->end_y);
+    } else {
+        strbuf_append_str(buf, "Selection: (none)\n");
+    }
+    
+    strbuf_append_str(buf, "==================================================\n");
+    
+    // Append to view_tree.txt (not overwrite)
+    const char* path = output_path ? output_path : "./view_tree.txt";
+    FILE* file = fopen(path, "a");  // append mode
+    if (file) {
+        fprintf(file, "%s", buf->str);
+        fclose(file);
+        log_info("print_caret_state: appended caret state to %s", path);
+    }
+    
+    // Also log it
+    log_debug("%s", buf->str);
+    
+    strbuf_free(buf);
 }
