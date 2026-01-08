@@ -9,6 +9,7 @@
  *     {"type": "wait", "ms": 500},
  *     {"type": "mouse_move", "x": 100, "y": 200},
  *     {"type": "mouse_down", "x": 100, "y": 200, "button": 0, "mods": 0},
+ *     {"type": "mouse_down", "target_text": "Click here"},  // find text and click
  *     {"type": "mouse_up", "x": 100, "y": 200, "button": 0, "mods": 0},
  *     {"type": "mouse_drag", "from_x": 100, "from_y": 200, "to_x": 200, "to_y": 200},
  *     {"type": "key_press", "key": "a"},
@@ -19,7 +20,9 @@
  *     {"type": "assert_caret", "view_type": 4, "char_offset": 5},
  *     {"type": "assert_selection", "is_collapsed": false},
  *     {"type": "assert_target", "view_type": 4},
- *     {"type": "log", "message": "Test step completed"}
+ *     {"type": "log", "message": "Test step completed"},
+ *     {"type": "render", "file": "/tmp/output.png"},
+ *     {"type": "dump_caret", "file": "./caret_state.txt"}
  *   ]
  * }
  */
@@ -49,7 +52,9 @@ enum SimEventType {
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
     SIM_EVENT_ASSERT_TARGET,
-    SIM_EVENT_LOG
+    SIM_EVENT_LOG,
+    SIM_EVENT_RENDER,          // render current view to PNG/SVG
+    SIM_EVENT_DUMP_CARET       // dump caret state to file
 };
 
 // Simulated event command
@@ -66,6 +71,8 @@ struct SimEvent {
     bool expected_is_collapsed;  // for assertions
     float scroll_dx, scroll_dy;  // scroll offsets
     char* message;               // for log events
+    char* file_path;             // for render/dump_caret events
+    char* target_text;           // for mouse events: find text and click on it
 };
 
 // Event simulation context

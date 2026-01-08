@@ -47,43 +47,25 @@ void target_children(EventContext* evcon, View* view) {
 void target_text_view(EventContext* evcon, ViewText* text) {
     unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
+    MousePositionEvent* event = &evcon->event.mouse_position;
+    
     NEXT_RECT:
     float x = evcon->block.x + text_rect->x, y = evcon->block.y + text_rect->y;
-    unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + max(text_rect->length, 0);
+    float rect_right = x + text_rect->width;
+    float rect_bottom = y + text_rect->height;
+    
     log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
         str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, evcon->block.x);
-    bool has_space = false;
-    // Get pixel_ratio for converting physical pixels to CSS pixels
-    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0) ? evcon->ui_context->pixel_ratio : 1.0f;
-    for (; p < end; p++) {
-        int wd = 0;
-        if (is_space(*p)) {
-            if (has_space) continue;  // skip consecutive spaces
-            else has_space = true;
-            // printf("target_space: %c, x:%f, end:%f\n", *p, x, x + evcon->font.space_width);
-            wd = evcon->font.style->space_width;
-        }
-        else {
-            has_space = false;
-            FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-            if (FT_Load_Char(evcon->font.ft_face, *p, load_flags)) {
-                log_error("Could not load character '%c'", *p);
-                continue;
-            }
-            // Font is loaded at physical pixel size, so advance is in physical pixels
-            // Divide by pixel_ratio to convert back to CSS pixels for hit testing
-            wd = evcon->font.ft_face->glyph->advance.x / 64.0 / pixel_ratio;
-        }
-        // Font height is also in physical pixels, divide by pixel_ratio
-        float char_right = x + wd;  float char_bottom = y + (evcon->font.ft_face->height / 64.0 / pixel_ratio);
-        MousePositionEvent* event = &evcon->event.mouse_position;
-        if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
-            log_debug("hit on text: %c", *p);
-            evcon->target = text;  evcon->target_text_rect = text_rect;  return;
-        }
-        // advance to the next position
-        x += wd;
+    
+    // First check if mouse is within the text rect bounds (use rect height, not char height)
+    if (x <= event->x && event->x < rect_right && y <= event->y && event->y < rect_bottom) {
+        // Mouse is in this text rect - set target and return
+        log_debug("hit on text rect at (%d, %d)", event->x, event->y);
+        evcon->target = text;  
+        evcon->target_text_rect = text_rect;  
+        return;
     }
+    
     assert(text_rect->next != text_rect);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
@@ -176,7 +158,13 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     RETURN:
-    evcon->block = pa_block;  evcon->font = pa_font;
+    // Only restore block position if no target was found
+    // When a target is found, keep block at the parent's position for coordinate calculations
+    if (!evcon->target) {
+        evcon->block = pa_block;
+    }
+    evcon->font = pa_font;
+    
     if (!evcon->target) { // check the block itself
         float x = evcon->block.x, y = evcon->block.y;
         if (x <= event->x && event->x < x + block->width &&
@@ -652,10 +640,85 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0) 
         ? evcon->ui_context->pixel_ratio : 1.0f;
     
+    // Get letter-spacing from font style (same as used in layout)
+    float letter_spacing = evcon->font.style ? evcon->font.style->letter_spacing : 0.0f;
+    
     bool has_space = false;
     float prev_x = x;
     
+    log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
+              mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
+    
     for (; p < end; p++, char_offset++) {
+        float wd = 0;
+        
+        // Skip newlines and carriage returns - they don't have visual width
+        if (*p == '\n' || *p == '\r') {
+            // At end of visual content - treat rest as trailing whitespace
+            break;
+        }
+        
+        if (is_space(*p)) {
+            if (has_space) {
+                // Consecutive spaces are collapsed - skip without adding width
+                continue;
+            }
+            has_space = true;
+            wd = evcon->font.style->space_width;
+        } else {
+            has_space = false;
+            // Use load_glyph to match layout calculation
+            FT_GlyphSlot glyph = load_glyph(evcon->ui_context, evcon->font.ft_face, evcon->font.style, *p, false);
+            if (!glyph) {
+                log_error("Could not load character '%c'", *p);
+                continue;
+            }
+            wd = glyph->advance.x / 64.0 / pixel_ratio;
+        }
+        
+        // Add letter-spacing (applied after each character except the last)
+        if (p + 1 < end && *(p+1) != '\n' && *(p+1) != '\r') {
+            wd += letter_spacing;
+        }
+        
+        float char_mid = x + wd / 2.0f;
+        
+        // If mouse is before the midpoint of this character, return previous offset
+        if (mouse_x < char_mid) {
+            log_debug("calculate_char_offset: matched char='%c' at offset %d", *p, char_offset);
+            return char_offset;
+        }
+        
+        prev_x = x;
+        x += wd;
+    }
+    
+    log_debug("calculate_char_offset: end of text, returning offset=%d", char_offset);
+    // Mouse is after all characters - return end offset
+    return char_offset;
+}
+
+/**
+ * Calculate visual position (x, y, height) from character offset within a text rect
+ * Returns the x position relative to the text rect's origin
+ */
+void calculate_position_from_char_offset(EventContext* evcon, ViewText* text, 
+    TextRect* rect, int target_offset, float* out_x, float* out_y, float* out_height) {
+    
+    unsigned char* str = text->text_data();
+    float x = rect->x;  // relative to block
+    float y = rect->y;
+    
+    unsigned char* p = str + rect->start_index;
+    unsigned char* end = p + max(rect->length, 0);
+    int char_offset = rect->start_index;
+    
+    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0) 
+        ? evcon->ui_context->pixel_ratio : 1.0f;
+    
+    bool has_space = false;
+    
+    for (; p < end && char_offset < target_offset; p++, char_offset++) {
         int wd = 0;
         
         if (is_space(*p)) {
@@ -666,25 +729,17 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
             has_space = false;
             FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
             if (FT_Load_Char(evcon->font.ft_face, *p, load_flags)) {
-                log_error("Could not load character '%c'", *p);
                 continue;
             }
             wd = evcon->font.ft_face->glyph->advance.x / 64.0 / pixel_ratio;
         }
         
-        float char_mid = x + wd / 2.0f;
-        
-        // If mouse is before the midpoint of this character, return previous offset
-        if (mouse_x < char_mid) {
-            return char_offset;
-        }
-        
-        prev_x = x;
         x += wd;
     }
     
-    // Mouse is after all characters - return end offset
-    return char_offset;
+    *out_x = x;
+    *out_y = y;
+    *out_height = rect->height;  // use rect height as caret height
 }
 
 // ============================================================================
@@ -693,8 +748,6 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
 
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     EventContext evcon;
-    fprintf(stderr, ">>> handle_event: type=%d\n", event->type);
-    fflush(stderr);
     log_info("HANDLE_EVENT: type=%d", event->type);
     log_debug("Handling event %d", event->type);
     // PDF documents don't have html_root - they only have view_tree
@@ -767,6 +820,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     selection_extend(state, char_offset);
                     caret_set(state, sel_view, char_offset);
                     
+                    // Calculate and set visual position for the caret
+                    if (state->caret) {
+                        float caret_x, caret_y, caret_height;
+                        calculate_position_from_char_offset(&temp_evcon, text, temp_evcon.target_text_rect, 
+                            char_offset, &caret_x, &caret_y, &caret_height);
+                        state->caret->x = caret_x;
+                        state->caret->y = caret_y;
+                        state->caret->height = caret_height;
+                    }
+                    
                     log_debug("Dragging selection to offset %d", char_offset);
                     evcon.need_repaint = true;
                 }
@@ -803,18 +866,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {
         MouseButtonEvent* btn_event = &event->mouse_button;
-        fprintf(stderr, ">>> MOUSE_DOWN/UP: x=%d y=%d\n", btn_event->x, btn_event->y);
-        fflush(stderr);
         log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
-        
-        fprintf(stderr, ">>> After targeting: target=%p\n", evcon.target);
-        if (evcon.target) {
-            fprintf(stderr, ">>> Target view_type=%d (TEXT=4), target_text_rect=%p\n", 
-                    evcon.target->view_type, evcon.target_text_rect);
-        }
-        fflush(stderr);
         
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
         
@@ -846,6 +900,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 
                 // Set caret at clicked position
                 caret_set(state, evcon.target, char_offset);
+                
+                // Calculate and set visual position for the caret
+                if (state->caret) {
+                    float caret_x, caret_y, caret_height;
+                    calculate_position_from_char_offset(&evcon, text, rect, char_offset,
+                        &caret_x, &caret_y, &caret_height);
+                    state->caret->x = caret_x;
+                    state->caret->y = caret_y;
+                    state->caret->height = caret_height;
+                    log_info("CARET VISUAL: x=%.1f y=%.1f height=%.1f", caret_x, caret_y, caret_height);
+                }
                 
                 // Start new selection if shift not pressed, otherwise extend
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
