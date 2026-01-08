@@ -17,7 +17,7 @@ A lightweight memory tracking system for the Lambda/Radiant engine, designed to 
 │           (parsers, formatters, layout, rendering)              │
 ├─────────────────────────────────────────────────────────────────┤
 │                  Memory Tracker API (lib/memtrack.h)            │
-│  lmem_alloc() / lmem_free() / lmem_track_* / lmem_query_*      │
+│  mem_alloc() / mem_free() / mem_track_* / mem_query_*      │
 ├─────────────────────────────────────────────────────────────────┤
 │              Tracking Layer (lib/memtrack.c)                    │
 │  • Allocation registry (hashmap)                                │
@@ -88,47 +88,47 @@ Categories enable per-subsystem memory accounting:
 
 ```c
 typedef enum MemCategory {
-    LMEM_CAT_UNKNOWN = 0,
+    MEM_CAT_UNKNOWN = 0,
 
     // Lambda core
-    LMEM_CAT_AST,           // AST nodes
-    LMEM_CAT_PARSER,        // Parser temporaries
-    LMEM_CAT_EVAL,          // Evaluation stack/context
-    LMEM_CAT_STRING,        // String data (non-pooled)
-    LMEM_CAT_CONTAINER,     // List, Map, Element, Array
-    LMEM_CAT_NAMEPOOL,      // Name pool entries
-    LMEM_CAT_SHAPEPOOL,     // Shape pool entries
+    MEM_CAT_AST,           // AST nodes
+    MEM_CAT_PARSER,        // Parser temporaries
+    MEM_CAT_EVAL,          // Evaluation stack/context
+    MEM_CAT_STRING,        // String data (non-pooled)
+    MEM_CAT_CONTAINER,     // List, Map, Element, Array
+    MEM_CAT_NAMEPOOL,      // Name pool entries
+    MEM_CAT_SHAPEPOOL,     // Shape pool entries
 
     // Input parsers
-    LMEM_CAT_INPUT_JSON,
-    LMEM_CAT_INPUT_XML,
-    LMEM_CAT_INPUT_HTML,
-    LMEM_CAT_INPUT_CSS,
-    LMEM_CAT_INPUT_MD,
-    LMEM_CAT_INPUT_PDF,
-    LMEM_CAT_INPUT_OTHER,
+    MEM_CAT_INPUT_JSON,
+    MEM_CAT_INPUT_XML,
+    MEM_CAT_INPUT_HTML,
+    MEM_CAT_INPUT_CSS,
+    MEM_CAT_INPUT_MD,
+    MEM_CAT_INPUT_PDF,
+    MEM_CAT_INPUT_OTHER,
 
     // Formatters
-    LMEM_CAT_FORMAT,
+    MEM_CAT_FORMAT,
 
     // Radiant layout/render
-    LMEM_CAT_DOM,           // DOM nodes
-    LMEM_CAT_LAYOUT,        // Layout computation
-    LMEM_CAT_STYLE,         // CSS style data
-    LMEM_CAT_FONT,          // Font data/cache
-    LMEM_CAT_IMAGE,         // Image data/cache
-    LMEM_CAT_RENDER,        // Render buffers
+    MEM_CAT_DOM,           // DOM nodes
+    MEM_CAT_LAYOUT,        // Layout computation
+    MEM_CAT_STYLE,         // CSS style data
+    MEM_CAT_FONT,          // Font data/cache
+    MEM_CAT_IMAGE,         // Image data/cache
+    MEM_CAT_RENDER,        // Render buffers
 
     // Caches (evictable under memory pressure)
-    LMEM_CAT_CACHE_FONT,    // Font glyph cache
-    LMEM_CAT_CACHE_IMAGE,   // Decoded image cache
-    LMEM_CAT_CACHE_LAYOUT,  // Layout cache
-    LMEM_CAT_CACHE_OTHER,
+    MEM_CAT_CACHE_FONT,    // Font glyph cache
+    MEM_CAT_CACHE_IMAGE,   // Decoded image cache
+    MEM_CAT_CACHE_LAYOUT,  // Layout cache
+    MEM_CAT_CACHE_OTHER,
 
     // Temporary allocations
-    LMEM_CAT_TEMP,
+    MEM_CAT_TEMP,
 
-    LMEM_CAT_COUNT
+    MEM_CAT_COUNT
 } MemCategory;
 ```
 
@@ -143,7 +143,7 @@ typedef enum MemCategory {
 └──────────────┴─────────────────────┴──────────────┘
 ```
 
-On `lmem_free()`, guards are verified. Corruption triggers:
+On `mem_free()`, guards are verified. Corruption triggers:
 ```
 memtrack: buffer overflow detected for allocation 0x12345678
           (alloc'd at input-json.cpp:234, size=1024, category=input-json)
@@ -158,7 +158,7 @@ memtrack: buffer overflow detected for allocation 0x12345678
 #### Source Location Tracking
 When `MEMTRACK_DEBUG_LOCATIONS` is defined:
 ```c
-#define lmem_alloc(size, cat) lmem_alloc_loc(size, cat, __FILE__, __LINE__)
+#define mem_alloc(size, cat) mem_alloc_loc(size, cat, __FILE__, __LINE__)
 ```
 
 Enables leak reports like:
@@ -191,13 +191,13 @@ size_t evict_font_cache(MemPressureLevel level, size_t target, void* ctx) {
 uint32_t handle = memtrack_register_pressure_callback(
     evict_font_cache,
     font_cache,
-    (1ULL << LMEM_CAT_CACHE_FONT)
+    (1ULL << MEM_CAT_CACHE_FONT)
 );
 ```
 
 #### Automatic Triggering
 Pressure callbacks are automatically invoked when:
-1. `lmem_alloc()` causes memory to exceed soft_limit
+1. `mem_alloc()` causes memory to exceed soft_limit
 2. `memtrack_request_free(bytes)` is called explicitly
 3. `memtrack_trigger_pressure(level)` is called manually
 
@@ -217,11 +217,11 @@ void memtrack_set_mode(MemtrackMode mode);
 
 ### Allocation
 ```c
-void* lmem_alloc(size_t size, MemCategory category);
-void* lmem_calloc(size_t count, size_t size, MemCategory category);
-void* lmem_realloc(void* ptr, size_t new_size, MemCategory category);
-void  lmem_free(void* ptr);
-char* lmem_strdup(const char* str, MemCategory category);
+void* mem_alloc(size_t size, MemCategory category);
+void* mem_calloc(size_t count, size_t size, MemCategory category);
+void* mem_realloc(void* ptr, size_t new_size, MemCategory category);
+void  mem_free(void* ptr);
+char* mem_strdup(const char* str, MemCategory category);
 ```
 
 ### Statistics
@@ -255,7 +255,61 @@ void memtrack_unregister_pressure_callback(uint32_t handle);
 size_t memtrack_request_free(size_t bytes_needed);
 ```
 
-## External Profiling Integration
+## Memory Profiling Integration
+
+We evaluated several external profiling tools to avoid reinventing functionality that existing tools handle well.
+
+### Tool Comparison
+
+| Aspect | Heaptrack | MTuner | Valgrind/Massif |
+|--------|-----------|--------|------------------|
+| **Integration** | Zero code changes (LD_PRELOAD) | Requires linking rmem | Zero code changes |
+| **Category/Tags** | ❌ None | ✅ Has tags | ❌ None |
+| **Platform** | Linux, macOS | Windows, Linux | Linux, macOS |
+| **Visualization** | Good (Qt GUI) | Excellent | Basic (text) |
+| **Overhead** | ~10% | ~10% | ~20x |
+| **Flame graphs** | ✅ Yes | ❌ No | ❌ No |
+| **Timeline** | ✅ Yes | ✅ Excellent | ⚠️ Limited |
+| **Conflict with rpmalloc** | None | Possible (replaces allocator) | None |
+| **Active development** | ✅ Active | ⚠️ Less active | ✅ Active |
+
+### Decision: Heaptrack for Profiling
+
+**We chose Heaptrack** as the primary profiling tool because:
+
+1. **Zero code changes** - Works via LD_PRELOAD, no instrumentation needed
+2. **No allocator conflict** - Works alongside rpmalloc without issues
+3. **Better macOS support** - MTuner has limited macOS support
+4. **Flame graphs** - Excellent for identifying allocation hotspots
+5. **Active maintenance** - Part of KDE, regularly updated
+
+**MTuner's tag feature** is appealing (similar to our categories), but:
+- Requires replacing rpmalloc with rmem
+- Less portable
+- We build our own category tracking anyway
+
+**For bug detection**, we use **ASan** (AddressSanitizer):
+- Buffer overflow, use-after-free, double-free detection
+- Compile flag only: `-fsanitize=address`
+- No custom code needed
+
+### Recommended Workflow
+
+```bash
+# Development: ASan for bug detection
+CFLAGS="-fsanitize=address -g" make dev
+./lambda.exe test.ls  # ASan reports errors
+
+# Profiling: Heaptrack for memory analysis
+make profile
+heaptrack ./lambda.exe script.ls
+heaptrack_gui heaptrack.lambda.exe.*.gz
+
+# Production: No overhead
+make release
+```
+
+## External Profiling Tools Reference
 
 ### Heaptrack (Recommended)
 
@@ -350,7 +404,7 @@ Replace allocations in key areas:
 String* str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
 
 // After
-String* str = (String *)lmem_alloc(len + 1 + sizeof(String), LMEM_CAT_STRING);
+String* str = (String *)mem_alloc(len + 1 + sizeof(String), MEM_CAT_STRING);
 ```
 
 Priority areas:
@@ -368,7 +422,7 @@ void font_cache_init() {
     memtrack_register_pressure_callback(
         font_cache_evict_callback,
         g_font_cache,
-        (1ULL << LMEM_CAT_CACHE_FONT)
+        (1ULL << MEM_CAT_CACHE_FONT)
     );
 }
 ```
@@ -435,6 +489,60 @@ profile-heap: lambda.exe
 | `utils/CMakeLists.txt` | CMake build for typemeta_extract |
 | `generated/typemeta_defs.c` | Auto-generated type definitions |
 | `vibe/Lambda_Memory_Tracker.md` | This document |
+
+## Type Metadata Alternatives Analysis
+
+We evaluated existing RTTI and reflection libraries before deciding to build a custom solution with Clang-based extraction.
+
+### Existing Libraries Considered
+
+| Library | Language | Description | Verdict |
+|---------|----------|-------------|--------|
+| **[GLib/GObject](https://docs.gtk.org/gobject/)** | C | Full runtime type system with properties, signals | ❌ Too heavy, requires GObject base class |
+| **[RTTR](https://www.rttr.org/)** | C++ | Runtime reflection library | ❌ C++ only, Lambda has C core |
+| **[Meta](https://github.com/skypjack/meta)** | C++ | EnTT's reflection library | ❌ C++ only, header-only |
+| **[Boost.Describe](https://www.boost.org/doc/libs/release/libs/describe/)** | C++ | Boost's reflection macros | ❌ Requires Boost, C++ only |
+| **[magic_enum](https://github.com/Neargye/magic_enum)** | C++ | Enum reflection | ⚠️ Enum-only, useful but limited |
+| **[libclang](https://clang.llvm.org/docs/LibClang.html)** | C/C++ | AST access for type extraction | ✅ Use for code generation |
+
+### Memory Trackers with Type Info
+
+| Library | Type Metadata | Categories | Notes |
+|---------|--------------|------------|-------|
+| **[MTuner/rmem](https://github.com/RudjiGames/MTuner)** | ❌ No | ✅ Tags | Most similar, but no struct introspection |
+| **[Chromium PartitionAlloc](https://chromium.googlesource.com/chromium/src/+/main/base/allocator/)** | ❌ No | ✅ Buckets | Production-grade, but complex |
+| **Protocol Buffers** | ✅ Full schema | N/A | Different memory model |
+
+### Why Build Custom
+
+No existing solution fits Lambda's requirements:
+
+1. **C struct compatibility** - Lambda's core (`lambda.h`) is C, not C++
+2. **Category-based tracking** - No standard tool provides this
+3. **Memory walking** - Need to traverse Lambda's data structures
+4. **Zero runtime overhead option** - Must be optional for release builds
+5. **Clang integration** - Can auto-extract types from existing headers
+
+### Decision: Custom TypeMeta + Clang Extraction
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Clang LibTooling / JSON AST                        │
+│   (extracts struct layouts from lambda.h, radiant/*.hpp)        │
+├─────────────────────────────────────────────────────────────────┤
+│              Generated TypeMeta Definitions                     │
+│   (generated/typemeta_defs.c - compile-time, no runtime cost)   │
+├─────────────────────────────────────────────────────────────────┤
+│              TypeMeta Registry (optional, debug only)           │
+│   (hashmap for runtime type lookup)                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**What we borrow from existing tools:**
+- **From RTTR**: Registration macro patterns
+- **From MTuner**: Tag-based API design
+- **From GObject**: Type hierarchy, property flags
+- **From libclang**: AST-based type extraction
 
 ## Type Metadata System (RTTI for C/C++)
 
@@ -578,7 +686,7 @@ Types can be registered manually via macros or auto-generated:
 // ============================================================================
 
 // Register a primitive type
-#define LMEM_REGISTER_PRIMITIVE(type, kind) \
+#define MEM_REGISTER_PRIMITIVE(type, kind) \
     static const TypeMeta _typemeta_##type = { \
         .name = #type, \
         .kind = kind, \
@@ -591,11 +699,11 @@ Types can be registered manually via macros or auto-generated:
     }
 
 // Begin struct definition
-#define LMEM_STRUCT_BEGIN(type) \
+#define MEM_STRUCT_BEGIN(type) \
     static const FieldMeta _fields_##type[] = {
 
 // Define a field
-#define LMEM_FIELD(type, field, field_type_meta) \
+#define MEM_FIELD(type, field, field_type_meta) \
     { \
         .name = #field, \
         .type = field_type_meta, \
@@ -606,7 +714,7 @@ Types can be registered manually via macros or auto-generated:
     },
 
 // Define a pointer field (for memory walking)
-#define LMEM_FIELD_PTR(type, field, target_type_meta, owned) \
+#define MEM_FIELD_PTR(type, field, target_type_meta, owned) \
     { \
         .name = #field, \
         .type = target_type_meta, \
@@ -615,7 +723,7 @@ Types can be registered manually via macros or auto-generated:
     },
 
 // End struct definition
-#define LMEM_STRUCT_END(type) \
+#define MEM_STRUCT_END(type) \
     }; \
     static const TypeMeta _typemeta_##type = { \
         .name = #type, \
@@ -641,50 +749,50 @@ extern const TypeMeta* TYPEMETA_Element;
 extern const TypeMeta* TYPEMETA_Container;
 
 // String type
-LMEM_STRUCT_BEGIN(String)
-    LMEM_FIELD(String, len, &TYPEMETA_uint32)
-    LMEM_FIELD(String, ref_cnt, &TYPEMETA_uint32)
+MEM_STRUCT_BEGIN(String)
+    MEM_FIELD(String, len, &TYPEMETA_uint32)
+    MEM_FIELD(String, ref_cnt, &TYPEMETA_uint32)
     // chars[] is a flexible array member
-LMEM_STRUCT_END(String)
+MEM_STRUCT_END(String)
 
 // Container base type
-LMEM_STRUCT_BEGIN(Container)
-    LMEM_FIELD(Container, type_id, &TYPEMETA_uint8)
-    LMEM_FIELD(Container, flags, &TYPEMETA_uint8)
-    LMEM_FIELD(Container, ref_cnt, &TYPEMETA_uint16)
-LMEM_STRUCT_END(Container)
+MEM_STRUCT_BEGIN(Container)
+    MEM_FIELD(Container, type_id, &TYPEMETA_uint8)
+    MEM_FIELD(Container, flags, &TYPEMETA_uint8)
+    MEM_FIELD(Container, ref_cnt, &TYPEMETA_uint16)
+MEM_STRUCT_END(Container)
 
 // List type (extends Container)
-LMEM_STRUCT_BEGIN(List)
-    LMEM_FIELD(List, type_id, &TYPEMETA_uint8)
-    LMEM_FIELD(List, flags, &TYPEMETA_uint8)
-    LMEM_FIELD(List, ref_cnt, &TYPEMETA_uint16)
-    LMEM_FIELD_PTR(List, items, &TYPEMETA_Item, true)  // owned pointer
-    LMEM_FIELD(List, length, &TYPEMETA_int64)
-    LMEM_FIELD(List, extra, &TYPEMETA_int64)
-    LMEM_FIELD(List, capacity, &TYPEMETA_int64)
-LMEM_STRUCT_END(List)
+MEM_STRUCT_BEGIN(List)
+    MEM_FIELD(List, type_id, &TYPEMETA_uint8)
+    MEM_FIELD(List, flags, &TYPEMETA_uint8)
+    MEM_FIELD(List, ref_cnt, &TYPEMETA_uint16)
+    MEM_FIELD_PTR(List, items, &TYPEMETA_Item, true)  // owned pointer
+    MEM_FIELD(List, length, &TYPEMETA_int64)
+    MEM_FIELD(List, extra, &TYPEMETA_int64)
+    MEM_FIELD(List, capacity, &TYPEMETA_int64)
+MEM_STRUCT_END(List)
 ```
 
 ### Enhanced Allocation API
 
 ```c
 // Allocate with type metadata
-void* lmem_alloc_typed(const TypeMeta* type, MemCategory category);
+void* mem_alloc_typed(const TypeMeta* type, MemCategory category);
 
 // Allocate array of typed elements
-void* lmem_alloc_array_typed(const TypeMeta* element_type, size_t count, MemCategory category);
+void* mem_alloc_array_typed(const TypeMeta* element_type, size_t count, MemCategory category);
 
 // Convenience macro for typed allocation
-#define LMEM_NEW(type, category) \
-    ((type*)lmem_alloc_typed(TYPEMETA_##type, category))
+#define MEM_NEW(type, category) \
+    ((type*)mem_alloc_typed(TYPEMETA_##type, category))
 
-#define LMEM_NEW_ARRAY(type, count, category) \
-    ((type*)lmem_alloc_array_typed(TYPEMETA_##type, count, category))
+#define MEM_NEW_ARRAY(type, count, category) \
+    ((type*)mem_alloc_array_typed(TYPEMETA_##type, count, category))
 
 // Example usage:
-List* list = LMEM_NEW(List, LMEM_CAT_CONTAINER);
-Item* items = LMEM_NEW_ARRAY(Item, 100, LMEM_CAT_CONTAINER);
+List* list = MEM_NEW(List, MEM_CAT_CONTAINER);
+Item* items = MEM_NEW_ARRAY(Item, 100, MEM_CAT_CONTAINER);
 ```
 
 ### Memory Walking API
@@ -700,13 +808,13 @@ typedef bool (*MemWalkCallback)(
 );
 
 // Walk an allocation and all reachable objects
-void lmem_walk(void* ptr, MemWalkCallback callback, void* user_data);
+void mem_walk(void* ptr, MemWalkCallback callback, void* user_data);
 
 // Walk all allocations of a specific type
-void lmem_walk_type(const TypeMeta* type, MemWalkCallback callback, void* user_data);
+void mem_walk_type(const TypeMeta* type, MemWalkCallback callback, void* user_data);
 
 // Walk all allocations in a category
-void lmem_walk_category(MemCategory category, MemWalkCallback callback, void* user_data);
+void mem_walk_category(MemCategory category, MemWalkCallback callback, void* user_data);
 
 // ============================================================================
 // Example: Dump all List allocations
@@ -723,7 +831,7 @@ bool dump_list_callback(void* ptr, const TypeMeta* type,
 }
 
 void dump_all_lists() {
-    lmem_walk_type(TYPEMETA_List, dump_list_callback, NULL);
+    mem_walk_type(TYPEMETA_List, dump_list_callback, NULL);
 }
 ```
 
@@ -731,7 +839,7 @@ void dump_all_lists() {
 
 ```c
 // Get type metadata for an allocation
-const TypeMeta* lmem_get_type(void* ptr);
+const TypeMeta* mem_get_type(void* ptr);
 
 // Get field by name
 const FieldMeta* typemeta_get_field(const TypeMeta* type, const char* name);
@@ -751,7 +859,7 @@ char* typemeta_format_value(void* ptr, const TypeMeta* type, char* buf, size_t b
 // ============================================================================
 
 void inspect_object(void* ptr) {
-    const TypeMeta* type = lmem_get_type(ptr);
+    const TypeMeta* type = mem_get_type(ptr);
     if (!type) {
         log_warn("Unknown type at %p", ptr);
         return;
@@ -1021,10 +1129,10 @@ With type metadata, the tracker can perform runtime validation:
 
 ```c
 // Validate an allocation matches expected type
-bool lmem_validate_type(void* ptr, const TypeMeta* expected_type);
+bool mem_validate_type(void* ptr, const TypeMeta* expected_type);
 
 // Check all allocations for corruption
-size_t lmem_validate_all(void);
+size_t mem_validate_all(void);
 
 // Validation checks performed:
 // 1. Size matches TypeMeta->size
@@ -1038,13 +1146,13 @@ size_t lmem_validate_all(void);
 
 ```c
 // Dump allocation as formatted text
-void lmem_dump(void* ptr, FILE* out);
+void mem_dump(void* ptr, FILE* out);
 
 // Dump all allocations to file
-void lmem_dump_all(const char* filename);
+void mem_dump_all(const char* filename);
 
 // Export allocation graph (DOT format for Graphviz)
-void lmem_export_graph(const char* filename);
+void mem_export_graph(const char* filename);
 ```
 
 Example DOT output:
