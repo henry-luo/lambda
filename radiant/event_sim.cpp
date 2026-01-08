@@ -193,7 +193,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->y = reader.get("y").asInt32();
         // also support target_text for mouse_move
         const char* target = reader.get("target_text").cstring();
-        if (target) ev->target_text = strdup(target);
+        if (target) ev->target_text = mem_strdup(target, MEM_CAT_LAYOUT);
     }
     else if (strcmp(type_str, "mouse_down") == 0) {
         ev->type = SIM_EVENT_MOUSE_DOWN;
@@ -205,7 +205,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (mods_str) ev->mods = parse_mods_string(mods_str);
         // support target_text to find text and click on it
         const char* target = reader.get("target_text").cstring();
-        if (target) ev->target_text = strdup(target);
+        if (target) ev->target_text = mem_strdup(target, MEM_CAT_LAYOUT);
     }
     else if (strcmp(type_str, "mouse_up") == 0) {
         ev->type = SIM_EVENT_MOUSE_UP;
@@ -278,17 +278,17 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     else if (strcmp(type_str, "render") == 0) {
         ev->type = SIM_EVENT_RENDER;
         const char* file = reader.get("file").cstring();
-        if (file) ev->file_path = strdup(file);
+        if (file) ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
         else {
             log_error("event_sim: render event missing 'file' field");
-            free(ev);
+            mem_free(ev);
             return NULL;
         }
     }
     else if (strcmp(type_str, "dump_caret") == 0) {
         ev->type = SIM_EVENT_DUMP_CARET;
         const char* file = reader.get("file").cstring();
-        if (file) ev->file_path = strdup(file);
+        if (file) ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
         // file is optional, defaults to ./view_tree.txt
     }
     else {

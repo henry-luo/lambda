@@ -311,7 +311,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
             } else {
                 log_error("Failed to load font face via platform lookup: %s (path: %s)", font_name, font_path);
             }
-            free(font_path);
+            mem_free(font_path);
         } else {
             log_error("Platform lookup also failed for: %s", font_name);
         }
