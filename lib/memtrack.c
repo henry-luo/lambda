@@ -55,7 +55,14 @@ const char* memtrack_category_names[MEM_CAT_COUNT] = {
     [MEM_CAT_INPUT_HTML]   = "input-html",
     [MEM_CAT_INPUT_CSS]    = "input-css",
     [MEM_CAT_INPUT_MD]     = "input-md",
-    [MEM_CAT_INPUT_PDF]    = "input-pdf",    [MEM_CAT_INPUT_INI]     = "input-ini",    [MEM_CAT_INPUT_OTHER]  = "input-other",
+    [MEM_CAT_INPUT_PDF]    = "input-pdf",
+    [MEM_CAT_INPUT_INI]    = "input-ini",
+    [MEM_CAT_INPUT_YAML]   = "input-yaml",
+    [MEM_CAT_INPUT_TOML]   = "input-toml",
+    [MEM_CAT_INPUT_CSV]    = "input-csv",
+    [MEM_CAT_INPUT_PROPS]  = "input-props",
+    [MEM_CAT_INPUT_MARKUP] = "input-markup",
+    [MEM_CAT_INPUT_OTHER]  = "input-other",
     [MEM_CAT_FORMAT]       = "format",
     [MEM_CAT_DOM]          = "dom",
     [MEM_CAT_LAYOUT]       = "layout",
@@ -273,7 +280,9 @@ bool memtrack_init(MemtrackMode mode) {
     g_memtrack.critical_limit = 768 * 1024 * 1024;  // 768 MB
 
     if (mode == MEMTRACK_MODE_DEBUG) {
-        g_memtrack.alloc_map = hashmap_new(
+        // Use raw malloc/realloc/free to avoid tracking the hashmap itself
+        g_memtrack.alloc_map = hashmap_new_with_allocator(
+            malloc, realloc, free,  // Use raw allocators
             sizeof(AllocInfo),    // Element size
             MAX_TRACKED_ALLOCS,  // Initial capacity
             0, 0,                // Random seeds
@@ -303,21 +312,38 @@ void memtrack_shutdown(void) {
 
     lock_tracker();
 
-    // Report leaks in debug mode
+    // Capture leak count while holding lock
+    size_t leak_count = 0;
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
-        size_t leak_count = hashmap_count(g_memtrack.alloc_map);
+        leak_count = hashmap_count(g_memtrack.alloc_map);
+    }
+    
+    // Capture stats while holding lock
+    size_t peak_bytes = g_memtrack.stats.peak_bytes;
+    size_t total_allocs = g_memtrack.stats.total_allocs;
+    
+    unlock_tracker();
+    
+    // Report leaks WITHOUT holding lock to avoid deadlock if logging allocates
+    if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
         if (leak_count > 0) {
             log_warn("memtrack: %zu memory leaks detected!", leak_count);
             memtrack_log_allocations();
         } else {
             log_info("memtrack: no memory leaks detected");
         }
+    }
+    
+    // Log final stats WITHOUT holding lock
+    log_info("memtrack: shutdown - peak usage: %zu bytes, total allocs: %zu",
+             peak_bytes, total_allocs);
+    
+    // Now safely clean up with lock
+    lock_tracker();
+    
+    if (g_memtrack.alloc_map) {
         hashmap_free(g_memtrack.alloc_map);
     }
-
-    // Log final stats
-    log_info("memtrack: shutdown - peak usage: %zu bytes, total allocs: %zu",
-             g_memtrack.stats.peak_bytes, g_memtrack.stats.total_allocs);
 
     unlock_tracker();
     pthread_mutex_destroy(&g_memtrack.lock);
@@ -334,7 +360,9 @@ void memtrack_set_mode(MemtrackMode mode) {
 
     // Transitioning to debug mode requires creating the allocation map
     if (mode == MEMTRACK_MODE_DEBUG && !g_memtrack.alloc_map) {
-        g_memtrack.alloc_map = hashmap_new(
+        // Use raw malloc/realloc/free to avoid tracking the hashmap itself
+        g_memtrack.alloc_map = hashmap_new_with_allocator(
+            malloc, realloc, free,  // Use raw allocators
             sizeof(AllocInfo),    // Element size
             MAX_TRACKED_ALLOCS,  // Initial capacity
             0, 0,                // Random seeds
