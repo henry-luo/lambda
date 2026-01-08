@@ -1,4 +1,5 @@
 #include "input.hpp"
+#include "../../lib/memtrack.h"
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
 #include "input-context.hpp"
 #include "source_tracker.hpp"
@@ -27,7 +28,7 @@ static void add_plain_text(Input* input, Element* container, const char* start, 
     if (end <= start) return;
 
     size_t len = end - start;
-    char* text_copy = (char*)malloc(len + 1);
+    char* text_copy = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_ORG);
     if (!text_copy) return;
 
     strncpy(text_copy, start, len);
@@ -43,7 +44,7 @@ static void add_plain_text(Input* input, Element* container, const char* start, 
             ((TypeElmt*)container->type)->content_length++;
         }
     }
-    free(text_copy);
+    mem_free(text_copy);
 }
 
 // Helper: parse simple inline formatting (bold, italic, code, etc.)
@@ -68,7 +69,7 @@ static const char* parse_simple_format(Input* input, Element* container, const c
 
     if (*current == marker && current > content_start) {
         size_t len = current - content_start;
-        char* content = (char*)malloc(len + 1);
+        char* content = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_ORG);
         if (content) {
             strncpy(content, content_start, len);
             content[len] = '\0';
@@ -83,7 +84,7 @@ static const char* parse_simple_format(Input* input, Element* container, const c
                     ((TypeElmt*)container->type)->content_length++;
                 }
             }
-            free(content);
+            mem_free(content);
         }
         return current + 1; // skip closing marker
     }
@@ -113,7 +114,7 @@ static const char* parse_math_expr(Input* input, Element* container, const char*
     }
 
     size_t len = current - content_start;
-    char* math_content = (char*)malloc(len + 1);
+    char* math_content = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_ORG);
     if (!math_content) return current + close_len;
 
     strncpy(math_content, content_start, len);
@@ -153,7 +154,7 @@ static const char* parse_math_expr(Input* input, Element* container, const char*
             }
         }
     }
-    free(math_content);
+    mem_free(math_content);
 
     return current + close_len;
 }
@@ -449,7 +450,7 @@ static bool is_scheduling_line(const char* line, char** keyword, char** timestam
                 }
             }
 
-            free(*keyword);
+            mem_free(*keyword);
             return false;
         }
     }
@@ -823,7 +824,7 @@ static bool is_footnote_definition(const char* line, char** footnote_name, char*
 
     // Extract footnote name
     size_t name_len = name_end - name_start;
-    *footnote_name = (char*)malloc(name_len + 1);
+    *footnote_name = (char*)mem_alloc(name_len + 1, MEM_CAT_INPUT_ORG);
     if (!*footnote_name) return false;
 
     strncpy(*footnote_name, name_start, name_len);
@@ -1031,7 +1032,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
             // Add any plain text before the link
             if (current > start) {
                 size_t plain_len = current - start;
-                char* plain_text = (char*)malloc(plain_len + 1);
+                char* plain_text = (char*)mem_alloc(plain_len + 1, MEM_CAT_INPUT_ORG);
                 if (plain_text) {
                     strncpy(plain_text, start, plain_len);
                     plain_text[plain_len] = '\0';
@@ -1046,7 +1047,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                             ((TypeElmt*)text_container->type)->content_length++;
                         }
                     }
-                    free(plain_text);
+                    mem_free(plain_text);
                 }
             }
 
@@ -1062,7 +1063,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
 
             if (*current == ']') {
                 size_t url_len = current - url_start;
-                char* url = (char*)malloc(url_len + 1);
+                char* url = (char*)mem_alloc(url_len + 1, MEM_CAT_INPUT_ORG);
                 if (url) {
                     strncpy(url, url_start, url_len);
                     url[url_len] = '\0';
@@ -1079,7 +1080,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                         }
                         if (*current == ']') {
                             size_t desc_len = current - desc_start;
-                            description = (char*)malloc(desc_len + 1);
+                            description = (char*)mem_alloc(desc_len + 1, MEM_CAT_INPUT_ORG);
                             if (description) {
                                 strncpy(description, desc_start, desc_len);
                                 description[desc_len] = '\0';
@@ -1127,8 +1128,8 @@ static Element* parse_inline_text(Input* input, const char* text) {
                         current = link_start + 1;
                     }
 
-                    free(url);
-                    free(description);
+                    mem_free(url);
+                    mem_free(description);
                 }
             } else {
                 // No closing ]], treat as plain text
@@ -1141,7 +1142,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
             // Add any plain text before the timestamp
             if (current > start) {
                 size_t plain_len = current - start;
-                char* plain_text = (char*)malloc(plain_len + 1);
+                char* plain_text = (char*)mem_alloc(plain_len + 1, MEM_CAT_INPUT_ORG);
                 if (plain_text) {
                     strncpy(plain_text, start, plain_len);
                     plain_text[plain_len] = '\0';
@@ -1156,7 +1157,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                             ((TypeElmt*)text_container->type)->content_length++;
                         }
                     }
-                    free(plain_text);
+                    mem_free(plain_text);
                 }
             }
 
@@ -1173,7 +1174,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
             if (*current == closing_char) {
                 current++; // skip closing bracket
                 size_t ts_len = current - ts_start;
-                char* timestamp_str = (char*)malloc(ts_len + 1);
+                char* timestamp_str = (char*)mem_alloc(ts_len + 1, MEM_CAT_INPUT_ORG);
                 if (timestamp_str) {
                     strncpy(timestamp_str, ts_start, ts_len);
                     timestamp_str[ts_len] = '\0';
@@ -1184,7 +1185,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                         ((TypeElmt*)text_container->type)->content_length++;
                     }
 
-                    free(timestamp_str);
+                    mem_free(timestamp_str);
                 }
                 start = current;
             } else {
@@ -1198,7 +1199,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
             // Add any plain text before the footnote
             if (current > start) {
                 size_t plain_len = current - start;
-                char* plain_text = (char*)malloc(plain_len + 1);
+                char* plain_text = (char*)mem_alloc(plain_len + 1, MEM_CAT_INPUT_ORG);
                 if (plain_text) {
                     strncpy(plain_text, start, plain_len);
                     plain_text[plain_len] = '\0';
@@ -1213,7 +1214,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                             ((TypeElmt*)text_container->type)->content_length++;
                         }
                     }
-                    free(plain_text);
+                    mem_free(plain_text);
                 }
             }
 
@@ -1232,7 +1233,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                 size_t name_len = current - name_start;
                 char* name = NULL;
                 if (name_len > 0) {
-                    name = (char*)malloc(name_len + 1);
+                    name = (char*)mem_alloc(name_len + 1, MEM_CAT_INPUT_ORG);
                     if (name) {
                         strncpy(name, name_start, name_len);
                         name[name_len] = '\0';
@@ -1251,7 +1252,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                     size_t def_len = current - def_start;
                     char* definition = NULL;
                     if (def_len > 0) {
-                        definition = (char*)malloc(def_len + 1);
+                        definition = (char*)mem_alloc(def_len + 1, MEM_CAT_INPUT_ORG);
                         if (definition) {
                             strncpy(definition, def_start, def_len);
                             definition[def_len] = '\0';
@@ -1268,19 +1269,19 @@ static Element* parse_inline_text(Input* input, const char* text) {
                         ((TypeElmt*)text_container->type)->content_length++;
                     }
 
-                    free(name);
-                    free(definition);
+                    mem_free(name);
+                    mem_free(definition);
                     start = current;
                 } else {
                     // No closing ], treat as plain text
                     current = footnote_start + 1;
-                    free(name);
+                    mem_free(name);
                 }
             } else if (*current == ']') {
                 // This is [fn:name] - a footnote reference
                 size_t name_len = current - name_start;
                 if (name_len > 0) {
-                    char* name = (char*)malloc(name_len + 1);
+                    char* name = (char*)mem_alloc(name_len + 1, MEM_CAT_INPUT_ORG);
                     if (name) {
                         strncpy(name, name_start, name_len);
                         name[name_len] = '\0';
@@ -1294,7 +1295,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                             ((TypeElmt*)text_container->type)->content_length++;
                         }
 
-                        free(name);
+                        mem_free(name);
                         start = current;
                     } else {
                         current = footnote_start + 1;
@@ -1315,7 +1316,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
     // Add any remaining plain text
     if (current > start) {
         size_t plain_len = current - start;
-        char* plain_text = (char*)malloc(plain_len + 1);
+        char* plain_text = (char*)mem_alloc(plain_len + 1, MEM_CAT_INPUT_ORG);
         if (plain_text) {
             strncpy(plain_text, start, plain_len);
             plain_text[plain_len] = '\0';
@@ -1330,7 +1331,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                     ((TypeElmt*)text_container->type)->content_length++;
                 }
             }
-            free(plain_text);
+            mem_free(plain_text);
         }
     }
 
@@ -1402,7 +1403,7 @@ static int parse_table_cells(const char* line, char*** cells) {
         if (*cell_end == '|' || *cell_end == '\0') {
             // Extract cell content
             size_t cell_len = cell_end - cell_start;
-            char* cell_content = (char*)malloc(cell_len + 1);
+            char* cell_content = (char*)mem_alloc(cell_len + 1, MEM_CAT_INPUT_ORG);
             if (cell_content) {
                 strncpy(cell_content, cell_start, cell_len);
                 cell_content[cell_len] = '\0';
@@ -1415,7 +1416,7 @@ static int parse_table_cells(const char* line, char*** cells) {
                 *(end + 1) = '\0';
 
                 (*cells)[current_cell] = strdup(start);
-                free(cell_content);
+                mem_free(cell_content);
             }
             current_cell++;
             cell_start = cell_end + 1;
@@ -1502,7 +1503,7 @@ static Element* create_heading(Input* input, int level, const char* title) {
                 ((TypeElmt*)heading->type)->content_length++;
             }
         }
-        free(todo);
+        mem_free(todo);
     }
 
     // Add title (use actual_title if parsed, otherwise original title)
@@ -1530,10 +1531,10 @@ static Element* create_heading(Input* input, int level, const char* title) {
                 ((TypeElmt*)heading->type)->content_length++;
             }
         }
-        free(tags);
+        mem_free(tags);
     }
 
-    if (actual_title) free(actual_title);
+    if (actual_title) mem_free(actual_title);
 
     return heading;
 }
@@ -1565,7 +1566,7 @@ void parse_org(Input* input, const char* org_string) {
 
         // Create null-terminated line string
         size_t line_len = line_end - line_start;
-        char* line = (char*)malloc(line_len + 1);
+        char* line = (char*)mem_alloc(line_len + 1, MEM_CAT_INPUT_ORG);
         if (!line) break;
 
         strncpy(line, line_start, line_len);
@@ -1596,7 +1597,7 @@ void parse_org(Input* input, const char* org_string) {
                 int code_line_count = 0;
 
                 // Move to next line
-                free(line);
+                mem_free(line);
                 if (*line_end == '\n') {
                     line_start = line_end + 1;
                 } else {
@@ -1611,7 +1612,7 @@ void parse_org(Input* input, const char* org_string) {
                     }
 
                     line_len = line_end - line_start;
-                    line = (char*)malloc(line_len + 1);
+                    line = (char*)mem_alloc(line_len + 1, MEM_CAT_INPUT_ORG);
                     if (!line) break;
 
                     strncpy(line, line_start, line_len);
@@ -1619,7 +1620,7 @@ void parse_org(Input* input, const char* org_string) {
 
                     // Check if this is the end of the code block
                     if (is_end_src(line)) {
-                        free(line);
+                        mem_free(line);
                         break;
                     }
 
@@ -1645,9 +1646,9 @@ void parse_org(Input* input, const char* org_string) {
 
                 // Free code lines
                 for (int i = 0; i < code_line_count; i++) {
-                    free((void*)code_lines[i]);
+                    mem_free((void*)code_lines[i]);
                 }
-                free(code_lines);
+                mem_free(code_lines);
 
                 // Move to next line
                 if (*line_end == '\n') {
@@ -1665,7 +1666,7 @@ void parse_org(Input* input, const char* org_string) {
                 int quote_line_count = 0;
 
                 // Move to next line
-                free(line);
+                mem_free(line);
                 if (*line_end == '\n') {
                     line_start = line_end + 1;
                 } else {
@@ -1680,7 +1681,7 @@ void parse_org(Input* input, const char* org_string) {
                     }
 
                     line_len = line_end - line_start;
-                    line = (char*)malloc(line_len + 1);
+                    line = (char*)mem_alloc(line_len + 1, MEM_CAT_INPUT_ORG);
                     if (!line) break;
 
                     strncpy(line, line_start, line_len);
@@ -1688,7 +1689,7 @@ void parse_org(Input* input, const char* org_string) {
 
                     // Check if this is the end of the quote block
                     if (is_end_quote(line)) {
-                        free(line);
+                        mem_free(line);
                         break;
                     }
 
@@ -1713,9 +1714,9 @@ void parse_org(Input* input, const char* org_string) {
 
                 // Free quote lines
                 for (int i = 0; i < quote_line_count; i++) {
-                    free((void*)quote_lines[i]);
+                    mem_free((void*)quote_lines[i]);
                 }
-                free(quote_lines);
+                mem_free(quote_lines);
 
                 // Move to next line
                 if (*line_end == '\n') {
@@ -1731,20 +1732,20 @@ void parse_org(Input* input, const char* org_string) {
                 const char** block_lines = (const char**)malloc(1000 * sizeof(char*));
                 int block_line_count = 0;
 
-                free(line);
+                mem_free(line);
                 if (*line_end == '\n') line_start = line_end + 1; else break;
 
                 while (*line_start && block_line_count < 1000) {
                     line_end = line_start;
                     while (*line_end && *line_end != '\n') line_end++;
                     line_len = line_end - line_start;
-                    line = (char*)malloc(line_len + 1);
+                    line = (char*)mem_alloc(line_len + 1, MEM_CAT_INPUT_ORG);
                     if (!line) break;
                     strncpy(line, line_start, line_len);
                     line[line_len] = '\0';
 
                     if (is_end_example(line)) {
-                        free(line);
+                        mem_free(line);
                         break;
                     }
 
@@ -1759,9 +1760,9 @@ void parse_org(Input* input, const char* org_string) {
                 }
 
                 for (int i = 0; i < block_line_count; i++) {
-                    free((void*)block_lines[i]);
+                    mem_free((void*)block_lines[i]);
                 }
-                free(block_lines);
+                mem_free(block_lines);
 
                 if (*line_end == '\n') line_start = line_end + 1; else break;
                 continue;
@@ -1772,20 +1773,20 @@ void parse_org(Input* input, const char* org_string) {
                 const char** block_lines = (const char**)malloc(1000 * sizeof(char*));
                 int block_line_count = 0;
 
-                free(line);
+                mem_free(line);
                 if (*line_end == '\n') line_start = line_end + 1; else break;
 
                 while (*line_start && block_line_count < 1000) {
                     line_end = line_start;
                     while (*line_end && *line_end != '\n') line_end++;
                     line_len = line_end - line_start;
-                    line = (char*)malloc(line_len + 1);
+                    line = (char*)mem_alloc(line_len + 1, MEM_CAT_INPUT_ORG);
                     if (!line) break;
                     strncpy(line, line_start, line_len);
                     line[line_len] = '\0';
 
                     if (is_end_verse(line)) {
-                        free(line);
+                        mem_free(line);
                         break;
                     }
 
@@ -1800,9 +1801,9 @@ void parse_org(Input* input, const char* org_string) {
                 }
 
                 for (int i = 0; i < block_line_count; i++) {
-                    free((void*)block_lines[i]);
+                    mem_free((void*)block_lines[i]);
                 }
-                free(block_lines);
+                mem_free(block_lines);
 
                 if (*line_end == '\n') line_start = line_end + 1; else break;
                 continue;
@@ -1813,20 +1814,20 @@ void parse_org(Input* input, const char* org_string) {
                 const char** block_lines = (const char**)malloc(1000 * sizeof(char*));
                 int block_line_count = 0;
 
-                free(line);
+                mem_free(line);
                 if (*line_end == '\n') line_start = line_end + 1; else break;
 
                 while (*line_start && block_line_count < 1000) {
                     line_end = line_start;
                     while (*line_end && *line_end != '\n') line_end++;
                     line_len = line_end - line_start;
-                    line = (char*)malloc(line_len + 1);
+                    line = (char*)mem_alloc(line_len + 1, MEM_CAT_INPUT_ORG);
                     if (!line) break;
                     strncpy(line, line_start, line_len);
                     line[line_len] = '\0';
 
                     if (is_end_center(line)) {
-                        free(line);
+                        mem_free(line);
                         break;
                     }
 
@@ -1841,9 +1842,9 @@ void parse_org(Input* input, const char* org_string) {
                 }
 
                 for (int i = 0; i < block_line_count; i++) {
-                    free((void*)block_lines[i]);
+                    mem_free((void*)block_lines[i]);
                 }
-                free(block_lines);
+                mem_free(block_lines);
 
                 if (*line_end == '\n') line_start = line_end + 1; else break;
                 continue;
@@ -1855,20 +1856,20 @@ void parse_org(Input* input, const char* org_string) {
                 const char** drawer_lines = (const char**)malloc(1000 * sizeof(char*));
                 int drawer_line_count = 0;
 
-                free(line);
+                mem_free(line);
                 if (*line_end == '\n') line_start = line_end + 1; else break;
 
                 while (*line_start && drawer_line_count < 1000) {
                     line_end = line_start;
                     while (*line_end && *line_end != '\n') line_end++;
                     line_len = line_end - line_start;
-                    line = (char*)malloc(line_len + 1);
+                    line = (char*)mem_alloc(line_len + 1, MEM_CAT_INPUT_ORG);
                     if (!line) break;
                     strncpy(line, line_start, line_len);
                     line[line_len] = '\0';
 
                     if (is_drawer_end(line)) {
-                        free(line);
+                        mem_free(line);
                         break;
                     }
 
@@ -1883,9 +1884,9 @@ void parse_org(Input* input, const char* org_string) {
                 }
 
                 for (int i = 0; i < drawer_line_count; i++) {
-                    free((void*)drawer_lines[i]);
+                    mem_free((void*)drawer_lines[i]);
                 }
-                free(drawer_lines);
+                mem_free(drawer_lines);
 
                 if (*line_end == '\n') line_start = line_end + 1; else break;
                 continue;
@@ -1915,8 +1916,8 @@ void parse_org(Input* input, const char* org_string) {
                         list_push((List*)doc, {.item = (uint64_t)scheduling});
                         ((TypeElmt*)doc->type)->content_length++;
                     }
-                    free(sched_keyword);
-                    free(sched_timestamp);
+                    mem_free(sched_keyword);
+                    mem_free(sched_timestamp);
                 } else if (is_footnote_definition(line, &footnote_name, &footnote_content)) {
                     // Handle footnote definitions
                     Element* footnote_def = create_footnote_definition(input, footnote_name, footnote_content);
@@ -1924,8 +1925,8 @@ void parse_org(Input* input, const char* org_string) {
                         list_push((List*)doc, {.item = (uint64_t)footnote_def});
                         ((TypeElmt*)doc->type)->content_length++;
                     }
-                    free(footnote_name);
-                    free(footnote_content);
+                    mem_free(footnote_name);
+                    mem_free(footnote_content);
                 } else if (is_list_item(line)) {
                 // Create list item element
                 Element* list_item = create_org_element(input, "list_item");
@@ -1963,9 +1964,9 @@ void parse_org(Input* input, const char* org_string) {
 
                     // Free cell strings
                     for (int j = 0; j < cell_count; j++) {
-                        free(cells[j]);
+                        mem_free(cells[j]);
                     }
-                    free(cells);
+                    mem_free(cells);
                 }
 
                 // Look ahead for more table rows
@@ -1983,14 +1984,14 @@ void parse_org(Input* input, const char* org_string) {
 
                     // Create null-terminated line string
                     size_t next_line_len = next_line_end - next_line_start;
-                    char* next_line = (char*)malloc(next_line_len + 1);
+                    char* next_line = (char*)mem_alloc(next_line_len + 1, MEM_CAT_INPUT_ORG);
                     if (!next_line) break;
 
                     strncpy(next_line, next_line_start, next_line_len);
                     next_line[next_line_len] = '\0';
 
                     if (!is_table_row(next_line)) {
-                        free(next_line);
+                        mem_free(next_line);
                         break;
                     }
 
@@ -1999,7 +2000,7 @@ void parse_org(Input* input, const char* org_string) {
                         if (row_count == 1) {
                             first_row_is_header = true;
                         }
-                        free(next_line);
+                        mem_free(next_line);
                         // Move past separator
                         line_start = (*next_line_end == '\n') ? next_line_end + 1 : next_line_end;
                         next_line_start = line_start;
@@ -2018,12 +2019,12 @@ void parse_org(Input* input, const char* org_string) {
 
                         // Free cell strings
                         for (int j = 0; j < next_cell_count; j++) {
-                            free(next_cells[j]);
+                            mem_free(next_cells[j]);
                         }
-                        free(next_cells);
+                        mem_free(next_cells);
                     }
 
-                    free(next_line);
+                    mem_free(next_line);
 
                     // Move to next line
                     line_start = (*next_line_end == '\n') ? next_line_end + 1 : next_line_end;
@@ -2081,7 +2082,7 @@ void parse_org(Input* input, const char* org_string) {
             }
         }
 
-        free(line);
+        mem_free(line);
 
         // Move to next line
         if (*line_end == '\n') {
