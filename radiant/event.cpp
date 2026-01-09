@@ -624,6 +624,44 @@ View* find_view(View* view, DomNode* node) {
 }
 
 /**
+ * Calculate absolute window position from view-relative coordinates.
+ * Walks up the parent chain accumulating block positions.
+ * @param view The view whose coordinate system the position is relative to
+ * @param rel_x X coordinate relative to view's parent block
+ * @param rel_y Y coordinate relative to view's parent block
+ * @param iframe_offset_x Additional X offset for iframe content
+ * @param iframe_offset_y Additional Y offset for iframe content
+ * @param out_abs_x Output: absolute X in window coordinates
+ * @param out_abs_y Output: absolute Y in window coordinates
+ */
+void view_to_absolute_position(View* view, float rel_x, float rel_y,
+    float iframe_offset_x, float iframe_offset_y,
+    float* out_abs_x, float* out_abs_y) {
+
+    float abs_x = rel_x;
+    float abs_y = rel_y;
+
+    // Walk up from view's parent to accumulate block positions
+    View* parent = view->parent;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
+            abs_x += ((ViewBlock*)parent)->x;
+            abs_y += ((ViewBlock*)parent)->y;
+        }
+        parent = parent->parent;
+    }
+
+    // Add iframe offset
+    abs_x += iframe_offset_x;
+    abs_y += iframe_offset_y;
+
+    *out_abs_x = abs_x;
+    *out_abs_y = abs_y;
+}
+
+/**
  * Calculate character offset from mouse click position within a text rect
  * Returns the character offset closest to the click position
  */
@@ -804,6 +842,30 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 ViewText* text = (ViewText*)sel_view;
                 TextRect* rect = text->rect;
 
+                // Calculate the correct block position for the selection view
+                // by walking up ITS parent chain (not using evcon.block which is
+                // set based on current hit target)
+                float sel_block_x = 0, sel_block_y = 0;
+                View* parent = text->parent;
+                while (parent) {
+                    if (parent->view_type == RDT_VIEW_BLOCK ||
+                        parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                        parent->view_type == RDT_VIEW_LIST_ITEM) {
+                        sel_block_x += ((ViewBlock*)parent)->x;
+                        sel_block_y += ((ViewBlock*)parent)->y;
+                    }
+                    parent = parent->parent;
+                }
+
+                // Add the iframe offset that was stored when selection started
+                sel_block_x += state->selection->iframe_offset_x;
+                sel_block_y += state->selection->iframe_offset_y;
+
+                // Save evcon.block and temporarily set it to the selection view's block position
+                BlockBlot saved_block = evcon.block;
+                evcon.block.x = sel_block_x;
+                evcon.block.y = sel_block_y;
+
                 // Calculate character offset from mouse position using original text rect
                 int char_offset = calculate_char_offset_from_position(
                     &evcon, text, rect,
@@ -821,17 +883,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 calculate_position_from_char_offset(&evcon, text, rect,
                     char_offset, &caret_x, &caret_y, &caret_height);
 
+                // Restore evcon.block
+                evcon.block = saved_block;
+
                 if (state->caret) {
                     state->caret->x = caret_x;
                     state->caret->y = caret_y;
                     state->caret->height = caret_height;
+
+                    // Use the same iframe offset as the selection
+                    state->caret->iframe_offset_x = state->selection->iframe_offset_x;
+                    state->caret->iframe_offset_y = state->selection->iframe_offset_y;
                 }
 
                 // Update selection end visual coordinates for rendering
                 if (state->selection) {
                     state->selection->end_x = caret_x;
                     state->selection->end_y = caret_y + caret_height;
-                    log_debug("[SELECTION DRAG] updated end coords: (%.1f, %.1f)", caret_x, caret_y + caret_height);
                 }
 
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, state->selection->is_collapsed);
@@ -914,7 +982,29 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->caret->x = caret_x;
                     state->caret->y = caret_y;
                     state->caret->height = caret_height;
-                    log_info("CARET VISUAL: x=%.1f y=%.1f height=%.1f", caret_x, caret_y, caret_height);
+
+                    // Calculate iframe offset: evcon.block has the absolute position of
+                    // the text's parent block (including any iframe offset). We need to
+                    // find the offset that isn't accounted for when walking up the parent
+                    // chain within the iframe document.
+                    float chain_x = 0, chain_y = 0;
+                    View* parent = text->parent;
+                    while (parent) {
+                        if (parent->view_type == RDT_VIEW_BLOCK ||
+                            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            parent->view_type == RDT_VIEW_LIST_ITEM) {
+                            chain_x += ((ViewBlock*)parent)->x;
+                            chain_y += ((ViewBlock*)parent)->y;
+                        }
+                        parent = parent->parent;
+                    }
+                    // iframe offset is the difference between evcon.block and chain position
+                    state->caret->iframe_offset_x = evcon.block.x - chain_x;
+                    state->caret->iframe_offset_y = evcon.block.y - chain_y;
+
+                    log_info("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
+                        caret_x, caret_y, caret_height,
+                        state->caret->iframe_offset_x, state->caret->iframe_offset_y);
                 }
 
                 // Start new selection if shift not pressed, otherwise extend
@@ -928,6 +1018,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         state->selection->start_y = caret_y;
                         state->selection->end_x = caret_x;
                         state->selection->end_y = caret_y + caret_height;
+                        // Copy iframe offset from caret
+                        state->selection->iframe_offset_x = state->caret->iframe_offset_x;
+                        state->selection->iframe_offset_y = state->caret->iframe_offset_y;
                     }
                 } else if (state->selection && !state->selection->is_collapsed) {
                     // Shift-click extends selection
