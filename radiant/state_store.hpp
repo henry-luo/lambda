@@ -110,6 +110,8 @@ typedef struct CaretState {
     float x;                       // visual x position (pixels from element left)
     float y;                       // visual y position (pixels from element top)
     float height;                  // caret height (based on font)
+    float iframe_offset_x;         // iframe x offset if caret is inside an iframe
+    float iframe_offset_y;         // iframe y offset if caret is inside an iframe
     bool visible;                  // caret visibility (for blinking)
     uint64_t blink_time;           // timestamp for blink cycle
 } CaretState;
@@ -131,6 +133,8 @@ typedef struct SelectionState {
     bool is_selecting;             // true if user is actively selecting (mouse down)
     float start_x, start_y;        // visual start position
     float end_x, end_y;            // visual end position
+    float iframe_offset_x;         // iframe offset x (for content inside iframes)
+    float iframe_offset_y;         // iframe offset y (for content inside iframes)
 } SelectionState;
 
 /**

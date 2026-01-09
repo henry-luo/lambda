@@ -1637,6 +1637,7 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
 
     tvg_canvas_push(rdcon->canvas, shape);
+    tvg_canvas_draw(rdcon->canvas, false);  // Draw immediately to buffer
     log_debug("[FOCUS] Rendered focus outline at (%.0f,%.0f) size %.0fx%.0f", ox, oy, ow, oh);
 }
 
@@ -1665,55 +1666,40 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     // The caret x/y is already relative to the text's parent block
     View* parent = view->parent;  // Start from parent, not from view itself
     while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
             x += ((ViewBlock*)parent)->x;
             y += ((ViewBlock*)parent)->y;
         }
         parent = parent->parent;
     }
 
+    // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
+    x += caret->iframe_offset_x;
+    y += caret->iframe_offset_y;
+
+    // Store CSS pixel coordinates for logging
+    float css_x = x;
+    float css_y = y;
+
     // Scale to physical pixels
     x *= s;  y *= s;
     float height = caret->height * s;
     float caret_width = 3.0f * s;  // 3 CSS pixels wide
 
-    // Use ThorVG to draw a filled rectangle for the caret
+    log_debug("[CARET] Before render: CSS pos (%.1f,%.1f), physical pos (%.1f,%.1f) height=%.1f", 
+        css_x, css_y, x, y, height);
+
+    // Draw using ThorVG for proper integration with scene graph
     Tvg_Paint* shape = tvg_shape_new();
-    if (!shape) {
-        return;
-    }
-
-    // Draw a filled rectangle (not a stroke line)
-    tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0);
-
-    // Fill with bright RED color
-    tvg_shape_set_fill_color(shape, 0xFF, 0x00, 0x00, 0xFF);
-
-    tvg_canvas_push(rdcon->canvas, shape);
-
-    // ALSO draw directly to surface buffer as backup
-    ImageSurface* surface = rdcon->ui_context->surface;
-    if (surface && surface->pixels) {
-        uint32_t* pixels = (uint32_t*)surface->pixels;
-        int pitch = surface->pitch / 4;  // pitch in uint32_t units
-        int ix = (int)x;
-        int iy = (int)y;
-        int iw = (int)caret_width;
-        int ih = (int)height;
-
-        // Clamp to surface bounds
-        if (ix < 0) { iw += ix; ix = 0; }
-        if (iy < 0) { ih += iy; iy = 0; }
-        if (ix + iw > surface->width) iw = surface->width - ix;
-        if (iy + ih > surface->height) ih = surface->height - iy;
-
-        // Draw red rectangle directly to pixel buffer (RGBA: 0xFFFF0000 = red)
-        uint32_t red_color = 0xFF0000FF;  // ABGR format: Alpha=FF, Blue=00, Green=00, Red=FF
-        for (int py = iy; py < iy + ih && py < surface->height; py++) {
-            for (int px = ix; px < ix + iw && px < surface->width; px++) {
-                pixels[py * pitch + px] = red_color;
-            }
-        }
+    if (shape) {
+        tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0);
+        // Red caret color
+        tvg_shape_set_fill_color(shape, 0xFF, 0x00, 0x00, 0xFF);
+        tvg_canvas_push(rdcon->canvas, shape);
+        tvg_canvas_draw(rdcon->canvas, false);  // Draw immediately to buffer
+        log_debug("[CARET] ThorVG: Drew caret at (%.0f,%.0f) size %.0fx%.0f", x, y, caret_width, height);
     }
 
     log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, height);
@@ -1741,9 +1727,6 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     
     View* view = sel->view;
     float s = rdcon->scale;
-    log_debug("[SELECTION] Rendering: anchor=%d, focus=%d, start=(%.1f,%.1f), end=(%.1f,%.1f)",
-        sel->anchor_offset, sel->focus_offset,
-        sel->start_x, sel->start_y, sel->end_x, sel->end_y);
     
     // For single-line selection, draw a single rectangle
     // Multi-line selection would require multiple rectangles per line
@@ -1761,7 +1744,9 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     // (same as caret rendering - coordinates are relative to parent block)
     View* parent = view->parent;
     while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
             ViewBlock* block = (ViewBlock*)parent;
             log_debug("[SELECTION] Adding block offset: (%.1f,%.1f)", block->x, block->y);
             start_x += block->x;
@@ -1771,6 +1756,12 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
         }
         parent = parent->parent;
     }
+
+    // Add iframe offset (if selection is inside an iframe, parent chain stops at iframe doc root)
+    start_x += sel->iframe_offset_x;
+    start_y += sel->iframe_offset_y;
+    end_x += sel->iframe_offset_x;
+    end_y += sel->iframe_offset_y;
 
     // Scale to physical pixels
     start_x *= s;  start_y *= s;
@@ -1786,64 +1777,16 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     float sel_height = end_y - start_y;  // Use line height approximation
     if (sel_height <= 0) sel_height = 20 * s;  // default line height if not set (scaled)
 
-    // Create selection highlight shape
+    // Draw selection highlight using ThorVG
     Tvg_Paint* shape = tvg_shape_new();
-    if (!shape) return;
-
-    tvg_shape_append_rect(shape, min_x, min_y, sel_width, sel_height, 0, 0);
-
-    // Selection highlight color: semi-transparent blue (standard selection blue)
-    // #0078D7 at 50% opacity
-    tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);
-
-    tvg_canvas_push(rdcon->canvas, shape);
-    
-    // ALSO draw directly to surface buffer as backup (same as caret)
-    ImageSurface* surface = rdcon->ui_context->surface;
-    if (surface && surface->pixels) {
-        uint32_t* pixels = (uint32_t*)surface->pixels;
-        int pitch = surface->pitch / 4;  // pitch in uint32_t units
-        int ix = (int)min_x;
-        int iy = (int)min_y;
-        int iw = (int)sel_width;
-        int ih = (int)sel_height;
-        
-        log_debug("[SELECTION] Direct draw: ix=%d, iy=%d, iw=%d, ih=%d, surface=%dx%d, pitch=%d",
-            ix, iy, iw, ih, surface->width, surface->height, pitch);
-        
-        // Clamp to surface bounds
-        if (ix < 0) { iw += ix; ix = 0; }
-        if (iy < 0) { ih += iy; iy = 0; }
-        if (ix + iw > surface->width) iw = surface->width - ix;
-        if (iy + ih > surface->height) ih = surface->height - iy;
-        
-        log_debug("[SELECTION] After clamp: ix=%d, iy=%d, iw=%d, ih=%d",
-            ix, iy, iw, ih);
-        
-        // Draw selection highlight using standard browser selection color
-        // ABGR format: Alpha blend blue selection over existing content  
-        int pixels_drawn = 0;
-        for (int py = iy; py < iy + ih && py < surface->height; py++) {
-            for (int px = ix; px < ix + iw && px < surface->width; px++) {
-                uint32_t existing = pixels[py * pitch + px];
-                // Extract existing RGB (ABGR format)
-                uint8_t er = existing & 0xFF;
-                uint8_t eg = (existing >> 8) & 0xFF;
-                uint8_t eb = (existing >> 16) & 0xFF;
-                
-                // Use "invert" style for better text visibility on any background
-                // This gives the classic selection look where text remains readable
-                uint8_t nr = 255 - er;
-                uint8_t ng = 255 - eg;
-                uint8_t nb = 255 - eb;
-                
-                pixels[py * pitch + px] = 0xFF000000 | (nb << 16) | (ng << 8) | nr;
-                pixels_drawn++;
-            }
-        }
-        log_debug("[SELECTION] Drew %d pixels", pixels_drawn);
+    if (shape) {
+        tvg_shape_append_rect(shape, min_x, min_y, sel_width, sel_height, 0, 0);
+        // Semi-transparent blue selection highlight (typical system selection color)
+        tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);  // Blue with 50% alpha
+        tvg_canvas_push(rdcon->canvas, shape);
+        tvg_canvas_draw(rdcon->canvas, false);  // Draw immediately to buffer
     }
-    
+
     log_debug("[SELECTION] Rendered selection at (%.0f,%.0f) size %.0fx%.0f", min_x, min_y, sel_width, sel_height);
 }
 
@@ -1860,8 +1803,8 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
     
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
     
-    // Selection is rendered inline during text rendering (render_text_view)
-    // This ensures selection background appears behind text, not on top
+    // Render selection highlight (before caret so caret appears on top)
+    render_selection(rdcon, state);
     
     // Caret rendered on top of content
     render_caret(rdcon, state);
