@@ -8,6 +8,7 @@ extern "C" {
 #include <string.h>
 #include <math.h>
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 }
 
 // Forward declarations
@@ -18,7 +19,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (!container) return;
     log_debug("Initializing grid container for %p\n", container);
 
-    GridContainerLayout* grid = (GridContainerLayout*)calloc(1, sizeof(GridContainerLayout));
+    GridContainerLayout* grid = (GridContainerLayout*)mem_calloc(1, sizeof(GridContainerLayout), MEM_CAT_LAYOUT);
     lycon->grid_container = grid;
     grid->lycon = lycon;  // Store layout context for intrinsic sizing
 
@@ -55,19 +56,19 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Initialize dynamic arrays
     grid->allocated_items = 8;
-    grid->grid_items = (ViewBlock**)calloc(grid->allocated_items, sizeof(ViewBlock*));
+    grid->grid_items = (ViewBlock**)mem_calloc(grid->allocated_items, sizeof(ViewBlock*), MEM_CAT_LAYOUT);
 
     // Only allocate new areas array if not already copied from embed->grid
     if (!grid->grid_areas || grid->area_count == 0) {
         grid->allocated_areas = 4;
-        grid->grid_areas = (GridArea*)calloc(grid->allocated_areas, sizeof(GridArea));
+        grid->grid_areas = (GridArea*)mem_calloc(grid->allocated_areas, sizeof(GridArea), MEM_CAT_LAYOUT);
         grid->area_count = 0;  // Reset if we allocated new
     }
     // If grid_areas was copied from embed->grid, keep it as-is
     log_debug("Grid areas after init: area_count=%d, grid_areas=%p", grid->area_count, (void*)grid->grid_areas);
 
     grid->allocated_line_names = 8;
-    grid->line_names = (GridLineName*)calloc(grid->allocated_line_names, sizeof(GridLineName));
+    grid->line_names = (GridLineName*)mem_calloc(grid->allocated_line_names, sizeof(GridLineName), MEM_CAT_LAYOUT);
 
     // Initialize track lists - only create new ones if not already copied from embed->grid
     // Track ownership to avoid double-free
@@ -129,7 +130,7 @@ void cleanup_grid_container(LayoutContext* lycon) {
                 destroy_grid_track_size(grid->computed_rows[i].size);
             }
         }
-        free(grid->computed_rows);
+        mem_free(grid->computed_rows);
     }
 
     if (grid->computed_columns) {
@@ -139,23 +140,23 @@ void cleanup_grid_container(LayoutContext* lycon) {
                 destroy_grid_track_size(grid->computed_columns[i].size);
             }
         }
-        free(grid->computed_columns);
+        mem_free(grid->computed_columns);
     }
 
     // Free grid areas
     for (int i = 0; i < grid->area_count; i++) {
         destroy_grid_area(&grid->grid_areas[i]);
     }
-    free(grid->grid_areas);
+    mem_free(grid->grid_areas);
 
     // Free line names
     for (int i = 0; i < grid->line_name_count; i++) {
-        free(grid->line_names[i].name);
+        mem_free(grid->line_names[i].name);
     }
-    free(grid->line_names);
+    mem_free(grid->line_names);
 
-    free(grid->grid_items);
-    free(grid);
+    mem_free(grid->grid_items);
+    mem_free(grid);
     log_debug("Grid container cleanup complete\n");
 }
 
@@ -376,8 +377,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     // Ensure we have enough space in the grid items array
     if (count > grid_layout->allocated_items) {
         grid_layout->allocated_items = count * 2;
-        grid_layout->grid_items = (ViewBlock**)realloc(
-            grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*));
+        grid_layout->grid_items = (ViewBlock**)mem_realloc(
+            grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*), MEM_CAT_LAYOUT);
     }
 
     // Collect items - ONLY collect element nodes, skip text nodes
@@ -916,7 +917,7 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
 
             // Expand the track list
             int new_track_count = cols->track_count - 1 + (repeat_count * ts->repeat_track_count);
-            GridTrackSize** new_tracks = (GridTrackSize**)calloc(new_track_count, sizeof(GridTrackSize*));
+            GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
             if (!new_tracks) return;
 
             int dest = 0;
@@ -938,7 +939,7 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
 
             // Replace track list (but don't free old one if shared)
             if (grid_layout->owns_template_columns) {
-                free(cols->tracks);
+                mem_free(cols->tracks);
             }
             cols->tracks = new_tracks;
             cols->track_count = new_track_count;
@@ -982,7 +983,7 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             // TODO: Calculate actual row requirements based on items and columns
 
             int new_track_count = rows->track_count - 1 + (repeat_count * ts->repeat_track_count);
-            GridTrackSize** new_tracks = (GridTrackSize**)calloc(new_track_count, sizeof(GridTrackSize*));
+            GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
             if (!new_tracks) return;
 
             int dest = 0;
@@ -999,7 +1000,7 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             }
 
             if (grid_layout->owns_template_rows) {
-                free(rows->tracks);
+                mem_free(rows->tracks);
             }
             rows->tracks = new_tracks;
             rows->track_count = new_track_count;

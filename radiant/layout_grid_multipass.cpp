@@ -9,6 +9,7 @@
 
 extern "C" {
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 }
 
 // Multi-pass grid layout implementation
@@ -736,7 +737,7 @@ static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, bo
 
     // We need (track_count + 1) positions for grid lines
     int line_count = track_count + 1;
-    float* positions = (float*)calloc(line_count, sizeof(float));
+    float* positions = (float*)mem_calloc(line_count, sizeof(float), MEM_CAT_LAYOUT);
     if (!positions) return nullptr;
 
     float current_pos = container_offset;
@@ -797,8 +798,8 @@ static bool compute_grid_area_for_absolute(
     float* row_positions = calculate_grid_line_positions(grid_layout, true, container_offset_y, &row_line_count);
 
     if (!col_positions || !row_positions) {
-        free(col_positions);
-        free(row_positions);
+        mem_free(col_positions);
+        mem_free(row_positions);
         return false;
     }
 
@@ -839,8 +840,8 @@ static bool compute_grid_area_for_absolute(
               col_start_line, col_end_line, row_start_line, row_end_line,
               *out_x, *out_y, *out_width, *out_height);
 
-    free(col_positions);
-    free(row_positions);
+    mem_free(col_positions);
+    mem_free(row_positions);
     return true;
 }
 

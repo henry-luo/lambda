@@ -780,7 +780,7 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
  */
 static char* read_pdf_file(const char* filename, size_t* out_size) {
     if (out_size) *out_size = 0;
-    
+
     FILE* file = fopen(filename, "rb");
     if (!file) {
         log_error("Failed to open file: %s", filename);
@@ -791,7 +791,7 @@ static char* read_pdf_file(const char* filename, size_t* out_size) {
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char* content = (char*)malloc(size + 1);
+    char* content = (char*)mem_alloc(size + 1, MEM_CAT_INPUT_CSS);
     if (!content) {
         fclose(file);
         return NULL;
