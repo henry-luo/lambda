@@ -924,6 +924,8 @@ void selection_start(RadiantState* state, View* view, int char_offset) {
     SelectionState* sel = state->selection;
     memset(sel, 0, sizeof(SelectionState));
     sel->view = view;
+    sel->anchor_view = view;
+    sel->focus_view = view;
     sel->anchor_offset = char_offset;
     sel->focus_offset = char_offset;
     sel->is_collapsed = true;
@@ -940,7 +942,9 @@ void selection_extend(RadiantState* state, int char_offset) {
 
     SelectionState* sel = state->selection;
     sel->focus_offset = char_offset;
-    sel->is_collapsed = (sel->anchor_offset == sel->focus_offset);
+    // Check if collapsed: same view and same offset
+    sel->is_collapsed = (sel->anchor_view == sel->focus_view && 
+                         sel->anchor_offset == sel->focus_offset);
 
     // Move caret to focus position
     if (state->caret) {
@@ -951,6 +955,30 @@ void selection_extend(RadiantState* state, int char_offset) {
     state->needs_repaint = true;
 
     log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, sel->is_collapsed);
+}
+
+void selection_extend_to_view(RadiantState* state, View* view, int char_offset) {
+    if (!state || !state->selection) return;
+
+    SelectionState* sel = state->selection;
+    sel->focus_view = view;
+    sel->view = view;  // keep view updated for compatibility
+    sel->focus_offset = char_offset;
+    // Check if collapsed: same view and same offset
+    sel->is_collapsed = (sel->anchor_view == sel->focus_view && 
+                         sel->anchor_offset == sel->focus_offset);
+
+    // Move caret to focus position in the new view
+    if (state->caret) {
+        state->caret->view = view;
+        state->caret->char_offset = char_offset;
+        state->caret->visible = true;
+    }
+
+    state->needs_repaint = true;
+
+    log_debug("selection_extend_to_view: focus_view=%p, focus_offset=%d, anchor_view=%p, collapsed=%d",
+        view, char_offset, sel->anchor_view, sel->is_collapsed);
 }
 
 void selection_set(RadiantState* state, View* view, int anchor_offset, int focus_offset) {
@@ -964,6 +992,8 @@ void selection_set(RadiantState* state, View* view, int anchor_offset, int focus
 
     SelectionState* sel = state->selection;
     sel->view = view;
+    sel->anchor_view = view;
+    sel->focus_view = view;
     sel->anchor_offset = anchor_offset;
     sel->focus_offset = focus_offset;
     sel->is_collapsed = (anchor_offset == focus_offset);
