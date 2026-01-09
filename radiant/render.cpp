@@ -198,6 +198,129 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
 
 extern CssEnum get_white_space_value(DomNode* node);
 
+/**
+ * Compare two views in document order (pre-order tree traversal order).
+ * Returns:
+ *   -1 if view_a comes before view_b
+ *    0 if view_a equals view_b
+ *    1 if view_a comes after view_b
+ * 
+ * Algorithm: Walk up to find common ancestor, then compare sibling order.
+ */
+static int compare_view_order(View* view_a, View* view_b) {
+    if (view_a == view_b) return 0;
+    if (!view_a) return -1;
+    if (!view_b) return 1;
+    
+    // Build ancestor chains for both views
+    View* chain_a[64];  // max depth 64
+    View* chain_b[64];
+    int depth_a = 0, depth_b = 0;
+    
+    for (View* v = view_a; v && depth_a < 64; v = v->parent) {
+        chain_a[depth_a++] = v;
+    }
+    for (View* v = view_b; v && depth_b < 64; v = v->parent) {
+        chain_b[depth_b++] = v;
+    }
+    
+    // Find common ancestor by walking up from root
+    int i = depth_a - 1, j = depth_b - 1;
+    while (i >= 0 && j >= 0 && chain_a[i] == chain_b[j]) {
+        i--; j--;
+    }
+    
+    // Now chain_a[i+1] == chain_b[j+1] is the common ancestor
+    // Compare chain_a[i] and chain_b[j] (children of common ancestor)
+    if (i < 0) {
+        // view_a is ancestor of view_b, so view_a comes first
+        return -1;
+    }
+    if (j < 0) {
+        // view_b is ancestor of view_a, so view_b comes first
+        return 1;
+    }
+    
+    // Compare sibling order: which comes first among children of common ancestor?
+    View* child_a = chain_a[i];
+    View* child_b = chain_b[j];
+    
+    // Walk through siblings to find which comes first
+    for (View* sib = child_a; sib; sib = (View*)sib->next_sibling) {
+        if (sib == child_b) {
+            return -1;  // child_a comes before child_b
+        }
+    }
+    return 1;  // child_b comes before child_a
+}
+
+/**
+ * Check if a text view is within a cross-view selection and determine
+ * which portion of the text should be selected.
+ * 
+ * Returns:
+ *   0: not in selection
+ *   1: fully selected (all text)
+ *   2: partially selected (check *start_offset and *end_offset)
+ */
+static int get_selection_range_for_view(SelectionState* sel, View* text_view, 
+    int text_length, int* start_offset, int* end_offset) {
+    
+    if (!sel || sel->is_collapsed) return 0;
+    
+    View* anchor_view = sel->anchor_view;
+    View* focus_view = sel->focus_view;
+    
+    // Single-view selection (legacy)
+    if (!anchor_view || !focus_view) {
+        anchor_view = sel->view;
+        focus_view = sel->view;
+    }
+    
+    // Same view for anchor and focus
+    if (anchor_view == focus_view) {
+        if (text_view != anchor_view) return 0;
+        // Normalize selection range
+        *start_offset = sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
+        *end_offset = sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
+        return 2;  // partially selected
+    }
+    
+    // Cross-view selection: determine order
+    int anchor_vs_focus = compare_view_order(anchor_view, focus_view);
+    View* first_view = (anchor_vs_focus <= 0) ? anchor_view : focus_view;
+    View* last_view = (anchor_vs_focus <= 0) ? focus_view : anchor_view;
+    int first_offset = (anchor_vs_focus <= 0) ? sel->anchor_offset : sel->focus_offset;
+    int last_offset = (anchor_vs_focus <= 0) ? sel->focus_offset : sel->anchor_offset;
+    
+    // Check if text_view is the first view
+    if (text_view == first_view) {
+        *start_offset = first_offset;
+        *end_offset = text_length;  // select to end
+        return 2;
+    }
+    
+    // Check if text_view is the last view
+    if (text_view == last_view) {
+        *start_offset = 0;
+        *end_offset = last_offset;
+        return 2;
+    }
+    
+    // Check if text_view is between first and last
+    int view_vs_first = compare_view_order(text_view, first_view);
+    int view_vs_last = compare_view_order(text_view, last_view);
+    
+    if (view_vs_first > 0 && view_vs_last < 0) {
+        // text_view is between first and last - fully selected
+        *start_offset = 0;
+        *end_offset = text_length;
+        return 1;
+    }
+    
+    return 0;  // not in selection
+}
+
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
@@ -215,15 +338,24 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         return;
     }
     
-    // Check if this text view has a selection
+    // Check if this text view has a selection (supports cross-view selection)
     SelectionState* sel = rdcon->selection;
-    bool has_selection = sel && !sel->is_collapsed && sel->view == (View*)text_view;
     int sel_start = 0, sel_end = 0;
+    
+    // Calculate total text length for cross-view selection check
+    int total_text_length = 0;
+    if (str) {
+        total_text_length = strlen((const char*)str);
+    }
+    
+    // Use the new cross-view aware selection check
+    int selection_type = get_selection_range_for_view(sel, (View*)text_view, total_text_length, &sel_start, &sel_end);
+    bool has_selection = selection_type > 0;
+    
     if (has_selection) {
-        // Normalize selection range (anchor can be after focus)
-        sel_start = sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
-        sel_end = sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
-        log_debug("[SELECTION] Text view has selection: start=%d, end=%d", sel_start, sel_end);
+        log_debug("[SELECTION] Text view %p has selection (type=%d): start=%d, end=%d, anchor_view=%p, focus_view=%p",
+            text_view, selection_type, sel_start, sel_end,
+            sel ? sel->anchor_view : nullptr, sel ? sel->focus_view : nullptr);
     }
 
     // Apply text color from text_view if set (PDF text uses this for fill color)
