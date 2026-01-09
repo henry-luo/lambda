@@ -213,6 +213,17 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         log_debug("no text rect for text view");
         return;
     }
+    
+    // Check if this text view has a selection
+    SelectionState* sel = rdcon->selection;
+    bool has_selection = sel && !sel->is_collapsed && sel->view == (View*)text_view;
+    int sel_start = 0, sel_end = 0;
+    if (has_selection) {
+        // Normalize selection range (anchor can be after focus)
+        sel_start = sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
+        sel_end = sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
+        log_debug("[SELECTION] Text view has selection: start=%d, end=%d", sel_start, sel_end);
+    }
 
     // Apply text color from text_view if set (PDF text uses this for fill color)
     Color saved_color = rdcon->color;
@@ -338,11 +349,26 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         // Render the text with adjusted spacing
         bool has_space = false;  uint32_t codepoint;
         bool is_word_start = true;  // Track word boundaries for capitalize
+        int char_index = text_rect->start_index;  // Track character offset for selection
+        
+        // Selection background color (standard browser selection blue: #3399FF)
+        uint32_t sel_bg_color = 0xFFFF9933;  // ABGR format: #3399FF
+        
         while (p < end) {
+            // Check if current character is in selection range
+            bool is_selected = has_selection && char_index >= sel_start && char_index < sel_end;
+            
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
                 if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
+                    
+                    // Draw selection background for selected space
+                    if (is_selected) {
+                        Rect sel_rect = {x, y, space_width, text_rect->height * s};
+                        fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip);
+                    }
+                    
                     // Render space by advancing x position
                     // All spaces are rendered (not just non-trailing) because layout has
                     // already determined correct positioning including inter-element whitespace
@@ -351,12 +377,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 // else  // skip consecutive spaces
                 is_word_start = true;  // Next non-space is word start
                 p++;
+                char_index++;
             }
             else {
                 has_space = false;
                 int bytes = utf8_to_codepoint(p, &codepoint);
-                if (bytes <= 0) { p++;  codepoint = 0; }
-                else { p += bytes; }
+                if (bytes <= 0) { p++;  codepoint = 0;  char_index++; }
+                else { p += bytes;  char_index++; }
 
                 // Apply text-transform before loading glyph
                 codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
@@ -393,6 +420,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else {
                     // draw the glyph to the image buffer
                     float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                    
+                    // Draw selection background BEFORE glyph (so text appears on top)
+                    if (is_selected) {
+                        float glyph_width = glyph->advance.x / 64.0f;
+                        Rect sel_rect = {x, y, glyph_width, text_rect->height * s};
+                        fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip);
+                    }
                     
                     // Debug: Check bitmap data for Monaco (capped to avoid log spam)
                     static int bitmap_debug_count = 0;
@@ -1689,28 +1723,47 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
  * Draws semi-transparent blue rectangles behind selected text
  */
 void render_selection(RenderContext* rdcon, RadiantState* state) {
-    if (!state || !state->selection) return;
-    if (state->selection->is_collapsed) return;  // no selection
-    if (!state->selection->view) return;
-    
+    if (!state || !state->selection) {
+        return;
+    }
     SelectionState* sel = state->selection;
+    log_debug("[SELECTION] check: anchor=%d, focus=%d, is_collapsed=%d, view=%p",
+        sel->anchor_offset, sel->focus_offset, sel->is_collapsed, (void*)sel->view);
+    if (state->selection->is_collapsed) {
+        return;  // no selection
+    }
+    if (!state->selection->view) {
+        log_debug("[SELECTION] No selection view");
+        return;
+    }
+    
     View* view = sel->view;
     float s = rdcon->scale;
+    
+    log_debug("[SELECTION] Rendering: anchor=%d, focus=%d, start=(%.1f,%.1f), end=(%.1f,%.1f)",
+        sel->anchor_offset, sel->focus_offset,
+        sel->start_x, sel->start_y, sel->end_x, sel->end_y);
     
     // For single-line selection, draw a single rectangle
     // Multi-line selection would require multiple rectangles per line
     
     // Calculate absolute position (CSS pixels)
+    // start_x/y and end_x/y are relative to the parent block (from TextRect coordinates)
     float start_x = sel->start_x;
     float start_y = sel->start_y;
     float end_x = sel->end_x;
     float end_y = sel->end_y;
     
-    // Walk up to get absolute coordinates (CSS pixels)
-    View* parent = view;
+    log_debug("[SELECTION] Before parent walk: start=(%.1f,%.1f), view=%p, view_type=%d",
+        start_x, start_y, (void*)view, view->view_type);
+    
+    // Walk up from the text view's parent to get absolute coordinates
+    // (same as caret rendering - coordinates are relative to parent block)
+    View* parent = view->parent;
     while (parent) {
         if (parent->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* block = (ViewBlock*)parent;
+            log_debug("[SELECTION] Adding block offset: (%.1f,%.1f)", block->x, block->y);
             start_x += block->x;
             start_y += block->y;
             end_x += block->x;
@@ -1718,6 +1771,8 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
         }
         parent = parent->parent;
     }
+    
+    log_debug("[SELECTION] After parent walk: start=(%.1f,%.1f)", start_x, start_y);
     
     // Scale to physical pixels
     start_x *= s;  start_y *= s;
@@ -1744,20 +1799,73 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);
     
     tvg_canvas_push(rdcon->canvas, shape);
+    
+    // ALSO draw directly to surface buffer as backup (same as caret)
+    ImageSurface* surface = rdcon->ui_context->surface;
+    if (surface && surface->pixels) {
+        uint32_t* pixels = (uint32_t*)surface->pixels;
+        int pitch = surface->pitch / 4;  // pitch in uint32_t units
+        int ix = (int)min_x;
+        int iy = (int)min_y;
+        int iw = (int)sel_width;
+        int ih = (int)sel_height;
+        
+        log_debug("[SELECTION] Direct draw: ix=%d, iy=%d, iw=%d, ih=%d, surface=%dx%d, pitch=%d",
+            ix, iy, iw, ih, surface->width, surface->height, pitch);
+        
+        // Clamp to surface bounds
+        if (ix < 0) { iw += ix; ix = 0; }
+        if (iy < 0) { ih += iy; iy = 0; }
+        if (ix + iw > surface->width) iw = surface->width - ix;
+        if (iy + ih > surface->height) ih = surface->height - iy;
+        
+        log_debug("[SELECTION] After clamp: ix=%d, iy=%d, iw=%d, ih=%d",
+            ix, iy, iw, ih);
+        
+        // Draw selection highlight using standard browser selection color
+        // ABGR format: Alpha blend blue selection over existing content  
+        int pixels_drawn = 0;
+        for (int py = iy; py < iy + ih && py < surface->height; py++) {
+            for (int px = ix; px < ix + iw && px < surface->width; px++) {
+                uint32_t existing = pixels[py * pitch + px];
+                // Extract existing RGB (ABGR format)
+                uint8_t er = existing & 0xFF;
+                uint8_t eg = (existing >> 8) & 0xFF;
+                uint8_t eb = (existing >> 16) & 0xFF;
+                
+                // Use "invert" style for better text visibility on any background
+                // This gives the classic selection look where text remains readable
+                uint8_t nr = 255 - er;
+                uint8_t ng = 255 - eg;
+                uint8_t nb = 255 - eb;
+                
+                pixels[py * pitch + px] = 0xFF000000 | (nb << 16) | (ng << 8) | nr;
+                pixels_drawn++;
+            }
+        }
+        log_debug("[SELECTION] Drew %d pixels", pixels_drawn);
+    }
+    
     log_debug("[SELECTION] Rendered selection at (%.0f,%.0f) size %.0fx%.0f", min_x, min_y, sel_width, sel_height);
 }
 
 /**
- * Render all interactive state overlays (focus, caret, selection)
+ * Render all interactive state overlays (caret, focus)
  * Called after main content rendering, before canvas sync
+ * Note: Selection is now rendered inline during text rendering
  */
 void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
-    if (!state) return;
+    if (!state) {
+        log_debug("[UI_OVERLAY] No state");
+        return;
+    }
     
-    // Selection is rendered first (behind text/caret)
-    render_selection(rdcon, state);
+    log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
     
-    // Caret rendered on top of selection
+    // Selection is rendered inline during text rendering (render_text_view)
+    // This ensures selection background appears behind text, not on top
+    
+    // Caret rendered on top of content
     render_caret(rdcon, state);
     
     // Focus outline rendered last (outside content)
@@ -1781,6 +1889,13 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     // Initialize HiDPI scale factor for converting CSS logical pixels to physical surface pixels
     rdcon->scale = uicon->pixel_ratio > 0 ? uicon->pixel_ratio : 1.0f;
     log_debug("render_init: scale factor = %.2f (pixel_ratio)", rdcon->scale);
+    
+    // Initialize selection state from document state
+    if (uicon->document && uicon->document->state && uicon->document->state->selection) {
+        rdcon->selection = uicon->document->state->selection;
+    } else {
+        rdcon->selection = nullptr;
+    }
 
     // load default font
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
@@ -1881,7 +1996,11 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     // Render UI overlays (focus outline, caret, selection) on top of content
     if (uicon->document && uicon->document->state) {
+        log_info("[RENDER] calling render_ui_overlays, state=%p", (void*)uicon->document->state);
         render_ui_overlays(&rdcon, uicon->document->state);
+    } else {
+        log_info("[RENDER] no state for overlays: doc=%p, state=%p", 
+            (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
 
     // all shapes should already have been drawn to the canvas
