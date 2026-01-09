@@ -6,6 +6,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/url.h"
+#include "../lib/memtrack.h"
 }
 #include "../lib/strbuf.h"
 #include <stdio.h>
@@ -82,7 +83,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
     // Transform text if needed
-    char* text_content = (char*)malloc(text_rect->length * 4 + 1);  // Allocate extra for UTF-8
+    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 1, MEM_CAT_RENDER);  // Allocate extra for UTF-8
     if (text_transform != CSS_VALUE_NONE) {
         // Apply text-transform character by character
         unsigned char* src = str + text_rect->start_index;
@@ -242,7 +243,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
 
-    free(text_content);  strbuf_free(escaped_text);
+    mem_free(text_content);  strbuf_free(escaped_text);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -694,7 +695,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     strbuf_append_str(ctx.svg_content, "</svg>\n");
 
     // Extract the final SVG string
-    char* result = strdup(ctx.svg_content->str);
+    char* result = mem_strdup(ctx.svg_content->str, MEM_CAT_RENDER);
     strbuf_free(ctx.svg_content);
 
     return result;
@@ -822,13 +823,13 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
                 printf("Successfully rendered HTML to SVG: %s\n", svg_file);
-                free(svg_content);
+                mem_free(svg_content);
                 url_destroy(cwd);
                 ui_context_cleanup(&ui_context);
                 return 0;
             } else {
                 log_debug("Failed to save SVG to file: %s", svg_file);
-                free(svg_content);
+                mem_free(svg_content);
             }
         } else {
             log_debug("Failed to render view tree to SVG");

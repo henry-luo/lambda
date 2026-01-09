@@ -5,6 +5,7 @@
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
 #include "../lib/utf.h"
+#include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
@@ -629,23 +630,23 @@ struct TableMetadata {
 
     TableMetadata(int cols, int rows)
         : column_count(cols), row_count(rows) {
-        grid_occupied = (bool*)calloc(rows * cols, sizeof(bool));
-        col_widths = (float*)calloc(cols, sizeof(float));
-        col_min_widths = (float*)calloc(cols, sizeof(float));  // Minimum content widths (CSS MCW)
-        col_max_widths = (float*)calloc(cols, sizeof(float));  // Preferred content widths (CSS PCW)
-        row_heights = (float*)calloc(rows, sizeof(float));
-        row_y_positions = (float*)calloc(rows, sizeof(float));
-        row_collapsed = (bool*)calloc(rows, sizeof(bool));
+        grid_occupied = (bool*)mem_calloc(rows * cols, sizeof(bool), MEM_CAT_LAYOUT);
+        col_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
+        col_min_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);  // Minimum content widths (CSS MCW)
+        col_max_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);  // Preferred content widths (CSS PCW)
+        row_heights = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
+        row_y_positions = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
+        row_collapsed = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
     }
 
     ~TableMetadata() {
-        free(grid_occupied);
-        free(col_widths);
-        free(col_min_widths);
-        free(col_max_widths);
-        free(row_heights);
-        free(row_y_positions);
-        free(row_collapsed);
+        mem_free(grid_occupied);
+        mem_free(col_widths);
+        mem_free(col_min_widths);
+        mem_free(col_max_widths);
+        mem_free(row_heights);
+        mem_free(row_y_positions);
+        mem_free(row_collapsed);
     }
 
     // Grid accessor
@@ -883,13 +884,13 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
             if (row > 0) {
                 ViewTableCell* cell_above = find_cell_at(table, row - 1, col);
                 if (cell_above) {
-                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                     *border = get_cell_border(cell_above, 2); // bottom
                     arraylist_append(candidates, border);
                 }
             } else {
                 // Top edge of table
-                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                 *border = get_table_border(table, 0); // top
                 arraylist_append(candidates, border);
             }
@@ -898,13 +899,13 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
             if (row < meta->row_count) {
                 ViewTableCell* cell_below = find_cell_at(table, row, col);
                 if (cell_below) {
-                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                     *border = get_cell_border(cell_below, 0); // top
                     arraylist_append(candidates, border);
                 }
             } else {
                 // Bottom edge of table
-                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                 *border = get_table_border(table, 2); // bottom
                 arraylist_append(candidates, border);
             }
@@ -915,12 +916,12 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 int curr = 0;
                 for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
                     if (curr == row - 1) {
-                        CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                         *border = get_row_border(r, 2); // bottom of row above
                         if (border->style != CSS_VALUE_NONE) {
                             arraylist_append(candidates, border);
                         } else {
-                            free(border);
+                            mem_free(border);
                         }
                         break;
                     }
@@ -929,12 +930,12 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 curr = 0;
                 for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
                     if (curr == row) {
-                        CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                         *border = get_row_border(r, 0); // top of row below
                         if (border->style != CSS_VALUE_NONE) {
                             arraylist_append(candidates, border);
                         } else {
-                            free(border);
+                            mem_free(border);
                         }
                         break;
                     }
@@ -969,7 +970,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
 
             // Cleanup
             for (int i = 0; i < candidates->length; i++) {
-                free(candidates->data[i]);
+                mem_free(candidates->data[i]);
             }
             arraylist_free(candidates);
         }
@@ -986,13 +987,13 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
             if (col > 0) {
                 ViewTableCell* cell_left = find_cell_at(table, row, col - 1);
                 if (cell_left) {
-                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                     *border = get_cell_border(cell_left, 1); // right
                     arraylist_append(candidates, border);
                 }
             } else {
                 // Left edge of table
-                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                 *border = get_table_border(table, 3); // left
                 arraylist_append(candidates, border);
             }
@@ -1001,13 +1002,13 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
             if (col < meta->column_count) {
                 ViewTableCell* cell_right = find_cell_at(table, row, col);
                 if (cell_right) {
-                    CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                    CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                     *border = get_cell_border(cell_right, 3); // left
                     arraylist_append(candidates, border);
                 }
             } else {
                 // Right edge of table
-                CollapsedBorder* border = (CollapsedBorder*)malloc(sizeof(CollapsedBorder));
+                CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
                 *border = get_table_border(table, 1); // right
                 arraylist_append(candidates, border);
             }
@@ -1042,7 +1043,7 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
 
             // Cleanup
             for (int i = 0; i < candidates->length; i++) {
-                free(candidates->data[i]);
+                mem_free(candidates->data[i]);
             }
             arraylist_free(candidates);
         }
@@ -1102,7 +1103,7 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
                 float required_height = tcell->height;
 
                 if (required_height > current_total) {
-                    RowspanCell* rsc = (RowspanCell*)malloc(sizeof(RowspanCell));
+                    RowspanCell* rsc = (RowspanCell*)mem_alloc(sizeof(RowspanCell), MEM_CAT_LAYOUT);
                     rsc->cell = tcell;
                     rsc->start_row = start_row;
                     rsc->end_row = end_row;
@@ -1156,7 +1157,7 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
 
     // Free the arraylist and allocated structs
     for (int i = 0; i < rowspan_cells->length; i++) {
-        free(rowspan_cells->data[i]);
+        mem_free(rowspan_cells->data[i]);
     }
     arraylist_free(rowspan_cells);
 
@@ -3697,7 +3698,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         log_debug("Content width for columns: %dpx", content_width);
         // STEP 3: Read explicit column widths from FIRST ROW cells
-        float* explicit_col_widths = (float*)calloc(columns, sizeof(float));
+        float* explicit_col_widths = (float*)mem_calloc(columns, sizeof(float), MEM_CAT_LAYOUT);
         float total_explicit = 0.0f;  int unspecified_cols = 0;
 
         // Find first row using navigation helper
@@ -3793,7 +3794,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // STEP 5: Replace col_widths with fixed layout widths
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
-        free(explicit_col_widths);
+        mem_free(explicit_col_widths);
 
         log_debug("=== FIXED LAYOUT COMPLETE ===");
         for (int i = 0; i < columns; i++) {
@@ -4099,7 +4100,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Step 4: Position cells and calculate row heights with CSS 2.1 border model
 
-    float* col_x_positions = (float*)calloc(columns + 1, sizeof(float));
+    float* col_x_positions = (float*)mem_calloc(columns + 1, sizeof(float), MEM_CAT_LAYOUT);
 
     // Start with table padding and left border-spacing for separate border model
     int table_padding_left = 0;
@@ -5294,7 +5295,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Cleanup - TableMetadata destructor handles grid_occupied and col_widths
     delete meta;
-    free(col_x_positions);
+    mem_free(col_x_positions);
 
     #undef GRID
 }

@@ -12,6 +12,7 @@
 
 #include "layout.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <cmath>
 #include <cfloat>
 
@@ -228,7 +229,7 @@ FloatBox* block_context_alloc_float_box(BlockContext* ctx) {
     if (ctx->pool) {
         return (FloatBox*)pool_calloc(ctx->pool, sizeof(FloatBox));
     }
-    return (FloatBox*)calloc(1, sizeof(FloatBox));
+    return (FloatBox*)mem_calloc(1, sizeof(FloatBox), MEM_CAT_LAYOUT);
 }
 
 // ============================================================================
