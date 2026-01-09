@@ -798,41 +798,44 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Handle text selection drag
         if (state && state->selection && state->selection->is_selecting) {
             View* sel_view = state->selection->view;
+            log_debug("[SELECTION DRAG] is_selecting=true, sel_view=%p (type=%d)", sel_view, sel_view ? sel_view->view_type : -1);
             if (sel_view && sel_view->view_type == RDT_VIEW_TEXT) {
-                // Find which text rect we're hovering over
+                // Use the original selection view's text for offset calculation
                 ViewText* text = (ViewText*)sel_view;
                 TextRect* rect = text->rect;
                 
-                // Convert mouse position to character offset
-                EventContext temp_evcon = evcon;
-                temp_evcon.target = nullptr;
-                temp_evcon.target_text_rect = nullptr;
+                // Calculate character offset from mouse position using original text rect
+                int char_offset = calculate_char_offset_from_position(
+                    &evcon, text, rect, 
+                    motion->x, motion->y);
                 
-                // Re-target to find the text rect under mouse
-                target_html_doc(&temp_evcon, doc->view_tree);
+                log_debug("[SELECTION DRAG] calculated char_offset=%d, anchor=%d", 
+                    char_offset, state->selection->anchor_offset);
                 
-                if (temp_evcon.target == sel_view && temp_evcon.target_text_rect) {
-                    int char_offset = calculate_char_offset_from_position(
-                        &temp_evcon, text, temp_evcon.target_text_rect, 
-                        motion->x, motion->y);
+                // Extend selection to new position
+                selection_extend(state, char_offset);
+                caret_set(state, sel_view, char_offset);
+                
+                // Calculate and set visual position for the caret
+                float caret_x, caret_y, caret_height;
+                calculate_position_from_char_offset(&evcon, text, rect, 
+                    char_offset, &caret_x, &caret_y, &caret_height);
                     
-                    // Extend selection to new position
-                    selection_extend(state, char_offset);
-                    caret_set(state, sel_view, char_offset);
-                    
-                    // Calculate and set visual position for the caret
-                    if (state->caret) {
-                        float caret_x, caret_y, caret_height;
-                        calculate_position_from_char_offset(&temp_evcon, text, temp_evcon.target_text_rect, 
-                            char_offset, &caret_x, &caret_y, &caret_height);
-                        state->caret->x = caret_x;
-                        state->caret->y = caret_y;
-                        state->caret->height = caret_height;
-                    }
-                    
-                    log_debug("Dragging selection to offset %d", char_offset);
-                    evcon.need_repaint = true;
+                if (state->caret) {
+                    state->caret->x = caret_x;
+                    state->caret->y = caret_y;
+                    state->caret->height = caret_height;
                 }
+                
+                // Update selection end visual coordinates for rendering
+                if (state->selection) {
+                    state->selection->end_x = caret_x;
+                    state->selection->end_y = caret_y + caret_height;
+                    log_debug("[SELECTION DRAG] updated end coords: (%.1f, %.1f)", caret_x, caret_y + caret_height);
+                }
+                
+                log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, state->selection->is_collapsed);
+                evcon.need_repaint = true;
             }
         }
         
@@ -901,11 +904,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Set caret at clicked position
                 caret_set(state, evcon.target, char_offset);
                 
-                // Calculate and set visual position for the caret
+                // Calculate visual position for the caret
+                float caret_x = 0, caret_y = 0, caret_height = 16;
+                calculate_position_from_char_offset(&evcon, text, rect, char_offset,
+                    &caret_x, &caret_y, &caret_height);
+                
+                // Set caret visual position
                 if (state->caret) {
-                    float caret_x, caret_y, caret_height;
-                    calculate_position_from_char_offset(&evcon, text, rect, char_offset,
-                        &caret_x, &caret_y, &caret_height);
                     state->caret->x = caret_x;
                     state->caret->y = caret_y;
                     state->caret->height = caret_height;
@@ -916,9 +921,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
                     selection_start(state, evcon.target, char_offset);
                     state->selection->is_selecting = true;  // enter selection mode
+                    
+                    // Set visual coordinates for selection (same point for start)
+                    if (state->selection) {
+                        state->selection->start_x = caret_x;
+                        state->selection->start_y = caret_y;
+                        state->selection->end_x = caret_x;
+                        state->selection->end_y = caret_y + caret_height;
+                    }
                 } else if (state->selection && !state->selection->is_collapsed) {
                     // Shift-click extends selection
                     selection_extend(state, char_offset);
+                    
+                    // Update end visual coordinates
+                    if (state->selection) {
+                        state->selection->end_x = caret_x;
+                        state->selection->end_y = caret_y + caret_height;
+                    }
                 }
                 
                 evcon.need_repaint = true;
