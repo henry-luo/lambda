@@ -48,24 +48,24 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     MousePositionEvent* event = &evcon->event.mouse_position;
-    
+
     NEXT_RECT:
     float x = evcon->block.x + text_rect->x, y = evcon->block.y + text_rect->y;
     float rect_right = x + text_rect->width;
     float rect_bottom = y + text_rect->height;
-    
+
     log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
         str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, evcon->block.x);
-    
+
     // First check if mouse is within the text rect bounds (use rect height, not char height)
     if (x <= event->x && event->x < rect_right && y <= event->y && event->y < rect_bottom) {
         // Mouse is in this text rect - set target and return
         log_debug("hit on text rect at (%d, %d)", event->x, event->y);
-        evcon->target = text;  
-        evcon->target_text_rect = text_rect;  
+        evcon->target = text;
+        evcon->target_text_rect = text_rect;
         return;
     }
-    
+
     assert(text_rect->next != text_rect);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
@@ -116,22 +116,22 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         DomDocument* iframe_doc = block->embed->doc;
         if (iframe_doc->view_tree && iframe_doc->view_tree->root) {
             log_debug("targeting into iframe embedded document: %s", block->node_name());
-            
+
             // Save current state
             View* prev_target = evcon->target;
-            
+
             // Target into the embedded document's view tree
             // The coordinate system is already set up correctly (evcon->block.x/y)
             // since we added block->x and block->y above
             target_html_doc(evcon, iframe_doc->view_tree);
-            
+
             // If we found a target inside the iframe, we're done
             if (evcon->target && evcon->target != prev_target) {
-                log_debug("found target inside iframe: %s", 
+                log_debug("found target inside iframe: %s",
                     evcon->target->is_element() ? ((ViewElement*)evcon->target)->node_name() : "text");
                 goto RETURN;
             }
-            
+
             log_debug("no target found inside iframe, will target iframe block itself");
         }
     }
@@ -164,7 +164,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         evcon->block = pa_block;
     }
     evcon->font = pa_font;
-    
+
     if (!evcon->target) { // check the block itself
         float x = evcon->block.x, y = evcon->block.y;
         if (x <= event->x && event->x < x + block->width &&
@@ -318,32 +318,32 @@ void event_context_cleanup(EventContext* evcon) {
  */
 static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     if (!view || !view->is_element()) return;
-    
+
     DomElement* element = (DomElement*)view;
     uint32_t old_state = element->pseudo_state;
-    
+
     if (set) {
         dom_element_set_pseudo_state(element, pseudo_flag);
     } else {
         dom_element_clear_pseudo_state(element, pseudo_flag);
     }
-    
+
     // If state actually changed, schedule potential reflow
     if (element->pseudo_state != old_state && element->doc && element->doc->state) {
         RadiantState* state = (RadiantState*)element->doc->state;
-        
+
         // Pseudo-states that can affect layout (need reflow, not just repaint)
         bool affects_layout = (pseudo_flag == PSEUDO_STATE_HOVER ||
                                pseudo_flag == PSEUDO_STATE_ACTIVE ||
                                pseudo_flag == PSEUDO_STATE_FOCUS ||
                                pseudo_flag == PSEUDO_STATE_CHECKED ||
                                pseudo_flag == PSEUDO_STATE_DISABLED);
-        
+
         if (affects_layout) {
             // Schedule subtree reflow (element and descendants may change)
             reflow_schedule(state, view, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
         }
-        
+
         // Always mark for repaint
         dirty_mark_element(state, view);
         state->is_dirty = true;
@@ -357,11 +357,11 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
 void update_hover_state(EventContext* evcon, View* new_target) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state) return;
-    
+
     View* prev_hover = (View*)state->hover_target;
-    
+
     if (prev_hover == new_target) return;  // no change
-    
+
     // Clear :hover on previous target and its ancestors
     if (prev_hover) {
         View* node = prev_hover;
@@ -372,7 +372,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
         }
         log_debug("update_hover_state: cleared hover on %p", prev_hover);
     }
-    
+
     // Set :hover on new target and its ancestors
     if (new_target) {
         View* node = new_target;
@@ -383,7 +383,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
         }
         log_debug("update_hover_state: set hover on %p", new_target);
     }
-    
+
     state->hover_target = new_target;
     state->needs_repaint = true;
 }
@@ -394,7 +394,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
 void update_active_state(EventContext* evcon, View* target, bool is_active) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state) return;
-    
+
     if (is_active) {
         // Set :active on target and ancestors
         View* node = target;
@@ -419,7 +419,7 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
         state->active_target = NULL;
         log_debug("update_active_state: cleared active");
     }
-    
+
     state->needs_repaint = true;
 }
 
@@ -428,7 +428,7 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
  */
 bool is_view_focusable(View* view) {
     if (!view) return false;
-    
+
     // Elements that are focusable by default:
     // - <a> with href
     // - <button>
@@ -436,11 +436,11 @@ bool is_view_focusable(View* view) {
     // - <select>
     // - <textarea>
     // - elements with tabindex >= 0
-    
+
     if (view->is_element()) {
         ViewElement* elem = (ViewElement*)view;
         uint32_t tag = elem->tag();
-        
+
         switch (tag) {
         case HTM_TAG_A:
             // <a> is focusable if it has href
@@ -464,7 +464,7 @@ bool is_view_focusable(View* view) {
             break;
         }
     }
-    
+
     return false;
 }
 
@@ -486,15 +486,15 @@ static void propagate_focus_within(View* view, bool set) {
 void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state) return;
-    
+
     View* prev_focus = focus_get(state);
-    
+
     if (prev_focus == new_focus) return;  // no change
-    
+
     // Use the focus API to handle all state updates
     if (new_focus) {
         focus_set(state, new_focus, from_keyboard);
-        
+
         // Sync DOM pseudo-states for previous focus
         if (prev_focus) {
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
@@ -502,30 +502,30 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             // Clear :focus-within from previous ancestor chain
             propagate_focus_within(prev_focus, false);
         }
-        
+
         // Set :focus on new element
         sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS, true);
-        
+
         // Set :focus-visible only for keyboard navigation
         if (from_keyboard) {
             sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS_VISIBLE, true);
         }
-        
+
         // Propagate :focus-within up the ancestor chain
         propagate_focus_within(new_focus, true);
-        
-        log_debug("update_focus_state: set focus on %p (keyboard=%d, focus-visible=%d)", 
+
+        log_debug("update_focus_state: set focus on %p (keyboard=%d, focus-visible=%d)",
                   new_focus, from_keyboard, from_keyboard);
     } else {
         focus_clear(state);
-        
+
         if (prev_focus) {
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
             // Clear :focus-within from ancestor chain
             propagate_focus_within(prev_focus, false);
         }
-        
+
         log_debug("update_focus_state: cleared focus");
     }
 }
@@ -536,10 +536,10 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
 void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state) return;
-    
+
     state->drag_target = is_dragging ? target : NULL;
     state->is_dirty = true;
-    
+
     log_debug("update_drag_state: dragging=%d, target=%p", is_dragging, target);
 }
 
@@ -627,37 +627,37 @@ View* find_view(View* view, DomNode* node) {
  * Calculate character offset from mouse click position within a text rect
  * Returns the character offset closest to the click position
  */
-int calculate_char_offset_from_position(EventContext* evcon, ViewText* text, 
+int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, int mouse_x, int mouse_y) {
     unsigned char* str = text->text_data();
     float x = evcon->block.x + rect->x;
     float y = evcon->block.y + rect->y;
-    
+
     unsigned char* p = str + rect->start_index;
     unsigned char* end = p + max(rect->length, 0);
     int char_offset = rect->start_index;
-    
-    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0) 
+
+    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
-    
+
     // Get letter-spacing from font style (same as used in layout)
     float letter_spacing = evcon->font.style ? evcon->font.style->letter_spacing : 0.0f;
-    
+
     bool has_space = false;
     float prev_x = x;
-    
+
     log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
               mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
-    
+
     for (; p < end; p++, char_offset++) {
         float wd = 0;
-        
+
         // Skip newlines and carriage returns - they don't have visual width
         if (*p == '\n' || *p == '\r') {
             // At end of visual content - treat rest as trailing whitespace
             break;
         }
-        
+
         if (is_space(*p)) {
             if (has_space) {
                 // Consecutive spaces are collapsed - skip without adding width
@@ -675,24 +675,24 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
             }
             wd = glyph->advance.x / 64.0 / pixel_ratio;
         }
-        
+
         // Add letter-spacing (applied after each character except the last)
         if (p + 1 < end && *(p+1) != '\n' && *(p+1) != '\r') {
             wd += letter_spacing;
         }
-        
+
         float char_mid = x + wd / 2.0f;
-        
+
         // If mouse is before the midpoint of this character, return previous offset
         if (mouse_x < char_mid) {
             log_debug("calculate_char_offset: matched char='%c' at offset %d", *p, char_offset);
             return char_offset;
         }
-        
+
         prev_x = x;
         x += wd;
     }
-    
+
     log_debug("calculate_char_offset: end of text, returning offset=%d", char_offset);
     // Mouse is after all characters - return end offset
     return char_offset;
@@ -702,25 +702,25 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
  * Calculate visual position (x, y, height) from character offset within a text rect
  * Returns the x position relative to the text rect's origin
  */
-void calculate_position_from_char_offset(EventContext* evcon, ViewText* text, 
+void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     TextRect* rect, int target_offset, float* out_x, float* out_y, float* out_height) {
-    
+
     unsigned char* str = text->text_data();
     float x = rect->x;  // relative to block
     float y = rect->y;
-    
+
     unsigned char* p = str + rect->start_index;
     unsigned char* end = p + max(rect->length, 0);
     int char_offset = rect->start_index;
-    
-    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0) 
+
+    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
-    
+
     bool has_space = false;
-    
+
     for (; p < end && char_offset < target_offset; p++, char_offset++) {
         int wd = 0;
-        
+
         if (is_space(*p)) {
             if (has_space) continue;
             has_space = true;
@@ -733,10 +733,10 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
             }
             wd = evcon->font.ft_face->glyph->advance.x / 64.0 / pixel_ratio;
         }
-        
+
         x += wd;
     }
-    
+
     *out_x = x;
     *out_y = y;
     *out_height = rect->height;  // use rect height as caret height
@@ -776,10 +776,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse event at (%d, %d)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree);
-        
+
         // Update hover state based on new target
         update_hover_state(&evcon, evcon.target);
-        
+
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
@@ -794,7 +794,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // fire drag event if dragging in progress
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
-        
+
         // Handle text selection drag
         if (state && state->selection && state->selection->is_selecting) {
             View* sel_view = state->selection->view;
@@ -803,42 +803,42 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Use the original selection view's text for offset calculation
                 ViewText* text = (ViewText*)sel_view;
                 TextRect* rect = text->rect;
-                
+
                 // Calculate character offset from mouse position using original text rect
                 int char_offset = calculate_char_offset_from_position(
-                    &evcon, text, rect, 
+                    &evcon, text, rect,
                     motion->x, motion->y);
-                
-                log_debug("[SELECTION DRAG] calculated char_offset=%d, anchor=%d", 
+
+                log_debug("[SELECTION DRAG] calculated char_offset=%d, anchor=%d",
                     char_offset, state->selection->anchor_offset);
-                
+
                 // Extend selection to new position
                 selection_extend(state, char_offset);
                 caret_set(state, sel_view, char_offset);
-                
+
                 // Calculate and set visual position for the caret
                 float caret_x, caret_y, caret_height;
-                calculate_position_from_char_offset(&evcon, text, rect, 
+                calculate_position_from_char_offset(&evcon, text, rect,
                     char_offset, &caret_x, &caret_y, &caret_height);
-                    
+
                 if (state->caret) {
                     state->caret->x = caret_x;
                     state->caret->y = caret_y;
                     state->caret->height = caret_height;
                 }
-                
+
                 // Update selection end visual coordinates for rendering
                 if (state->selection) {
                     state->selection->end_x = caret_x;
                     state->selection->end_y = caret_y + caret_height;
                     log_debug("[SELECTION DRAG] updated end coords: (%.1f, %.1f)", caret_x, caret_y + caret_height);
                 }
-                
+
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, state->selection->is_collapsed);
                 evcon.need_repaint = true;
             }
         }
-        
+
         if (state && state->drag_target) {
             log_debug("Dragging in progress");
             ArrayList* target_list = build_view_stack(&evcon, (View*)state->drag_target);
@@ -872,43 +872,43 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
-        
+
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
-        
+
         // Update active and focus states
         if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target) {
             log_info("MOUSE_DOWN: target=%p view_type=%d", evcon.target, evcon.target->view_type);
             if (evcon.target->view_type == RDT_VIEW_TEXT) {
                 log_info("Target is ViewText, target_text_rect=%p", evcon.target_text_rect);
             }
-            
+
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
-            
+
             // Update focus if target is focusable (mouse-triggered focus)
             if (is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
             }
-            
+
             // Handle click in text - position caret or start selection
             if (evcon.target->view_type == RDT_VIEW_TEXT && evcon.target_text_rect) {
                 ViewText* text = (ViewText*)evcon.target;
                 TextRect* rect = evcon.target_text_rect;
-                
+
                 // Calculate character offset from click position
                 int char_offset = calculate_char_offset_from_position(
                     &evcon, text, rect, btn_event->x, btn_event->y);
-                
+
                 log_info("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
-                
+
                 // Set caret at clicked position
                 caret_set(state, evcon.target, char_offset);
-                
+
                 // Calculate visual position for the caret
                 float caret_x = 0, caret_y = 0, caret_height = 16;
                 calculate_position_from_char_offset(&evcon, text, rect, char_offset,
                     &caret_x, &caret_y, &caret_height);
-                
+
                 // Set caret visual position
                 if (state->caret) {
                     state->caret->x = caret_x;
@@ -916,12 +916,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->caret->height = caret_height;
                     log_info("CARET VISUAL: x=%.1f y=%.1f height=%.1f", caret_x, caret_y, caret_height);
                 }
-                
+
                 // Start new selection if shift not pressed, otherwise extend
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
                     selection_start(state, evcon.target, char_offset);
                     state->selection->is_selecting = true;  // enter selection mode
-                    
+
                     // Set visual coordinates for selection (same point for start)
                     if (state->selection) {
                         state->selection->start_x = caret_x;
@@ -932,26 +932,26 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 } else if (state->selection && !state->selection->is_collapsed) {
                     // Shift-click extends selection
                     selection_extend(state, char_offset);
-                    
+
                     // Update end visual coordinates
                     if (state->selection) {
                         state->selection->end_x = caret_x;
                         state->selection->end_y = caret_y + caret_height;
                     }
                 }
-                
+
                 evcon.need_repaint = true;
             }
         } else if (event->type == RDT_EVENT_MOUSE_UP) {
             // Clear :active state
             update_active_state(&evcon, NULL, false);
-            
+
             // End selection mode
             if (state && state->selection) {
                 state->selection->is_selecting = false;
             }
         }
-        
+
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
@@ -1006,16 +1006,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout
-                                // Temporarily set window dimensions to iframe dimensions (CSS pixels) for layout
+                                // Save parent document and window dimensions
+                                DomDocument* parent_doc = evcon.ui_context->document;
                                 float saved_window_width = evcon.ui_context->window_width;
                                 float saved_window_height = evcon.ui_context->window_height;
+                                // Set document context to iframe doc for proper URL resolution (e.g., images)
+                                evcon.ui_context->document = new_doc;
                                 // iframe dimensions are now in CSS pixels
                                 evcon.ui_context->window_width = (float)css_vw;
                                 evcon.ui_context->window_height = (float)css_vh;
                                 // Process @font-face rules before layout (critical for custom fonts)
                                 process_document_font_faces(evcon.ui_context, new_doc);
                                 layout_html_doc(evcon.ui_context, new_doc, false);
-                                // Restore window dimensions
+                                // Restore parent document and window dimensions
+                                evcon.ui_context->document = parent_doc;
                                 evcon.ui_context->window_width = saved_window_width;
                                 evcon.ui_context->window_height = saved_window_height;
                             }
@@ -1075,10 +1079,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         KeyEvent* key_event = &event->key;
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
         if (!state) break;
-        
+
         View* focused = focus_get(state);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
-        
+
         // Tab navigation
         if (key_event->key == RDT_KEY_TAB) {
             bool forward = !(key_event->mods & RDT_MOD_SHIFT);
@@ -1088,13 +1092,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             evcon.need_repaint = true;
             break;
         }
-        
+
         // Handle caret/selection navigation for focused editable elements
         if (focused && state->caret) {
             bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
             bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-            
+
             switch (key_event->key) {
                 case RDT_KEY_LEFT:
                     if (shift) {
@@ -1109,7 +1113,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                     break;
-                    
+
                 case RDT_KEY_RIGHT:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
@@ -1122,7 +1126,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                     break;
-                    
+
                 case RDT_KEY_UP:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
@@ -1137,7 +1141,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                     break;
-                    
+
                 case RDT_KEY_DOWN:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
@@ -1151,7 +1155,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                     break;
-                    
+
                 case RDT_KEY_HOME:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
@@ -1165,7 +1169,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                     break;
-                    
+
                 case RDT_KEY_END:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
@@ -1179,7 +1183,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                     break;
-                    
+
                 case RDT_KEY_A:
                     // Select all (Ctrl+A / Cmd+A)
                     if (ctrl || cmd) {
@@ -1187,7 +1191,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         evcon.need_repaint = true;
                     }
                     break;
-                    
+
                 case RDT_KEY_C:
                     // Copy selection (Ctrl+C / Cmd+C)
                     if (ctrl || cmd) {
@@ -1204,7 +1208,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                     }
                     break;
-                    
+
                 case RDT_KEY_X:
                     // Cut selection (Ctrl+X / Cmd+X)
                     if (ctrl || cmd) {
@@ -1219,24 +1223,24 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             }
                             arena_destroy(temp_arena);
                             pool_destroy(temp_pool);
-                            
+
                             // TODO: delete selected text
                             selection_clear(state);
                             evcon.need_repaint = true;
                         }
                     }
                     break;
-                    
+
                 case RDT_KEY_BACKSPACE:
                     // TODO: delete selection or character before caret
                     evcon.need_repaint = true;
                     break;
-                    
+
                 case RDT_KEY_DELETE:
                     // TODO: delete selection or character after caret
                     evcon.need_repaint = true;
                     break;
-                    
+
                 default:
                     break;
             }
@@ -1252,20 +1256,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         TextInputEvent* text_event = &event->text_input;
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
         if (!state) break;
-        
+
         View* focused = focus_get(state);
         log_debug("Text input: codepoint=U+%04X, focused=%p", text_event->codepoint, focused);
-        
+
         if (focused && state->caret) {
             // Delete any existing selection first
             if (selection_has(state)) {
                 // TODO: delete selected text
                 selection_clear(state);
             }
-            
+
             // TODO: insert character at caret position
             // This requires access to the text content of the focused element
-            
+
             // Move caret forward
             caret_move(state, 1);
             evcon.need_repaint = true;
@@ -1276,13 +1280,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Unhandled event type: %d", event->type);
         break;
     }
-    
+
     // Process pending reflows if any state changes require relayout
     RadiantState* state = (RadiantState*)uicon->document->state;
     if (state && state->needs_reflow) {
         log_debug("Processing pending reflows before repaint");
         reflow_process_pending(state);
-        
+
         // If reflow is still needed after processing, trigger actual relayout
         if (state->needs_reflow) {
             // Trigger relayout by marking the event context
@@ -1290,7 +1294,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             log_debug("Reflow required, will trigger relayout");
         }
     }
-    
+
     if (evcon.need_repaint) {
         uicon->document->state->is_dirty = true;
         to_repaint();
