@@ -133,6 +133,8 @@ typedef struct SelectionState {
     bool is_selecting;             // true if user is actively selecting (mouse down)
     float start_x, start_y;        // visual start position
     float end_x, end_y;            // visual end position
+    float iframe_offset_x;         // iframe offset x (for content inside iframes)
+    float iframe_offset_y;         // iframe offset y (for content inside iframes)
 } SelectionState;
 
 /**
