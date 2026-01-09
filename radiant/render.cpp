@@ -1665,7 +1665,9 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     // The caret x/y is already relative to the text's parent block
     View* parent = view->parent;  // Start from parent, not from view itself
     while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
             x += ((ViewBlock*)parent)->x;
             y += ((ViewBlock*)parent)->y;
         }
@@ -1745,9 +1747,6 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     
     View* view = sel->view;
     float s = rdcon->scale;
-    log_debug("[SELECTION] Rendering: anchor=%d, focus=%d, start=(%.1f,%.1f), end=(%.1f,%.1f)",
-        sel->anchor_offset, sel->focus_offset,
-        sel->start_x, sel->start_y, sel->end_x, sel->end_y);
     
     // For single-line selection, draw a single rectangle
     // Multi-line selection would require multiple rectangles per line
@@ -1765,7 +1764,9 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     // (same as caret rendering - coordinates are relative to parent block)
     View* parent = view->parent;
     while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
             ViewBlock* block = (ViewBlock*)parent;
             log_debug("[SELECTION] Adding block offset: (%.1f,%.1f)", block->x, block->y);
             start_x += block->x;
@@ -1870,8 +1871,8 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
     
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
     
-    // Selection is rendered inline during text rendering (render_text_view)
-    // This ensures selection background appears behind text, not on top
+    // Render selection highlight (before caret so caret appears on top)
+    render_selection(rdcon, state);
     
     // Caret rendered on top of content
     render_caret(rdcon, state);
