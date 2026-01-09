@@ -227,7 +227,7 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
             // Check if it starts with "/" (plain file path) or "file://" (URL)
             if (stylesheet->origin_url[0] == '/') {
                 // Plain file path - use directly
-                stylesheet_path = strdup(stylesheet->origin_url);
+                stylesheet_path = strdup(stylesheet->origin_url);  // must use strdup to match url_to_local_path
                 if (stylesheet_path) {
                     base_path = stylesheet_path;
                     clog_debug(font_log, "Using stylesheet origin_url (plain path) for font resolution: %s", base_path);
@@ -249,12 +249,12 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
         process_font_face_rules_from_stylesheet(uicon, stylesheet, base_path);
 
         if (stylesheet_path) {
-            free(stylesheet_path);
+            free(stylesheet_path);  // from url_to_local_path() or strdup() which use stdlib
         }
     }
 
     if (doc_base_path) {
-        free(doc_base_path);
+        free(doc_base_path);  // from url_to_local_path() which uses stdlib
     }
 }
 
@@ -354,8 +354,8 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     // Expand array if needed
     if (uicon->font_face_count >= uicon->font_face_capacity) {
         int new_capacity = uicon->font_face_capacity * 2;
-        FontFaceDescriptor** new_array = (FontFaceDescriptor**)realloc(
-            uicon->font_faces, new_capacity * sizeof(FontFaceDescriptor*));
+        FontFaceDescriptor** new_array = (FontFaceDescriptor**)mem_realloc(
+            uicon->font_faces, new_capacity * sizeof(FontFaceDescriptor*), MEM_CAT_LAYOUT);
 
         if (!new_array) {
             clog_error(font_log, "Failed to expand font_faces array");
@@ -586,7 +586,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
             log_debug("load_font_from_data_uri: detected WOFF2 format, decompressing...");
             size_t ttf_size = 0;
             uint8_t* ttf_data = woff2_decompress_to_ttf(raw_data, font_data_size, &ttf_size);
-            free(raw_data);  // free the WOFF2 data
+            free(raw_data);  // free the WOFF2 data (from parse_data_uri which uses stdlib malloc)
 
             if (!ttf_data || ttf_size == 0) {
                 clog_error(font_log, "WOFF2 decompression failed");
