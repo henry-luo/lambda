@@ -756,8 +756,13 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     
     bool has_space = false;
     
+    // Debug: log initial state
+    log_debug("[CALC-POS] target_offset=%d, rect->x=%.1f, rect->start_index=%d, pixel_ratio=%.1f, y_ppem=%d",
+        target_offset, rect->x, rect->start_index, pixel_ratio,
+        evcon->font.ft_face ? evcon->font.ft_face->size->metrics.y_ppem : -1);
+    
     for (; p < end && char_offset < target_offset; p++, char_offset++) {
-        int wd = 0;
+        float wd = 0;
         
         if (is_space(*p)) {
             if (has_space) continue;
@@ -769,11 +774,20 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
             if (FT_Load_Char(evcon->font.ft_face, *p, load_flags)) {
                 continue;
             }
-            wd = evcon->font.ft_face->glyph->advance.x / 64.0 / pixel_ratio;
+            wd = evcon->font.ft_face->glyph->advance.x / 64.0f / pixel_ratio;
+            
+            // Debug: log per-character advance for first 15 chars
+            if (char_offset < 15) {
+                log_debug("[CALC-POS] char_offset=%d codepoint=U+%04X '%c' x=%.1f wd=%.1f (raw advance=%.1f)",
+                    char_offset, *p, (*p >= 32 && *p < 127) ? *p : '?',
+                    x, wd, evcon->font.ft_face->glyph->advance.x / 64.0f);
+            }
         }
         
         x += wd;
     }
+    
+    log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
     
     *out_x = x;
     *out_y = y;
@@ -842,6 +856,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 ViewText* text = (ViewText*)sel_view;
                 TextRect* rect = text->rect;
                 
+                // Setup font from text view (critical for correct glyph advance calculation)
+                FontBox saved_font = evcon.font;
+                if (text->font) {
+                    setup_font(evcon.ui_context, &evcon.font, text->font);
+                }
+                
                 // Calculate the correct block position for the selection view
                 // by walking up ITS parent chain (not using evcon.block which is 
                 // set based on current hit target)
@@ -883,8 +903,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 calculate_position_from_char_offset(&evcon, text, rect, 
                     char_offset, &caret_x, &caret_y, &caret_height);
                 
-                // Restore evcon.block
+                log_debug("[CARET DRAG] char_offset=%d, calc pos: (%.1f, %.1f) height=%.1f, sel_block: (%.1f, %.1f)",
+                    char_offset, caret_x, caret_y, caret_height, sel_block_x, sel_block_y);
+                
+                // Restore evcon.block and evcon.font
                 evcon.block = saved_block;
+                evcon.font = saved_font;
                     
                 if (state->caret) {
                     state->caret->x = caret_x;
@@ -900,6 +924,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (state->selection) {
                     state->selection->end_x = caret_x;
                     state->selection->end_y = caret_y + caret_height;
+                    log_debug("[SEL-END] Setting selection end: (%.1f, %.1f), caret at (%.1f, %.1f)",
+                        state->selection->end_x, state->selection->end_y,
+                        state->caret ? state->caret->x : -1, state->caret ? state->caret->y : -1);
                 }
                 
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, state->selection->is_collapsed);
@@ -962,6 +989,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (evcon.target->view_type == RDT_VIEW_TEXT && evcon.target_text_rect) {
                 ViewText* text = (ViewText*)evcon.target;
                 TextRect* rect = evcon.target_text_rect;
+                
+                // Setup font from text view (critical for correct glyph advance calculation)
+                FontBox saved_font = evcon.font;
+                if (text->font) {
+                    setup_font(evcon.ui_context, &evcon.font, text->font);
+                }
                 
                 // Calculate character offset from click position
                 int char_offset = calculate_char_offset_from_position(
@@ -1033,6 +1066,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
                 
+                // Restore font
+                evcon.font = saved_font;
                 evcon.need_repaint = true;
             }
         } else if (event->type == RDT_EVENT_MOUSE_UP) {

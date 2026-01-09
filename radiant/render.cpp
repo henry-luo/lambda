@@ -352,12 +352,28 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         bool is_word_start = true;  // Track word boundaries for capitalize
         int char_index = text_rect->start_index;  // Track character offset for selection
         
-        // Selection background color (standard browser selection blue: #3399FF)
-        uint32_t sel_bg_color = 0xFFFF9933;  // ABGR format: #3399FF
+        // Selection background color - standard blue for text selection
+        uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue (like browser selection)
+        
+        // Debug: log inline selection position info
+        if (has_selection) {
+            log_debug("[SEL-INLINE] text_rect: x=%.1f y=%.1f, rdcon->block: x=%.1f y=%.1f, final pos: x=%.1f y=%.1f, font_size=%.1f, y_ppem=%d",
+                text_rect->x, text_rect->y, rdcon->block.x, rdcon->block.y, x, y,
+                rdcon->font.style->font_size, rdcon->font.ft_face->size->metrics.y_ppem);
+        }
+        
+        // Track cumulative position for debugging
+        float debug_start_x = x;
         
         while (p < end) {
             // Check if current character is in selection range
             bool is_selected = has_selection && char_index >= sel_start && char_index < sel_end;
+            
+            // Debug first selected character
+            if (is_selected && char_index == sel_start) {
+                log_debug("[SEL-INLINE] First selected char at index=%d, x=%.1f y=%.1f, advance_so_far=%.1f (expected overlay start_x=%.1f * scale=%.1f = %.1f)",
+                    char_index, x, y, x - debug_start_x, rdcon->selection->start_x, s, rdcon->selection->start_x * s);
+            }
             
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
@@ -421,6 +437,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else {
                     // draw the glyph to the image buffer
                     float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                    
+                    // Debug: log per-character advance for first 15 chars when selection active
+                    if (has_selection && char_index <= 15) {
+                        log_debug("[SEL-ADVANCE] char_index=%d codepoint=U+%04X '%c' x=%.1f advance=%.1f (26.2=%.1f raw)",
+                            char_index, codepoint, (codepoint >= 32 && codepoint < 127) ? (char)codepoint : '?',
+                            x, glyph->advance.x / 64.0f, (float)glyph->advance.x);
+                    }
 
                     // Draw selection background BEFORE glyph (so text appears on top)
                     if (is_selected) {
@@ -1669,8 +1692,14 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         if (parent->view_type == RDT_VIEW_BLOCK ||
             parent->view_type == RDT_VIEW_INLINE_BLOCK ||
             parent->view_type == RDT_VIEW_LIST_ITEM) {
-            x += ((ViewBlock*)parent)->x;
-            y += ((ViewBlock*)parent)->y;
+            ViewBlock* block = (ViewBlock*)parent;
+            x += block->x;
+            y += block->y;
+            // Account for scroll offset (same as render traversal does)
+            if (block->scroller && block->scroller->pane) {
+                x -= block->scroller->pane->h_scroll_position;
+                y -= block->scroller->pane->v_scroll_position;
+            }
         }
         parent = parent->parent;
     }
@@ -1803,8 +1832,8 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
     
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
     
-    // Render selection highlight (before caret so caret appears on top)
-    render_selection(rdcon, state);
+    // Selection is now rendered inline in render_text_view, so we don't need overlay
+    // render_selection(rdcon, state);
     
     // Caret rendered on top of content
     render_caret(rdcon, state);
