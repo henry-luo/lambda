@@ -7,9 +7,7 @@
 #include "font_lookup_platform.h"
 #include "../lib/log.h"
 #include "../lib/font_config.h"
-
-/* Explicit strdup declaration for compatibility */
-extern char *strdup(const char *s);
+#include "../lib/memtrack.h"
 
 /**
  * Resolve CSS generic font family to system font names.
@@ -137,7 +135,7 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
 
     // Just take the first match for now - could be enhanced to prefer normal weight/style
     FontEntry* font = (FontEntry*)matches->data[0];
-    char* result = strdup(font->file_path);
+    char* result = mem_strdup(font->file_path, MEM_CAT_FONT);
     arraylist_free(matches);
     return result;
 }
@@ -202,14 +200,14 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
             // put the font face into the hashmap
             if (uicon->fontface_map) {
                 // copy the font name
-                char* name = (char*)malloc(name_and_size->length + 1);
+                char* name = (char*)mem_alloc(name_and_size->length + 1, MEM_CAT_FONT);
                 memcpy(name, name_and_size->str, name_and_size->length);
                 name[name_and_size->length] = '\0';
                 FontfaceEntry new_entry = {.name=name, .face=face};
                 hashmap_set(uicon->fontface_map, &new_entry);
             }
         }
-        free(font_path);
+        mem_free(font_path);
     }
     strbuf_free(name_and_size);
     // units_per_EM is the font design size, and does not change with font pixel size
@@ -227,10 +225,10 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     // Apply pixel ratio to get physical pixel size for HiDPI displays
     float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
     float physical_font_size = font_style->font_size * pixel_ratio;
-    
+
     log_debug("[FONT LOAD] font=%s, css_size=%.2f, pixel_ratio=%.2f, physical_size=%.2f",
               font_name, font_style->font_size, pixel_ratio, physical_font_size);
-    
+
     // Create cache key with (family, weight, style, physical_size) - deterministic based on input parameters
     StrBuf* style_cache_key = strbuf_create(font_name);
     strbuf_append_str(style_cache_key, font_style->font_weight == CSS_VALUE_BOLD ? ":bold:" : ":normal:");
@@ -313,7 +311,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
             } else {
                 log_error("Failed to load font face via platform lookup: %s (path: %s)", font_name, font_path);
             }
-            free(font_path);
+            mem_free(font_path);
         } else {
             log_error("Platform lookup also failed for: %s", font_name);
         }
@@ -322,7 +320,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     // Cache result under style key for fast lookup on next call
     // Cache both successful (face != NULL) and failed (face == NULL) lookups to avoid retrying
     {
-        char* name = (char*)malloc(style_cache_key->length + 1);
+        char* name = (char*)mem_alloc(style_cache_key->length + 1, MEM_CAT_FONT);
         memcpy(name, style_cache_key->str, style_cache_key->length);
         name[style_cache_key->length] = '\0';
         FontfaceEntry new_entry = {.name=name, .face=face};
@@ -335,20 +333,20 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
 FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
     FT_GlyphSlot slot = NULL;  FT_Error error;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
-    
+
     // Debug: Log the face's current pixel size and glyph metrics
     static int debug_count = 0;
     if (for_rendering && debug_count < 100) {
         // y_ppem is in pixels, height is in 26.6 fixed-point
         log_debug("[GLYPH LOAD] face=%s, char_index=%u, y_ppem=%d, height=%.1f, css_size=%.2f, codepoint=U+%04X",
-                  face->family_name, 
+                  face->family_name,
                   char_index,
                   face->size ? face->size->metrics.y_ppem : 0,
                   face->size ? (face->size->metrics.height / 64.0) : 0,
                   font_style ? font_style->font_size : 0.0f, codepoint);
         debug_count++;
     }
-    
+
     // FT_LOAD_NO_HINTING matches browser closely, whereas FT_LOAD_FORCE_AUTOHINT makes the text narrower
     // FT_LOAD_COLOR is required for color emoji fonts (Apple Color Emoji, Noto Color Emoji, etc.)
     FT_Int32 load_flags = for_rendering ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR) : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
@@ -489,7 +487,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     // Pixel ratio for converting physical font metrics back to CSS pixels for layout
     float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
-    
+
     // Use sub-pixel rendering flags for better quality
     FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
     if (FT_Load_Char(fbox->ft_face, ' ', load_flags)) {
@@ -517,7 +515,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
 bool fontface_entry_free(const void *item, void *udata) {
     FontfaceEntry* entry = (FontfaceEntry*)item;
-    free(entry->name);
+    mem_free(entry->name);
     FT_Done_Face(entry->face);
     return true;
 }

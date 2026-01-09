@@ -9,6 +9,7 @@
 #include "../../lambda/input/pdf_decompress.h"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
+#include "../../lib/memtrack.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -194,7 +195,7 @@ static uint32_t decode_char_with_encoding(unsigned int char_code, PDFEncodingTyp
                 return symbol_to_unicode[char_code];
             }
             return char_code;  // Fallback for undefined
-            
+
         case PDF_ENCODING_MAC_ROMAN:
             // ASCII range - same for all encodings
             if (char_code < 0x80) {
@@ -204,7 +205,7 @@ static uint32_t decode_char_with_encoding(unsigned int char_code, PDFEncodingTyp
                 return mac_roman_to_unicode[char_code - 0x80];
             }
             break;
-            
+
         case PDF_ENCODING_WIN_ANSI:
             if (char_code < 0x80) {
                 return char_code;
@@ -215,14 +216,14 @@ static uint32_t decode_char_with_encoding(unsigned int char_code, PDFEncodingTyp
             }
             // 0xA0-0xFF maps to Latin-1 Supplement (same code point)
             return char_code;
-            
+
         case PDF_ENCODING_PDF_DOC:
         case PDF_ENCODING_STANDARD:
         default:
             // For these, assume Latin-1 compatible for now
             return char_code;
     }
-    
+
     return char_code;  // Fallback
 }
 
@@ -236,17 +237,17 @@ static uint32_t decode_char_with_encoding(unsigned int char_code, PDFEncodingTyp
  */
 static int parse_hex_string(const char* s, uint32_t* out_value, int* out_byte_count) {
     if (!s || *s != '<') return 0;
-    
+
     const char* start = s + 1;
     const char* p = start;
-    
+
     // Find closing >
     while (*p && *p != '>') p++;
     if (*p != '>') return 0;
-    
+
     int hex_len = (int)(p - start);
     if (hex_len == 0 || hex_len > 8) return 0;
-    
+
     // Parse hex value
     uint32_t value = 0;
     for (const char* h = start; h < p; h++) {
@@ -258,7 +259,7 @@ static int parse_hex_string(const char* s, uint32_t* out_value, int* out_byte_co
         else return 0;
         value = (value << 4) | digit;
     }
-    
+
     *out_value = value;
     if (out_byte_count) *out_byte_count = hex_len / 2;
     return (int)(p - s + 1); // Include closing >
@@ -305,16 +306,16 @@ typedef struct {
 /**
  * Add a mapping to ToUnicode map
  */
-static void tounicode_map_add(ToUnicodeMap* map, uint32_t char_code, 
+static void tounicode_map_add(ToUnicodeMap* map, uint32_t char_code,
                               uint32_t unicode_value, Pool* pool) {
     if (map->count >= map->capacity) {
         int new_cap = map->capacity ? map->capacity * 2 : 256;
         uint32_t* new_codes = (uint32_t*)pool_calloc(pool, sizeof(uint32_t) * new_cap);
         uint32_t* new_values = (uint32_t*)pool_calloc(pool, sizeof(uint32_t) * new_cap);
         int* new_lengths = (int*)pool_calloc(pool, sizeof(int) * new_cap);
-        
+
         if (!new_codes || !new_values || !new_lengths) return;
-        
+
         if (map->count > 0) {
             memcpy(new_codes, map->char_codes, sizeof(uint32_t) * map->count);
             memcpy(new_values, map->unicode_values, sizeof(uint32_t) * map->count);
@@ -325,7 +326,7 @@ static void tounicode_map_add(ToUnicodeMap* map, uint32_t char_code,
         map->unicode_lengths = new_lengths;
         map->capacity = new_cap;
     }
-    
+
     map->char_codes[map->count] = char_code;
     map->unicode_values[map->count] = unicode_value;
     map->unicode_lengths[map->count] = 1;
@@ -336,38 +337,38 @@ static void tounicode_map_add(ToUnicodeMap* map, uint32_t char_code,
  * Parse a beginbfchar section
  * Format: n beginbfchar <srcCode> <dstString> ... endbfchar
  */
-static const char* parse_bfchar_section(const char* s, const char* end, 
+static const char* parse_bfchar_section(const char* s, const char* end,
                                         ToUnicodeMap* map, Pool* pool) {
     s = skip_cmap_whitespace(s, end);
-    
+
     // Parse entries until endbfchar
     while (s < end) {
         s = skip_cmap_whitespace(s, end);
-        
+
         // Check for endbfchar
         if (s + 9 <= end && strncmp(s, "endbfchar", 9) == 0) {
             return s + 9;
         }
-        
+
         // Parse source code
         uint32_t src_code;
         int consumed = parse_hex_string(s, &src_code, nullptr);
         if (consumed == 0) break;
         s += consumed;
-        
+
         s = skip_cmap_whitespace(s, end);
-        
+
         // Parse destination Unicode
         uint32_t dst_unicode;
         consumed = parse_hex_string(s, &dst_unicode, nullptr);
         if (consumed == 0) break;
         s += consumed;
-        
+
         // Add mapping
         tounicode_map_add(map, src_code, dst_unicode, pool);
         log_debug("ToUnicode bfchar: %04X -> U+%04X", src_code, dst_unicode);
     }
-    
+
     return s;
 }
 
@@ -376,35 +377,35 @@ static const char* parse_bfchar_section(const char* s, const char* end,
  * Format: n beginbfrange <srcCodeLo> <srcCodeHi> <dstStringLo> ... endbfrange
  * Or:     n beginbfrange <srcCodeLo> <srcCodeHi> [<dst1> <dst2> ...] ... endbfrange
  */
-static const char* parse_bfrange_section(const char* s, const char* end, 
+static const char* parse_bfrange_section(const char* s, const char* end,
                                          ToUnicodeMap* map, Pool* pool) {
     s = skip_cmap_whitespace(s, end);
-    
+
     // Parse entries until endbfrange
     while (s < end) {
         s = skip_cmap_whitespace(s, end);
-        
+
         // Check for endbfrange
         if (s + 10 <= end && strncmp(s, "endbfrange", 10) == 0) {
             return s + 10;
         }
-        
+
         // Parse source code low
         uint32_t src_lo;
         int consumed = parse_hex_string(s, &src_lo, nullptr);
         if (consumed == 0) break;
         s += consumed;
-        
+
         s = skip_cmap_whitespace(s, end);
-        
+
         // Parse source code high
         uint32_t src_hi;
         consumed = parse_hex_string(s, &src_hi, nullptr);
         if (consumed == 0) break;
         s += consumed;
-        
+
         s = skip_cmap_whitespace(s, end);
-        
+
         // Check if destination is an array [ ... ] or a single value
         if (*s == '[') {
             // Array of individual mappings
@@ -412,12 +413,12 @@ static const char* parse_bfrange_section(const char* s, const char* end,
             for (uint32_t code = src_lo; code <= src_hi && s < end; code++) {
                 s = skip_cmap_whitespace(s, end);
                 if (*s == ']') break;
-                
+
                 uint32_t dst;
                 consumed = parse_hex_string(s, &dst, nullptr);
                 if (consumed == 0) break;
                 s += consumed;
-                
+
                 tounicode_map_add(map, code, dst, pool);
                 log_debug("ToUnicode bfrange array: %04X -> U+%04X", code, dst);
             }
@@ -430,47 +431,47 @@ static const char* parse_bfrange_section(const char* s, const char* end,
             consumed = parse_hex_string(s, &dst_start, nullptr);
             if (consumed == 0) break;
             s += consumed;
-            
+
             // Add all mappings in range
             for (uint32_t code = src_lo; code <= src_hi; code++) {
                 uint32_t dst = dst_start + (code - src_lo);
                 tounicode_map_add(map, code, dst, pool);
             }
-            log_debug("ToUnicode bfrange: %04X-%04X -> U+%04X-U+%04X", 
+            log_debug("ToUnicode bfrange: %04X-%04X -> U+%04X-U+%04X",
                      src_lo, src_hi, dst_start, dst_start + (src_hi - src_lo));
         }
     }
-    
+
     return s;
 }
 
 /**
  * Parse ToUnicode CMap stream and populate font entry
- * 
+ *
  * @param cmap_data Raw CMap stream data (decompressed)
  * @param cmap_len Length of CMap data
  * @param entry Font entry to populate
  * @param pool Memory pool for allocations
  * @return true if parsing succeeded
  */
-static bool parse_tounicode_cmap(const char* cmap_data, size_t cmap_len, 
+static bool parse_tounicode_cmap(const char* cmap_data, size_t cmap_len,
                                   PDFFontEntry* entry, Pool* pool) {
     if (!cmap_data || cmap_len == 0 || !entry) return false;
-    
+
     const char* end = cmap_data + cmap_len;
     ToUnicodeMap map = {0};
-    
+
     log_debug("Parsing ToUnicode CMap (%zu bytes)", cmap_len);
-    
+
     // Find and parse all beginbfchar sections
     const char* s = cmap_data;
     while (s < end) {
         const char* bfchar = find_cmap_keyword(s, end, "beginbfchar");
         const char* bfrange = find_cmap_keyword(s, end, "beginbfrange");
-        
+
         // Process whichever comes first
         if (!bfchar && !bfrange) break;
-        
+
         if (bfchar && (!bfrange || bfchar < bfrange)) {
             s = parse_bfchar_section(bfchar, end, &map, pool);
         } else if (bfrange) {
@@ -479,25 +480,25 @@ static bool parse_tounicode_cmap(const char* cmap_data, size_t cmap_len,
             break;
         }
     }
-    
+
     if (map.count > 0) {
         // Determine max char code to size the array
         uint32_t max_code = 0;
         for (int i = 0; i < map.count; i++) {
             if (map.char_codes[i] > max_code) max_code = map.char_codes[i];
         }
-        
+
         // Allocate to_unicode array (sparse mapping, but simple)
         // Use a reasonable limit to avoid huge allocations
         if (max_code > 65535) max_code = 65535;
-        
+
         entry->to_unicode_count = max_code + 1;
         entry->to_unicode = (uint32_t*)pool_calloc(pool, sizeof(uint32_t) * entry->to_unicode_count);
-        
+
         if (entry->to_unicode) {
             // Initialize all to 0 (will be treated as "no mapping")
             memset(entry->to_unicode, 0, sizeof(uint32_t) * entry->to_unicode_count);
-            
+
             // Fill in mappings
             for (int i = 0; i < map.count; i++) {
                 uint32_t code = map.char_codes[i];
@@ -505,18 +506,18 @@ static bool parse_tounicode_cmap(const char* cmap_data, size_t cmap_len,
                     entry->to_unicode[code] = map.unicode_values[i];
                 }
             }
-            
+
             log_info("Parsed ToUnicode CMap: %d mappings, max code %u", map.count, max_code);
             return true;
         }
     }
-    
+
     return false;
 }
 
 /**
  * Extract and parse ToUnicode CMap from font dictionary
- * 
+ *
  * @param font_dict PDF font dictionary
  * @param entry Font entry to populate
  * @param input Input context
@@ -524,19 +525,19 @@ static bool parse_tounicode_cmap(const char* cmap_data, size_t cmap_len,
  * @param pdf_data Root PDF data for resolving indirect references (optional)
  * @return true if ToUnicode was found and parsed
  */
-static bool extract_tounicode_cmap(Map* font_dict, PDFFontEntry* entry, 
+static bool extract_tounicode_cmap(Map* font_dict, PDFFontEntry* entry,
                                     Input* input, Pool* pool, Map* pdf_data) {
     if (!font_dict || !entry) return false;
-    
+
     // Use safe Map::get that doesn't require runtime context
     ConstItem tounicode_const = font_dict->get("ToUnicode");
     Item tounicode_item = *(Item*)&tounicode_const;
-    
+
     if (tounicode_item.item == ITEM_NULL) {
         log_debug("No ToUnicode entry in font dict");
         return false;
     }
-    
+
     // Resolve indirect reference if needed
     if (pdf_data) {
         tounicode_item = pdf_resolve_reference(pdf_data, tounicode_item, pool);
@@ -545,51 +546,51 @@ static bool extract_tounicode_cmap(Map* font_dict, PDFFontEntry* entry,
             return false;
         }
     }
-    
+
     // ToUnicode should be a stream (Map with 'data' key)
     if (get_type_id(tounicode_item) != LMD_TYPE_MAP) {
         log_debug("ToUnicode is not a stream/map (type=%d)", get_type_id(tounicode_item));
         return false;
     }
-    
+
     Map* stream_dict = tounicode_item.map;
-    
+
     // Get stream data - check both "data" and "stream_data" keys (using safe Map::get)
     ConstItem data_const = stream_dict->get("data");
     Item data_item = *(Item*)&data_const;
-    
+
     if (data_item.item == ITEM_NULL) {
         // Try stream_data key
         ConstItem stream_data_const = stream_dict->get("stream_data");
         data_item = *(Item*)&stream_data_const;
     }
-    
+
     if (data_item.item == ITEM_NULL) {
         log_debug("ToUnicode stream has no data");
         return false;
     }
-    
+
     String* data_str = data_item.get_string();
     if (!data_str || data_str->len == 0) {
         log_debug("ToUnicode stream data is empty");
         return false;
     }
-    
+
     // Get the stream's dictionary (Filter is inside "dictionary" key, not directly on stream)
     ConstItem dict_const = stream_dict->get("dictionary");
     Map* filter_dict = nullptr;
     if (dict_const.item != ITEM_NULL && dict_const.type_id() == LMD_TYPE_MAP) {
         filter_dict = (Map*)dict_const.map;
     }
-    
+
     // Check for compression filter in the stream dictionary
     ConstItem filter_const = filter_dict ? filter_dict->get("Filter") : stream_dict->get("Filter");
     Item filter_item = *(Item*)&filter_const;
-    
+
     const char* cmap_data = nullptr;
     size_t cmap_len = 0;
     char* decompressed = nullptr;
-    
+
     if (filter_item.item != ITEM_NULL) {
         // Need to decompress
         String* filter_name = filter_item.get_string();
@@ -609,19 +610,19 @@ static bool extract_tounicode_cmap(Map* font_dict, PDFFontEntry* entry,
         cmap_data = data_str->chars;
         cmap_len = data_str->len;
     }
-    
+
     if (!cmap_data || cmap_len == 0) {
         log_warn("Failed to get ToUnicode CMap data");
         return false;
     }
-    
+
     bool result = parse_tounicode_cmap(cmap_data, cmap_len, entry, pool);
-    
+
     // Free decompressed data if allocated
     if (decompressed) {
-        free(decompressed);
+        free(decompressed);  // from pdf_decompress_stream which uses stdlib malloc
     }
-    
+
     return result;
 }
 
@@ -677,7 +678,7 @@ FontProp* create_font_from_pdf(Pool* pool, const char* font_name, double font_si
 
     // Resolve font reference from hardcoded mapping
     const char* resolved_font_name = font_name;
-    
+
     // Check if this is a font reference (F1, F2, F1.0, F2.0 etc.)
     if (font_name && font_name[0] == 'F' && font_name[1] >= '1' && font_name[1] <= '9') {
         // Use hardcoded mapping for common PDF font references
@@ -787,7 +788,7 @@ static FT_Library g_ft_library = nullptr;
  */
 bool pdf_font_init_freetype() {
     if (g_ft_library) return true;
-    
+
     FT_Error error = FT_Init_FreeType(&g_ft_library);
     if (error) {
         log_error("Failed to initialize FreeType: error %d", error);
@@ -813,17 +814,17 @@ void pdf_font_cleanup_freetype() {
 PDFFontCache* pdf_font_cache_create(Pool* pool) {
     PDFFontCache* cache = (PDFFontCache*)pool_calloc(pool, sizeof(PDFFontCache));
     if (!cache) return nullptr;
-    
+
     cache->pool = pool;
     cache->fonts = nullptr;
     cache->count = 0;
-    
+
     // Initialize FreeType if needed
     if (!g_ft_library) {
         pdf_font_init_freetype();
     }
     cache->ft_library = g_ft_library;
-    
+
     return cache;
 }
 
@@ -832,7 +833,7 @@ PDFFontCache* pdf_font_cache_create(Pool* pool) {
  */
 PDFFontType pdf_font_detect_type(Map* font_dict, Input* input) {
     if (!font_dict) return PDF_FONT_UNKNOWN;
-    
+
     // Create helper to get string from dict
     auto get_name = [input, font_dict](const char* key) -> const char* {
         MarkBuilder builder(input);
@@ -844,11 +845,11 @@ PDFFontType pdf_font_detect_type(Map* font_dict, Input* input) {
         }
         return nullptr;
     };
-    
+
     // Get Subtype
     const char* subtype = get_name("Subtype");
     if (!subtype) return PDF_FONT_UNKNOWN;
-    
+
     if (strcmp(subtype, "Type1") == 0) {
         // Check for CFF font data (FontFile3 with Type1C subtype)
         MarkBuilder builder(input);
@@ -874,7 +875,7 @@ PDFFontType pdf_font_detect_type(Map* font_dict, Input* input) {
         return PDF_FONT_CID_TYPE2; // Common case
     }
     if (strcmp(subtype, "OpenType") == 0) return PDF_FONT_OPENTYPE;
-    
+
     return PDF_FONT_UNKNOWN;
 }
 
@@ -882,13 +883,13 @@ PDFFontType pdf_font_detect_type(Map* font_dict, Input* input) {
  * Extract embedded font data from PDF font dictionary
  * Returns the raw font data that can be loaded by FreeType
  */
-static unsigned char* extract_embedded_font_data(Map* font_dict, Input* input, 
+static unsigned char* extract_embedded_font_data(Map* font_dict, Input* input,
                                                   size_t* out_len, PDFFontType* out_type) {
     if (!font_dict || !out_len) return nullptr;
     *out_len = 0;
-    
+
     MarkBuilder builder(input);
-    
+
     // Get FontDescriptor
     String* desc_key = builder.createString("FontDescriptor");
     Item desc_item = {.item = map_get(font_dict, {.item = s2it(desc_key)}).item};
@@ -897,35 +898,35 @@ static unsigned char* extract_embedded_font_data(Map* font_dict, Input* input,
         return nullptr;
     }
     Map* desc_dict = desc_item.map;
-    
+
     // Try FontFile (Type 1), FontFile2 (TrueType), FontFile3 (CFF/OpenType)
     const char* font_file_keys[] = {"FontFile3", "FontFile2", "FontFile", nullptr};
     PDFFontType font_types[] = {PDF_FONT_TYPE1C, PDF_FONT_TRUETYPE, PDF_FONT_TYPE1};
-    
+
     for (int i = 0; font_file_keys[i]; i++) {
         String* ff_key = builder.createString(font_file_keys[i]);
         Item ff_item = {.item = map_get(desc_dict, {.item = s2it(ff_key)}).item};
-        
+
         if (ff_item.item != ITEM_NULL && get_type_id(ff_item) == LMD_TYPE_MAP) {
             Map* stream_dict = ff_item.map;
-            
+
             // Get stream data
             String* data_key = builder.createString("data");
             Item data_item = {.item = map_get(stream_dict, {.item = s2it(data_key)}).item};
             if (data_item.item == ITEM_NULL) continue;
-            
+
             String* data_str = data_item.get_string();
             if (!data_str || data_str->len == 0) continue;
-            
+
             // Check for filter (might need decompression)
             String* filter_key = builder.createString("Filter");
             Item filter_item = {.item = map_get(stream_dict, {.item = s2it(filter_key)}).item};
-            
+
             if (filter_item.item != ITEM_NULL) {
                 // Need to decompress
                 String* filter_name = filter_item.get_string();
                 const char* filters[1] = { filter_name->chars };
-                
+
                 size_t decompressed_len = 0;
                 char* decompressed = pdf_decompress_stream(data_str->chars, data_str->len,
                                                            filters, 1, &decompressed_len);
@@ -937,7 +938,7 @@ static unsigned char* extract_embedded_font_data(Map* font_dict, Input* input,
                 }
             } else {
                 // Raw data
-                unsigned char* font_data = (unsigned char*)malloc(data_str->len);
+                unsigned char* font_data = (unsigned char*)mem_alloc(data_str->len, MEM_CAT_FONT);
                 if (font_data) {
                     memcpy(font_data, data_str->chars, data_str->len);
                     *out_len = data_str->len;
@@ -948,24 +949,24 @@ static unsigned char* extract_embedded_font_data(Map* font_dict, Input* input,
             }
         }
     }
-    
+
     return nullptr;
 }
 
 /**
  * Load embedded font into FreeType
  */
-FT_Face pdf_font_load_embedded(PDFFontCache* cache, unsigned char* font_data, 
+FT_Face pdf_font_load_embedded(PDFFontCache* cache, unsigned char* font_data,
                                 size_t font_data_len, PDFFontType font_type) {
     if (!cache || !font_data || font_data_len == 0) return nullptr;
     if (!cache->ft_library) {
         if (!pdf_font_init_freetype()) return nullptr;
         cache->ft_library = g_ft_library;
     }
-    
+
     FT_Face face = nullptr;
     FT_Error error;
-    
+
     // Load based on font type
     switch (font_type) {
         case PDF_FONT_TRUETYPE:
@@ -974,60 +975,60 @@ FT_Face pdf_font_load_embedded(PDFFontCache* cache, unsigned char* font_data,
             // Direct TrueType/OpenType loading
             error = FT_New_Memory_Face(cache->ft_library, font_data, font_data_len, 0, &face);
             break;
-            
+
         case PDF_FONT_TYPE1C:
         case PDF_FONT_CID_TYPE0C:
             // CFF font - FreeType can handle directly
             error = FT_New_Memory_Face(cache->ft_library, font_data, font_data_len, 0, &face);
             break;
-            
+
         case PDF_FONT_TYPE1:
             // Type 1 font - FreeType can handle PFB/PFA
             error = FT_New_Memory_Face(cache->ft_library, font_data, font_data_len, 0, &face);
             break;
-            
+
         default:
             log_warn("Unsupported font type for embedded loading: %d", font_type);
             return nullptr;
     }
-    
+
     if (error) {
         log_error("FreeType failed to load embedded font: error %d", error);
         return nullptr;
     }
-    
-    log_info("Loaded embedded font: %s (%s)", 
+
+    log_info("Loaded embedded font: %s (%s)",
              face->family_name ? face->family_name : "unknown",
              face->style_name ? face->style_name : "");
-    
+
     return face;
 }
 
 /**
  * Add font to cache from PDF Resources
  */
-PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name, 
+PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
                                   Map* font_dict, Input* input, Map* pdf_data) {
     if (!cache || !ref_name || !font_dict) return nullptr;
-    
+
     // Check if already cached
     for (PDFFontEntry* entry = cache->fonts; entry; entry = entry->next) {
         if (entry->name && strcmp(entry->name, ref_name) == 0) {
             return entry;
         }
     }
-    
+
     // Create new entry
     PDFFontEntry* entry = (PDFFontEntry*)pool_calloc(cache->pool, sizeof(PDFFontEntry));
     if (!entry) return nullptr;
-    
+
     // Copy reference name
     size_t name_len = strlen(ref_name);
     entry->name = (char*)pool_calloc(cache->pool, name_len + 1);
     if (entry->name) {
         strcpy(entry->name, ref_name);
     }
-    
+
     // Get BaseFont using Map::get (safe, no runtime context needed)
     ConstItem base_const = font_dict->get("BaseFont");
     if (base_const.item != ITEM_NULL) {
@@ -1047,10 +1048,10 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
             }
         }
     }
-    
+
     // Detect font type
     entry->type = pdf_font_detect_type(font_dict, input);
-    
+
     // Detect encoding type
     entry->encoding = PDF_ENCODING_STANDARD;  // Default
     ConstItem enc_const = font_dict->get("Encoding");
@@ -1078,7 +1079,7 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
             }
         }
     }
-    
+
     // Special case: detect Symbol and ZapfDingbats fonts by BaseFont name
     // These fonts have implicit encodings even without an Encoding key
     if (entry->encoding == PDF_ENCODING_STANDARD && entry->base_font) {
@@ -1092,38 +1093,38 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
             log_debug("Font '%s' detected as ZapfDingbats font", ref_name);
         }
     }
-    
+
     // Try to extract embedded font
     PDFFontType embed_type;
     size_t font_data_len = 0;
     unsigned char* font_data = extract_embedded_font_data(font_dict, input, &font_data_len, &embed_type);
-    
+
     if (font_data && font_data_len > 0) {
         entry->is_embedded = true;
         entry->font_data = font_data;
         entry->font_data_len = font_data_len;
-        
+
         // Load into FreeType
         entry->ft_face = pdf_font_load_embedded(cache, font_data, font_data_len, embed_type);
         if (entry->ft_face) {
-            log_info("Cached embedded font '%s' -> '%s'", ref_name, 
+            log_info("Cached embedded font '%s' -> '%s'", ref_name,
                     entry->ft_face->family_name ? entry->ft_face->family_name : "unknown");
         }
     } else {
         entry->is_embedded = false;
-        log_debug("Font '%s' (%s) is not embedded, using system fallback", 
+        log_debug("Font '%s' (%s) is not embedded, using system fallback",
                  ref_name, entry->base_font ? entry->base_font : "unknown");
     }
-    
+
     // Extract widths if present (use Map::get for safe access without runtime context)
     ConstItem widths_item_const = font_dict->get("Widths");
     Item widths_item = *(Item*)&widths_item_const;
-    
+
     // Resolve widths if it's an indirect reference
     if (widths_item.item != ITEM_NULL && pdf_data) {
         widths_item = pdf_resolve_reference(pdf_data, widths_item, cache->pool);
     }
-    
+
     if (widths_item.item != ITEM_NULL && get_type_id(widths_item) == LMD_TYPE_ARRAY) {
         Array* widths_array = widths_item.array;
         entry->widths_count = widths_array->length;
@@ -1141,39 +1142,39 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
             }
         }
     }
-    
+
     // Get FirstChar/LastChar (using safe Map::get)
     ConstItem fc_const = font_dict->get("FirstChar");
     if (fc_const.item != ITEM_NULL) {
         Item* fc_item = (Item*)&fc_const;
         TypeId fc_type = get_type_id(*fc_item);
-        entry->first_char = (int)(fc_type == LMD_TYPE_FLOAT ? 
+        entry->first_char = (int)(fc_type == LMD_TYPE_FLOAT ?
                                   fc_item->get_double() : fc_item->int_val);
     }
-    
+
     ConstItem lc_const = font_dict->get("LastChar");
     if (lc_const.item != ITEM_NULL) {
         Item* lc_item = (Item*)&lc_const;
         TypeId lc_type = get_type_id(*lc_item);
-        entry->last_char = (int)(lc_type == LMD_TYPE_FLOAT ? 
+        entry->last_char = (int)(lc_type == LMD_TYPE_FLOAT ?
                                  lc_item->get_double() : lc_item->int_val);
     }
-    
+
     // Extract and parse ToUnicode CMap for character decoding
     if (extract_tounicode_cmap(font_dict, entry, input, cache->pool, pdf_data)) {
-        log_info("Font '%s' has ToUnicode mapping with %d entries", 
+        log_info("Font '%s' has ToUnicode mapping with %d entries",
                 ref_name, entry->to_unicode_count);
     }
-    
+
     // Add to cache list
     entry->next = cache->fonts;
     cache->fonts = entry;
     cache->count++;
-    
-    log_debug("Added font to cache: %s (type=%d, embedded=%d, widths=%d, tounicode=%d)", 
-             ref_name, entry->type, entry->is_embedded, entry->widths_count, 
+
+    log_debug("Added font to cache: %s (type=%d, embedded=%d, widths=%d, tounicode=%d)",
+             ref_name, entry->type, entry->is_embedded, entry->widths_count,
              entry->to_unicode_count);
-    
+
     return entry;
 }
 
@@ -1182,7 +1183,7 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
  */
 PDFFontEntry* pdf_font_cache_get(PDFFontCache* cache, const char* ref_name) {
     if (!cache || !ref_name) return nullptr;
-    
+
     for (PDFFontEntry* entry = cache->fonts; entry; entry = entry->next) {
         if (entry->name && strcmp(entry->name, ref_name) == 0) {
             return entry;
@@ -1197,12 +1198,12 @@ PDFFontEntry* pdf_font_cache_get(PDFFontCache* cache, const char* ref_name) {
  */
 FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double font_size) {
     if (!pool || !entry) return nullptr;
-    
+
     FontProp* font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
     if (!font) return nullptr;
-    
+
     font->font_size = (float)font_size;
-    
+
     if (entry->ft_face) {
         // Use embedded font - get family name from FreeType
         if (entry->ft_face->family_name) {
@@ -1210,23 +1211,23 @@ FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double f
         } else {
             font->family = (char*)"Arial";
         }
-        
+
         // Get style from FreeType
         if (entry->ft_face->style_flags & FT_STYLE_FLAG_BOLD) {
             font->font_weight = CSS_VALUE_BOLD;
         } else {
             font->font_weight = CSS_VALUE_NORMAL;
         }
-        
+
         if (entry->ft_face->style_flags & FT_STYLE_FLAG_ITALIC) {
             font->font_style = CSS_VALUE_ITALIC;
         } else {
             font->font_style = CSS_VALUE_NORMAL;
         }
-        
+
         // Store FreeType face reference for direct rendering
         font->ft_face = entry->ft_face;
-        
+
         log_debug("Using embedded font: %s, size: %.2f", font->family, font->font_size);
     } else {
         // Fall back to system font mapping
@@ -1234,11 +1235,11 @@ FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double f
         font->family = (char*)map_pdf_font_to_system(base_font);
         font->font_weight = get_font_weight_from_name(base_font);
         font->font_style = get_font_style_from_name(base_font);
-        
-        log_debug("Using system font: %s for %s, size: %.2f", 
+
+        log_debug("Using system font: %s for %s, size: %.2f",
                  font->family, entry->name, font->font_size);
     }
-    
+
     return font;
 }
 
@@ -1247,7 +1248,7 @@ FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double f
  */
 float pdf_font_get_glyph_width(PDFFontEntry* entry, int char_code, float font_size) {
     if (!entry) return font_size * 0.5f;  // Default estimate
-    
+
     // Check widths array first
     if (entry->widths && char_code >= entry->first_char && char_code <= entry->last_char) {
         int idx = char_code - entry->first_char;
@@ -1256,7 +1257,7 @@ float pdf_font_get_glyph_width(PDFFontEntry* entry, int char_code, float font_si
             return entry->widths[idx] / 1000.0f * font_size;
         }
     }
-    
+
     // Try FreeType if embedded
     if (entry->ft_face) {
         FT_Error error = FT_Set_Char_Size(entry->ft_face, 0, (FT_F26Dot6)(font_size * 64), 72, 72);
@@ -1271,7 +1272,7 @@ float pdf_font_get_glyph_width(PDFFontEntry* entry, int char_code, float font_si
             }
         }
     }
-    
+
     // Fallback: estimate based on font size
     return font_size * 0.5f;
 }
@@ -1281,15 +1282,15 @@ float pdf_font_get_glyph_width(PDFFontEntry* entry, int char_code, float font_si
  */
 float pdf_font_calculate_text_width(PDFFontEntry* entry, const char* text, float font_size) {
     if (!text || !entry) return estimate_text_width(text, font_size);
-    
+
     float total_width = 0.0f;
     const unsigned char* p = (const unsigned char*)text;
-    
+
     while (*p) {
         total_width += pdf_font_get_glyph_width(entry, *p, font_size);
         p++;
     }
-    
+
     return total_width;
 }
 
@@ -1306,18 +1307,18 @@ bool pdf_font_has_tounicode(PDFFontEntry* entry) {
  */
 bool pdf_font_needs_decoding(PDFFontEntry* entry) {
     if (!entry) return false;
-    
+
     // Has ToUnicode CMap
     if (entry->to_unicode && entry->to_unicode_count > 0) {
         return true;
     }
-    
+
     // Has a non-standard encoding that requires translation
-    if (entry->encoding != PDF_ENCODING_STANDARD && 
+    if (entry->encoding != PDF_ENCODING_STANDARD &&
         entry->encoding != PDF_ENCODING_IDENTITY_H) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -1351,7 +1352,7 @@ static int encode_utf8(uint32_t codepoint, char* buf) {
 /**
  * Decode PDF text using ToUnicode CMap
  * Converts character codes to Unicode string
- * 
+ *
  * @param entry Font entry with ToUnicode mapping
  * @param input_text Raw text from PDF (character codes)
  * @param input_len Length of input text
@@ -1364,7 +1365,7 @@ int pdf_font_decode_text(PDFFontEntry* entry, const char* input_text, int input_
     if (!input_text || input_len <= 0 || !output_buf || output_size <= 0) {
         return -1;
     }
-    
+
     // If no entry at all, just copy as-is (fallback)
     if (!entry) {
         int copy_len = input_len < output_size - 1 ? input_len : output_size - 1;
@@ -1372,12 +1373,12 @@ int pdf_font_decode_text(PDFFontEntry* entry, const char* input_text, int input_
         output_buf[copy_len] = '\0';
         return copy_len;
     }
-    
+
     // Determine which decoding method to use
     bool has_tounicode = (entry->to_unicode && entry->to_unicode_count > 0);
-    bool has_encoding = (entry->encoding != PDF_ENCODING_STANDARD && 
+    bool has_encoding = (entry->encoding != PDF_ENCODING_STANDARD &&
                          entry->encoding != PDF_ENCODING_IDENTITY_H);
-    
+
     // If no ToUnicode and no special encoding, just copy
     if (!has_tounicode && !has_encoding) {
         int copy_len = input_len < output_size - 1 ? input_len : output_size - 1;
@@ -1385,17 +1386,17 @@ int pdf_font_decode_text(PDFFontEntry* entry, const char* input_text, int input_
         output_buf[copy_len] = '\0';
         return copy_len;
     }
-    
+
     int out_pos = 0;
     const unsigned char* p = (const unsigned char*)input_text;
     const unsigned char* end = p + input_len;
-    
+
     while (p < end && out_pos < output_size - 4) {  // Reserve space for UTF-8
         unsigned int char_code = *p++;
-        
+
         // Determine Unicode code point
         uint32_t unicode;
-        
+
         if (has_tounicode) {
             // Use ToUnicode map if available
             if (char_code < (unsigned int)entry->to_unicode_count && entry->to_unicode[char_code] != 0) {
@@ -1408,7 +1409,7 @@ int pdf_font_decode_text(PDFFontEntry* entry, const char* input_text, int input_
             // Use font encoding table
             unicode = decode_char_with_encoding(char_code, entry->encoding);
         }
-        
+
         // Handle common ligatures by decomposing them
         // This is important for search/comparison functionality
         switch (unicode) {
@@ -1439,7 +1440,7 @@ int pdf_font_decode_text(PDFFontEntry* entry, const char* input_text, int input_
                 break;
         }
     }
-    
+
     output_buf[out_pos] = '\0';
     return out_pos;
 }

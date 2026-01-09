@@ -6,13 +6,14 @@ extern "C" {
 #include <math.h>
 #include <ctype.h>
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 }
 
 // Create a minmax() track size
 GridTrackSize* create_minmax_track_size(GridTrackSize* min_size, GridTrackSize* max_size) {
     if (!min_size || !max_size) return NULL;
 
-    GridTrackSize* track_size = (GridTrackSize*)calloc(1, sizeof(GridTrackSize));
+    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
     if (!track_size) return NULL;
 
     track_size->type = GRID_TRACK_SIZE_MINMAX;
@@ -87,12 +88,12 @@ int resolve_minmax_track_size(GridTrackSize* track_size, int available_space, in
 GridTrackSize* create_repeat_track_size(int repeat_count, GridTrackSize** repeat_tracks, int track_count) {
     if (repeat_count <= 0 || !repeat_tracks || track_count <= 0) return NULL;
 
-    GridTrackSize* track_size = (GridTrackSize*)calloc(1, sizeof(GridTrackSize));
+    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
     if (!track_size) return NULL;
 
     track_size->type = GRID_TRACK_SIZE_REPEAT;
     track_size->repeat_count = repeat_count;
-    track_size->repeat_tracks = (GridTrackSize**)calloc(track_count, sizeof(GridTrackSize*));
+    track_size->repeat_tracks = (GridTrackSize**)mem_calloc(track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
     track_size->repeat_track_count = track_count;
     track_size->is_auto_fill = false;
     track_size->is_auto_fit = false;
@@ -110,12 +111,12 @@ GridTrackSize* create_repeat_track_size(int repeat_count, GridTrackSize** repeat
 GridTrackSize* create_auto_repeat_track_size(bool is_auto_fill, GridTrackSize** repeat_tracks, int track_count) {
     if (!repeat_tracks || track_count <= 0) return NULL;
 
-    GridTrackSize* track_size = (GridTrackSize*)calloc(1, sizeof(GridTrackSize));
+    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
     if (!track_size) return NULL;
 
     track_size->type = GRID_TRACK_SIZE_REPEAT;
     track_size->repeat_count = 0; // Will be calculated based on available space
-    track_size->repeat_tracks = (GridTrackSize**)calloc(track_count, sizeof(GridTrackSize*));
+    track_size->repeat_tracks = (GridTrackSize**)mem_calloc(track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
     track_size->repeat_track_count = track_count;
     track_size->is_auto_fill = is_auto_fill;
     track_size->is_auto_fit = !is_auto_fill;
@@ -342,8 +343,8 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
                        track_list->allocated_tracks, track_list->allocated_tracks * 2);
 
                 int new_capacity = track_list->allocated_tracks * 2;
-                GridTrackSize** new_tracks = (GridTrackSize**)realloc(track_list->tracks,
-                                                                     new_capacity * sizeof(GridTrackSize*));
+                GridTrackSize** new_tracks = (GridTrackSize**)mem_realloc(track_list->tracks,
+                                                                     new_capacity * sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
 
                 // CRITICAL: Check if realloc failed
                 if (!new_tracks) {

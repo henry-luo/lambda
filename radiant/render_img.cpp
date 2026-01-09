@@ -4,6 +4,7 @@
 #include "font_face.h"
 extern "C" {
 #include "../lib/url.h"
+#include "../lib/memtrack.h"
 }
 #include <stdio.h>
 #include <string.h>
@@ -58,7 +59,7 @@ void save_surface_to_png(ImageSurface* surface, const char* filename) {
     png_write_info(png_ptr, info_ptr);
 
     // Write image data
-    uint8_t** row_pointers = (uint8_t**)malloc(sizeof(uint8_t*) * surface->height);
+    uint8_t** row_pointers = (uint8_t**)mem_alloc(sizeof(uint8_t*) * surface->height, MEM_CAT_RENDER);
     for (int y = 0; y < surface->height; y++) {
         row_pointers[y] = (uint8_t*)surface->pixels + y * surface->pitch;
     }
@@ -67,7 +68,7 @@ void save_surface_to_png(ImageSurface* surface, const char* filename) {
     png_write_end(png_ptr, NULL);
 
     // Clean up
-    free(row_pointers);
+    mem_free(row_pointers);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
 
@@ -85,7 +86,7 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     // Convert RGBA to RGB (JPEG doesn't support alpha channel)
     int width = surface->width;
     int height = surface->height;
-    unsigned char* rgb_buffer = (unsigned char*)malloc(width * height * 3);
+    unsigned char* rgb_buffer = (unsigned char*)mem_alloc(width * height * 3, MEM_CAT_RENDER);
     if (!rgb_buffer) {
         log_error("Failed to allocate memory for RGB buffer");
         tjDestroy(tj_instance);
@@ -115,7 +116,7 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 
     if (result != 0) {
         log_error("TurboJPEG compression failed: %s", tjGetErrorStr());
-        free(rgb_buffer);
+        mem_free(rgb_buffer);
         tjDestroy(tj_instance);
         return;
     }
@@ -124,7 +125,7 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     FILE* fp = fopen(filename, "wb");
     if (!fp) {
         log_error("Failed to open file for writing: %s", filename);
-        free(rgb_buffer);
+        mem_free(rgb_buffer);
         tjFree(jpeg_buffer);
         tjDestroy(tj_instance);
         return;
@@ -139,7 +140,7 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 
     // Clean up
     fclose(fp);
-    free(rgb_buffer);
+    mem_free(rgb_buffer);
     tjFree(jpeg_buffer);
     tjDestroy(tj_instance);
 }
@@ -371,12 +372,12 @@ int render_uicontext_to_png(UiContext* uicon, const char* png_file) {
         log_error("render_uicontext_to_png: invalid uicontext or no view tree");
         return 1;
     }
-    
+
     log_info("render_uicontext_to_png: rendering to %s", png_file);
-    
+
     // Render the document (this will include caret/selection via render_ui_overlays)
     render_html_doc(uicon, uicon->document->view_tree, png_file);
-    
+
     log_info("render_uicontext_to_png: completed successfully");
     return 0;
 }
@@ -397,22 +398,22 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
         log_error("render_uicontext_to_svg: invalid uicontext or no view tree");
         return 1;
     }
-    
+
     log_info("render_uicontext_to_svg: rendering to %s", svg_file);
-    
+
     // Get content dimensions
     int content_max_x = uicon->viewport_width;
     int content_max_y = uicon->viewport_height;
-    
+
     extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
     calculate_content_bounds(uicon->document->view_tree->root, &content_max_x, &content_max_y);
     content_max_x += 50;
     content_max_y += 50;
-    
+
     // Render to SVG (now includes caret if present)
     extern char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, RadiantState* state);
     extern bool save_svg_to_file(const char* svg_content, const char* filename);
-    
+
     char* svg_content = render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
                                                 content_max_x, content_max_y,
                                                 uicon->document->state);
@@ -420,14 +421,14 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
         log_error("render_uicontext_to_svg: failed to render view tree");
         return 1;
     }
-    
+
     if (!save_svg_to_file(svg_content, svg_file)) {
         log_error("render_uicontext_to_svg: failed to save SVG to %s", svg_file);
-        free(svg_content);
+        mem_free(svg_content);
         return 1;
     }
-    
-    free(svg_content);
+
+    mem_free(svg_content);
     log_info("render_uicontext_to_svg: completed successfully");
     return 0;
 }

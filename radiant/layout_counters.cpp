@@ -3,6 +3,7 @@
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -338,7 +339,7 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     if (!*values) return;
 
     // Collect values from outermost to innermost
-    int* temp = (int*)malloc(sizeof(int) * counter_count);
+    int* temp = (int*)mem_alloc(sizeof(int) * counter_count, MEM_CAT_LAYOUT);
     int idx = 0;
 
     scope = ctx->current_scope;
@@ -353,7 +354,7 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
 
     // Copy to output array
     memcpy(*values, temp, sizeof(int) * counter_count);
-    free(temp);
+    mem_free(temp);
 
     *count = counter_count;
 }
