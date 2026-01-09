@@ -1672,6 +1672,10 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         parent = parent->parent;
     }
 
+    // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
+    x += caret->iframe_offset_x;
+    y += caret->iframe_offset_y;
+
     // Scale to physical pixels
     x *= s;  y *= s;
     float height = caret->height * s;

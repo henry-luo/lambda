@@ -629,6 +629,10 @@ static void render_caret_svg(SvgRenderContext* ctx, RadiantState* state) {
         parent = parent->parent;
     }
     
+    // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
+    x += caret->iframe_offset_x;
+    y += caret->iframe_offset_y;
+    
     float height = caret->height;
     
     // Render caret as a line

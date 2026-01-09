@@ -825,6 +825,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->caret->x = caret_x;
                     state->caret->y = caret_y;
                     state->caret->height = caret_height;
+                    
+                    // Calculate iframe offset (same logic as in MOUSE_DOWN)
+                    float chain_x = 0, chain_y = 0;
+                    View* parent = text->parent;
+                    while (parent) {
+                        if (parent->view_type == RDT_VIEW_BLOCK || 
+                            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            parent->view_type == RDT_VIEW_LIST_ITEM) {
+                            chain_x += ((ViewBlock*)parent)->x;
+                            chain_y += ((ViewBlock*)parent)->y;
+                        }
+                        parent = parent->parent;
+                    }
+                    state->caret->iframe_offset_x = evcon.block.x - chain_x;
+                    state->caret->iframe_offset_y = evcon.block.y - chain_y;
                 }
                 
                 // Update selection end visual coordinates for rendering
@@ -914,7 +929,29 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->caret->x = caret_x;
                     state->caret->y = caret_y;
                     state->caret->height = caret_height;
-                    log_info("CARET VISUAL: x=%.1f y=%.1f height=%.1f", caret_x, caret_y, caret_height);
+                    
+                    // Calculate iframe offset: evcon.block has the absolute position of
+                    // the text's parent block (including any iframe offset). We need to
+                    // find the offset that isn't accounted for when walking up the parent
+                    // chain within the iframe document.
+                    float chain_x = 0, chain_y = 0;
+                    View* parent = text->parent;
+                    while (parent) {
+                        if (parent->view_type == RDT_VIEW_BLOCK || 
+                            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            parent->view_type == RDT_VIEW_LIST_ITEM) {
+                            chain_x += ((ViewBlock*)parent)->x;
+                            chain_y += ((ViewBlock*)parent)->y;
+                        }
+                        parent = parent->parent;
+                    }
+                    // iframe offset is the difference between evcon.block and chain position
+                    state->caret->iframe_offset_x = evcon.block.x - chain_x;
+                    state->caret->iframe_offset_y = evcon.block.y - chain_y;
+                    
+                    log_info("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)", 
+                        caret_x, caret_y, caret_height,
+                        state->caret->iframe_offset_x, state->caret->iframe_offset_y);
                 }
                 
                 // Start new selection if shift not pressed, otherwise extend
