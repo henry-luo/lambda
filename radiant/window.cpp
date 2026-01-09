@@ -195,6 +195,12 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     doc->scale = doc->given_scale * ui_context.pixel_ratio;
 
     ui_context.document = doc;
+    
+    // Create RadiantState for interactive state management (caret, selection, focus, etc.)
+    if (!doc->state) {
+        doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
+        log_debug("show_html_doc: created RadiantState for document");
+    }
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
