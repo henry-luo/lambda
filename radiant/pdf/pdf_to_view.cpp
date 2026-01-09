@@ -6,6 +6,7 @@
 #include "pages.hpp"
 #include "pdf_fonts.h"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/mark_builder.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
@@ -376,25 +377,25 @@ static ViewBlock* create_document_view(Pool* pool) {
  */
 static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_item, Map* resources) {
     if (cs_item.item == ITEM_NULL) return nullptr;
-    
+
     PDFColorSpaceInfo* info = (PDFColorSpaceInfo*)pool_calloc(pool, sizeof(PDFColorSpaceInfo));
     if (!info) return nullptr;
-    
+
     // Default values
     info->gamma[0] = info->gamma[1] = info->gamma[2] = 1.0;
     info->white_point[0] = 0.9505; // D65 white point X
     info->white_point[1] = 1.0;    // D65 white point Y
     info->white_point[2] = 1.0890; // D65 white point Z
-    
+
     TypeId type = get_type_id(cs_item);
-    
+
     // Simple name color space (e.g., "DeviceRGB")
     if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
         String* cs_name = cs_item.get_string();
         if (!cs_name) return nullptr;
-        
+
         info->name = cs_name;
-        
+
         if (strcmp(cs_name->chars, "DeviceRGB") == 0 || strcmp(cs_name->chars, "RGB") == 0) {
             info->type = PDF_CS_DEVICE_RGB;
             info->num_components = 3;
@@ -416,16 +417,16 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
         }
         return info;
     }
-    
+
     // Map type - this could be an ICCBased stream or similar
     if (type == LMD_TYPE_MAP) {
         Map* cs_map = cs_item.map;
         if (!cs_map) return nullptr;
-        
+
         // Check if it's an ICCBased stream by looking for /N key
         String* n_key = input_create_string(input, "N");
         Item n_item = {.item = map_get(cs_map, {.item = s2it(n_key)}).item};
-        
+
         if (n_item.item != ITEM_NULL) {
             // It's an ICCBased stream
             info->type = PDF_CS_ICCBASED;
@@ -440,31 +441,31 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             log_debug("Map color space: ICCBased with N=%d", info->icc_n);
             return info;
         }
-        
+
         // Unknown map type - default to DeviceGray (common for single-component spaces)
         log_debug("Unknown map color space, defaulting to DeviceGray");
         info->type = PDF_CS_DEVICE_GRAY;
         info->num_components = 1;
         return info;
     }
-    
+
     // Array color space (e.g., [/Indexed /DeviceRGB 255 <data>])
     if (type == LMD_TYPE_ARRAY) {
         Array* cs_array = cs_item.array;
         if (!cs_array || cs_array->length < 1) return nullptr;
-        
+
         // First element is the color space type name
         Item type_item = cs_array->items[0];
         String* type_name = type_item.get_string();
         if (!type_name) return nullptr;
-        
+
         log_debug("Parsing array color space: %s", type_name->chars);
-        
+
         if (strcmp(type_name->chars, "Indexed") == 0 || strcmp(type_name->chars, "I") == 0) {
             // [/Indexed base hival lookup]
             info->type = PDF_CS_INDEXED;
             info->num_components = 1;  // Indexed uses single index value
-            
+
             if (cs_array->length >= 4) {
                 // Base color space
                 Item base_item = cs_array->items[1];
@@ -474,7 +475,7 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
                 } else {
                     info->base_type = PDF_CS_DEVICE_RGB;  // Default
                 }
-                
+
                 // hival (max index)
                 Item hival_item = cs_array->items[2];
                 if (get_type_id(hival_item) == LMD_TYPE_INT) {
@@ -482,7 +483,7 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
                 } else if (get_type_id(hival_item) == LMD_TYPE_FLOAT) {
                     info->hival = (int)hival_item.get_double();
                 }
-                
+
                 // Lookup table
                 Item lookup_item = cs_array->items[3];
                 TypeId lookup_type = get_type_id(lookup_item);
@@ -498,17 +499,17 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             }
             return info;
         }
-        
+
         if (strcmp(type_name->chars, "ICCBased") == 0) {
             // [/ICCBased stream]
             info->type = PDF_CS_ICCBASED;
-            
+
             // The stream contains ICC profile data and N (number of components)
             if (cs_array->length >= 2) {
                 Item stream_item = cs_array->items[1];
                 if (get_type_id(stream_item) == LMD_TYPE_MAP) {
                     Map* stream_dict = stream_item.map;
-                    
+
                     // Get N (number of components)
                     String* n_key = input_create_string(input, "N");
                     Item n_item = {.item = map_get(stream_dict, {.item = s2it(n_key)}).item};
@@ -527,17 +528,17 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             }
             return info;
         }
-        
+
         if (strcmp(type_name->chars, "CalGray") == 0) {
             // [/CalGray <<dict>>]
             info->type = PDF_CS_CAL_GRAY;
             info->num_components = 1;
-            
+
             if (cs_array->length >= 2) {
                 Item dict_item = cs_array->items[1];
                 if (get_type_id(dict_item) == LMD_TYPE_MAP) {
                     Map* dict = dict_item.map;
-                    
+
                     // Gamma (optional, default 1)
                     String* gamma_key = input_create_string(input, "Gamma");
                     Item gamma_item = {.item = map_get(dict, {.item = s2it(gamma_key)}).item};
@@ -553,17 +554,17 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             }
             return info;
         }
-        
+
         if (strcmp(type_name->chars, "CalRGB") == 0) {
             // [/CalRGB <<dict>>]
             info->type = PDF_CS_CAL_RGB;
             info->num_components = 3;
-            
+
             if (cs_array->length >= 2) {
                 Item dict_item = cs_array->items[1];
                 if (get_type_id(dict_item) == LMD_TYPE_MAP) {
                     Map* dict = dict_item.map;
-                    
+
                     // Gamma array (optional, default [1 1 1])
                     String* gamma_key = input_create_string(input, "Gamma");
                     Item gamma_item = {.item = map_get(dict, {.item = s2it(gamma_key)}).item};
@@ -584,14 +585,14 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             }
             return info;
         }
-        
+
         if (strcmp(type_name->chars, "Lab") == 0) {
             info->type = PDF_CS_LAB;
             info->num_components = 3;
             log_debug("Lab color space (limited support)");
             return info;
         }
-        
+
         if (strcmp(type_name->chars, "Separation") == 0 ||
             strcmp(type_name->chars, "DeviceN") == 0) {
             // Separation and DeviceN require tint transform functions
@@ -603,7 +604,7 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             return info;
         }
     }
-    
+
     // Default to DeviceRGB
     log_debug("Defaulting to DeviceRGB color space");
     info->type = PDF_CS_DEVICE_RGB;
@@ -617,26 +618,26 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
 static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Pool* pool,
                                                    const char* cs_name, Map* resources) {
     if (!resources || !cs_name) return nullptr;
-    
+
     // Look in /ColorSpace dictionary of resources
     String* cs_key = input_create_string(input, "ColorSpace");
     Item cs_dict_item = {.item = map_get(resources, {.item = s2it(cs_key)}).item};
-    
+
     if (cs_dict_item.item == ITEM_NULL || get_type_id(cs_dict_item) != LMD_TYPE_MAP) {
         return nullptr;
     }
-    
+
     Map* cs_dict = cs_dict_item.map;
-    
+
     // Look up the named color space
     String* name_key = input_create_string(input, cs_name);
     Item cs_item = {.item = map_get(cs_dict, {.item = s2it(name_key)}).item};
-    
+
     if (cs_item.item == ITEM_NULL) {
         log_debug("Named color space '%s' not found in resources", cs_name);
         return nullptr;
     }
-    
+
     log_debug("Found named color space '%s' in resources", cs_name);
     return parse_color_space(input, pool, cs_item, resources);
 }
@@ -649,18 +650,18 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
         rgb_out[0] = rgb_out[1] = rgb_out[2] = 0.0;
         return;
     }
-    
+
     switch (cs_info->type) {
         case PDF_CS_DEVICE_RGB:
             rgb_out[0] = components[0];
             rgb_out[1] = components[1];
             rgb_out[2] = components[2];
             break;
-            
+
         case PDF_CS_DEVICE_GRAY:
             rgb_out[0] = rgb_out[1] = rgb_out[2] = components[0];
             break;
-            
+
         case PDF_CS_DEVICE_CMYK: {
             double c = components[0], m = components[1], y = components[2], k = components[3];
             rgb_out[0] = (1.0 - c) * (1.0 - k);
@@ -668,18 +669,18 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
             rgb_out[2] = (1.0 - y) * (1.0 - k);
             break;
         }
-            
+
         case PDF_CS_INDEXED: {
             // Look up index in palette
             int idx = (int)components[0];
             if (idx < 0) idx = 0;
             if (idx > cs_info->hival) idx = cs_info->hival;
-            
+
             if (cs_info->lookup_table) {
                 int base_components = 3;  // RGB default
                 if (cs_info->base_type == PDF_CS_DEVICE_GRAY) base_components = 1;
                 else if (cs_info->base_type == PDF_CS_DEVICE_CMYK) base_components = 4;
-                
+
                 int offset = idx * base_components;
                 if (offset + base_components <= cs_info->lookup_table_size) {
                     if (cs_info->base_type == PDF_CS_DEVICE_RGB) {
@@ -702,7 +703,7 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
             }
             break;
         }
-            
+
         case PDF_CS_ICCBASED:
             // Simplified: treat as RGB, Gray, or CMYK based on N
             if (cs_info->icc_n == 1) {
@@ -720,7 +721,7 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
                 rgb_out[0] = rgb_out[1] = rgb_out[2] = 0.0;
             }
             break;
-            
+
         case PDF_CS_CAL_GRAY: {
             // Apply gamma correction: out = in^gamma
             double gray = components[0];
@@ -730,7 +731,7 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
             rgb_out[0] = rgb_out[1] = rgb_out[2] = gray;
             break;
         }
-            
+
         case PDF_CS_CAL_RGB: {
             // Apply gamma correction to each channel
             for (int i = 0; i < 3; i++) {
@@ -742,7 +743,7 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
             }
             break;
         }
-            
+
         case PDF_CS_LAB:
             // Simplified Lab to RGB (approximate)
             // L* is in [0, 100], a* and b* are approximately [-128, 127]
@@ -751,19 +752,19 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
             rgb_out[1] = (components[1] + 128.0) / 255.0;
             rgb_out[2] = (components[2] + 128.0) / 255.0;
             break;
-            
+
         case PDF_CS_SEPARATION:
         case PDF_CS_DEVICEN:
             // Simplified: treat as grayscale tint
             rgb_out[0] = rgb_out[1] = rgb_out[2] = 1.0 - components[0];
             break;
-            
+
         case PDF_CS_PATTERN:
         default:
             rgb_out[0] = rgb_out[1] = rgb_out[2] = 0.0;
             break;
     }
-    
+
     // Clamp values to [0, 1]
     for (int i = 0; i < 3; i++) {
         if (rgb_out[i] < 0.0) rgb_out[i] = 0.0;
@@ -832,62 +833,62 @@ static void lookup_font_entry(PDFStreamParser* parser, const char* font_name) {
         if (parser) parser->state.current_font_entry = nullptr;
         return;
     }
-    
+
     // Check if already in cache
     PDFFontEntry* entry = pdf_font_cache_get(parser->font_cache, font_name);
     if (entry) {
         parser->state.current_font_entry = entry;
-        log_debug("Using cached font entry for '%s' (tounicode=%d)", 
+        log_debug("Using cached font entry for '%s' (tounicode=%d)",
                  font_name, entry->to_unicode_count);
         return;
     }
-    
+
     Pool* pool = parser->input->pool;
-    
+
     // Look up font dictionary from resources
     MarkBuilder builder(parser->input);
     String* font_key = builder.createString("Font");
     Item fonts_item = {.item = map_get(parser->resources, {.item = s2it(font_key)}).item};
-    
+
     // Resolve indirect reference if needed
     if (fonts_item.item != ITEM_NULL && parser->pdf_data) {
         fonts_item = pdf_resolve_reference(parser->pdf_data, fonts_item, pool);
     }
-    
+
     if (fonts_item.item == ITEM_NULL || get_type_id(fonts_item) != LMD_TYPE_MAP) {
-        log_debug("No Font dictionary in resources for '%s' (type=%d)", 
+        log_debug("No Font dictionary in resources for '%s' (type=%d)",
                  font_name, fonts_item.item != ITEM_NULL ? get_type_id(fonts_item) : -1);
         parser->state.current_font_entry = nullptr;
         return;
     }
-    
+
     Map* fonts_dict = fonts_item.map;
     log_debug("Found Font dictionary with font keys for lookup of '%s'", font_name);
-    
+
     // Look up specific font (e.g., F1)
     String* specific_font_key = builder.createString(font_name);
     Item font_item = {.item = map_get(fonts_dict, {.item = s2it(specific_font_key)}).item};
-    
+
     // Resolve indirect reference if needed
     if (font_item.item != ITEM_NULL && parser->pdf_data) {
         font_item = pdf_resolve_reference(parser->pdf_data, font_item, pool);
     }
-    
+
     if (font_item.item == ITEM_NULL || get_type_id(font_item) != LMD_TYPE_MAP) {
-        log_debug("Font '%s' not found in resources (type=%d)", 
+        log_debug("Font '%s' not found in resources (type=%d)",
                  font_name, font_item.item != ITEM_NULL ? get_type_id(font_item) : -1);
         parser->state.current_font_entry = nullptr;
         return;
     }
-    
+
     log_debug("Found font '%s' dictionary, adding to cache", font_name);
-    
+
     // Add to cache (this will parse ToUnicode CMap)
     entry = pdf_font_cache_add(parser->font_cache, font_name, font_item.map, parser->input, parser->pdf_data);
     parser->state.current_font_entry = entry;
-    
+
     if (entry) {
-        log_info("Cached font '%s' with ToUnicode mapping (%d entries)", 
+        log_info("Cached font '%s' with ToUnicode mapping (%d entries)",
                 font_name, entry->to_unicode_count);
     }
 }
@@ -926,12 +927,12 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
             // Get decode parameters if present
             String* decode_key = input_create_string(input, "DecodeParms");
             Item decode_item = {.item = map_get(stream_dict, {.item = s2it(decode_key)}).item};
-            
+
             // Helper lambda to extract decode params from a dict
             auto extract_decode_params = [input](Map* params_dict, PDFDecodeParams* params) {
                 pdf_decode_params_init(params);
                 if (!params_dict) return;
-                
+
                 // Extract Predictor
                 String* pred_key = input_create_string(input, "Predictor");
                 Item pred_item = {.item = map_get(params_dict, {.item = s2it(pred_key)}).item};
@@ -943,7 +944,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                         params->predictor = pred_item.int_val;
                     }
                 }
-                
+
                 // Extract Colors
                 String* colors_key = input_create_string(input, "Colors");
                 Item colors_item = {.item = map_get(params_dict, {.item = s2it(colors_key)}).item};
@@ -955,7 +956,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                         params->colors = colors_item.int_val;
                     }
                 }
-                
+
                 // Extract BitsPerComponent
                 String* bpc_key = input_create_string(input, "BitsPerComponent");
                 Item bpc_item = {.item = map_get(params_dict, {.item = s2it(bpc_key)}).item};
@@ -967,7 +968,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                         params->bits = bpc_item.int_val;
                     }
                 }
-                
+
                 // Extract Columns
                 String* cols_key = input_create_string(input, "Columns");
                 Item cols_item = {.item = map_get(params_dict, {.item = s2it(cols_key)}).item};
@@ -979,7 +980,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                         params->columns = cols_item.int_val;
                     }
                 }
-                
+
                 // Extract EarlyChange (for LZW)
                 String* ec_key = input_create_string(input, "EarlyChange");
                 Item ec_item = {.item = map_get(params_dict, {.item = s2it(ec_key)}).item};
@@ -991,29 +992,29 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                         params->early_change = ec_item.int_val;
                     }
                 }
-                
-                log_debug("Decode params: predictor=%d, colors=%d, bits=%d, columns=%d", 
+
+                log_debug("Decode params: predictor=%d, colors=%d, bits=%d, columns=%d",
                          params->predictor, params->colors, params->bits, params->columns);
             };
-            
+
             // Get filter(s) - can be a single name or an array
             TypeId filter_type = get_type_id(filter_item);
 
             if (filter_type == LMD_TYPE_ARRAY) {
                 // Multiple filters
                 Array* filter_array = filter_item.array;
-                const char** filters = (const char**)malloc(sizeof(char*) * filter_array->length);
-                PDFDecodeParams* decode_params = (PDFDecodeParams*)calloc(filter_array->length, sizeof(PDFDecodeParams));
-                
+                const char** filters = (const char**)mem_alloc(sizeof(char*) * filter_array->length, MEM_CAT_INPUT_CSS);
+                PDFDecodeParams* decode_params = (PDFDecodeParams*)mem_calloc(filter_array->length, sizeof(PDFDecodeParams), MEM_CAT_INPUT_CSS);
+
                 if (filters && decode_params) {
                     for (int i = 0; i < filter_array->length; i++) {
                         Item filter_name_item = array_get(filter_array, i);
                         String* filter_name = filter_name_item.get_string();
                         filters[i] = filter_name->chars;
-                        
+
                         // Initialize with defaults
                         pdf_decode_params_init(&decode_params[i]);
-                        
+
                         // Get decode params if available (may be array or dict)
                         if (decode_item.item != ITEM_NULL) {
                             TypeId decode_type = get_type_id(decode_item);
@@ -1036,8 +1037,8 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                     decompressed_data = pdf_decompress_stream_with_params(content_data, content_len,
                                                               filters, filter_array->length,
                                                               decode_params, &decompressed_len);
-                    free(filters);
-                    free(decode_params);
+                    mem_free(filters);  // allocated with mem_alloc
+                    mem_free(decode_params);  // allocated with mem_calloc
 
                     if (decompressed_data) {
                         content_data = decompressed_data;
@@ -1048,8 +1049,8 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                         return;
                     }
                 } else {
-                    if (filters) free(filters);
-                    if (decode_params) free(decode_params);
+                    if (filters) mem_free(filters);  // allocated with mem_alloc
+                    if (decode_params) mem_free(decode_params);  // allocated with mem_calloc
                     return;
                 }
             } else if (filter_type == LMD_TYPE_STRING) {
@@ -1058,7 +1059,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
                 const char* filters[1] = { filter_name->chars };
                 PDFDecodeParams decode_params[1];
                 pdf_decode_params_init(&decode_params[0]);
-                
+
                 // Get decode params if present
                 if (decode_item.item != ITEM_NULL && get_type_id(decode_item) == LMD_TYPE_MAP) {
                     extract_decode_params(decode_item.map, &decode_params[0]);
@@ -1092,17 +1093,17 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
     if (!parser) {
         log_error("Failed to create stream parser");
         if (decompressed_data) {
-            free(decompressed_data);
+            free(decompressed_data);  // from pdf_decompress_stream_with_params which uses stdlib
         }
         return;
     }
 
     // Set page resources for ExtGState lookup
     parser->resources = resources;
-    
+
     // Set pdf_data for resolving indirect references
     parser->pdf_data = pdf_data;
-    
+
     // Create font cache for ToUnicode decoding
     parser->font_cache = pdf_font_cache_create(input->pool);
 
@@ -1116,7 +1117,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Free decompressed data if allocated
     if (decompressed_data) {
-        free(decompressed_data);
+        free(decompressed_data);  // from pdf_decompress_stream_with_params which uses stdlib
     }
 }
 
@@ -1441,7 +1442,7 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             if (op->operands.show_text.text && parser->resources) {
                 const char* cs_name = op->operands.show_text.text->chars;
                 log_debug("cs operator: setting fill color space to '%s'", cs_name);
-                
+
                 // Look up named color space if not a device color space
                 if (strcmp(cs_name, "DeviceRGB") != 0 &&
                     strcmp(cs_name, "DeviceGray") != 0 &&
@@ -1462,7 +1463,7 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             if (op->operands.show_text.text && parser->resources) {
                 const char* cs_name = op->operands.show_text.text->chars;
                 log_debug("CS operator: setting stroke color space to '%s'", cs_name);
-                
+
                 if (strcmp(cs_name, "DeviceRGB") != 0 &&
                     strcmp(cs_name, "DeviceGray") != 0 &&
                     strcmp(cs_name, "DeviceCMYK") != 0) {
@@ -2062,8 +2063,8 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
     const char* display_text = text->chars;
     int display_len = text->len;
     char* decoded_text = nullptr;
-    
-    if (parser->state.current_font_entry && 
+
+    if (parser->state.current_font_entry &&
         pdf_font_needs_decoding(parser->state.current_font_entry)) {
         // Allocate buffer for decoded text (UTF-8 can be up to 4x the length)
         decoded_text = (char*)pool_calloc(view_pool, text->len * 4 + 1);
@@ -2075,7 +2076,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
             if (decoded_len > 0) {
                 display_text = decoded_text;
                 display_len = decoded_len;
-                log_debug("Decoded text: '%s' -> '%s'", 
+                log_debug("Decoded text: '%s' -> '%s'",
                          text->chars, decoded_text);
             }
         }
@@ -2092,7 +2093,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
     double tm_scale = sqrt(parser->state.tm[0] * parser->state.tm[0] +
                           parser->state.tm[1] * parser->state.tm[1]);
     double effective_font_size = parser->state.font_size * tm_scale;
-    
+
     // Ensure minimum font size
     if (effective_font_size < 1.0) effective_font_size = 12.0;
 
@@ -2261,11 +2262,11 @@ static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* paren
 /**
  * Create ViewText nodes from TJ operator text array
  * TJ array format: [(string) num (string) num ...] where num is horizontal displacement in 1/1000 em
- * 
+ *
  * Strategy: Combine adjacent strings with small kerning adjustments.
  * When a large spacing adjustment is encountered (word boundary), flush the current
  * accumulated text as a view and start a new accumulation.
- * 
+ *
  * Threshold: -1000 (1 em) is typically used for word spacing in justified text.
  * Adjustments smaller than this threshold are considered intra-word kerning.
  */
@@ -2290,7 +2291,7 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
     char* buffer = (char*)pool_calloc(view_pool, buffer_capacity);
     if (!buffer) return;
     size_t buffer_pos = 0;
-    
+
     // Track starting position for the current text segment
     double segment_start_x = parser->state.tm[4];
     double segment_start_y = parser->state.tm[5];
@@ -2299,11 +2300,11 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
     auto flush_buffer = [&]() {
         if (buffer_pos > 0) {
             // Trim trailing spaces
-            while (buffer_pos > 0 && (buffer[buffer_pos - 1] == ' ' || 
+            while (buffer_pos > 0 && (buffer[buffer_pos - 1] == ' ' ||
                                        buffer[buffer_pos - 1] == '\t')) {
                 buffer_pos--;
             }
-            
+
             if (buffer_pos > 0) {
                 buffer[buffer_pos] = '\0';
                 String* str = create_string(view_pool, buffer);
@@ -2313,9 +2314,9 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
                     double saved_y = parser->state.tm[5];
                     parser->state.tm[4] = segment_start_x;
                     parser->state.tm[5] = segment_start_y;
-                    
+
                     create_text_view_raw(input, view_pool, parent, parser, str);
-                    
+
                     parser->state.tm[4] = saved_x;
                     parser->state.tm[5] = saved_y;
                 }
@@ -2338,9 +2339,9 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
                     segment_start_y = parser->state.tm[5];
                     has_content = true;
                 }
-                
+
                 // Decode and add to buffer
-                if (parser->state.current_font_entry && 
+                if (parser->state.current_font_entry &&
                     pdf_font_needs_decoding(parser->state.current_font_entry)) {
                     char* decode_buf = (char*)pool_calloc(view_pool, text->len * 4 + 1);
                     if (decode_buf) {
@@ -2374,22 +2375,22 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
             } else {
                 adjustment = item.get_double();
             }
-            
+
             // Check if this is a word boundary
             if (adjustment < WORD_BOUNDARY_THRESHOLD) {
                 // Flush current buffer and start new segment
                 flush_buffer();
             }
-            
+
             // Apply position adjustment
             double displacement = -adjustment / 1000.0 * effective_font_size;
             parser->state.tm[4] += displacement;
         }
     }
-    
+
     // Flush remaining content
     flush_buffer();
-    
+
     log_debug("Processed TJ array with %lld elements", text_array->length);
 }
 
@@ -2653,16 +2654,16 @@ static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
     ConstItem cs_item = image_dict->get("ColorSpace");
     PDFColorSpaceType cs_type = PDF_CS_DEVICE_RGB;  // Default
     int components = 3;  // Default RGB
-    
+
     // Variables for indexed color space
     uint8_t* indexed_lookup = nullptr;
     int indexed_hival = 0;
     PDFColorSpaceType indexed_base = PDF_CS_DEVICE_RGB;
     int indexed_base_components = 3;
-    
+
     if (cs_item.item != ITEM_NULL) {
         TypeId item_type = cs_item.type_id();
-        
+
         if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
             // Simple named color space
             String* cs_str = cs_item.string();
@@ -2685,14 +2686,14 @@ static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
             if (cs_array && cs_array->length >= 1) {
                 Item type_item = cs_array->items[0];
                 String* type_name = type_item.get_string();
-                
+
                 if (type_name) {
                     log_debug("decode_raw_image: array colorspace type=%s", type_name->chars);
-                    
+
                     if (strcmp(type_name->chars, "Indexed") == 0 || strcmp(type_name->chars, "I") == 0) {
                         cs_type = PDF_CS_INDEXED;
                         components = 1;  // Indexed uses single index value
-                        
+
                         if (cs_array->length >= 4) {
                             // Parse base color space
                             Item base_item = cs_array->items[1];
@@ -2709,7 +2710,7 @@ static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
                                     indexed_base_components = 3;
                                 }
                             }
-                            
+
                             // Parse hival
                             Item hival_item = cs_array->items[2];
                             if (get_type_id(hival_item) == LMD_TYPE_INT) {
@@ -2717,7 +2718,7 @@ static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
                             } else if (get_type_id(hival_item) == LMD_TYPE_FLOAT) {
                                 indexed_hival = (int)hival_item.get_double();
                             }
-                            
+
                             // Parse lookup table
                             Item lookup_item = cs_array->items[3];
                             TypeId lookup_type = get_type_id(lookup_item);
@@ -2806,10 +2807,10 @@ static ImageSurface* decode_raw_image_data(Map* image_dict, String* data,
                         idx = (src[byte_idx] >> bit_offset) & 1;
                     }
                 }
-                
+
                 if (idx > indexed_hival) idx = indexed_hival;
                 int offset = idx * indexed_base_components;
-                
+
                 if (indexed_base == PDF_CS_DEVICE_RGB) {
                     r = indexed_lookup[offset];
                     g = indexed_lookup[offset + 1];

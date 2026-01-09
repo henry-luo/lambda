@@ -377,8 +377,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     // Ensure we have enough space in the grid items array
     if (count > grid_layout->allocated_items) {
         grid_layout->allocated_items = count * 2;
-        grid_layout->grid_items = (ViewBlock**)realloc(
-            grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*));
+        grid_layout->grid_items = (ViewBlock**)mem_realloc(
+            grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*), MEM_CAT_LAYOUT);
     }
 
     // Collect items - ONLY collect element nodes, skip text nodes

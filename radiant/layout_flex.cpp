@@ -1213,7 +1213,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
     // Ensure we have enough space in the flex items array
     if (count > flex->allocated_items) {
         flex->allocated_items = count * 2;
-        flex->flex_items = (View**)realloc(flex->flex_items, flex->allocated_items * sizeof(View*));
+        flex->flex_items = (View**)mem_realloc(flex->flex_items, flex->allocated_items * sizeof(View*), MEM_CAT_LAYOUT);
     }
 
     // Collect items - use ViewBlock hierarchy for flex items
@@ -1391,8 +1391,8 @@ static bool should_skip_flex_item(ViewElement* item) {
 static void ensure_flex_items_capacity(FlexContainerLayout* flex, int required) {
     if (required > flex->allocated_items) {
         flex->allocated_items = required * 2;
-        flex->flex_items = (View**)realloc(flex->flex_items,
-                                           flex->allocated_items * sizeof(View*));
+        flex->flex_items = (View**)mem_realloc(flex->flex_items,
+                                           flex->allocated_items * sizeof(View*), MEM_CAT_LAYOUT);
     }
 }
 
@@ -2500,8 +2500,8 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
         // Ensure we have space for another line
         if (line_count >= flex_layout->allocated_lines) {
             flex_layout->allocated_lines *= 2;
-            flex_layout->lines = (FlexLineInfo*)realloc(flex_layout->lines,
-                                                       flex_layout->allocated_lines * sizeof(FlexLineInfo));
+            flex_layout->lines = (FlexLineInfo*)mem_realloc(flex_layout->lines,
+                                                       flex_layout->allocated_lines * sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
         }
 
         FlexLineInfo* line = &flex_layout->lines[line_count];
