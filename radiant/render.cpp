@@ -321,6 +321,39 @@ static int get_selection_range_for_view(SelectionState* sel, View* text_view,
     return 0;  // not in selection
 }
 
+/**
+ * Check if a view (any type, including images) is within a cross-view selection.
+ * Returns true if the view is between anchor and focus views.
+ */
+static bool is_view_in_selection(SelectionState* sel, View* view) {
+    if (!sel || sel->is_collapsed || !view) return false;
+    
+    View* anchor_view = sel->anchor_view;
+    View* focus_view = sel->focus_view;
+    
+    // Single-view selection (legacy) - images won't be text views
+    if (!anchor_view || !focus_view) {
+        return false;
+    }
+    
+    // Same view for anchor and focus - no cross-view selection
+    if (anchor_view == focus_view) {
+        return false;
+    }
+    
+    // Cross-view selection: determine order
+    int anchor_vs_focus = compare_view_order(anchor_view, focus_view);
+    View* first_view = (anchor_vs_focus <= 0) ? anchor_view : focus_view;
+    View* last_view = (anchor_vs_focus <= 0) ? focus_view : anchor_view;
+    
+    // Check if view is between first and last (inclusive of first and last)
+    int view_vs_first = compare_view_order(view, first_view);
+    int view_vs_last = compare_view_order(view, last_view);
+    
+    // View is selected if it's >= first and <= last in document order
+    return (view_vs_first >= 0 && view_vs_last <= 0);
+}
+
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
@@ -1543,6 +1576,15 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     } else {
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
         blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
+    }
+    
+    // Render blue selection overlay if image is within a cross-view selection
+    if (rdcon->selection && is_view_in_selection(rdcon->selection, (View*)view)) {
+        // Semi-transparent blue overlay (same color as text selection)
+        uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue
+        fill_surface_rect(rdcon->ui_context->surface, &rect, sel_bg_color, &rdcon->block.clip);
+        log_debug("[IMAGE SELECTION] Rendered blue overlay on image at (%.0f,%.0f) size %.0fx%.0f",
+                  rect.x, rect.y, rect.width, rect.height);
     }
 }
 
