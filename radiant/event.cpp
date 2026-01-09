@@ -842,13 +842,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // fire drag event if dragging in progress
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
 
-        // Handle text selection drag
+        // Handle text selection drag (supports cross-view selection)
         if (state && state->selection && state->selection->is_selecting) {
-            View* sel_view = state->selection->view;
-            log_debug("[SELECTION DRAG] is_selecting=true, sel_view=%p (type=%d)", sel_view, sel_view ? sel_view->view_type : -1);
-            if (sel_view && sel_view->view_type == RDT_VIEW_TEXT) {
-                // Use the original selection view's text for offset calculation
-                ViewText* text = (ViewText*)sel_view;
+            View* anchor_view = state->selection->anchor_view;
+            View* current_target = evcon.target;
+            
+            log_debug("[SELECTION DRAG] is_selecting=true, anchor_view=%p, current_target=%p (type=%d)", 
+                anchor_view, current_target, current_target ? current_target->view_type : -1);
+            
+            // Check if we're dragging over a text view (could be the same or different)
+            View* drag_target_view = nullptr;
+            if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
+                drag_target_view = current_target;
+            } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT) {
+                // Mouse is not over a text view, stay with the anchor view
+                drag_target_view = anchor_view;
+            }
+            
+            if (drag_target_view && drag_target_view->view_type == RDT_VIEW_TEXT) {
+                ViewText* text = (ViewText*)drag_target_view;
                 TextRect* rect = text->rect;
 
                 // Setup font from text view (critical for correct glyph advance calculation)
@@ -857,9 +869,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     setup_font(evcon.ui_context, &evcon.font, text->font);
                 }
                 
-                // Calculate the correct block position for the selection view
-                // by walking up ITS parent chain (not using evcon.block which is
-                // set based on current hit target)
+                // Calculate the correct block position for the drag target view
+                // by walking up ITS parent chain
                 float sel_block_x = 0, sel_block_y = 0;
                 View* parent = text->parent;
                 while (parent) {
@@ -881,17 +892,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.block.x = sel_block_x;
                 evcon.block.y = sel_block_y;
 
-                // Calculate character offset from mouse position using original text rect
+                // Calculate character offset from mouse position using target text rect
                 int char_offset = calculate_char_offset_from_position(
                     &evcon, text, rect,
                     motion->x, motion->y);
 
-                log_debug("[SELECTION DRAG] calculated char_offset=%d, anchor=%d",
-                    char_offset, state->selection->anchor_offset);
+                log_debug("[SELECTION DRAG] target_view=%p (same as anchor: %d), char_offset=%d, anchor=%d",
+                    drag_target_view, drag_target_view == anchor_view, char_offset, state->selection->anchor_offset);
 
-                // Extend selection to new position
-                selection_extend(state, char_offset);
-                caret_set(state, sel_view, char_offset);
+                // Check if we're extending to a different view
+                if (drag_target_view != anchor_view) {
+                    // Cross-view selection: update focus_view
+                    selection_extend_to_view(state, drag_target_view, char_offset);
+                    log_debug("[CROSS-VIEW SEL] Extending from anchor_view=%p to focus_view=%p", 
+                        anchor_view, drag_target_view);
+                } else {
+                    // Same view selection
+                    selection_extend(state, char_offset);
+                }
+                caret_set(state, drag_target_view, char_offset);
 
                 // Calculate and set visual position for the caret
                 float caret_x, caret_y, caret_height;
