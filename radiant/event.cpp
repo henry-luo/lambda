@@ -804,6 +804,30 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 ViewText* text = (ViewText*)sel_view;
                 TextRect* rect = text->rect;
                 
+                // Calculate the correct block position for the selection view
+                // by walking up ITS parent chain (not using evcon.block which is 
+                // set based on current hit target)
+                float sel_block_x = 0, sel_block_y = 0;
+                View* parent = text->parent;
+                while (parent) {
+                    if (parent->view_type == RDT_VIEW_BLOCK || 
+                        parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                        parent->view_type == RDT_VIEW_LIST_ITEM) {
+                        sel_block_x += ((ViewBlock*)parent)->x;
+                        sel_block_y += ((ViewBlock*)parent)->y;
+                    }
+                    parent = parent->parent;
+                }
+                
+                // Add the iframe offset that was stored when selection started
+                sel_block_x += state->selection->iframe_offset_x;
+                sel_block_y += state->selection->iframe_offset_y;
+                
+                // Save evcon.block and temporarily set it to the selection view's block position
+                BlockBlot saved_block = evcon.block;
+                evcon.block.x = sel_block_x;
+                evcon.block.y = sel_block_y;
+                
                 // Calculate character offset from mouse position using original text rect
                 int char_offset = calculate_char_offset_from_position(
                     &evcon, text, rect, 
@@ -820,26 +844,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 float caret_x, caret_y, caret_height;
                 calculate_position_from_char_offset(&evcon, text, rect, 
                     char_offset, &caret_x, &caret_y, &caret_height);
+                
+                // Restore evcon.block
+                evcon.block = saved_block;
                     
                 if (state->caret) {
                     state->caret->x = caret_x;
                     state->caret->y = caret_y;
                     state->caret->height = caret_height;
                     
-                    // Calculate iframe offset (same logic as in MOUSE_DOWN)
-                    float chain_x = 0, chain_y = 0;
-                    View* parent = text->parent;
-                    while (parent) {
-                        if (parent->view_type == RDT_VIEW_BLOCK || 
-                            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-                            parent->view_type == RDT_VIEW_LIST_ITEM) {
-                            chain_x += ((ViewBlock*)parent)->x;
-                            chain_y += ((ViewBlock*)parent)->y;
-                        }
-                        parent = parent->parent;
-                    }
-                    state->caret->iframe_offset_x = evcon.block.x - chain_x;
-                    state->caret->iframe_offset_y = evcon.block.y - chain_y;
+                    // Use the same iframe offset as the selection
+                    state->caret->iframe_offset_x = state->selection->iframe_offset_x;
+                    state->caret->iframe_offset_y = state->selection->iframe_offset_y;
                 }
                 
                 // Update selection end visual coordinates for rendering
@@ -965,6 +981,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         state->selection->start_y = caret_y;
                         state->selection->end_x = caret_x;
                         state->selection->end_y = caret_y + caret_height;
+                        // Copy iframe offset from caret
+                        state->selection->iframe_offset_x = state->caret->iframe_offset_x;
+                        state->selection->iframe_offset_y = state->caret->iframe_offset_y;
                     }
                 } else if (state->selection && !state->selection->is_collapsed) {
                     // Shift-click extends selection

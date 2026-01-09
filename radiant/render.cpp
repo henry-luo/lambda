@@ -1776,6 +1776,12 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
         parent = parent->parent;
     }
 
+    // Add iframe offset (if selection is inside an iframe, parent chain stops at iframe doc root)
+    start_x += sel->iframe_offset_x;
+    start_y += sel->iframe_offset_y;
+    end_x += sel->iframe_offset_x;
+    end_y += sel->iframe_offset_y;
+
     // Scale to physical pixels
     start_x *= s;  start_y *= s;
     end_x *= s;  end_y *= s;
