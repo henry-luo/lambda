@@ -624,6 +624,44 @@ View* find_view(View* view, DomNode* node) {
 }
 
 /**
+ * Calculate absolute window position from view-relative coordinates.
+ * Walks up the parent chain accumulating block positions.
+ * @param view The view whose coordinate system the position is relative to
+ * @param rel_x X coordinate relative to view's parent block
+ * @param rel_y Y coordinate relative to view's parent block
+ * @param iframe_offset_x Additional X offset for iframe content
+ * @param iframe_offset_y Additional Y offset for iframe content
+ * @param out_abs_x Output: absolute X in window coordinates
+ * @param out_abs_y Output: absolute Y in window coordinates
+ */
+void view_to_absolute_position(View* view, float rel_x, float rel_y,
+    float iframe_offset_x, float iframe_offset_y,
+    float* out_abs_x, float* out_abs_y) {
+    
+    float abs_x = rel_x;
+    float abs_y = rel_y;
+    
+    // Walk up from view's parent to accumulate block positions
+    View* parent = view->parent;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
+            abs_x += ((ViewBlock*)parent)->x;
+            abs_y += ((ViewBlock*)parent)->y;
+        }
+        parent = parent->parent;
+    }
+    
+    // Add iframe offset
+    abs_x += iframe_offset_x;
+    abs_y += iframe_offset_y;
+    
+    *out_abs_x = abs_x;
+    *out_abs_y = abs_y;
+}
+
+/**
  * Calculate character offset from mouse click position within a text rect
  * Returns the character offset closest to the click position
  */
@@ -862,7 +900,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (state->selection) {
                     state->selection->end_x = caret_x;
                     state->selection->end_y = caret_y + caret_height;
-                    log_debug("[SELECTION DRAG] updated end coords: (%.1f, %.1f)", caret_x, caret_y + caret_height);
                 }
                 
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, state->selection->is_collapsed);
