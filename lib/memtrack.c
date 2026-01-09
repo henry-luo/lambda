@@ -497,20 +497,24 @@ void* mem_realloc(void* ptr, size_t new_size, MemCategory category)
         return realloc(ptr, new_size);
     }
 
-    // Get old allocation info
+    // In STATS mode, just use stdlib realloc which preserves data correctly
+    // We don't track realloc separately - it's an implementation detail
+    if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
+        return realloc(ptr, new_size);
+    }
+
+    // DEBUG mode: need to track old allocation info for proper memcpy
     size_t old_size = 0;
     MemCategory old_category = category;
 
-    if (g_memtrack.mode == MEMTRACK_MODE_DEBUG) {
-        lock_tracker();
-        AllocInfo key = {.ptr = ptr};
-        const AllocInfo* info = (const AllocInfo*)hashmap_get(g_memtrack.alloc_map, &key);
-        if (info) {
-            old_size = info->size;
-            old_category = info->category;
-        }
-        unlock_tracker();
+    lock_tracker();
+    AllocInfo key = {.ptr = ptr};
+    const AllocInfo* info = (const AllocInfo*)hashmap_get(g_memtrack.alloc_map, &key);
+    if (info) {
+        old_size = info->size;
+        old_category = info->category;
     }
+    unlock_tracker();
 
     // Allocate new
 #ifdef MEMTRACK_DEBUG_LOCATIONS

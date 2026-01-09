@@ -3495,6 +3495,9 @@ static bool layout_single_file(
     // Note: free_document is handled by pool_destroy since doc is allocated from pool
     pool_destroy(pool);
 
+    // Reset ui_context document pointer to avoid dangling pointer in batch mode
+    ui_context->document = nullptr;
+
     return success;
 }
 

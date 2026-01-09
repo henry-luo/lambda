@@ -108,7 +108,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
-    free((char*)entry->path);
+    free((char*)entry->path);  // path is from url_to_local_path() which uses stdlib malloc
     if (entry->image->url) url_destroy(entry->image->url);
     image_surface_destroy(entry->image);
     return true;
