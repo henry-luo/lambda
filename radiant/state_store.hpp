@@ -122,9 +122,12 @@ typedef struct CaretState {
  * - anchor: where selection started (user clicked)
  * - focus: where selection ends (user dragged to)
  * anchor can be before or after focus (selection direction)
+ * Supports cross-view selection: anchor_view and focus_view can be different
  */
 typedef struct SelectionState {
-    View* view;                    // view containing selection
+    View* view;                    // view containing selection (deprecated, use anchor_view)
+    View* anchor_view;             // view where selection started
+    View* focus_view;              // view where selection ends (can differ from anchor_view)
     int anchor_offset;             // character offset where selection started
     int anchor_line;               // line of anchor (for multiline)
     int focus_offset;              // character offset where selection ends
@@ -350,6 +353,11 @@ void selection_start(RadiantState* state, View* view, int char_offset);
  * Extend selection to the given position (during drag)
  */
 void selection_extend(RadiantState* state, int char_offset);
+
+/**
+ * Extend selection to a different view (for cross-view selection)
+ */
+void selection_extend_to_view(RadiantState* state, View* view, int char_offset);
 
 /**
  * Set selection range explicitly
