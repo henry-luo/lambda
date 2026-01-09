@@ -20,6 +20,7 @@
 #include <limits.h>
 #include <math.h>
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 
 /**
  * find_font_path_platform
@@ -77,7 +78,7 @@ char* find_font_path_platform(const char* font_name) {
             FILE* test_file = fopen(mappings[i].file_path, "r");
             if (test_file) {
                 fclose(test_file);
-                char* result = strdup(mappings[i].file_path);
+                char* result = mem_strdup(mappings[i].file_path, MEM_CAT_FONT);
                 log_debug("Found macOS font '%s' via mapping: %s", font_name, result);
                 return result;
             } else {
@@ -110,7 +111,7 @@ char* find_font_path_platform(const char* font_name) {
             FILE* test_file = fopen(font_path, "r");
             if (test_file) {
                 fclose(test_file);
-                char* result = strdup(font_path);
+                char* result = mem_strdup(font_path, MEM_CAT_FONT);
                 log_debug("Found macOS font '%s' at: %s", font_name, result);
                 return result;
             }
@@ -243,7 +244,7 @@ char* find_font_path_platform(const char* font_name) {
             FILE* test_file = fopen(font_path, "r");
             if (test_file) {
                 fclose(test_file);
-                char* result = strdup(font_path);
+                char* result = mem_strdup(font_path, MEM_CAT_FONT);
                 log_info("Found Linux font '%s' at: %s", font_name, result);
                 return result;
             }
@@ -297,7 +298,7 @@ char* find_font_path_platform(const char* font_name) {
             FILE* test_file = fopen(font_path, "r");
             if (test_file) {
                 fclose(test_file);
-                char* result = strdup(font_path);
+                char* result = mem_strdup(font_path, MEM_CAT_FONT);
                 log_info("Found Windows font '%s' at: %s", font_name, result);
                 return result;
             }

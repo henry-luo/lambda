@@ -11,6 +11,7 @@ extern "C" {
 #include <string.h>
 #include <math.h>
 #include <float.h>
+#include "../lib/memtrack.h"
 }
 
 // NOTE: All conversion functions removed - enums now align directly with Lexbor constants
@@ -145,10 +146,10 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // create embed structure if it doesn't exist
     if (!container->embed) {
-        container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
+        container->embed = (EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_LAYOUT);
     }
 
-    FlexContainerLayout* flex = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
+    FlexContainerLayout* flex = (FlexContainerLayout*)mem_calloc(1, sizeof(FlexContainerLayout), MEM_CAT_LAYOUT);
     lycon->flex_container = flex;
     flex->lycon = lycon;  // Store layout context for intrinsic sizing
     if (container->embed && container->embed->flex) {
@@ -445,9 +446,9 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Initialize dynamic arrays
     flex->allocated_items = 8;
-    flex->flex_items = (View**)calloc(flex->allocated_items, sizeof(View*));
+    flex->flex_items = (View**)mem_calloc(flex->allocated_items, sizeof(View*), MEM_CAT_LAYOUT);
     flex->allocated_lines = 4;
-    flex->lines = (FlexLineInfo*)calloc(flex->allocated_lines, sizeof(FlexLineInfo));
+    flex->lines = (FlexLineInfo*)mem_calloc(flex->allocated_lines, sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
     flex->needs_reflow = false;
 }
 
@@ -456,11 +457,11 @@ void cleanup_flex_container(LayoutContext* lycon) {
     FlexContainerLayout* flex = lycon->flex_container;
     // Free line items arrays
     for (int i = 0; i < flex->line_count; ++i) {
-        free(flex->lines[i].items);
+        mem_free(flex->lines[i].items);
     }
-    free(flex->flex_items);
-    free(flex->lines);
-    free(flex);
+    mem_free(flex->flex_items);
+    mem_free(flex->lines);
+    mem_free(flex);
 }
 
 // Main flex layout algorithm entry point
@@ -1212,7 +1213,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
     // Ensure we have enough space in the flex items array
     if (count > flex->allocated_items) {
         flex->allocated_items = count * 2;
-        flex->flex_items = (View**)realloc(flex->flex_items, flex->allocated_items * sizeof(View*));
+        flex->flex_items = (View**)mem_realloc(flex->flex_items, flex->allocated_items * sizeof(View*), MEM_CAT_LAYOUT);
     }
 
     // Collect items - use ViewBlock hierarchy for flex items
@@ -1390,8 +1391,8 @@ static bool should_skip_flex_item(ViewElement* item) {
 static void ensure_flex_items_capacity(FlexContainerLayout* flex, int required) {
     if (required > flex->allocated_items) {
         flex->allocated_items = required * 2;
-        flex->flex_items = (View**)realloc(flex->flex_items,
-                                           flex->allocated_items * sizeof(View*));
+        flex->flex_items = (View**)mem_realloc(flex->flex_items,
+                                           flex->allocated_items * sizeof(View*), MEM_CAT_LAYOUT);
     }
 }
 
@@ -2489,7 +2490,7 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
     // Ensure we have space for lines
     if (flex_layout->allocated_lines == 0) {
         flex_layout->allocated_lines = 4;
-        flex_layout->lines = (FlexLineInfo*)calloc(flex_layout->allocated_lines, sizeof(FlexLineInfo));
+        flex_layout->lines = (FlexLineInfo*)mem_calloc(flex_layout->allocated_lines, sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
     }
 
     int line_count = 0;
@@ -2499,15 +2500,15 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
         // Ensure we have space for another line
         if (line_count >= flex_layout->allocated_lines) {
             flex_layout->allocated_lines *= 2;
-            flex_layout->lines = (FlexLineInfo*)realloc(flex_layout->lines,
-                                                       flex_layout->allocated_lines * sizeof(FlexLineInfo));
+            flex_layout->lines = (FlexLineInfo*)mem_realloc(flex_layout->lines,
+                                                       flex_layout->allocated_lines * sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
         }
 
         FlexLineInfo* line = &flex_layout->lines[line_count];
         memset(line, 0, sizeof(FlexLineInfo));
 
         // Allocate items array for this line
-        line->items = (View**)malloc(item_count * sizeof(View*));
+        line->items = (View**)mem_alloc(item_count * sizeof(View*), MEM_CAT_LAYOUT);
         line->item_count = 0;
 
         int main_size = 0;
@@ -2590,13 +2591,13 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
     // CRITICAL: Store original flex basis for each item (needed for correct flex-shrink calculation)
     // Per CSS Flexbox spec §9.7, scaled shrink factor uses the original flex base size
-    float* item_flex_basis = (float*)calloc(line->item_count, sizeof(float));
+    float* item_flex_basis = (float*)mem_calloc(line->item_count, sizeof(float), MEM_CAT_LAYOUT);
     if (!item_flex_basis) return;
 
     // Track which items are frozen (have flex factor 0 or hit constraints during distribution)
-    bool* frozen = (bool*)calloc(line->item_count, sizeof(bool));
+    bool* frozen = (bool*)mem_calloc(line->item_count, sizeof(bool), MEM_CAT_LAYOUT);
     if (!frozen) {
-        free(item_flex_basis);
+        mem_free(item_flex_basis);
         return;
     }
 
@@ -2667,8 +2668,8 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
               container_main_size, total_initial_size, gap_space, free_space);
 
     if (free_space == 0.0f) {
-        free(item_flex_basis);
-        free(frozen);
+        mem_free(item_flex_basis);
+        mem_free(frozen);
         return;  // No space to distribute
     }
 
@@ -2733,13 +2734,16 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
         // CSS Flexbox §9.7 Step 5: Calculate target sizes for unfrozen items
         // Store target sizes and violation info for two-phase freezing
-        float* target_sizes = (float*)calloc(line->item_count, sizeof(float));
-        float* clamped_sizes = (float*)calloc(line->item_count, sizeof(float));
-        bool* has_min_violation = (bool*)calloc(line->item_count, sizeof(bool));
-        bool* has_max_violation = (bool*)calloc(line->item_count, sizeof(bool));
+        float* target_sizes = (float*)mem_calloc(line->item_count, sizeof(float), MEM_CAT_LAYOUT);
+        float* clamped_sizes = (float*)mem_calloc(line->item_count, sizeof(float), MEM_CAT_LAYOUT);
+        bool* has_min_violation = (bool*)mem_calloc(line->item_count, sizeof(bool), MEM_CAT_LAYOUT);
+        bool* has_max_violation = (bool*)mem_calloc(line->item_count, sizeof(bool), MEM_CAT_LAYOUT);
 
         if (!target_sizes || !clamped_sizes || !has_min_violation || !has_max_violation) {
-            free(target_sizes); free(clamped_sizes); free(has_min_violation); free(has_max_violation);
+            mem_free(target_sizes);
+            mem_free(clamped_sizes);
+            mem_free(has_min_violation);
+            mem_free(has_max_violation);
             break;
         }
 
@@ -2840,10 +2844,10 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             }
         }
 
-        free(target_sizes);
-        free(clamped_sizes);
-        free(has_min_violation);
-        free(has_max_violation);
+        mem_free(target_sizes);
+        mem_free(clamped_sizes);
+        mem_free(has_min_violation);
+        mem_free(has_max_violation);
 
         // If no items were frozen this iteration (total_violation was 0), we're done
         if (!any_frozen_this_iteration) {
@@ -2869,8 +2873,8 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         }
     }
 
-    free(frozen);
-    free(item_flex_basis);
+    mem_free(frozen);
+    mem_free(item_flex_basis);
     log_info("ITERATIVE_FLEX COMPLETE - converged after %d iterations", iteration);
 }
 

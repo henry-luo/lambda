@@ -5,6 +5,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font_config.h"
+#include "../lib/memtrack.h"
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <cmath>
@@ -1626,7 +1627,7 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
 
     // Parse the track sizes in the repeat pattern
     int track_count = val->data.function->arg_count - 1;
-    GridTrackSize** repeat_tracks = (GridTrackSize**)calloc(track_count, sizeof(GridTrackSize*));
+    GridTrackSize** repeat_tracks = (GridTrackSize**)mem_calloc(track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
     if (!repeat_tracks) return NULL;
 
     int actual_track_count = 0;
@@ -1638,14 +1639,14 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
     }
 
     if (actual_track_count == 0) {
-        free(repeat_tracks);
+        mem_free(repeat_tracks);
         return NULL;
     }
 
     // Create the repeat track size
-    GridTrackSize* track_size = (GridTrackSize*)calloc(1, sizeof(GridTrackSize));
+    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
     if (!track_size) {
-        free(repeat_tracks);
+        mem_free(repeat_tracks);
         return NULL;
     }
 
@@ -6061,7 +6062,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Clear existing areas
                 for (int i = 0; i < grid->area_count; i++) {
                     if (grid->grid_areas && grid->grid_areas[i].name) {
-                        free(grid->grid_areas[i].name);
+                        mem_free(grid->grid_areas[i].name);
                     }
                 }
                 grid->area_count = 0;
@@ -6088,7 +6089,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 if (total_len > 0) {
-                    char* combined = (char*)malloc(total_len + 1);
+                    char* combined = (char*)mem_alloc(total_len + 1, MEM_CAT_LAYOUT);
                     combined[0] = '\0';
                     for (int i = 0; i < value->data.list.count; i++) {
                         if (value->data.list.values[i]->type == CSS_VALUE_TYPE_STRING) {
@@ -6101,7 +6102,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] grid-template-areas: combined string '%s'", combined);
                     parse_grid_template_areas(grid, combined);
-                    free(combined);
+                    mem_free(combined);
                     log_debug("[CSS] grid-template-areas: parsed %d areas", grid->area_count);
                 }
             }
@@ -6117,16 +6118,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // 2. A shorthand for row-start / column-start / row-end / column-end
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Named area (quoted string)
-                if (span->gi->grid_area) free(span->gi->grid_area);
-                span->gi->grid_area = strdup(value->data.string);
+                if (span->gi->grid_area) mem_free(span->gi->grid_area);
+                span->gi->grid_area = mem_strdup(value->data.string, MEM_CAT_LAYOUT);
                 log_debug("[CSS] grid-area: named area (string) '%s'", span->gi->grid_area);
             }
             else if (value->type == CSS_VALUE_TYPE_CUSTOM) {
                 // Named area (unquoted identifier like "header")
                 // Stored as custom property reference when not a known keyword
                 if (value->data.custom_property.name) {
-                    if (span->gi->grid_area) free(span->gi->grid_area);
-                    span->gi->grid_area = strdup(value->data.custom_property.name);
+                    if (span->gi->grid_area) mem_free(span->gi->grid_area);
+                    span->gi->grid_area = mem_strdup(value->data.custom_property.name, MEM_CAT_LAYOUT);
                     log_debug("[CSS] grid-area: named area (custom) '%s'", span->gi->grid_area);
                 }
             }
@@ -6134,8 +6135,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Can be "auto" or an identifier (area name)
                 const char* name = css_enum_info(value->data.keyword)->name;
                 if (value->data.keyword != CSS_VALUE_AUTO) {
-                    if (span->gi->grid_area) free(span->gi->grid_area);
-                    span->gi->grid_area = strdup(name);
+                    if (span->gi->grid_area) mem_free(span->gi->grid_area);
+                    span->gi->grid_area = mem_strdup(name, MEM_CAT_LAYOUT);
                     log_debug("[CSS] grid-area: named area (keyword) '%s'", span->gi->grid_area);
                 }
             }

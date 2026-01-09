@@ -6,6 +6,7 @@
 #include "../lib/font_config.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
+#include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
@@ -146,7 +147,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
         font_path = load_font_path(uicon->font_db, "Times");  // Fallback to Times if Times New Roman not found
     }
     if (font_path) {
-        tvg_font_load(font_path);  free(font_path);
+        tvg_font_load(font_path);  mem_free(font_path);
     }
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);

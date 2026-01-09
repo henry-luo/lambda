@@ -10,6 +10,7 @@
 #include "state_store.hpp"
 #include "../lib/log.h"
 #include "../lib/avl_tree.h"
+#include "../lib/memtrack.h"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include <string.h>
@@ -150,15 +151,15 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     log_debug("[GLYPH RENDER] drawing glyph at x=%d y=%d size=%dx%d color=#%02x%02x%02x (c=0x%08x) pixel_mode=%d",
         x, y, bitmap->width, bitmap->rows, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.c, bitmap->pixel_mode);
     ImageSurface* surface = rdcon->ui_context->surface;
-    
+
     // handle monochrome bitmaps (1 bit per pixel) - common for some system fonts like Monaco
     bool is_mono = (bitmap->pixel_mode == FT_PIXEL_MODE_MONO);
-    
+
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
         for (int j = left - x; j < right - x; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
-            
+
             uint32_t intensity;
             if (is_mono) {
                 // for monochrome: each byte contains 8 pixels, MSB first
@@ -170,11 +171,11 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                 // grayscale: 1 byte per pixel
                 intensity = bitmap->buffer[i * bitmap->pitch + j];
             }
-            
+
             if (intensity > 0) {
                 // blend the pixel with the background
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
-                
+
                 // important to use 32bit int for computation below
                 uint32_t v = 255 - intensity;
                 // can further optimize if background is a fixed color
@@ -204,7 +205,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         log_debug("font face is null");
         return;
     }
-    
+
     float s = rdcon->scale;  // scale factor for CSS -> physical pixels
     unsigned char* str = text_view->text_data();
     TextRect* text_rect = text_view->rect;
@@ -420,17 +421,17 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else {
                     // draw the glyph to the image buffer
                     float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
-                    
+
                     // Draw selection background BEFORE glyph (so text appears on top)
                     if (is_selected) {
                         float glyph_width = glyph->advance.x / 64.0f;
                         Rect sel_rect = {x, y, glyph_width, text_rect->height * s};
                         fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip);
                     }
-                    
+
                     // Debug: Check bitmap data for Monaco (capped to avoid log spam)
                     static int bitmap_debug_count = 0;
-                    if (bitmap_debug_count < 50 && rdcon->font.ft_face && 
+                    if (bitmap_debug_count < 50 && rdcon->font.ft_face &&
                         strcmp(rdcon->font.ft_face->family_name, "Monaco") == 0) {
                         log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
                                   codepoint, glyph->bitmap.width, glyph->bitmap.rows,
@@ -438,7 +439,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                                   glyph->advance.x / 64.0, glyph->bitmap.pixel_mode);
                         bitmap_debug_count++;
                     }
-                    
+
                     auto t3 = std::chrono::high_resolution_clock::now();
                     draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
                     auto t4 = std::chrono::high_resolution_clock::now();
@@ -938,11 +939,11 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                     // (workaround for CSS-relative URLs that need res/ subdirectory)
                     if (result != TVG_RESULT_SUCCESS && image_url[0] == '.' && image_url[1] == '/') {
                         log_debug("[RENDER] background-image: trying with res/ prefix");
-                        char* res_url = (char*)malloc(strlen(image_url) + 5);
+                        char* res_url = (char*)mem_alloc(strlen(image_url) + 5, MEM_CAT_RENDER);
                         sprintf(res_url, "./res/%s", image_url + 2);
                         url_destroy(abs_url);
                         abs_url = parse_url(rdcon->ui_context->document->url, res_url);
-                        free(res_url);
+                        mem_free(res_url);
                         if (abs_url) {
                             char* new_file_path = url_to_local_path(abs_url);
                             if (new_file_path) {
@@ -1298,7 +1299,7 @@ void render_svg(ImageSurface* surface) {
 
     uint32_t width = surface->max_render_width;
     uint32_t height = surface->max_render_width * surface->height / surface->width;
-    surface->pixels = (uint32_t*)malloc(width * height * sizeof(uint32_t));
+    surface->pixels = (uint32_t*)mem_alloc(width * height * sizeof(uint32_t), MEM_CAT_RENDER);
     if (!surface->pixels) {
         tvg_canvas_destroy(canvas);
         return;
@@ -1312,7 +1313,7 @@ void render_svg(ImageSurface* surface) {
     if (tvg_swcanvas_set_target(canvas, (uint32_t*)surface->pixels, width, width, height,
         TVG_COLORSPACE_ABGR8888) != TVG_RESULT_SUCCESS) {
         log_debug("Failed to set canvas target");
-        free(surface->pixels);  surface->pixels = NULL;
+        mem_free(surface->pixels);  surface->pixels = NULL;
         tvg_canvas_destroy(canvas);
         return;
     }
@@ -1580,22 +1581,22 @@ void render_children(RenderContext* rdcon, View* view) {
  */
 void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     if (!state || !state->focus || !state->focus->current) return;
-    
+
     // Only render focus-visible (keyboard navigation)
     if (!state->focus->focus_visible) return;
-    
+
     View* focused = state->focus->current;
     if (focused->view_type != RDT_VIEW_BLOCK) return;
-    
+
     ViewBlock* block = (ViewBlock*)focused;
     float s = rdcon->scale;
-    
+
     // Calculate absolute position of the focused element (in CSS pixels)
     float x = block->x;
     float y = block->y;
     float width = block->width;
     float height = block->height;
-    
+
     // Walk up the tree to get absolute coordinates (CSS pixels)
     View* parent = block->parent;
     while (parent) {
@@ -1605,36 +1606,36 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
         }
         parent = parent->parent;
     }
-    
+
     // Scale to physical pixels
     x *= s;  y *= s;
     width *= s;  height *= s;
-    
+
     // Outline offset (outside border box) - in physical pixels
     float outline_offset = 2.0f * s;
     float outline_width = 2.0f * s;
-    
+
     // Create outline shape
     Tvg_Paint* shape = tvg_shape_new();
     if (!shape) return;
-    
+
     // Draw dotted rectangle outline
     float ox = x - outline_offset;
     float oy = y - outline_offset;
     float ow = width + outline_offset * 2;
     float oh = height + outline_offset * 2;
-    
+
     tvg_shape_append_rect(shape, ox, oy, ow, oh, 0, 0);
-    
+
     // Focus ring color: typically blue or system accent color
     // Using a standard web focus color: #005FCC (blue)
     tvg_shape_set_stroke_color(shape, 0x00, 0x5F, 0xCC, 0xFF);
     tvg_shape_set_stroke_width(shape, outline_width);
-    
+
     // Dotted pattern: dash length 4, gap 2 (scaled)
     float dash_pattern[] = {4.0f * s, 2.0f * s};
     tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
-    
+
     tvg_canvas_push(rdcon->canvas, shape);
     log_debug("[FOCUS] Rendered focus outline at (%.0f,%.0f) size %.0fx%.0f", ox, oy, ow, oh);
 }
@@ -1648,18 +1649,18 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     }
     // Force visible for debugging
     state->caret->visible = true;
-    
+
     if (!state->caret->view) return;
-    
+
     CaretState* caret = state->caret;
     View* view = caret->view;
     float s = rdcon->scale;
-    
+
     // caret->x and caret->y are relative to the parent block (from TextRect coordinates)
     // So we start with those coordinates and walk up from the parent block
     float x = caret->x;
     float y = caret->y;
-    
+
     // Walk up from the text view's parent to get absolute coordinates
     // The caret x/y is already relative to the text's parent block
     View* parent = view->parent;  // Start from parent, not from view itself
@@ -1670,26 +1671,26 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         }
         parent = parent->parent;
     }
-    
+
     // Scale to physical pixels
     x *= s;  y *= s;
     float height = caret->height * s;
     float caret_width = 3.0f * s;  // 3 CSS pixels wide
-    
+
     // Use ThorVG to draw a filled rectangle for the caret
     Tvg_Paint* shape = tvg_shape_new();
     if (!shape) {
         return;
     }
-    
+
     // Draw a filled rectangle (not a stroke line)
     tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0);
-    
+
     // Fill with bright RED color
     tvg_shape_set_fill_color(shape, 0xFF, 0x00, 0x00, 0xFF);
-    
+
     tvg_canvas_push(rdcon->canvas, shape);
-    
+
     // ALSO draw directly to surface buffer as backup
     ImageSurface* surface = rdcon->ui_context->surface;
     if (surface && surface->pixels) {
@@ -1699,13 +1700,13 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         int iy = (int)y;
         int iw = (int)caret_width;
         int ih = (int)height;
-        
+
         // Clamp to surface bounds
         if (ix < 0) { iw += ix; ix = 0; }
         if (iy < 0) { ih += iy; iy = 0; }
         if (ix + iw > surface->width) iw = surface->width - ix;
         if (iy + ih > surface->height) ih = surface->height - iy;
-        
+
         // Draw red rectangle directly to pixel buffer (RGBA: 0xFFFF0000 = red)
         uint32_t red_color = 0xFF0000FF;  // ABGR format: Alpha=FF, Blue=00, Green=00, Red=FF
         for (int py = iy; py < iy + ih && py < surface->height; py++) {
@@ -1714,7 +1715,7 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
             }
         }
     }
-    
+
     log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, height);
 }
 
@@ -1723,9 +1724,10 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
  * Draws semi-transparent blue rectangles behind selected text
  */
 void render_selection(RenderContext* rdcon, RadiantState* state) {
-    if (!state || !state->selection) {
-        return;
-    }
+    if (!state || !state->selection) return;
+    if (state->selection->is_collapsed) return;  // no selection
+    if (!state->selection->view) return;
+
     SelectionState* sel = state->selection;
     log_debug("[SELECTION] check: anchor=%d, focus=%d, is_collapsed=%d, view=%p",
         sel->anchor_offset, sel->focus_offset, sel->is_collapsed, (void*)sel->view);
@@ -1739,21 +1741,19 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     
     View* view = sel->view;
     float s = rdcon->scale;
-    
     log_debug("[SELECTION] Rendering: anchor=%d, focus=%d, start=(%.1f,%.1f), end=(%.1f,%.1f)",
         sel->anchor_offset, sel->focus_offset,
         sel->start_x, sel->start_y, sel->end_x, sel->end_y);
     
     // For single-line selection, draw a single rectangle
     // Multi-line selection would require multiple rectangles per line
-    
+
     // Calculate absolute position (CSS pixels)
     // start_x/y and end_x/y are relative to the parent block (from TextRect coordinates)
     float start_x = sel->start_x;
     float start_y = sel->start_y;
     float end_x = sel->end_x;
     float end_y = sel->end_y;
-    
     log_debug("[SELECTION] Before parent walk: start=(%.1f,%.1f), view=%p, view_type=%d",
         start_x, start_y, (void*)view, view->view_type);
     
@@ -1771,33 +1771,31 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
         }
         parent = parent->parent;
     }
-    
-    log_debug("[SELECTION] After parent walk: start=(%.1f,%.1f)", start_x, start_y);
-    
+
     // Scale to physical pixels
     start_x *= s;  start_y *= s;
     end_x *= s;  end_y *= s;
-    
+
     // Normalize coordinates (anchor can be after focus)
     float min_x = start_x < end_x ? start_x : end_x;
     float max_x = start_x > end_x ? start_x : end_x;
     float min_y = start_y < end_y ? start_y : end_y;
-    
+
     // For now, simple single-line selection rect
     float sel_width = max_x - min_x;
     float sel_height = end_y - start_y;  // Use line height approximation
     if (sel_height <= 0) sel_height = 20 * s;  // default line height if not set (scaled)
-    
+
     // Create selection highlight shape
     Tvg_Paint* shape = tvg_shape_new();
     if (!shape) return;
-    
+
     tvg_shape_append_rect(shape, min_x, min_y, sel_width, sel_height, 0, 0);
-    
+
     // Selection highlight color: semi-transparent blue (standard selection blue)
     // #0078D7 at 50% opacity
     tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);
-    
+
     tvg_canvas_push(rdcon->canvas, shape);
     
     // ALSO draw directly to surface buffer as backup (same as caret)
@@ -1867,7 +1865,7 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
     
     // Caret rendered on top of content
     render_caret(rdcon, state);
-    
+
     // Focus outline rendered last (outside content)
     render_focus_outline(rdcon, state);
 }
