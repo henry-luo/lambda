@@ -343,8 +343,8 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
                        track_list->allocated_tracks, track_list->allocated_tracks * 2);
 
                 int new_capacity = track_list->allocated_tracks * 2;
-                GridTrackSize** new_tracks = (GridTrackSize**)realloc(track_list->tracks,
-                                                                     new_capacity * sizeof(GridTrackSize*));
+                GridTrackSize** new_tracks = (GridTrackSize**)mem_realloc(track_list->tracks,
+                                                                     new_capacity * sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
 
                 // CRITICAL: Check if realloc failed
                 if (!new_tracks) {
