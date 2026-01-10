@@ -2,6 +2,7 @@
 #include "state_store.hpp"
 
 #include "../lib/log.h"
+#include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -663,7 +664,7 @@ void view_to_absolute_position(View* view, float rel_x, float rel_y,
 
 /**
  * Calculate character offset from mouse click position within a text rect
- * Returns the character offset closest to the click position
+ * Returns the byte offset closest to the click position, aligned to UTF-8 character boundaries
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, int mouse_x, int mouse_y) {
@@ -673,7 +674,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
 
     unsigned char* p = str + rect->start_index;
     unsigned char* end = p + max(rect->length, 0);
-    int char_offset = rect->start_index;
+    int byte_offset = rect->start_index;  // track byte offset for return value
 
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
@@ -687,8 +688,9 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
               mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
 
-    for (; p < end; p++, char_offset++) {
+    while (p < end) {
         float wd = 0;
+        int bytes = 1;  // number of bytes for current character
 
         // Skip newlines and carriage returns - they don't have visual width
         if (*p == '\n' || *p == '\r') {
@@ -699,45 +701,63 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
         if (is_space(*p)) {
             if (has_space) {
                 // Consecutive spaces are collapsed - skip without adding width
+                p++;
+                byte_offset++;
                 continue;
             }
             has_space = true;
             wd = evcon->font.style->space_width;
+            bytes = 1;  // spaces are always single byte
         } else {
             has_space = false;
+            // Decode UTF-8 codepoint to handle multi-byte characters
+            uint32_t codepoint;
+            bytes = utf8_to_codepoint(p, &codepoint);
+            if (bytes <= 0) {
+                // Invalid UTF-8 sequence, skip single byte
+                bytes = 1;
+                codepoint = *p;
+            }
             // Use load_glyph to match layout calculation
-            FT_GlyphSlot glyph = load_glyph(evcon->ui_context, evcon->font.ft_face, evcon->font.style, *p, false);
+            FT_GlyphSlot glyph = load_glyph(evcon->ui_context, evcon->font.ft_face, evcon->font.style, codepoint, false);
             if (!glyph) {
-                log_error("Could not load character '%c'", *p);
+                log_error("Could not load codepoint U+%04X", codepoint);
+                p += bytes;
+                byte_offset += bytes;
                 continue;
             }
             wd = glyph->advance.x / 64.0 / pixel_ratio;
         }
 
         // Add letter-spacing (applied after each character except the last)
-        if (p + 1 < end && *(p+1) != '\n' && *(p+1) != '\r') {
+        unsigned char* next_p = p + bytes;
+        if (next_p < end && *next_p != '\n' && *next_p != '\r') {
             wd += letter_spacing;
         }
 
         float char_mid = x + wd / 2.0f;
 
-        // If mouse is before the midpoint of this character, return previous offset
+        // If mouse is before the midpoint of this character, return current byte offset
+        // (caret should be placed before this character)
         if (mouse_x < char_mid) {
-            log_debug("calculate_char_offset: matched char='%c' at offset %d", *p, char_offset);
-            return char_offset;
+            log_debug("calculate_char_offset: matched at byte_offset %d", byte_offset);
+            return byte_offset;
         }
 
         prev_x = x;
         x += wd;
+        p += bytes;
+        byte_offset += bytes;
     }
 
-    log_debug("calculate_char_offset: end of text, returning offset=%d", char_offset);
+    log_debug("calculate_char_offset: end of text, returning byte_offset=%d", byte_offset);
     // Mouse is after all characters - return end offset
-    return char_offset;
+    return byte_offset;
 }
 
 /**
- * Calculate visual position (x, y, height) from character offset within a text rect
+ * Calculate visual position (x, y, height) from byte offset within a text rect
+ * The target_offset is a byte offset aligned to UTF-8 character boundaries
  * Returns the x position relative to the text rect's origin
  */
 void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
@@ -749,7 +769,7 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
 
     unsigned char* p = str + rect->start_index;
     unsigned char* end = p + max(rect->length, 0);
-    int char_offset = rect->start_index;
+    int byte_offset = rect->start_index;  // track byte offset
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
     bool has_space = false;
@@ -759,28 +779,47 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
         target_offset, rect->x, rect->start_index, pixel_ratio,
         evcon->font.ft_face ? evcon->font.ft_face->size->metrics.y_ppem : -1);
     
-    for (; p < end && char_offset < target_offset; p++, char_offset++) {
+    while (p < end && byte_offset < target_offset) {
         float wd = 0;
+        int bytes = 1;  // number of bytes for current character
+        
         if (is_space(*p)) {
-            if (has_space) continue;
+            if (has_space) {
+                p++;
+                byte_offset++;
+                continue;
+            }
             has_space = true;
             wd = evcon->font.style->space_width;
+            bytes = 1;
         } else {
             has_space = false;
+            // Decode UTF-8 codepoint to handle multi-byte characters
+            uint32_t codepoint;
+            bytes = utf8_to_codepoint(p, &codepoint);
+            if (bytes <= 0) {
+                // Invalid UTF-8 sequence, skip single byte
+                bytes = 1;
+                codepoint = *p;
+            }
             FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-            if (FT_Load_Char(evcon->font.ft_face, *p, load_flags)) {
+            if (FT_Load_Char(evcon->font.ft_face, codepoint, load_flags)) {
+                p += bytes;
+                byte_offset += bytes;
                 continue;
             }
             wd = evcon->font.ft_face->glyph->advance.x / 64.0f / pixel_ratio;
             
             // Debug: log per-character advance for first 15 chars
-            if (char_offset < 15) {
-                log_debug("[CALC-POS] char_offset=%d codepoint=U+%04X '%c' x=%.1f wd=%.1f (raw advance=%.1f)",
-                    char_offset, *p, (*p >= 32 && *p < 127) ? *p : '?',
+            if (byte_offset - rect->start_index < 30) {
+                log_debug("[CALC-POS] byte_offset=%d codepoint=U+%04X x=%.1f wd=%.1f (raw advance=%.1f)",
+                    byte_offset, codepoint,
                     x, wd, evcon->font.ft_face->glyph->advance.x / 64.0f);
             }
         }
         x += wd;
+        p += bytes;
+        byte_offset += bytes;
     }
     log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
 
@@ -1239,15 +1278,24 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
             bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+            
+            // Get text data for UTF-8 aware navigation
+            unsigned char* text_data = nullptr;
+            if (focused->is_text()) {
+                text_data = ((ViewText*)focused)->text_data();
+            }
 
             switch (key_event->key) {
                 case RDT_KEY_LEFT:
                     if (shift) {
-                        // Extend selection left
+                        // Extend selection left (UTF-8 aware)
                         if (!state->selection || state->selection->is_collapsed) {
                             selection_start(state, focused, state->caret->char_offset);
                         }
-                        selection_extend(state, state->caret->char_offset - 1);
+                        int new_offset = text_data 
+                            ? utf8_offset_by_chars(text_data, state->caret->char_offset, -1)
+                            : state->caret->char_offset - 1;
+                        selection_extend(state, new_offset);
                     } else {
                         selection_clear(state);
                         caret_move(state, ctrl ? -10 : -1);  // word jump with ctrl
@@ -1257,10 +1305,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 case RDT_KEY_RIGHT:
                     if (shift) {
+                        // Extend selection right (UTF-8 aware)
                         if (!state->selection || state->selection->is_collapsed) {
                             selection_start(state, focused, state->caret->char_offset);
                         }
-                        selection_extend(state, state->caret->char_offset + 1);
+                        int new_offset = text_data
+                            ? utf8_offset_by_chars(text_data, state->caret->char_offset, 1)
+                            : state->caret->char_offset + 1;
+                        selection_extend(state, new_offset);
                     } else {
                         selection_clear(state);
                         caret_move(state, ctrl ? 10 : 1);
