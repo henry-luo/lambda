@@ -165,29 +165,37 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // 3D inset border
     draw_3d_border(rdcon, x, y, size, size, true, 1 * s);
 
-    // Checkmark if checked
+    // Checkmark if checked - draw using ThorVG stroked path
     if (form->checked) {
-        Color check_color = make_color(0, 0, 0);
+        Tvg_Canvas* canvas = rdcon->canvas;
+        Tvg_Paint* shape = tvg_shape_new();
+
         float inset = 3 * s;
-        float inner_size = size - 2 * inset;
+        // Checkmark points: short leg down-left, then long leg up-right
+        // Start point (left)
+        float cx1 = x + inset;
+        float cy1 = y + size * 0.5f;
+        // Middle point (bottom of check)
+        float cx2 = x + size * 0.35f;
+        float cy2 = y + size - inset;
+        // End point (top right)
+        float cx3 = x + size - inset;
+        float cy3 = y + inset;
 
-        // Draw simple checkmark (two lines forming a V)
-        // Line 1: from top-left to center-bottom
-        float x1 = x + inset;
-        float y1 = y + size / 2;
-        float x2 = x + size / 2 - 1 * s;
-        float y2 = y + size - inset - 1 * s;
+        tvg_shape_move_to(shape, cx1, cy1);
+        tvg_shape_line_to(shape, cx2, cy2);
+        tvg_shape_line_to(shape, cx3, cy3);
 
-        // Line 2: from center-bottom to top-right
-        float x3 = x + size - inset;
-        float y3 = y + inset + 1 * s;
+        // Stroke style
+        Color check_color = form->disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
+        tvg_shape_set_stroke_color(shape, check_color.r, check_color.g, check_color.b, check_color.a);
+        tvg_shape_set_stroke_width(shape, 2.0f * s);
+        tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_ROUND);
+        tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_ROUND);
 
-        // Approximate lines with small rectangles
-        float line_width = 2 * s;
-        // Left part of check
-        fill_rect(rdcon, x1, y1, inner_size / 2, line_width, check_color);
-        // Right part of check (diagonal up)
-        fill_rect(rdcon, x2, y3, inner_size / 2 + 1 * s, line_width, check_color);
+        tvg_canvas_push(canvas, shape);
+        tvg_canvas_draw(canvas, false);
+        tvg_canvas_sync(canvas);
     }
 
     log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, form->checked);
