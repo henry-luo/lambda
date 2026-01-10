@@ -4,7 +4,7 @@
 
 This document describes the LaTeX typesetting library for Lambda. The goal is to produce publication-quality typeset output comparable to TeX/LaTeX, validated against DVI reference files.
 
-**Status**: All core phases complete (1-5). **140 tests passing.**
+**Status**: All core phases complete (1-5). **140 tests passing.** Legacy code removed.
 
 ## Implementation Status
 
@@ -22,18 +22,23 @@ This document describes the LaTeX typesetting library for Lambda. The goal is to
 | `tex_font_metrics.hpp` | ✅ Complete | Font metric structures (TFM-compatible) |
 | `tex_math_bridge.hpp/cpp` | ✅ Complete | Math bridge (inline/display math, fractions, radicals, scripts) |
 | `dvi_parser.hpp/cpp` | ✅ Complete | DVI parsing for validation |
-| `tex_simple_math.hpp/cpp` | ✅ Complete | Minimal test typesetter |
 
-### Legacy Components (to be migrated/removed)
+### Legacy Components (REMOVED)
+
+The following legacy files were removed after Phase 4 completion:
 
 | File | Status | Notes |
 |------|--------|-------|
-| `tex_box.hpp/cpp` | ⚠️ Legacy | Superseded by tex_node.hpp |
-| `tex_ast.hpp` | ⚠️ Legacy | Superseded by tex_node.hpp |
-| `tex_ast_builder.hpp/cpp` | ❌ Broken | Uses undefined types |
-| `tex_typeset.hpp/cpp` | ❌ Broken | Needs rewrite with new node system |
-| `tex_output.cpp` | ❌ Broken | Uses wrong types |
-| `tex_paragraph.hpp/cpp` | ⚠️ Legacy | Old implementation, superseded by tex_linebreak |
+| `tex_box.hpp/cpp` | 🗑️ Removed | Superseded by tex_node.hpp |
+| `tex_ast.hpp` | 🗑️ Removed | Superseded by tex_node.hpp |
+| `tex_ast_builder.hpp/cpp` | 🗑️ Removed | Was broken, used undefined types |
+| `tex_typeset.hpp/cpp` | 🗑️ Removed | Was broken |
+| `tex_output.hpp/cpp` | 🗑️ Removed | Was broken, used wrong types |
+| `tex_paragraph.hpp/cpp` | 🗑️ Removed | Superseded by tex_linebreak |
+| `tex_math_layout.hpp/cpp` | 🗑️ Removed | Legacy math implementation |
+| `tex_radiant_bridge.hpp/cpp` | 🗑️ Removed | Legacy bridge |
+| `tex_radiant_font.hpp/cpp` | 🗑️ Removed | Legacy font bridge |
+| `tex_simple_math.hpp/cpp` | 🗑️ Removed | Superseded by tex_math_bridge |
 
 ### Pending Components
 
@@ -495,30 +500,21 @@ TexNode* vlist = typeset_paragraph(hlist, params, baseline_skip, arena);
 
 ```
 lambda/tex/
-├── tex_node.hpp/cpp          # ✅ Unified node system
+├── tex_node.hpp/cpp          # ✅ Unified node system (30+ node types)
 ├── tex_glue.hpp              # ✅ Glue/spacing primitives
 ├── tex_tfm.hpp/cpp           # ✅ TFM parser + built-in fallbacks
-├── tex_hlist.hpp/cpp         # ✅ HList builder
+├── tex_hlist.hpp/cpp         # ✅ HList builder (ligatures, kerning)
 ├── tex_linebreak.hpp/cpp     # ✅ Knuth-Plass line breaking
-├── tex_vlist.hpp/cpp         # ✅ VList builder (Phase 3)
-├── tex_pagebreak.hpp/cpp     # ✅ Optimal page breaking (Phase 3)
-├── tex_dvi_out.hpp/cpp       # ✅ DVI output generation (Phase 5)
-├── tex_pdf_out.hpp/cpp       # ✅ PDF output generation (Phase 5)
+├── tex_vlist.hpp/cpp         # ✅ VList builder
+├── tex_pagebreak.hpp/cpp     # ✅ Optimal page breaking
+├── tex_math_bridge.hpp/cpp   # ✅ Math integration (Phase 4)
+├── tex_dvi_out.hpp/cpp       # ✅ DVI output generation
+├── tex_pdf_out.hpp/cpp       # ✅ PDF output generation
 ├── tex_font_metrics.hpp      # ✅ Font metric structures
-├── dvi_parser.hpp/cpp        # ✅ DVI validation tool
-├── tex_simple_math.hpp/cpp   # ✅ Minimal math typesetter
-│
-├── tex_box.hpp/cpp           # ⚠️ Legacy (superseded)
-├── tex_ast.hpp               # ⚠️ Legacy (superseded)
-├── tex_paragraph.hpp/cpp     # ⚠️ Legacy (superseded)
-├── tex_ast_builder.hpp/cpp   # ❌ Broken
-├── tex_typeset.hpp/cpp       # ❌ Broken
-├── tex_output.hpp/cpp        # ❌ Broken
-│
-├── tex_math_layout.hpp/cpp   # Partial (use radiant instead)
-├── tex_radiant_bridge.hpp/cpp # Partial
-└── tex_radiant_font.hpp/cpp  # Partial
+└── dvi_parser.hpp/cpp        # ✅ DVI validation tool
 ```
+
+**22 files total** (11 .hpp + 11 .cpp) - clean, focused implementation.
 
 ### Test Files
 
@@ -526,14 +522,8 @@ lambda/tex/
 test/
 ├── test_tex_node_gtest.cpp   # ✅ 37 tests (Phase 1 & 2)
 ├── test_tex_vlist_gtest.cpp  # ✅ 25 tests (Phase 3)
+├── test_tex_phase4_gtest.cpp # ✅ 41 tests (Phase 4 - Math integration)
 └── test_tex_phase5_gtest.cpp # ✅ 37 tests (Phase 5 - DVI/PDF output)
-```
-
-### Future Files (Planned)
-
-```
-lambda/tex/
-└── tex_math_bridge.hpp/cpp   # 📋 Bridge to Radiant math (Phase 4)
 ```
 
 ---
@@ -615,9 +605,12 @@ test/tex/
 - [x] Page breaks at correct positions
 - [x] 25 tests for VList and page breaking
 
-### Phase 4 (Next)
-- [ ] Inline math positioned correctly
-- [ ] Display math centered
+### Phase 4 ✅ ACHIEVED
+- [x] Math bridge with all atom types and spacing
+- [x] Inline math ($...$) integration
+- [x] Display math ($$...$$) centering
+- [x] Fractions, radicals, scripts
+- [x] 41 tests passing
 
 ### Phase 5 ✅ ACHIEVED
 - [x] DVI output with correct opcodes
@@ -629,31 +622,32 @@ test/tex/
 
 ## Appendix A: Code Status
 
-### Complete (Keep)
-- `tex_node.hpp/cpp` - Unified node system ✅
-- `tex_glue.hpp` - Complete, well-tested ✅
-- `tex_tfm.hpp/cpp` - TFM parser with fallbacks ✅
-- `tex_hlist.hpp/cpp` - HList builder ✅
-- `tex_linebreak.hpp/cpp` - Knuth-Plass ✅
+### Active Files (22 total)
+- `tex_node.hpp/cpp` - Unified node system (30+ types) ✅
+- `tex_glue.hpp` - Glue/spacing primitives ✅
+- `tex_tfm.hpp/cpp` - TFM parser with built-in fallbacks ✅
+- `tex_hlist.hpp/cpp` - HList builder (ligatures, kerning) ✅
+- `tex_linebreak.hpp/cpp` - Knuth-Plass optimal line breaking ✅
 - `tex_vlist.hpp/cpp` - VList builder ✅
 - `tex_pagebreak.hpp/cpp` - Optimal page breaking ✅
+- `tex_math_bridge.hpp/cpp` - Math integration (Phase 4) ✅
 - `tex_dvi_out.hpp/cpp` - DVI output generation ✅
 - `tex_pdf_out.hpp/cpp` - PDF output generation ✅
-- `dvi_parser.hpp/cpp` - Working validation tool ✅
-- `tex_simple_math.hpp/cpp` - Useful for testing ✅
-- `tex_font_metrics.hpp` - Good structure definitions ✅
+- `dvi_parser.hpp/cpp` - DVI validation tool ✅
+- `tex_font_metrics.hpp` - Font metric structures ✅
 
-### Legacy (to be removed/migrated)
+### Removed Files (19 total)
+The following legacy/broken files were removed after Phase 4 completion:
 - `tex_ast.hpp` - Superseded by `tex_node.hpp`
 - `tex_box.hpp/cpp` - Superseded by `tex_node.hpp`
+- `tex_ast_builder.hpp/cpp` - Was broken
 - `tex_paragraph.hpp/cpp` - Superseded by `tex_linebreak.hpp`
-- `tex_typeset.cpp` - Broken, needs rewrite
-- `tex_output.cpp` - Broken, uses wrong types
-- `tex_ast_builder.cpp` - Broken, uses undefined types
-
-### Partial (use Radiant instead)
-- `tex_math_layout.hpp/cpp` - Use `radiant/layout_math.cpp`
-- `tex_radiant_bridge.hpp/cpp` - Needs completion for math integration
+- `tex_typeset.hpp/cpp` - Was broken
+- `tex_output.hpp/cpp` - Was broken
+- `tex_math_layout.hpp/cpp` - Legacy math
+- `tex_radiant_bridge.hpp/cpp` - Legacy bridge
+- `tex_radiant_font.hpp/cpp` - Legacy font bridge
+- `tex_simple_math.hpp/cpp` - Superseded by tex_math_bridge
 
 ---
 
@@ -674,7 +668,8 @@ test/tex/
 
 ## Next Steps
 
-1. **Phase 4**: Bridge Radiant math layout to TexNode system (inline/display math)
-2. **Cleanup**: Remove legacy files after migration complete
+1. ~~**Phase 4**: Bridge Radiant math layout to TexNode system~~ ✅ COMPLETE
+2. ~~**Cleanup**: Remove legacy files after migration complete~~ ✅ COMPLETE (19 files removed)
 3. **SVG Output**: Add SVG backend for web rendering (optional)
 4. **Hyphenation**: Implement TeX hyphenation patterns (optional)
+5. **Lambda Integration**: Connect TeX typesetter to Lambda document pipeline
