@@ -2,6 +2,7 @@
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "../lib/log.h"
+#include "../lib/utf.h"
 #include <string.h>
 #include <math.h>
 
@@ -9,6 +10,9 @@
  * Rendering support for HTML form controls.
  * Provides native-like appearance for form elements.
  */
+
+// External declaration for glyph rendering from render.cpp
+extern void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y);
 
 // Helper to create a Color from RGBA values
 static inline Color make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
@@ -79,6 +83,64 @@ static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, floa
         // Right edge
         fill_rect(rdcon, x + w - border_width, y, border_width, h, dark);
     }
+}
+
+/**
+ * Render a simple string at the given position using the specified font.
+ * @param rdcon Render context
+ * @param text The UTF-8 string to render
+ * @param x X position in physical pixels
+ * @param y Y position in physical pixels (baseline)
+ * @param font Font properties to use
+ * @param color Text color
+ */
+static void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
+                                 FontProp* font, Color color) {
+    if (!text || !*text || !font || !rdcon->ui_context) return;
+    
+    // Setup font for rendering
+    FontBox fbox = {0};
+    setup_font(rdcon->ui_context, &fbox, font);
+    if (!fbox.ft_face) {
+        log_debug("[FORM] render_simple_string: failed to setup font");
+        return;
+    }
+    
+    // Save current color and set text color
+    Color saved_color = rdcon->color;
+    rdcon->color = color;
+    
+    // Get font metrics (all in physical pixels after setup_font)
+    float ascender = fbox.ft_face->size->metrics.ascender / 64.0f;
+    
+    // Render each character
+    const unsigned char* p = (const unsigned char*)text;
+    float pen_x = x;
+    
+    while (*p) {
+        uint32_t codepoint;
+        int bytes = utf8_to_codepoint(p, &codepoint);
+        if (bytes <= 0) { p++; continue; }
+        p += bytes;
+        
+        // Load glyph
+        FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, fbox.ft_face, font, codepoint, true);
+        if (!glyph) {
+            pen_x += font->font_size * 0.5f;  // fallback advance
+            continue;
+        }
+        
+        // Draw the glyph
+        draw_glyph(rdcon, &glyph->bitmap,
+                   (int)(pen_x + glyph->bitmap_left),
+                   (int)(y + ascender - glyph->bitmap_top));
+        
+        // Advance pen position
+        pen_x += glyph->advance.x / 64.0f;
+    }
+    
+    // Restore color
+    rdcon->color = saved_color;
 }
 
 /**
@@ -267,6 +329,9 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
               x, y, w, h, has_css_background);
 }
 
+// Forward declaration for helper function
+static const char* get_option_text_at_index(ViewBlock* select, int index);
+
 /**
  * Render a select dropdown (closed state).
  */
@@ -305,9 +370,197 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
         fill_rect(rdcon, arrow_x - line_width / 2, arrow_y - arrow_size / 2 + i, line_width, 1 * s, arrow_color);
     }
 
-    // Selected option text would be rendered via child content
+    // Render selected option text
+    if (block->font && form->selected_index >= 0) {
+        const char* selected_text = get_option_text_at_index(block, form->selected_index);
+        if (selected_text) {
+            // Calculate text position with padding
+            float text_padding = 6 * s;
+            float text_x = x + bw + text_padding;
+            
+            // Calculate text top position (vertically centered)
+            float font_height_scaled = block->font->font_height * s;
+            float text_top = y + (h - font_height_scaled) / 2;
+            
+            // Text color (black)
+            Color text_color = make_color(0, 0, 0);
+            
+            // Render the selected text
+            render_simple_string(rdcon, selected_text, text_x, text_top, block->font, text_color);
+        }
+    }
 
-    log_debug("[FORM] render_select at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
+    log_debug("[FORM] render_select at (%.1f, %.1f) size %.1fx%.1f selected=%d", x, y, w, h, form->selected_index);
+}
+
+/**
+ * Helper to get option text at index (same logic as event.cpp)
+ */
+static const char* get_option_text_at_index(ViewBlock* select, int index) {
+    if (!select || index < 0) return nullptr;
+    
+    int current_idx = 0;
+    DomNode* child = select->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* child_elem = (DomElement*)child;
+            if (child_elem->tag() == HTM_TAG_OPTION) {
+                if (current_idx == index) {
+                    // Find first text node child
+                    DomNode* text_child = child_elem->first_child;
+                    while (text_child) {
+                        if (text_child->is_text()) {
+                            DomText* text = (DomText*)text_child;
+                            return text->text;
+                        }
+                        text_child = text_child->next_sibling;
+                    }
+                    return nullptr;
+                }
+                current_idx++;
+            } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
+                // Check options inside optgroup
+                DomNode* opt_child = child_elem->first_child;
+                while (opt_child) {
+                    if (opt_child->is_element()) {
+                        DomElement* opt_elem = (DomElement*)opt_child;
+                        if (opt_elem->tag() == HTM_TAG_OPTION) {
+                            if (current_idx == index) {
+                                DomNode* text_child = opt_elem->first_child;
+                                while (text_child) {
+                                    if (text_child->is_text()) {
+                                        DomText* text = (DomText*)text_child;
+                                        return text->text;
+                                    }
+                                    text_child = text_child->next_sibling;
+                                }
+                                return nullptr;
+                            }
+                            current_idx++;
+                        }
+                    }
+                    opt_child = opt_child->next_sibling;
+                }
+            }
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+/**
+ * Render a select dropdown popup (when open).
+ * Called separately from render_select to ensure it's drawn on top.
+ */
+void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state) {
+    if (!select || !select->form || !select->form->dropdown_open) return;
+    if (!state) return;
+    
+    float s = rdcon->scale;
+    FormControlProp* form = select->form;
+    
+    // Calculate dropdown position relative to the select element
+    // Walk up parent chain to get absolute position, then apply scale
+    float abs_x = select->x;
+    float abs_y = select->y + select->height;  // Below the select
+    View* parent = select->parent;
+    while (parent) {
+        if (parent->is_block()) {
+            ViewBlock* pblock = (ViewBlock*)parent;
+            abs_x += pblock->x;
+            abs_y += pblock->y;
+            // Account for scroll in parent containers
+            if (pblock->scroller && pblock->scroller->pane) {
+                abs_y -= pblock->scroller->pane->v_scroll_position;
+                abs_x -= pblock->scroller->pane->h_scroll_position;
+            }
+        }
+        parent = parent->parent;
+    }
+    
+    float x = abs_x * s;
+    float y = abs_y * s;
+    float w = select->width * s;
+    
+    // Option height based on select height
+    float option_height = select->height * s;
+    int max_visible = 10;
+    int visible_count = (form->option_count < max_visible) ? form->option_count : max_visible;
+    if (visible_count <= 0) visible_count = 1;
+    float h = visible_count * option_height;
+    
+    // Update state with actual dropdown position for hit testing
+    state->dropdown_x = x;
+    state->dropdown_y = y;
+    state->dropdown_width = w;
+    state->dropdown_height = h;
+    
+    log_debug("[FORM] dropdown clip before override: (%.1f, %.1f, %.1f, %.1f)", 
+        rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
+    
+    // Override clip to full viewport for overlay rendering (dropdown should not be clipped by parent containers)
+    Bound saved_clip = rdcon->block.clip;
+    rdcon->block.clip.left = 0;
+    rdcon->block.clip.top = 0;
+    rdcon->block.clip.right = rdcon->ui_context->surface->width;
+    rdcon->block.clip.bottom = rdcon->ui_context->surface->height;
+    
+    // Dropdown background (white)
+    Color bg = make_color(255, 255, 255);
+    fill_rect(rdcon, x, y, w, h, bg);
+    
+    // Dropdown border
+    Color border_color = make_color(118, 118, 118);
+    float bw = 1 * s;
+    fill_rect(rdcon, x, y, w, bw, border_color);
+    fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
+    fill_rect(rdcon, x, y, bw, h, border_color);
+    fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
+    
+    // Render each visible option
+    for (int i = 0; i < visible_count; i++) {
+        float opt_y = y + i * option_height;
+        
+        // Highlight hovered option
+        if (i == form->hover_index) {
+            Color hover_bg = make_color(0, 120, 215);  // Blue highlight
+            fill_rect(rdcon, x + bw, opt_y + bw, w - 2 * bw, option_height - bw, hover_bg);
+        }
+        // Indicate selected option with checkmark or different style
+        else if (i == form->selected_index) {
+            Color selected_bg = make_color(230, 230, 230);  // Light gray
+            fill_rect(rdcon, x + bw, opt_y + bw, w - 2 * bw, option_height - bw, selected_bg);
+        }
+        
+        // Get option text
+        const char* opt_text = get_option_text_at_index(select, i);
+        if (opt_text && select->font) {
+            // Text color (white for hovered, black otherwise)
+            Color text_color = (i == form->hover_index) ? make_color(255, 255, 255) : make_color(0, 0, 0);
+            
+            // Calculate text position with padding
+            float text_padding = 6 * s;
+            float text_x = x + bw + text_padding;
+            
+            // Calculate text top position (vertically centered in option)
+            // font_height is in CSS pixels, need to scale for physical pixels
+            float font_height_scaled = select->font->font_height * s;
+            // Center text vertically: opt_y + (option_height - font_height) / 2
+            float text_top = opt_y + (option_height - font_height_scaled) / 2;
+            
+            log_debug("[FORM] option %d: text='%s' opt_y=%.1f option_height=%.1f font_height=%.1f text_top=%.1f",
+                i, opt_text, opt_y, option_height, font_height_scaled, text_top);
+            
+            // Render the option text (y is top of text area, not baseline)
+            render_simple_string(rdcon, opt_text, text_x, text_top, select->font, text_color);
+        }
+    }
+    
+    // Restore original clip
+    rdcon->block.clip = saved_clip;
+    
+    log_debug("[FORM] render_select_dropdown at (%.1f, %.1f) size %.1fx%.1f, %d options",
+        x, y, w, h, form->option_count);
 }
 
 /**

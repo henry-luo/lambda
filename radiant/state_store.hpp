@@ -195,6 +195,12 @@ typedef struct RadiantState {
     View* drag_target;             // drag source element
     bool is_dragging;              // true if drag operation in progress
     
+    // Dropdown state (for select elements)
+    View* open_dropdown;           // currently open select dropdown (null if none)
+    float dropdown_x, dropdown_y;  // dropdown popup position (absolute, in physical pixels)
+    float dropdown_width;          // dropdown popup width
+    float dropdown_height;         // dropdown popup height
+    
     // Document-level states
     float scroll_x, scroll_y;      // document scroll position
     float zoom_level;              // document zoom level (1.0 = 100%)

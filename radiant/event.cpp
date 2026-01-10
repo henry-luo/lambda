@@ -700,6 +700,372 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
     return false;
 }
 
+// ============================================================================
+// Select Dropdown Handling
+// ============================================================================
+
+/**
+ * Check if an element is a select dropdown
+ */
+static bool is_select(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewElement* elem = (ViewElement*)view;
+    return elem->tag() == HTM_TAG_SELECT;
+}
+
+/**
+ * Find the select element from a click target (may be inside the select)
+ */
+static View* find_select_element(View* target) {
+    if (!target) return nullptr;
+    
+    View* current = target;
+    while (current) {
+        if (is_select(current)) return current;
+        current = current->parent;
+    }
+    return nullptr;
+}
+
+/**
+ * Get the nth option element from a select (0-indexed)
+ * Returns nullptr if index is out of range
+ */
+static DomElement* get_option_at_index(ViewBlock* select, int index) {
+    if (!select || index < 0) return nullptr;
+    
+    int current_idx = 0;
+    DomNode* child = select->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* child_elem = (DomElement*)child;
+            if (child_elem->tag() == HTM_TAG_OPTION) {
+                if (current_idx == index) return child_elem;
+                current_idx++;
+            } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
+                // Check options inside optgroup
+                DomNode* opt_child = child_elem->first_child;
+                while (opt_child) {
+                    if (opt_child->is_element()) {
+                        DomElement* opt_elem = (DomElement*)opt_child;
+                        if (opt_elem->tag() == HTM_TAG_OPTION) {
+                            if (current_idx == index) return opt_elem;
+                            current_idx++;
+                        }
+                    }
+                    opt_child = opt_child->next_sibling;
+                }
+            }
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+/**
+ * Get the text content of an option element
+ */
+static const char* get_option_text(DomElement* option) {
+    if (!option) return nullptr;
+    
+    // First check for value attribute
+    // Actually for display, we want the text content, not value
+    // Value is for form submission
+    
+    // Find first text node child
+    DomNode* child = option->first_child;
+    while (child) {
+        if (child->is_text()) {
+            DomText* text = (DomText*)child;
+            return text->text;
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
+/**
+ * Get the selected option text for display
+ */
+static const char* get_selected_option_text(ViewBlock* select) {
+    if (!select || !select->form) return nullptr;
+    
+    DomElement* option = get_option_at_index(select, select->form->selected_index);
+    return get_option_text(option);
+}
+
+/**
+ * Calculate dropdown popup dimensions
+ */
+static void calculate_dropdown_dimensions(ViewBlock* select, RadiantState* state, float scale) {
+    if (!select || !state || !select->form) return;
+    
+    int option_count = select->form->option_count;
+    if (option_count <= 0) option_count = 1;
+    
+    // Maximum visible options
+    int max_visible = 10;
+    int visible_count = (option_count < max_visible) ? option_count : max_visible;
+    
+    // Option height based on select height (each option same height as closed select)
+    float option_height = select->height;
+    
+    // Calculate popup dimensions
+    state->dropdown_width = select->width * scale;
+    state->dropdown_height = visible_count * option_height * scale;
+}
+
+/**
+ * Handle click on select to toggle dropdown
+ */
+static bool handle_select_click(EventContext* evcon, View* target) {
+    log_debug("handle_select_click: target=%p, target_tag=%d", (void*)target, 
+        (target && target->is_element()) ? ((ViewElement*)target)->tag() : -1);
+    
+    View* select_view = find_select_element(target);
+    log_debug("handle_select_click: select_view=%p", (void*)select_view);
+    if (!select_view) return false;
+    
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state) return false;
+    
+    ViewBlock* select = (ViewBlock*)select_view;
+    log_debug("handle_select_click: select->form=%p, disabled=%d", 
+        (void*)select->form, select->form ? select->form->disabled : -1);
+    if (!select->form || select->form->disabled) return false;
+    
+    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
+    
+    if (state->open_dropdown == select_view) {
+        // Close the dropdown
+        log_info("handle_select_click: closing dropdown");
+        state->open_dropdown = nullptr;
+        select->form->dropdown_open = 0;
+        select->form->hover_index = -1;
+        state->needs_repaint = true;
+        return true;
+    }
+    
+    // Close any other open dropdown first
+    if (state->open_dropdown) {
+        ViewBlock* prev_select = (ViewBlock*)state->open_dropdown;
+        if (prev_select->form) {
+            prev_select->form->dropdown_open = 0;
+            prev_select->form->hover_index = -1;
+        }
+    }
+    
+    // Open this dropdown
+    log_info("handle_select_click: opening dropdown with %d options", select->form->option_count);
+    state->open_dropdown = select_view;
+    select->form->dropdown_open = 1;
+    select->form->hover_index = select->form->selected_index;
+    
+    // Calculate position (below the select, in absolute screen coords)
+    // Walk up parent chain to get absolute position
+    float abs_x = select->x;
+    float abs_y = select->y + select->height;  // Below the select
+    View* parent = select->parent;
+    while (parent) {
+        if (parent->is_block()) {
+            ViewBlock* pblock = (ViewBlock*)parent;
+            abs_x += pblock->x;
+            abs_y += pblock->y;
+        }
+        parent = parent->parent;
+    }
+    
+    state->dropdown_x = abs_x * scale;
+    state->dropdown_y = abs_y * scale;
+    calculate_dropdown_dimensions(select, state, scale);
+    
+    state->needs_repaint = true;
+    return true;
+}
+
+/**
+ * Handle click on a dropdown option
+ * @param mouse_y Mouse Y position in physical pixels
+ * @return true if an option was selected
+ */
+static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, float mouse_y) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state || !state->open_dropdown) return false;
+    
+    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    if (!select->form) return false;
+    
+    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
+    
+    log_info("handle_dropdown_option_click: mouse=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
+             mouse_x, mouse_y, state->dropdown_x, state->dropdown_y, 
+             state->dropdown_width, state->dropdown_height);
+    
+    // Check if click is within dropdown popup
+    if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width) {
+        log_info("handle_dropdown_option_click: click outside X bounds");
+        return false;
+    }
+    if (mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
+        log_info("handle_dropdown_option_click: click outside Y bounds");
+        return false;
+    }
+    
+    // Calculate which option was clicked
+    float option_height = select->height * scale;
+    int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height);
+    
+    log_info("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
+             option_height, clicked_index, select->form->option_count);
+    
+    if (clicked_index >= 0 && clicked_index < select->form->option_count) {
+        log_info("handle_dropdown_option_click: selecting option %d", clicked_index);
+        select->form->selected_index = clicked_index;
+        
+        // Close dropdown
+        state->open_dropdown = nullptr;
+        select->form->dropdown_open = 0;
+        select->form->hover_index = -1;
+        state->needs_repaint = true;
+        return true;
+    }
+    
+    log_info("handle_dropdown_option_click: clicked_index out of range");
+    return false;
+}
+
+/**
+ * Handle mouse move to update hover state in dropdown
+ */
+static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mouse_y) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state || !state->open_dropdown) return;
+    
+    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    if (!select->form) return;
+    
+    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
+    
+    // Check if mouse is within dropdown popup
+    if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
+        mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
+        if (select->form->hover_index != -1) {
+            select->form->hover_index = -1;
+            state->needs_repaint = true;
+        }
+        return;
+    }
+    
+    // Calculate which option is hovered
+    float option_height = select->height * scale;
+    int hover_index = (int)((mouse_y - state->dropdown_y) / option_height);
+    
+    if (hover_index >= 0 && hover_index < select->form->option_count) {
+        if (select->form->hover_index != hover_index) {
+            select->form->hover_index = hover_index;
+            state->needs_repaint = true;
+        }
+    }
+}
+
+/**
+ * Handle keyboard navigation in dropdown
+ */
+static bool handle_dropdown_key(EventContext* evcon, int key) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state || !state->open_dropdown) return false;
+    
+    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    if (!select->form) return false;
+    
+    int hover = select->form->hover_index;
+    int count = select->form->option_count;
+    
+    switch (key) {
+    case RDT_KEY_UP:
+        if (hover > 0) {
+            select->form->hover_index = hover - 1;
+            state->needs_repaint = true;
+        }
+        return true;
+        
+    case RDT_KEY_DOWN:
+        if (hover < count - 1) {
+            select->form->hover_index = hover + 1;
+            state->needs_repaint = true;
+        }
+        return true;
+        
+    case RDT_KEY_ENTER:
+        if (hover >= 0 && hover < count) {
+            select->form->selected_index = hover;
+            state->open_dropdown = nullptr;
+            select->form->dropdown_open = 0;
+            select->form->hover_index = -1;
+            state->needs_repaint = true;
+        }
+        return true;
+        
+    case RDT_KEY_ESCAPE:
+        state->open_dropdown = nullptr;
+        select->form->dropdown_open = 0;
+        select->form->hover_index = -1;
+        state->needs_repaint = true;
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Close dropdown if clicking outside
+ */
+static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float mouse_y) {
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state || !state->open_dropdown) return;
+    
+    ViewBlock* select = (ViewBlock*)state->open_dropdown;
+    if (!select->form) return;
+    
+    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
+    
+    // Calculate select box absolute position
+    float select_abs_x = select->x;
+    float select_abs_y = select->y;
+    View* parent = select->parent;
+    while (parent) {
+        if (parent->is_block()) {
+            ViewBlock* pblock = (ViewBlock*)parent;
+            select_abs_x += pblock->x;
+            select_abs_y += pblock->y;
+        }
+        parent = parent->parent;
+    }
+    select_abs_x *= scale;
+    select_abs_y *= scale;
+    float select_w = select->width * scale;
+    float select_h = select->height * scale;
+    
+    // Check if click is on the select itself (toggle handled elsewhere)
+    if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&
+        mouse_y >= select_abs_y && mouse_y <= select_abs_y + select_h) {
+        return;  // Click on select box, let handle_select_click deal with it
+    }
+    
+    // Check if click is on dropdown popup
+    if (mouse_x >= state->dropdown_x && mouse_x <= state->dropdown_x + state->dropdown_width &&
+        mouse_y >= state->dropdown_y && mouse_y <= state->dropdown_y + state->dropdown_height) {
+        return;  // Click on dropdown, let handle_dropdown_option_click deal with it
+    }
+    
+    // Click outside - close dropdown
+    log_info("close_dropdown_if_outside: closing dropdown");
+    state->open_dropdown = nullptr;
+    select->form->dropdown_open = 0;
+    select->form->hover_index = -1;
+    state->needs_repaint = true;
+}
+
 /**
  * Check if an element is focusable
  */
@@ -1258,6 +1624,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Update hover state based on new target
         update_hover_state(&evcon, evcon.target);
+        
+        // Update dropdown hover if open
+        update_dropdown_hover(&evcon, (float)mouse_x, (float)mouse_y);
 
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
@@ -1519,10 +1888,33 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Clear :active state
             update_active_state(&evcon, NULL, false);
 
-            // Handle checkbox/radio click toggle
-            log_info("MOUSE_UP: evcon.target=%p", evcon.target);
-            if (evcon.target) {
-                handle_checkbox_radio_click(&evcon, evcon.target);
+            // Handle select dropdown click FIRST (before other click handling)
+            // If a dropdown is open, handle clicks on it before anything else
+            bool dropdown_handled = false;
+            if (state && state->open_dropdown) {
+                // Check if clicking on dropdown option
+                if (handle_dropdown_option_click(&evcon, (float)mouse_x, (float)mouse_y)) {
+                    // Option was selected, done - skip other click handlers
+                    dropdown_handled = true;
+                } else {
+                    // Check if clicking outside dropdown - close it
+                    close_dropdown_if_outside(&evcon, (float)mouse_x, (float)mouse_y);
+                    dropdown_handled = true;  // Still handled - don't re-open dropdown
+                }
+            }
+            
+            // Only process other click handlers if dropdown wasn't involved
+            if (!dropdown_handled) {
+                // Handle checkbox/radio click toggle
+                log_info("MOUSE_UP: evcon.target=%p", evcon.target);
+                if (evcon.target) {
+                    handle_checkbox_radio_click(&evcon, evcon.target);
+                }
+                
+                // Handle click on select element to toggle dropdown
+                if (evcon.target) {
+                    handle_select_click(&evcon, evcon.target);
+                }
             }
 
             // End selection mode
@@ -1658,6 +2050,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         KeyEvent* key_event = &event->key;
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
         if (!state) break;
+        
+        // Handle dropdown keyboard navigation first (if dropdown is open)
+        if (state->open_dropdown) {
+            if (handle_dropdown_key(&evcon, key_event->key)) {
+                evcon.need_repaint = true;
+                break;
+            }
+        }
 
         View* focused = focus_get(state);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
