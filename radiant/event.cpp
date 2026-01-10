@@ -1211,26 +1211,14 @@ void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
     caret->y = caret_y;
     caret->height = caret_height;
     
-    // Calculate iframe offset by walking up parent chain
-    float chain_x = 0, chain_y = 0;
-    View* parent = view->parent;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            chain_x += ((ViewBlock*)parent)->x;
-            chain_y += ((ViewBlock*)parent)->y;
-        }
-        parent = parent->parent;
-    }
+    // Preserve the existing iframe offset - it was correctly calculated when
+    // the caret was initially placed via mouse click. During keyboard navigation,
+    // we stay in the same iframe context, so the offset remains valid.
+    // Note: chain_x/chain_y calculation above is for debugging only
     
-    // For now, assume no iframe (simple case)
-    // TODO: detect iframe context and calculate proper offset
-    caret->iframe_offset_x = 0;
-    caret->iframe_offset_y = 0;
-    
-    log_debug("[CARET-VISUAL] Updated caret: view_type=%d offset=%d x=%.1f y=%.1f height=%.1f",
-        view->view_type, caret->char_offset, caret_x, caret_y, caret_height);
+    log_debug("[CARET-VISUAL] Updated caret: view_type=%d offset=%d x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
+        view->view_type, caret->char_offset, caret_x, caret_y, caret_height,
+        caret->iframe_offset_x, caret->iframe_offset_y);
 }
 
 // ============================================================================
