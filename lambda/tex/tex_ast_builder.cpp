@@ -258,42 +258,42 @@ uint32_t math_symbol_codepoint(const char* name) {
 
 static const EnvironmentInfo ENV_INFO[] = {
     // Math environments
-    {"equation", Mode::Math, true, true, false, 0},
-    {"equation*", Mode::Math, true, true, false, 0},
-    {"align", Mode::Math, true, true, true, 2},
-    {"align*", Mode::Math, true, true, true, 2},
-    {"gather", Mode::Math, true, true, false, 0},
-    {"gather*", Mode::Math, true, true, false, 0},
-    {"multline", Mode::Math, true, true, false, 0},
-    {"multline*", Mode::Math, true, true, false, 0},
-    {"split", Mode::Math, true, true, true, 2},
-    {"cases", Mode::Math, true, false, true, 2},
-    {"matrix", Mode::Math, true, false, true, 0},
-    {"pmatrix", Mode::Math, true, false, true, 0},
-    {"bmatrix", Mode::Math, true, false, true, 0},
-    {"Bmatrix", Mode::Math, true, false, true, 0},
-    {"vmatrix", Mode::Math, true, false, true, 0},
-    {"Vmatrix", Mode::Math, true, false, true, 0},
-    {"array", Mode::Math, true, false, true, 0},
+    {"equation", Mode::MathMode, true, true, false, 0},
+    {"equation*", Mode::MathMode, true, true, false, 0},
+    {"align", Mode::MathMode, true, true, true, 2},
+    {"align*", Mode::MathMode, true, true, true, 2},
+    {"gather", Mode::MathMode, true, true, false, 0},
+    {"gather*", Mode::MathMode, true, true, false, 0},
+    {"multline", Mode::MathMode, true, true, false, 0},
+    {"multline*", Mode::MathMode, true, true, false, 0},
+    {"split", Mode::MathMode, true, true, true, 2},
+    {"cases", Mode::MathMode, true, false, true, 2},
+    {"matrix", Mode::MathMode, true, false, true, 0},
+    {"pmatrix", Mode::MathMode, true, false, true, 0},
+    {"bmatrix", Mode::MathMode, true, false, true, 0},
+    {"Bmatrix", Mode::MathMode, true, false, true, 0},
+    {"vmatrix", Mode::MathMode, true, false, true, 0},
+    {"Vmatrix", Mode::MathMode, true, false, true, 0},
+    {"array", Mode::MathMode, true, false, true, 0},
 
     // Text environments
-    {"document", Mode::Text, false, false, false, 0},
-    {"center", Mode::Text, false, false, false, 0},
-    {"flushleft", Mode::Text, false, false, false, 0},
-    {"flushright", Mode::Text, false, false, false, 0},
-    {"quote", Mode::Text, false, false, false, 0},
-    {"quotation", Mode::Text, false, false, false, 0},
-    {"verse", Mode::Text, false, false, false, 0},
-    {"enumerate", Mode::Text, false, false, false, 0},
-    {"itemize", Mode::Text, false, false, false, 0},
-    {"description", Mode::Text, false, false, false, 0},
-    {"tabular", Mode::Text, false, false, true, 0},
-    {"table", Mode::Text, false, false, false, 0},
-    {"figure", Mode::Text, false, false, false, 0},
-    {"minipage", Mode::Text, false, false, false, 0},
-    {"abstract", Mode::Text, false, false, false, 0},
+    {"document", Mode::Horizontal, false, false, false, 0},
+    {"center", Mode::Horizontal, false, false, false, 0},
+    {"flushleft", Mode::Horizontal, false, false, false, 0},
+    {"flushright", Mode::Horizontal, false, false, false, 0},
+    {"quote", Mode::Horizontal, false, false, false, 0},
+    {"quotation", Mode::Horizontal, false, false, false, 0},
+    {"verse", Mode::Horizontal, false, false, false, 0},
+    {"enumerate", Mode::Horizontal, false, false, false, 0},
+    {"itemize", Mode::Horizontal, false, false, false, 0},
+    {"description", Mode::Horizontal, false, false, false, 0},
+    {"tabular", Mode::Horizontal, false, false, true, 0},
+    {"table", Mode::Horizontal, false, false, false, 0},
+    {"figure", Mode::Horizontal, false, false, false, 0},
+    {"minipage", Mode::Horizontal, false, false, false, 0},
+    {"abstract", Mode::Horizontal, false, false, false, 0},
 
-    {nullptr, Mode::Text, false, false, false, 0}
+    {nullptr, Mode::Horizontal, false, false, false, 0}
 };
 
 const EnvironmentInfo* get_environment_info(const char* name) {
@@ -313,7 +313,7 @@ bool is_mode_changing_command(const char* cmd, Mode* new_mode) {
     // Text-to-math
     if (strcmp(cmd, "ensuremath") == 0 ||
         strcmp(cmd, "math") == 0) {
-        *new_mode = Mode::Math;
+        *new_mode = Mode::MathMode;
         return true;
     }
 
@@ -325,7 +325,7 @@ bool is_mode_changing_command(const char* cmd, Mode* new_mode) {
         strcmp(cmd, "textrm") == 0 ||
         strcmp(cmd, "textit") == 0 ||
         strcmp(cmd, "textbf") == 0) {
-        *new_mode = Mode::Text;
+        *new_mode = Mode::Horizontal;
         return true;
     }
 
@@ -569,7 +569,7 @@ TexNode* build_document(ASTBuilder* builder, TSNode node) {
 // ============================================================================
 
 TexNode* build_math_inline(ASTBuilder* builder, TSNode node) {
-    builder->push_mode(Mode::Math);
+    builder->push_mode(Mode::MathMode);
     builder->in_display_math = false;
 
     MathNode* math = create_math_node(false, builder->arena);
@@ -599,7 +599,7 @@ TexNode* build_math_inline(ASTBuilder* builder, TSNode node) {
 }
 
 TexNode* build_math_display(ASTBuilder* builder, TSNode node) {
-    builder->push_mode(Mode::Math);
+    builder->push_mode(Mode::MathMode);
     builder->in_display_math = true;
 
     MathNode* math = create_math_node(true, builder->arena);
@@ -828,7 +828,7 @@ TexNode* build_command(ASTBuilder* builder, TSNode node) {
 
     // Check for math symbol
     uint32_t codepoint = math_symbol_codepoint(name);
-    if (codepoint != 0 && builder->current_mode() == Mode::Math) {
+    if (codepoint != 0 && builder->current_mode() == Mode::MathMode) {
         CharNode* ch = create_char_node(codepoint, builder->arena);
         ch->atom_type = classify_math_command(name);
 
@@ -926,7 +926,7 @@ TexNode* build_environment(ASTBuilder* builder, TSNode node) {
 
     // Push mode if environment changes it
     if (info && info->is_math) {
-        builder->push_mode(Mode::Math);
+        builder->push_mode(Mode::MathMode);
         builder->in_display_math = info->is_display;
     }
 
@@ -991,7 +991,7 @@ TexNode* build_text(ASTBuilder* builder, TSNode node) {
     size_t len;
     const char* text = node_text(builder, node, &len);
 
-    if (builder->current_mode() == Mode::Math) {
+    if (builder->current_mode() == Mode::MathMode) {
         // In math mode, each character is potentially an atom
         GroupNode* group = create_group_node(builder->arena);
         group->children = (TexNode**)arena_alloc(builder->arena, len * sizeof(TexNode*));
