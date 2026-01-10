@@ -1014,10 +1014,28 @@ void caret_move(RadiantState* state, int delta) {
         if (delta > 0) {
             // Moving right
             if (str && current_offset < text_length) {
-                // Still within this text view
-                caret->char_offset = utf8_offset_by_chars(str, current_offset, delta);
+                // Still within this text view, move by character
+                int new_offset = utf8_offset_by_chars(str, current_offset, delta);
+                
+                // If we reached the end of text, immediately cross to next view
+                if (new_offset >= text_length) {
+                    View* next_view = find_next_navigable_view(view);
+                    if (next_view) {
+                        caret->view = next_view;
+                        caret->char_offset = 0;
+                        caret->line = 0;
+                        caret->column = 0;
+                        log_debug("caret_move: crossed to next view %p (type=%d)", 
+                            next_view, next_view->view_type);
+                    } else {
+                        // No next view, stay at end
+                        caret->char_offset = text_length;
+                    }
+                } else {
+                    caret->char_offset = new_offset;
+                }
             } else {
-                // At end of text, try to move to next view
+                // Already at end of text, try to move to next view
                 View* next_view = find_next_navigable_view(view);
                 if (next_view) {
                     caret->view = next_view;
@@ -1039,13 +1057,27 @@ void caret_move(RadiantState* state, int delta) {
                 View* prev_view = find_prev_navigable_view(view);
                 if (prev_view) {
                     caret->view = prev_view;
-                    // Set offset to end of previous view
+                    // Set offset to end of previous view - but position before the last char
+                    // so caret is visually at the end but before crossing
                     int prev_length = get_view_content_length(prev_view);
-                    caret->char_offset = prev_length;
+                    // For text views, position at the last character (not past it)
+                    // This avoids the double-press issue when going backwards
+                    if (prev_view->is_text() && prev_length > 0) {
+                        ViewText* prev_text = (ViewText*)prev_view;
+                        unsigned char* prev_str = prev_text->text_data();
+                        if (prev_str) {
+                            // Find offset of last character (one char before end)
+                            caret->char_offset = utf8_offset_by_chars(prev_str, prev_length, -1);
+                        } else {
+                            caret->char_offset = prev_length > 0 ? prev_length - 1 : 0;
+                        }
+                    } else {
+                        caret->char_offset = prev_length > 0 ? prev_length - 1 : 0;
+                    }
                     caret->line = 0;
-                    caret->column = prev_length;
+                    caret->column = caret->char_offset;
                     log_debug("caret_move: crossed to prev view %p (type=%d) at offset %d", 
-                        prev_view, prev_view->view_type, prev_length);
+                        prev_view, prev_view->view_type, caret->char_offset);
                 }
                 // else: stay at start of current view
             }
