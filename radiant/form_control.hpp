@@ -100,6 +100,12 @@ struct FormControlProp {
     uint8_t required : 1;
     uint8_t autofocus : 1;
     uint8_t multiple : 1;       // For select
+    uint8_t dropdown_open : 1;  // For select: dropdown is currently open
+
+    // Select dropdown properties
+    int selected_index;         // Index of currently selected option (0-based, -1 if none)
+    int option_count;           // Total number of options
+    int hover_index;            // Index of currently hovered option in dropdown (-1 if none)
 
     // Computed intrinsic dimensions (in physical pixels)
     float intrinsic_width;
@@ -119,6 +125,7 @@ struct FormControlProp {
         rows(FormDefaults::TEXTAREA_ROWS), maxlength(-1),
         range_min(0), range_max(100), range_step(1), range_value(0.5f),
         disabled(0), readonly(0), checked(0), required(0), autofocus(0), multiple(0),
+        dropdown_open(0), selected_index(-1), option_count(0), hover_index(-1),
         intrinsic_width(0), intrinsic_height(0),
         flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0) {}
 };
