@@ -811,6 +811,159 @@ void caret_set_position(RadiantState* state, View* view, int line, int column) {
     log_debug("caret_set_position: view=%p, line=%d, col=%d", view, line, column);
 }
 
+// ============================================================================
+// Cross-View Navigation Helpers
+// ============================================================================
+
+/**
+ * Check if a view is navigable (can hold a caret position)
+ * Text views and markers are navigable
+ */
+static bool is_view_navigable(View* view) {
+    if (!view) return false;
+    switch (view->view_type) {
+        case RDT_VIEW_TEXT:
+        case RDT_VIEW_MARKER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/**
+ * Get the text length of a view (for text views) or 1 (for atomic views like markers)
+ */
+static int get_view_content_length(View* view) {
+    if (!view) return 0;
+    
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        if (text->text) {
+            return strlen(text->text);
+        }
+        return 0;
+    }
+    
+    // Atomic elements like markers count as 1 character
+    if (view->view_type == RDT_VIEW_MARKER) {
+        return 1;
+    }
+    
+    return 0;
+}
+
+/**
+ * Find the first navigable view within a subtree (depth-first)
+ */
+static View* find_first_navigable_in_subtree(View* root) {
+    if (!root) return nullptr;
+    
+    if (is_view_navigable(root)) return root;
+    
+    if (root->is_element()) {
+        DomElement* elem = (DomElement*)root;
+        View* child = (View*)elem->first_child;
+        while (child) {
+            View* found = find_first_navigable_in_subtree(child);
+            if (found) return found;
+            child = child->next();
+        }
+    }
+    
+    return nullptr;
+}
+
+/**
+ * Find the last navigable view within a subtree (depth-first, rightmost)
+ */
+static View* find_last_navigable_in_subtree(View* root) {
+    if (!root) return nullptr;
+    
+    // First check children (rightmost first)
+    if (root->is_element()) {
+        DomElement* elem = (DomElement*)root;
+        if (elem->first_child) {
+            // Find last child
+            View* child = (View*)elem->first_child;
+            View* last_child = child;
+            while (child) {
+                last_child = child;
+                child = child->next();
+            }
+            // Search from last to first
+            while (last_child) {
+                View* found = find_last_navigable_in_subtree(last_child);
+                if (found) return found;
+                last_child = last_child->prev_placed_view();
+            }
+        }
+    }
+    
+    if (is_view_navigable(root)) return root;
+    
+    return nullptr;
+}
+
+/**
+ * Find the next navigable view in document order (depth-first traversal)
+ * Returns NULL if there is no next view
+ */
+static View* find_next_navigable_view(View* current) {
+    if (!current) return nullptr;
+    
+    // First try next sibling and its subtree
+    View* next = current->next();
+    while (next) {
+        View* found = find_first_navigable_in_subtree(next);
+        if (found) return found;
+        next = next->next();
+    }
+    
+    // No more siblings, go up to parent and try its next sibling
+    View* parent = current->parent;
+    while (parent) {
+        View* parent_next = parent->next();
+        while (parent_next) {
+            View* found = find_first_navigable_in_subtree(parent_next);
+            if (found) return found;
+            parent_next = parent_next->next();
+        }
+        parent = parent->parent;
+    }
+    
+    return nullptr;
+}
+
+/**
+ * Find the previous navigable view in document order
+ * Returns NULL if there is no previous view
+ */
+static View* find_prev_navigable_view(View* current) {
+    if (!current) return nullptr;
+    
+    // First try previous sibling and its subtree (find last navigable)
+    View* prev = current->prev_placed_view();
+    while (prev) {
+        View* found = find_last_navigable_in_subtree(prev);
+        if (found) return found;
+        prev = prev->prev_placed_view();
+    }
+    
+    // No more siblings, go up to parent and try its previous sibling
+    View* parent = current->parent;
+    while (parent) {
+        View* parent_prev = parent->prev_placed_view();
+        while (parent_prev) {
+            View* found = find_last_navigable_in_subtree(parent_prev);
+            if (found) return found;
+            parent_prev = parent_prev->prev_placed_view();
+        }
+        parent = parent->parent;
+    }
+    
+    return nullptr;
+}
+
 int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta) {
     if (!text_data || delta == 0) return current_offset;
     
@@ -856,72 +1009,360 @@ void caret_move(RadiantState* state, int delta) {
     if (view->is_text()) {
         ViewText* text_view = (ViewText*)view;
         unsigned char* str = text_view->text_data();
-        if (str) {
-            caret->char_offset = utf8_offset_by_chars(str, current_offset, delta);
-        } else {
-            // No text data, fall back to simple delta
-            int new_offset = current_offset + delta;
-            if (new_offset < 0) new_offset = 0;
-            caret->char_offset = new_offset;
+        int text_length = str ? strlen((char*)str) : 0;
+        
+        if (delta > 0) {
+            // Moving right
+            if (str && current_offset < text_length) {
+                // Still within this text view
+                caret->char_offset = utf8_offset_by_chars(str, current_offset, delta);
+            } else {
+                // At end of text, try to move to next view
+                View* next_view = find_next_navigable_view(view);
+                if (next_view) {
+                    caret->view = next_view;
+                    caret->char_offset = 0;
+                    caret->line = 0;
+                    caret->column = 0;
+                    log_debug("caret_move: crossed to next view %p (type=%d)", 
+                        next_view, next_view->view_type);
+                }
+                // else: stay at end of current view
+            }
+        } else if (delta < 0) {
+            // Moving left
+            if (current_offset > 0) {
+                // Still within this text view
+                caret->char_offset = utf8_offset_by_chars(str, current_offset, delta);
+            } else {
+                // At start of text, try to move to previous view
+                View* prev_view = find_prev_navigable_view(view);
+                if (prev_view) {
+                    caret->view = prev_view;
+                    // Set offset to end of previous view
+                    int prev_length = get_view_content_length(prev_view);
+                    caret->char_offset = prev_length;
+                    caret->line = 0;
+                    caret->column = prev_length;
+                    log_debug("caret_move: crossed to prev view %p (type=%d) at offset %d", 
+                        prev_view, prev_view->view_type, prev_length);
+                }
+                // else: stay at start of current view
+            }
+        }
+    } else if (view->view_type == RDT_VIEW_MARKER) {
+        // Atomic elements: offset is 0 (before) or 1 (after)
+        if (delta > 0) {
+            if (current_offset == 0) {
+                // Move from before to after the marker
+                caret->char_offset = 1;
+            } else {
+                // Already after, move to next view
+                View* next_view = find_next_navigable_view(view);
+                if (next_view) {
+                    caret->view = next_view;
+                    caret->char_offset = 0;
+                    caret->line = 0;
+                    caret->column = 0;
+                    log_debug("caret_move: crossed from marker to next view %p", next_view);
+                }
+            }
+        } else if (delta < 0) {
+            if (current_offset > 0) {
+                // Move from after to before the marker
+                caret->char_offset = 0;
+            } else {
+                // Already before, move to previous view
+                View* prev_view = find_prev_navigable_view(view);
+                if (prev_view) {
+                    caret->view = prev_view;
+                    int prev_length = get_view_content_length(prev_view);
+                    caret->char_offset = prev_length;
+                    caret->line = 0;
+                    caret->column = prev_length;
+                    log_debug("caret_move: crossed from marker to prev view %p", prev_view);
+                }
+            }
         }
     } else {
-        // Non-text views: simple offset adjustment
-        int new_offset = current_offset + delta;
-        if (new_offset < 0) new_offset = 0;
-        caret->char_offset = new_offset;
+        // Other non-text views: try to navigate to adjacent views
+        if (delta > 0) {
+            View* next_view = find_next_navigable_view(view);
+            if (next_view) {
+                caret->view = next_view;
+                caret->char_offset = 0;
+            }
+        } else if (delta < 0) {
+            View* prev_view = find_prev_navigable_view(view);
+            if (prev_view) {
+                caret->view = prev_view;
+                caret->char_offset = get_view_content_length(prev_view);
+            }
+        }
     }
     
     caret->visible = true;  // reset blink on move
     caret->blink_time = 0;
     state->needs_repaint = true;
 
-    log_debug("caret_move: delta=%d, new_offset=%d", delta, caret->char_offset);
+    log_debug("caret_move: delta=%d, new_view=%p, new_offset=%d", 
+        delta, caret->view, caret->char_offset);
 }
 
 void caret_move_to(RadiantState* state, int where) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
-
-    switch (where) {
-        case 0:  // line start
-            caret->column = 0;
-            break;
-        case 1:  // line end
-            // TODO: get line length
-            break;
-        case 2:  // doc start
-            caret->char_offset = 0;
-            caret->line = 0;
-            caret->column = 0;
-            break;
-        case 3:  // doc end
-            // TODO: get doc length
-            break;
+    View* view = caret->view;
+    
+    // Handle text views with proper line/offset calculation
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        TextRect* rect = text->rect;
+        
+        switch (where) {
+            case 0: {  // line start
+                // Find current line's rect
+                TextRect* current_rect = rect;
+                int line = 0;
+                while (current_rect) {
+                    int rect_end = current_rect->start_index + current_rect->length;
+                    if (caret->char_offset >= current_rect->start_index && 
+                        caret->char_offset <= rect_end) {
+                        break;
+                    }
+                    line++;
+                    current_rect = current_rect->next;
+                }
+                if (current_rect) {
+                    caret->char_offset = current_rect->start_index;
+                    caret->line = line;
+                    caret->column = 0;
+                }
+                break;
+            }
+            case 1: {  // line end
+                // Find current line's rect
+                TextRect* current_rect = rect;
+                int line = 0;
+                while (current_rect) {
+                    int rect_end = current_rect->start_index + current_rect->length;
+                    if (caret->char_offset >= current_rect->start_index && 
+                        caret->char_offset <= rect_end) {
+                        break;
+                    }
+                    line++;
+                    current_rect = current_rect->next;
+                }
+                if (current_rect) {
+                    caret->char_offset = current_rect->start_index + current_rect->length;
+                    caret->line = line;
+                    caret->column = current_rect->length;
+                }
+                break;
+            }
+            case 2:  // doc start
+                caret->char_offset = 0;
+                caret->line = 0;
+                caret->column = 0;
+                break;
+            case 3: {  // doc end
+                // Find last rect and its end
+                TextRect* last_rect = rect;
+                int line = 0;
+                while (last_rect && last_rect->next) {
+                    line++;
+                    last_rect = last_rect->next;
+                }
+                if (last_rect) {
+                    caret->char_offset = last_rect->start_index + last_rect->length;
+                    caret->line = line;
+                    caret->column = last_rect->length;
+                } else if (text->text) {
+                    // Fallback: use text length
+                    caret->char_offset = strlen(text->text);
+                }
+                break;
+            }
+        }
+    } else {
+        // Non-text views: simple handling
+        switch (where) {
+            case 0:  // line start
+                caret->column = 0;
+                break;
+            case 1:  // line end
+                break;
+            case 2:  // doc start
+                caret->char_offset = 0;
+                caret->line = 0;
+                caret->column = 0;
+                break;
+            case 3:  // doc end
+                break;
+        }
     }
 
     caret->visible = true;
     caret->blink_time = 0;
     state->needs_repaint = true;
 
-    log_debug("caret_move_to: where=%d", where);
+    log_debug("caret_move_to: where=%d, offset=%d", where, caret->char_offset);
+}
+
+/**
+ * Helper to find the TextRect (line) containing a given character offset
+ * Also returns the line number (0-based)
+ */
+static TextRect* find_rect_and_line(ViewText* text, int char_offset, int* out_line) {
+    if (!text || !text->rect) return nullptr;
+    
+    TextRect* rect = text->rect;
+    int line = 0;
+    
+    while (rect) {
+        int rect_start = rect->start_index;
+        int rect_end = rect->start_index + rect->length;
+        
+        if (char_offset >= rect_start && char_offset <= rect_end) {
+            if (out_line) *out_line = line;
+            return rect;
+        }
+        
+        line++;
+        if (!rect->next) {
+            // char_offset is beyond all text, return last rect
+            if (out_line) *out_line = line - 1;
+            return rect;
+        }
+        rect = rect->next;
+    }
+    
+    return nullptr;
+}
+
+/**
+ * Helper to get TextRect at a specific line number
+ */
+static TextRect* get_rect_at_line(ViewText* text, int target_line) {
+    if (!text || !text->rect || target_line < 0) return nullptr;
+    
+    TextRect* rect = text->rect;
+    int line = 0;
+    
+    while (rect && line < target_line) {
+        if (!rect->next) return rect;  // clamp to last line
+        rect = rect->next;
+        line++;
+    }
+    
+    return rect;
+}
+
+/**
+ * Helper to count total lines in a text view
+ */
+static int count_text_lines(ViewText* text) {
+    if (!text || !text->rect) return 0;
+    
+    int count = 0;
+    TextRect* rect = text->rect;
+    while (rect) {
+        count++;
+        rect = rect->next;
+    }
+    return count;
+}
+
+/**
+ * Helper to calculate the best character offset at a given visual x position
+ * within a TextRect. This is for maintaining horizontal position when moving
+ * between lines.
+ */
+static int find_offset_at_x(ViewText* text, TextRect* rect, float target_x) {
+    if (!text || !rect) return 0;
+    
+    unsigned char* str = (unsigned char*)text->text;
+    if (!str) return rect->start_index;
+    
+    // Walk through characters to find the closest one to target_x
+    unsigned char* p = str + rect->start_index;
+    unsigned char* end = p + rect->length;
+    int byte_offset = rect->start_index;
+    
+    // For now, return start of rect - visual x matching requires font metrics
+    // which we don't have access to here. The visual position update will
+    // handle the proper x coordinate.
+    // TODO: If we had access to font metrics, we could calculate the exact offset
+    
+    // Simple heuristic: if target_x is near the start, return start
+    // otherwise return end
+    if (target_x <= rect->x + rect->width / 2) {
+        return rect->start_index;
+    } else {
+        return rect->start_index + rect->length;
+    }
 }
 
 void caret_move_line(RadiantState* state, int delta) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
-    int new_line = caret->line + delta;
-    if (new_line < 0) new_line = 0;
-    // TODO: clamp to line count
-
-    caret->line = new_line;
+    View* view = caret->view;
+    
+    // Only handle text views
+    if (!view->is_text()) {
+        log_debug("caret_move_line: not a text view");
+        return;
+    }
+    
+    ViewText* text = (ViewText*)view;
+    if (!text->rect) {
+        log_debug("caret_move_line: no text rects");
+        return;
+    }
+    
+    // Find current line
+    int current_line = 0;
+    TextRect* current_rect = find_rect_and_line(text, caret->char_offset, &current_line);
+    if (!current_rect) {
+        log_debug("caret_move_line: could not find current rect");
+        return;
+    }
+    
+    // Calculate target line
+    int target_line = current_line + delta;
+    int total_lines = count_text_lines(text);
+    if (target_line < 0) target_line = 0;
+    if (target_line >= total_lines) target_line = total_lines - 1;
+    
+    // Get target rect
+    TextRect* target_rect = get_rect_at_line(text, target_line);
+    if (!target_rect) {
+        log_debug("caret_move_line: could not find target rect for line %d", target_line);
+        return;
+    }
+    
+    // Calculate new offset - try to maintain visual x position
+    // For now, use simple approach: maintain column position within line bounds
+    int current_column = caret->char_offset - current_rect->start_index;
+    int target_line_length = target_rect->length;
+    
+    // Clamp column to target line length
+    if (current_column > target_line_length) {
+        current_column = target_line_length;
+    }
+    
+    caret->char_offset = target_rect->start_index + current_column;
+    caret->line = target_line;
+    caret->column = current_column;
     caret->visible = true;
     caret->blink_time = 0;
 
     state->needs_repaint = true;
 
-    log_debug("caret_move_line: delta=%d, new_line=%d", delta, new_line);
+    log_debug("caret_move_line: delta=%d, new_line=%d, new_offset=%d", 
+        delta, target_line, caret->char_offset);
 }
 
 void caret_clear(RadiantState* state) {
