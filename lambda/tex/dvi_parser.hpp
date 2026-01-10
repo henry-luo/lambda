@@ -9,8 +9,8 @@
 #ifndef TEX_DVI_PARSER_HPP
 #define TEX_DVI_PARSER_HPP
 
-#include "../../lib/arena.h"
-#include "../../lib/arraylist.h"
+#include "lib/arena.h"
+#include "lib/arraylist.h"
 #include <cstdint>
 #include <cstdio>
 

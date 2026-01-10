@@ -1,0 +1,775 @@
+// tex_dvi_out.cpp - DVI Output Generation Implementation
+//
+// Reference: TeXBook Appendix A, DVI format specification
+
+#include "tex_dvi_out.hpp"
+#include "../../lib/log.h"
+#include <cstring>
+#include <cmath>
+
+namespace tex {
+
+// ============================================================================
+// DVI Opcodes (from dvi_parser.hpp)
+// ============================================================================
+
+enum DVIOpcode : uint8_t {
+    DVI_SET_CHAR_0   = 0,
+    DVI_SET_CHAR_127 = 127,
+    DVI_SET1 = 128,
+    DVI_SET2 = 129,
+    DVI_SET3 = 130,
+    DVI_SET4 = 131,
+    DVI_SET_RULE = 132,
+    DVI_PUT1 = 133,
+    DVI_PUT2 = 134,
+    DVI_PUT3 = 135,
+    DVI_PUT4 = 136,
+    DVI_PUT_RULE = 137,
+    DVI_NOP = 138,
+    DVI_BOP = 139,
+    DVI_EOP = 140,
+    DVI_PUSH = 141,
+    DVI_POP = 142,
+    DVI_RIGHT1 = 143,
+    DVI_RIGHT2 = 144,
+    DVI_RIGHT3 = 145,
+    DVI_RIGHT4 = 146,
+    DVI_W0 = 147,
+    DVI_W1 = 148,
+    DVI_W2 = 149,
+    DVI_W3 = 150,
+    DVI_W4 = 151,
+    DVI_X0 = 152,
+    DVI_X1 = 153,
+    DVI_X2 = 154,
+    DVI_X3 = 155,
+    DVI_X4 = 156,
+    DVI_DOWN1 = 157,
+    DVI_DOWN2 = 158,
+    DVI_DOWN3 = 159,
+    DVI_DOWN4 = 160,
+    DVI_Y0 = 161,
+    DVI_Y1 = 162,
+    DVI_Y2 = 163,
+    DVI_Y3 = 164,
+    DVI_Y4 = 165,
+    DVI_Z0 = 166,
+    DVI_Z1 = 167,
+    DVI_Z2 = 168,
+    DVI_Z3 = 169,
+    DVI_Z4 = 170,
+    DVI_FNT_NUM_0  = 171,
+    DVI_FNT_NUM_63 = 234,
+    DVI_FNT1 = 235,
+    DVI_FNT2 = 236,
+    DVI_FNT3 = 237,
+    DVI_FNT4 = 238,
+    DVI_XXX1 = 239,
+    DVI_XXX2 = 240,
+    DVI_XXX3 = 241,
+    DVI_XXX4 = 242,
+    DVI_FNT_DEF1 = 243,
+    DVI_FNT_DEF2 = 244,
+    DVI_FNT_DEF3 = 245,
+    DVI_FNT_DEF4 = 246,
+    DVI_PRE = 247,
+    DVI_POST = 248,
+    DVI_POST_POST = 249,
+};
+
+// ============================================================================
+// Low-Level Writing Helpers
+// ============================================================================
+
+static void write_u8(DVIWriter& w, uint8_t v) {
+    fputc(v, w.file);
+    w.byte_count++;
+}
+
+static void write_u16(DVIWriter& w, uint16_t v) {
+    write_u8(w, (v >> 8) & 0xFF);
+    write_u8(w, v & 0xFF);
+}
+
+static void write_u24(DVIWriter& w, uint32_t v) {
+    write_u8(w, (v >> 16) & 0xFF);
+    write_u8(w, (v >> 8) & 0xFF);
+    write_u8(w, v & 0xFF);
+}
+
+static void write_u32(DVIWriter& w, uint32_t v) {
+    write_u8(w, (v >> 24) & 0xFF);
+    write_u8(w, (v >> 16) & 0xFF);
+    write_u8(w, (v >> 8) & 0xFF);
+    write_u8(w, v & 0xFF);
+}
+
+static void write_i32(DVIWriter& w, int32_t v) {
+    write_u32(w, (uint32_t)v);
+}
+
+// Write a signed value using minimum bytes needed
+static void write_signed(DVIWriter& w, int32_t v, int base_opcode) {
+    if (v >= -128 && v <= 127) {
+        write_u8(w, base_opcode);
+        write_u8(w, (uint8_t)(int8_t)v);
+    } else if (v >= -32768 && v <= 32767) {
+        write_u8(w, base_opcode + 1);
+        write_u16(w, (uint16_t)(int16_t)v);
+    } else if (v >= -8388608 && v <= 8388607) {
+        write_u8(w, base_opcode + 2);
+        write_u24(w, (uint32_t)v);
+    } else {
+        write_u8(w, base_opcode + 3);
+        write_i32(w, v);
+    }
+}
+
+// Write an unsigned value using minimum bytes needed
+static void write_unsigned(DVIWriter& w, uint32_t v, int base_opcode) {
+    if (v <= 255) {
+        write_u8(w, base_opcode);
+        write_u8(w, v);
+    } else if (v <= 65535) {
+        write_u8(w, base_opcode + 1);
+        write_u16(w, v);
+    } else if (v <= 16777215) {
+        write_u8(w, base_opcode + 2);
+        write_u24(w, v);
+    } else {
+        write_u8(w, base_opcode + 3);
+        write_u32(w, v);
+    }
+}
+
+// ============================================================================
+// File Management
+// ============================================================================
+
+bool dvi_open(DVIWriter& writer, const char* filename, const DVIParams& params) {
+    writer.file = fopen(filename, "wb");
+    if (!writer.file) {
+        log_error("tex_dvi_out: cannot open file %s for writing", filename);
+        return false;
+    }
+
+    writer.params = params;
+    writer.h = writer.v = 0;
+    writer.w = writer.x = writer.y = writer.z = 0;
+    writer.current_font = 0;
+    writer.stack_depth = 0;
+    writer.page_count = 0;
+    writer.max_h = writer.max_v = 0;
+    writer.max_push = 0;
+    writer.byte_count = 0;
+
+    // Allocate stack
+    int stack_cap = params.max_stack_depth;
+    writer.stack = (DVIWriter::State*)arena_alloc(writer.arena, stack_cap * sizeof(DVIWriter::State));
+    writer.stack_depth = 0;
+
+    // Allocate BOP offset array
+    writer.bop_capacity = 64;
+    writer.bop_offsets = (int32_t*)arena_alloc(writer.arena, writer.bop_capacity * sizeof(int32_t));
+
+    // Allocate fonts array
+    writer.font_capacity = 16;
+    writer.fonts = (DVIFontEntry*)arena_alloc(writer.arena, writer.font_capacity * sizeof(DVIFontEntry));
+    writer.font_count = 0;
+
+    // Write preamble
+    dvi_write_preamble(writer);
+
+    return true;
+}
+
+bool dvi_close(DVIWriter& writer) {
+    if (!writer.file) return false;
+
+    // Write postamble
+    dvi_write_postamble(writer);
+
+    fclose(writer.file);
+    writer.file = nullptr;
+
+    log_debug("tex_dvi_out: wrote %ld bytes, %d pages", writer.byte_count, writer.page_count);
+    return true;
+}
+
+// ============================================================================
+// Preamble and Postamble
+// ============================================================================
+
+void dvi_write_preamble(DVIWriter& writer) {
+    // PRE i[1] num[4] den[4] mag[4] k[1] x[k]
+    write_u8(writer, DVI_PRE);
+    write_u8(writer, 2);  // DVI format version 2
+    write_u32(writer, writer.params.numerator);
+    write_u32(writer, writer.params.denominator);
+    write_u32(writer, writer.params.magnification);
+
+    // Comment string
+    const char* comment = writer.params.comment ? writer.params.comment : "";
+    int len = strlen(comment);
+    if (len > 255) len = 255;
+    write_u8(writer, len);
+    for (int i = 0; i < len; ++i) {
+        write_u8(writer, comment[i]);
+    }
+}
+
+void dvi_write_postamble(DVIWriter& writer) {
+    writer.post_offset = writer.byte_count;
+
+    // POST p[4] num[4] den[4] mag[4] l[4] u[4] s[2] t[2]
+    write_u8(writer, DVI_POST);
+
+    // Pointer to last BOP (or -1 if no pages)
+    int32_t last_bop = writer.page_count > 0 ? writer.bop_offsets[writer.page_count - 1] : -1;
+    write_i32(writer, last_bop);
+
+    write_u32(writer, writer.params.numerator);
+    write_u32(writer, writer.params.denominator);
+    write_u32(writer, writer.params.magnification);
+
+    // Maximum page height and width (in DVI units)
+    write_u32(writer, writer.max_v);
+    write_u32(writer, writer.max_h);
+
+    // Maximum stack depth and total pages
+    write_u16(writer, writer.max_push);
+    write_u16(writer, writer.page_count);
+
+    // Write font definitions again in postamble
+    for (int i = 0; i < writer.font_count; ++i) {
+        DVIFontEntry& f = writer.fonts[i];
+
+        // FNT_DEF1-4 k[1-4] c[4] s[4] d[4] a[1] l[1] n[a+l]
+        write_unsigned(writer, f.font_num, DVI_FNT_DEF1);
+        write_u32(writer, f.checksum);
+        write_u32(writer, f.scale);
+        write_u32(writer, f.design_size);
+
+        // Area (directory) - empty for standard fonts
+        write_u8(writer, 0);
+
+        // Font name
+        int name_len = strlen(f.name);
+        write_u8(writer, name_len);
+        for (int j = 0; j < name_len; ++j) {
+            write_u8(writer, f.name[j]);
+        }
+    }
+
+    // POST_POST q[4] i[1] 223...223
+    write_u8(writer, DVI_POST_POST);
+    write_u32(writer, (uint32_t)writer.post_offset);
+    write_u8(writer, 2);  // DVI format version
+
+    // Pad to 4-byte boundary with 223s
+    while (writer.byte_count % 4 != 0) {
+        write_u8(writer, 223);
+    }
+    // Add at least 4 more 223s
+    for (int i = 0; i < 4; ++i) {
+        write_u8(writer, 223);
+    }
+}
+
+// ============================================================================
+// Page Commands
+// ============================================================================
+
+void dvi_begin_page(DVIWriter& writer, int32_t c0, int32_t c1, int32_t c2,
+                    int32_t c3, int32_t c4, int32_t c5,
+                    int32_t c6, int32_t c7, int32_t c8, int32_t c9) {
+    // Record BOP offset
+    if (writer.page_count >= writer.bop_capacity) {
+        // Grow array
+        int new_cap = writer.bop_capacity * 2;
+        int32_t* new_offsets = (int32_t*)arena_alloc(writer.arena, new_cap * sizeof(int32_t));
+        memcpy(new_offsets, writer.bop_offsets, writer.page_count * sizeof(int32_t));
+        writer.bop_offsets = new_offsets;
+        writer.bop_capacity = new_cap;
+    }
+    writer.bop_offsets[writer.page_count] = (int32_t)writer.byte_count;
+
+    // BOP c0[4] ... c9[4] p[4]
+    write_u8(writer, DVI_BOP);
+    write_i32(writer, c0);
+    write_i32(writer, c1);
+    write_i32(writer, c2);
+    write_i32(writer, c3);
+    write_i32(writer, c4);
+    write_i32(writer, c5);
+    write_i32(writer, c6);
+    write_i32(writer, c7);
+    write_i32(writer, c8);
+    write_i32(writer, c9);
+
+    // Pointer to previous BOP
+    int32_t prev_bop = writer.page_count > 0 ? writer.bop_offsets[writer.page_count - 1] : -1;
+    write_i32(writer, prev_bop);
+
+    // Reset state for new page
+    writer.h = writer.v = 0;
+    writer.w = writer.x = writer.y = writer.z = 0;
+    writer.stack_depth = 0;
+
+    writer.page_count++;
+}
+
+void dvi_end_page(DVIWriter& writer) {
+    write_u8(writer, DVI_EOP);
+}
+
+// ============================================================================
+// Font Commands
+// ============================================================================
+
+uint32_t dvi_define_font(DVIWriter& writer, const char* name, float size_pt, uint32_t checksum) {
+    // Check if font already defined
+    for (int i = 0; i < writer.font_count; ++i) {
+        if (strcmp(writer.fonts[i].name, name) == 0 &&
+            fabs(writer.fonts[i].size_pt - size_pt) < 0.01f) {
+            return writer.fonts[i].font_num;
+        }
+    }
+
+    // Grow array if needed
+    if (writer.font_count >= writer.font_capacity) {
+        int new_cap = writer.font_capacity * 2;
+        DVIFontEntry* new_fonts = (DVIFontEntry*)arena_alloc(writer.arena, new_cap * sizeof(DVIFontEntry));
+        memcpy(new_fonts, writer.fonts, writer.font_count * sizeof(DVIFontEntry));
+        writer.fonts = new_fonts;
+        writer.font_capacity = new_cap;
+    }
+
+    uint32_t font_num = writer.font_count;
+    DVIFontEntry& f = writer.fonts[writer.font_count++];
+
+    f.font_num = font_num;
+    f.name = name;  // Assume name is arena-allocated or static
+    f.size_pt = size_pt;
+    f.checksum = checksum;
+
+    // Scale and design size in scaled points
+    // Design size is typically 10pt for CM fonts
+    float design_pt = 10.0f;
+    f.design_size = pt_to_sp(design_pt);
+    f.scale = pt_to_sp(size_pt);
+
+    // Write font definition
+    // FNT_DEF1-4 k[1-4] c[4] s[4] d[4] a[1] l[1] n[a+l]
+    write_unsigned(writer, font_num, DVI_FNT_DEF1);
+    write_u32(writer, f.checksum);
+    write_u32(writer, f.scale);
+    write_u32(writer, f.design_size);
+
+    // Area (directory) - empty
+    write_u8(writer, 0);
+
+    // Font name
+    int name_len = strlen(name);
+    write_u8(writer, name_len);
+    for (int j = 0; j < name_len; ++j) {
+        write_u8(writer, name[j]);
+    }
+
+    return font_num;
+}
+
+void dvi_select_font(DVIWriter& writer, uint32_t font_num) {
+    if (font_num == writer.current_font) return;
+
+    if (font_num < 64) {
+        write_u8(writer, DVI_FNT_NUM_0 + font_num);
+    } else {
+        write_unsigned(writer, font_num, DVI_FNT1);
+    }
+    writer.current_font = font_num;
+}
+
+// ============================================================================
+// Character Output
+// ============================================================================
+
+void dvi_set_char(DVIWriter& writer, int32_t c) {
+    if (c >= 0 && c <= 127) {
+        write_u8(writer, c);  // SET_CHAR_0 to SET_CHAR_127
+    } else {
+        write_unsigned(writer, (uint32_t)c, DVI_SET1);
+    }
+    // Note: Character width advancement should be handled by caller
+}
+
+void dvi_put_char(DVIWriter& writer, int32_t c) {
+    write_unsigned(writer, (uint32_t)c, DVI_PUT1);
+}
+
+// ============================================================================
+// Rules
+// ============================================================================
+
+void dvi_set_rule(DVIWriter& writer, int32_t height, int32_t width) {
+    write_u8(writer, DVI_SET_RULE);
+    write_i32(writer, height);
+    write_i32(writer, width);
+    // Advances h by width
+}
+
+void dvi_put_rule(DVIWriter& writer, int32_t height, int32_t width) {
+    write_u8(writer, DVI_PUT_RULE);
+    write_i32(writer, height);
+    write_i32(writer, width);
+}
+
+// ============================================================================
+// Movement Commands
+// ============================================================================
+
+void dvi_right(DVIWriter& writer, int32_t b) {
+    if (b == 0) return;
+    write_signed(writer, b, DVI_RIGHT1);
+    writer.h += b;
+    if (writer.h > writer.max_h) writer.max_h = writer.h;
+}
+
+void dvi_down(DVIWriter& writer, int32_t a) {
+    if (a == 0) return;
+    write_signed(writer, a, DVI_DOWN1);
+    writer.v += a;
+    if (writer.v > writer.max_v) writer.max_v = writer.v;
+}
+
+void dvi_set_h(DVIWriter& writer, int32_t h) {
+    int32_t delta = h - writer.h;
+    if (delta != 0) {
+        dvi_right(writer, delta);
+    }
+}
+
+void dvi_set_v(DVIWriter& writer, int32_t v) {
+    int32_t delta = v - writer.v;
+    if (delta != 0) {
+        dvi_down(writer, delta);
+    }
+}
+
+// ============================================================================
+// Stack Commands
+// ============================================================================
+
+void dvi_push(DVIWriter& writer) {
+    if (writer.stack_depth >= writer.params.max_stack_depth) {
+        log_error("tex_dvi_out: stack overflow");
+        return;
+    }
+
+    DVIWriter::State& s = writer.stack[writer.stack_depth++];
+    s.h = writer.h;
+    s.v = writer.v;
+    s.w = writer.w;
+    s.x = writer.x;
+    s.y = writer.y;
+    s.z = writer.z;
+    s.f = writer.current_font;
+
+    if (writer.stack_depth > writer.max_push) {
+        writer.max_push = writer.stack_depth;
+    }
+
+    write_u8(writer, DVI_PUSH);
+}
+
+void dvi_pop(DVIWriter& writer) {
+    if (writer.stack_depth == 0) {
+        log_error("tex_dvi_out: stack underflow");
+        return;
+    }
+
+    DVIWriter::State& s = writer.stack[--writer.stack_depth];
+    writer.h = s.h;
+    writer.v = s.v;
+    writer.w = s.w;
+    writer.x = s.x;
+    writer.y = s.y;
+    writer.z = s.z;
+    writer.current_font = s.f;
+
+    write_u8(writer, DVI_POP);
+}
+
+// ============================================================================
+// Special Commands
+// ============================================================================
+
+void dvi_special(DVIWriter& writer, const char* str, int len) {
+    if (len <= 0) return;
+    write_unsigned(writer, (uint32_t)len, DVI_XXX1);
+    for (int i = 0; i < len; ++i) {
+        write_u8(writer, str[i]);
+    }
+}
+
+// ============================================================================
+// Node Tree Traversal
+// ============================================================================
+
+void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
+    if (!node) return;
+
+    switch (node->node_class) {
+        case NodeClass::Char: {
+            // Ensure correct font is selected
+            const char* font_name = node->content.ch.font.name;
+            float font_size = node->content.ch.font.size_pt;
+            if (font_name) {
+                uint32_t font_num = dvi_define_font(writer, font_name, font_size);
+                dvi_select_font(writer, font_num);
+            }
+
+            dvi_set_char(writer, node->content.ch.codepoint);
+
+            // Advance by character width
+            int32_t width_sp = pt_to_sp(node->width);
+            writer.h += width_sp;
+            if (writer.h > writer.max_h) writer.max_h = writer.h;
+            break;
+        }
+
+        case NodeClass::Ligature: {
+            const char* font_name = node->content.lig.font.name;
+            float font_size = node->content.lig.font.size_pt;
+            if (font_name) {
+                uint32_t font_num = dvi_define_font(writer, font_name, font_size);
+                dvi_select_font(writer, font_num);
+            }
+
+            dvi_set_char(writer, node->content.lig.codepoint);
+
+            int32_t width_sp = pt_to_sp(node->width);
+            writer.h += width_sp;
+            if (writer.h > writer.max_h) writer.max_h = writer.h;
+            break;
+        }
+
+        case NodeClass::Glue: {
+            // In DVI, glue becomes fixed space after layout
+            int32_t width_sp = pt_to_sp(node->width);
+            if (width_sp != 0) {
+                dvi_right(writer, width_sp);
+            }
+            break;
+        }
+
+        case NodeClass::Kern: {
+            int32_t amount_sp = pt_to_sp(node->content.kern.amount);
+            if (amount_sp != 0) {
+                dvi_right(writer, amount_sp);
+            }
+            break;
+        }
+
+        case NodeClass::Rule: {
+            int32_t w_sp = pt_to_sp(node->width);
+            int32_t h_sp = pt_to_sp(node->height + node->depth);
+            dvi_set_rule(writer, h_sp, w_sp);
+            break;
+        }
+
+        case NodeClass::HList:
+        case NodeClass::HBox: {
+            dvi_output_hlist(writer, node, fonts);
+            break;
+        }
+
+        case NodeClass::VList:
+        case NodeClass::VBox: {
+            dvi_output_vlist(writer, node, fonts);
+            break;
+        }
+
+        case NodeClass::Penalty:
+            // Penalties are invisible
+            break;
+
+        default:
+            // Skip other node types for now
+            break;
+    }
+}
+
+void dvi_output_hlist(DVIWriter& writer, TexNode* hlist, TFMFontManager* fonts) {
+    if (!hlist) return;
+
+    dvi_push(writer);
+
+    // Process children left to right
+    for (TexNode* child = hlist->first_child; child; child = child->next_sibling) {
+        dvi_output_node(writer, child, fonts);
+    }
+
+    dvi_pop(writer);
+
+    // Advance by box width
+    int32_t width_sp = pt_to_sp(hlist->width);
+    writer.h += width_sp;
+    if (writer.h > writer.max_h) writer.max_h = writer.h;
+}
+
+void dvi_output_vlist(DVIWriter& writer, TexNode* vlist, TFMFontManager* fonts) {
+    if (!vlist) return;
+
+    dvi_push(writer);
+
+    // Process children top to bottom
+    for (TexNode* child = vlist->first_child; child; child = child->next_sibling) {
+        // Move down by child's height
+        if (child->height > 0) {
+            dvi_down(writer, pt_to_sp(child->height));
+        }
+
+        if (child->node_class == NodeClass::Glue) {
+            // Vertical glue becomes fixed space
+            int32_t glue_sp = pt_to_sp(child->content.glue.spec.space);
+            if (glue_sp > 0) {
+                dvi_down(writer, glue_sp);
+            }
+        } else if (child->node_class == NodeClass::Kern) {
+            int32_t kern_sp = pt_to_sp(child->content.kern.amount);
+            if (kern_sp != 0) {
+                dvi_down(writer, kern_sp);
+            }
+        } else if (child->node_class == NodeClass::HBox || child->node_class == NodeClass::HList) {
+            // Output horizontal content
+            dvi_push(writer);
+            for (TexNode* item = child->first_child; item; item = item->next_sibling) {
+                dvi_output_node(writer, item, fonts);
+            }
+            dvi_pop(writer);
+
+            // Move down by depth
+            if (child->depth > 0) {
+                dvi_down(writer, pt_to_sp(child->depth));
+            }
+        } else if (child->node_class == NodeClass::Rule) {
+            int32_t w_sp = pt_to_sp(child->width);
+            int32_t h_sp = pt_to_sp(child->height + child->depth);
+            dvi_put_rule(writer, h_sp, w_sp);
+            dvi_down(writer, pt_to_sp(child->depth));
+        } else {
+            // Other node types
+            dvi_output_node(writer, child, fonts);
+            if (child->depth > 0) {
+                dvi_down(writer, pt_to_sp(child->depth));
+            }
+        }
+    }
+
+    dvi_pop(writer);
+}
+
+// ============================================================================
+// High-Level API
+// ============================================================================
+
+bool dvi_write_page(
+    DVIWriter& writer,
+    TexNode* page_vlist,
+    int page_number,
+    TFMFontManager* fonts
+) {
+    if (!page_vlist) return false;
+
+    dvi_begin_page(writer, page_number);
+
+    // Start at top-left with 1-inch margins (72 points = 4736286 sp at 1000x mag)
+    int32_t margin_sp = pt_to_sp(72.0f);
+    dvi_right(writer, margin_sp);
+    dvi_down(writer, margin_sp);
+
+    dvi_output_vlist(writer, page_vlist, fonts);
+
+    dvi_end_page(writer);
+
+    return true;
+}
+
+bool dvi_write_document(
+    DVIWriter& writer,
+    PageContent* pages,
+    int page_count,
+    TFMFontManager* fonts
+) {
+    for (int i = 0; i < page_count; ++i) {
+        if (!dvi_write_page(writer, pages[i].vlist, i + 1, fonts)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ============================================================================
+// Convenience Functions
+// ============================================================================
+
+bool write_dvi_file(
+    const char* filename,
+    PageContent* pages,
+    int page_count,
+    TFMFontManager* fonts,
+    Arena* arena,
+    const DVIParams& params
+) {
+    DVIWriter writer(arena);
+
+    if (!dvi_open(writer, filename, params)) {
+        return false;
+    }
+
+    bool success = dvi_write_document(writer, pages, page_count, fonts);
+
+    dvi_close(writer);
+
+    return success;
+}
+
+bool write_dvi_page(
+    const char* filename,
+    TexNode* vlist,
+    TFMFontManager* fonts,
+    Arena* arena,
+    const DVIParams& params
+) {
+    DVIWriter writer(arena);
+
+    if (!dvi_open(writer, filename, params)) {
+        return false;
+    }
+
+    bool success = dvi_write_page(writer, vlist, 1, fonts);
+
+    dvi_close(writer);
+
+    return success;
+}
+
+// ============================================================================
+// Debugging
+// ============================================================================
+
+void dump_dvi_writer_state(const DVIWriter& writer) {
+    log_debug("DVI Writer State:");
+    log_debug("  Position: h=%d v=%d", writer.h, writer.v);
+    log_debug("  Registers: w=%d x=%d y=%d z=%d", writer.w, writer.x, writer.y, writer.z);
+    log_debug("  Font: %u", writer.current_font);
+    log_debug("  Stack depth: %d", writer.stack_depth);
+    log_debug("  Pages: %d", writer.page_count);
+    log_debug("  Fonts defined: %d", writer.font_count);
+    log_debug("  Max h=%d v=%d push=%d", writer.max_h, writer.max_v, writer.max_push);
+    log_debug("  Bytes written: %ld", writer.byte_count);
+}
+
+} // namespace tex
