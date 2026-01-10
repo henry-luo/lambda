@@ -1,6 +1,7 @@
 #include "state_store.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/utf.h"
 #include "view.hpp"
 
 #include <string.h>
@@ -810,67 +811,925 @@ void caret_set_position(RadiantState* state, View* view, int line, int column) {
     log_debug("caret_set_position: view=%p, line=%d, col=%d", view, line, column);
 }
 
+// ============================================================================
+// Cross-View Navigation Helpers
+// ============================================================================
+
+/**
+ * Check if a view is navigable (can hold a caret position)
+ * Text views and markers are navigable
+ */
+static bool is_view_navigable(View* view) {
+    if (!view) return false;
+    switch (view->view_type) {
+        case RDT_VIEW_TEXT:
+        case RDT_VIEW_MARKER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/**
+ * Get the text length of a view (for text views) or 1 (for atomic views like markers)
+ */
+static int get_view_content_length(View* view) {
+    if (!view) return 0;
+    
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        if (text->text) {
+            return strlen(text->text);
+        }
+        return 0;
+    }
+    
+    // Atomic elements like markers count as 1 character
+    if (view->view_type == RDT_VIEW_MARKER) {
+        return 1;
+    }
+    
+    return 0;
+}
+
+/**
+ * Find the first navigable view within a subtree (depth-first)
+ */
+static View* find_first_navigable_in_subtree(View* root) {
+    if (!root) return nullptr;
+    
+    if (is_view_navigable(root)) return root;
+    
+    if (root->is_element()) {
+        DomElement* elem = (DomElement*)root;
+        View* child = (View*)elem->first_child;
+        while (child) {
+            View* found = find_first_navigable_in_subtree(child);
+            if (found) return found;
+            child = child->next();
+        }
+    }
+    
+    return nullptr;
+}
+
+/**
+ * Find the last navigable view within a subtree (depth-first, rightmost)
+ */
+static View* find_last_navigable_in_subtree(View* root) {
+    if (!root) return nullptr;
+    
+    // First check children (rightmost first)
+    if (root->is_element()) {
+        DomElement* elem = (DomElement*)root;
+        if (elem->first_child) {
+            // Find last child
+            View* child = (View*)elem->first_child;
+            View* last_child = child;
+            while (child) {
+                last_child = child;
+                child = child->next();
+            }
+            // Search from last to first
+            while (last_child) {
+                View* found = find_last_navigable_in_subtree(last_child);
+                if (found) return found;
+                last_child = last_child->prev_placed_view();
+            }
+        }
+    }
+    
+    if (is_view_navigable(root)) return root;
+    
+    return nullptr;
+}
+
+/**
+ * Find the next navigable view in document order (depth-first traversal)
+ * Returns NULL if there is no next view
+ */
+static View* find_next_navigable_view(View* current) {
+    if (!current) return nullptr;
+    
+    // First try next sibling and its subtree
+    View* next = current->next();
+    while (next) {
+        View* found = find_first_navigable_in_subtree(next);
+        if (found) return found;
+        next = next->next();
+    }
+    
+    // No more siblings, go up to parent and try its next sibling
+    View* parent = current->parent;
+    while (parent) {
+        View* parent_next = parent->next();
+        while (parent_next) {
+            View* found = find_first_navigable_in_subtree(parent_next);
+            if (found) return found;
+            parent_next = parent_next->next();
+        }
+        parent = parent->parent;
+    }
+    
+    return nullptr;
+}
+
+/**
+ * Find the previous navigable view in document order
+ * Returns NULL if there is no previous view
+ */
+static View* find_prev_navigable_view(View* current) {
+    if (!current) return nullptr;
+    
+    log_debug("find_prev_navigable_view: current=%p type=%d", current, current->view_type);
+    
+    // First try previous sibling and its subtree (find last navigable)
+    View* prev = current->prev_placed_view();
+    while (prev) {
+        log_debug("  checking prev sibling=%p type=%d", prev, prev->view_type);
+        View* found = find_last_navigable_in_subtree(prev);
+        if (found) {
+            log_debug("  found=%p type=%d in sibling subtree", found, found->view_type);
+            return found;
+        }
+        prev = prev->prev_placed_view();
+    }
+    
+    // No more siblings, go up to parent and try its previous sibling
+    View* parent = current->parent;
+    while (parent) {
+        log_debug("  going up to parent=%p type=%d", parent, parent->view_type);
+        View* parent_prev = parent->prev_placed_view();
+        while (parent_prev) {
+            log_debug("  checking parent's prev sibling=%p type=%d", parent_prev, parent_prev->view_type);
+            View* found = find_last_navigable_in_subtree(parent_prev);
+            if (found) {
+                log_debug("  found=%p type=%d in parent sibling subtree", found, found->view_type);
+                return found;
+            }
+            parent_prev = parent_prev->prev_placed_view();
+        }
+        parent = parent->parent;
+    }
+    
+    log_debug("  no prev navigable view found");
+    return nullptr;
+}
+
+int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta) {
+    if (!text_data || delta == 0) return current_offset;
+    
+    if (delta > 0) {
+        // Moving forward: skip over UTF-8 characters
+        int chars_to_move = delta;
+        int new_offset = current_offset;
+        unsigned char* p = text_data + current_offset;
+        while (chars_to_move > 0 && *p) {
+            uint32_t codepoint;
+            int bytes = utf8_to_codepoint(p, &codepoint);
+            if (bytes <= 0) bytes = 1;  // invalid UTF-8, skip one byte
+            new_offset += bytes;
+            p += bytes;
+            chars_to_move--;
+        }
+        return new_offset;
+    } else {
+        // Moving backward: find start of previous UTF-8 characters
+        int chars_to_move = -delta;
+        int new_offset = current_offset;
+        while (chars_to_move > 0 && new_offset > 0) {
+            // Move back one byte at a time until we find a UTF-8 lead byte
+            new_offset--;
+            // Skip continuation bytes (10xxxxxx pattern)
+            while (new_offset > 0 && (text_data[new_offset] & 0xC0) == 0x80) {
+                new_offset--;
+            }
+            chars_to_move--;
+        }
+        return new_offset;
+    }
+}
+
+/**
+ * Check if a text view has meaningful content (non-empty, not just whitespace)
+ */
+static bool has_meaningful_content(View* view) {
+    if (!view) return false;
+    
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        unsigned char* str = text->text_data();
+        if (!str || *str == '\0') {
+            log_debug("has_meaningful_content: view %p - empty string", view);
+            return false;
+        }
+        
+        // Check if it's only whitespace
+        unsigned char* p = str;
+        while (*p) {
+            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                log_debug("has_meaningful_content: view %p - has content '%c'", view, *p);
+                return true;  // has non-whitespace content
+            }
+            p++;
+        }
+        log_debug("has_meaningful_content: view %p - whitespace only, len=%d", view, (int)(p - str));
+        return false;  // only whitespace
+    }
+    
+    // Markers always have meaningful content
+    if (view->view_type == RDT_VIEW_MARKER) return true;
+    
+    return false;
+}
+
+/**
+ * Check if a character is whitespace that gets collapsed in HTML rendering
+ */
+static inline bool is_collapsible_whitespace(unsigned char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+/**
+ * Check if whitespace should be preserved for a view based on CSS white-space property.
+ * Returns true if whitespace should NOT be collapsed (pre, pre-wrap, pre-line modes).
+ */
+static bool should_preserve_whitespace(View* view) {
+    if (!view) return false;
+    
+    // Walk up the parent chain to find a block with white-space property
+    View* parent = view->parent;
+    while (parent) {
+        if (parent->is_element()) {
+            DomElement* elem = (DomElement*)parent;
+            if (elem->blk) {
+                CssEnum ws = elem->blk->white_space;
+                // CSS_VALUE_PRE, CSS_VALUE_PRE_WRAP, CSS_VALUE_PRE_LINE preserve whitespace
+                if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_PRE_LINE) {
+                    return true;
+                }
+                // Found a block with white-space set, use its value
+                if (ws != 0) {
+                    return false;  // normal or nowrap - collapse whitespace
+                }
+            }
+        }
+        parent = parent->parent;
+    }
+    return false;  // default: collapse whitespace
+}
+
+/**
+ * Skip over collapsed whitespace when moving forward (right).
+ * In HTML, consecutive whitespace is collapsed to a single space.
+ * Only skip if we PASSED a whitespace char AND there's more whitespace ahead.
+ * This preserves word boundaries (stopping after 'd' in "word  with").
+ * @param prev_offset The offset before the move (to check what char we passed)
+ * @param new_offset The offset after moving one character
+ * @param preserve_ws If true, don't skip whitespace (pre/pre-wrap mode)
+ */
+static int skip_collapsed_whitespace_forward(unsigned char* str, int prev_offset, int new_offset, int text_length, bool preserve_ws) {
+    if (!str || new_offset >= text_length || preserve_ws) return new_offset;
+    
+    // Check the character we just passed (the one between prev_offset and new_offset)
+    // For ASCII whitespace (single byte), this is str[prev_offset]
+    bool passed_whitespace = (prev_offset < text_length) && is_collapsible_whitespace(str[prev_offset]);
+    bool facing_whitespace = is_collapsible_whitespace(str[new_offset]);
+    
+    // Only skip if we passed whitespace AND there's more whitespace ahead
+    // This prevents skipping at word boundaries (non-ws → ws)
+    if (passed_whitespace && facing_whitespace) {
+        // Skip all consecutive whitespace
+        while (new_offset < text_length && is_collapsible_whitespace(str[new_offset])) {
+            new_offset++;
+        }
+    }
+    return new_offset;
+}
+
+/**
+ * Skip over collapsed whitespace when moving backward (left).
+ * Only skip if we PASSED a whitespace char AND there's more whitespace behind.
+ * @param prev_offset The offset before the move
+ * @param new_offset The offset after moving one character backward
+ * @param preserve_ws If true, don't skip whitespace (pre/pre-wrap mode)
+ */
+static int skip_collapsed_whitespace_backward(unsigned char* str, int prev_offset, int new_offset, bool preserve_ws) {
+    if (!str || new_offset <= 0 || preserve_ws) return new_offset;
+    
+    // Check the character we just passed (the one at prev_offset - 1, or new_offset for leftward move)
+    // When moving left from prev_offset to new_offset, we passed str[new_offset]
+    bool passed_whitespace = is_collapsible_whitespace(str[new_offset]);
+    bool facing_whitespace = (new_offset > 0) && is_collapsible_whitespace(str[new_offset - 1]);
+    
+    // Only skip if we passed whitespace AND there's more whitespace behind
+    if (passed_whitespace && facing_whitespace) {
+        // Skip back over all consecutive whitespace
+        while (new_offset > 0 && is_collapsible_whitespace(str[new_offset - 1])) {
+            new_offset--;
+        }
+    }
+    return new_offset;
+}
+
 void caret_move(RadiantState* state, int delta) {
-    if (!state || !state->caret || !state->caret->view) return;
+    if (!state || !state->caret || !state->caret->view) {
+        log_debug("caret_move: early return - state=%p, caret=%p, view=%p",
+            state, state ? state->caret : nullptr, 
+            (state && state->caret) ? state->caret->view : nullptr);
+        return;
+    }
 
     CaretState* caret = state->caret;
-    int new_offset = caret->char_offset + delta;
-    if (new_offset < 0) new_offset = 0;
-    // TODO: clamp to text length
-
-    caret->char_offset = new_offset;
+    View* view = caret->view;
+    int current_offset = caret->char_offset;
+    
+    log_debug("caret_move: delta=%d, view=%p, view_type=%d, current_offset=%d",
+        delta, view, view->view_type, current_offset);
+    
+    // Check if whitespace should be preserved (CSS white-space: pre/pre-wrap/pre-line)
+    bool preserve_ws = should_preserve_whitespace(view);
+    
+    // For text views, we need to properly handle UTF-8 character boundaries
+    if (view->is_text()) {
+        ViewText* text_view = (ViewText*)view;
+        unsigned char* str = text_view->text_data();
+        int text_length = str ? strlen((char*)str) : 0;
+        
+        if (delta > 0) {
+            // Moving right
+            if (str && current_offset < text_length) {
+                // Move by one UTF-8 character
+                int new_offset = utf8_offset_by_chars(str, current_offset, 1);
+                
+                // Skip consecutive whitespace (only if we passed whitespace and there's more ahead)
+                new_offset = skip_collapsed_whitespace_forward(str, current_offset, new_offset, text_length, preserve_ws);
+                
+                // If we reached the end of text, stop at boundary first (don't cross yet)
+                if (new_offset >= text_length) {
+                    caret->char_offset = text_length;
+                    log_debug("caret_move: stopped at end of view %p (offset=%d)", view, text_length);
+                } else {
+                    caret->char_offset = new_offset;
+                }
+            } else {
+                // Already at end of text, now cross to next view
+                View* next_view = find_next_navigable_view(view);
+                while (next_view && !has_meaningful_content(next_view)) {
+                    next_view = find_next_navigable_view(next_view);
+                }
+                if (next_view) {
+                    caret->view = next_view;
+                    // Skip leading whitespace in new view (when crossing view boundary, treat as if we passed whitespace)
+                    if (next_view->is_text()) {
+                        ViewText* next_text = (ViewText*)next_view;
+                        unsigned char* next_str = next_text->text_data();
+                        int next_len = next_str ? strlen((char*)next_str) : 0;
+                        bool next_preserve_ws = should_preserve_whitespace(next_view);
+                        // Skip all leading whitespace when crossing view boundary
+                        int offset = 0;
+                        if (!next_preserve_ws && next_str) {
+                            while (offset < next_len && is_collapsible_whitespace(next_str[offset])) {
+                                offset++;
+                            }
+                        }
+                        caret->char_offset = offset;
+                    } else {
+                        caret->char_offset = 0;
+                    }
+                    caret->line = 0;
+                    caret->column = 0;
+                    log_debug("caret_move: crossed to next view %p (type=%d)", 
+                        next_view, next_view->view_type);
+                }
+                // else: stay at end of current view
+            }
+        } else if (delta < 0) {
+            // Moving left
+            if (current_offset > 0) {
+                // Move back by one UTF-8 character
+                int new_offset = utf8_offset_by_chars(str, current_offset, -1);
+                
+                // Skip consecutive whitespace (only if we passed whitespace and there's more behind)
+                new_offset = skip_collapsed_whitespace_backward(str, current_offset, new_offset, preserve_ws);
+                
+                // If we reached the start, stop at boundary first (don't cross yet)
+                if (new_offset <= 0) {
+                    caret->char_offset = 0;
+                    log_debug("caret_move: stopped at start of view %p", view);
+                } else {
+                    caret->char_offset = new_offset;
+                }
+            } else {
+                // At start of text, now cross to previous view
+                View* prev_view = find_prev_navigable_view(view);
+                while (prev_view && !has_meaningful_content(prev_view)) {
+                    prev_view = find_prev_navigable_view(prev_view);
+                }
+                if (prev_view) {
+                    caret->view = prev_view;
+                    // Position at end of prev view, skipping trailing whitespace (when crossing view boundary)
+                    int prev_length = get_view_content_length(prev_view);
+                    if (prev_view->is_text()) {
+                        ViewText* prev_text = (ViewText*)prev_view;
+                        unsigned char* prev_str = prev_text->text_data();
+                        bool prev_preserve_ws = should_preserve_whitespace(prev_view);
+                        // Skip all trailing whitespace when crossing view boundary
+                        int offset = prev_length;
+                        if (!prev_preserve_ws && prev_str) {
+                            while (offset > 0 && is_collapsible_whitespace(prev_str[offset - 1])) {
+                                offset--;
+                            }
+                        }
+                        caret->char_offset = offset;
+                    } else {
+                        caret->char_offset = prev_length;
+                    }
+                    caret->line = 0;
+                    caret->column = caret->char_offset;
+                    log_debug("caret_move: crossed to prev view %p (type=%d) at offset %d", 
+                        prev_view, prev_view->view_type, caret->char_offset);
+                }
+                // else: stay at start of current view
+            }
+        }
+    } else if (view->view_type == RDT_VIEW_MARKER) {
+        // Atomic elements: offset is 0 (before) or 1 (after)
+        if (delta > 0) {
+            if (current_offset == 0) {
+                // Move from before to after the marker
+                caret->char_offset = 1;
+            } else {
+                // Already after, move to next view with meaningful content
+                View* next_view = find_next_navigable_view(view);
+                while (next_view && !has_meaningful_content(next_view)) {
+                    next_view = find_next_navigable_view(next_view);
+                }
+                if (next_view) {
+                    caret->view = next_view;
+                    caret->char_offset = 0;
+                    caret->line = 0;
+                    caret->column = 0;
+                    log_debug("caret_move: crossed from marker to next view %p", next_view);
+                }
+            }
+        } else if (delta < 0) {
+            if (current_offset > 0) {
+                // Move from after to before the marker
+                caret->char_offset = 0;
+            } else {
+                // Already before, move to previous view with meaningful content
+                View* prev_view = find_prev_navigable_view(view);
+                while (prev_view && !has_meaningful_content(prev_view)) {
+                    prev_view = find_prev_navigable_view(prev_view);
+                }
+                if (prev_view) {
+                    caret->view = prev_view;
+                    int prev_length = get_view_content_length(prev_view);
+                    caret->char_offset = prev_length;
+                    caret->line = 0;
+                    caret->column = prev_length;
+                    log_debug("caret_move: crossed from marker to prev view %p", prev_view);
+                }
+            }
+        }
+    } else {
+        // Other non-text views: try to navigate to adjacent views with meaningful content
+        if (delta > 0) {
+            View* next_view = find_next_navigable_view(view);
+            while (next_view && !has_meaningful_content(next_view)) {
+                next_view = find_next_navigable_view(next_view);
+            }
+            if (next_view) {
+                caret->view = next_view;
+                caret->char_offset = 0;
+            }
+        } else if (delta < 0) {
+            View* prev_view = find_prev_navigable_view(view);
+            while (prev_view && !has_meaningful_content(prev_view)) {
+                prev_view = find_prev_navigable_view(prev_view);
+            }
+            if (prev_view) {
+                caret->view = prev_view;
+                caret->char_offset = get_view_content_length(prev_view);
+            }
+        }
+    }
+    
     caret->visible = true;  // reset blink on move
     caret->blink_time = 0;
-
     state->needs_repaint = true;
 
-    log_debug("caret_move: delta=%d, new_offset=%d", delta, new_offset);
+    log_debug("caret_move: delta=%d, new_view=%p, new_offset=%d", 
+        delta, caret->view, caret->char_offset);
 }
 
 void caret_move_to(RadiantState* state, int where) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
-
-    switch (where) {
-        case 0:  // line start
-            caret->column = 0;
-            break;
-        case 1:  // line end
-            // TODO: get line length
-            break;
-        case 2:  // doc start
-            caret->char_offset = 0;
-            caret->line = 0;
-            caret->column = 0;
-            break;
-        case 3:  // doc end
-            // TODO: get doc length
-            break;
+    View* view = caret->view;
+    
+    // Handle text views with proper line/offset calculation
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        TextRect* rect = text->rect;
+        
+        switch (where) {
+            case 0: {  // line start
+                // Find current line's rect
+                TextRect* current_rect = rect;
+                int line = 0;
+                while (current_rect) {
+                    int rect_end = current_rect->start_index + current_rect->length;
+                    if (caret->char_offset >= current_rect->start_index && 
+                        caret->char_offset <= rect_end) {
+                        break;
+                    }
+                    line++;
+                    current_rect = current_rect->next;
+                }
+                if (current_rect) {
+                    caret->char_offset = current_rect->start_index;
+                    caret->line = line;
+                    caret->column = 0;
+                }
+                break;
+            }
+            case 1: {  // line end
+                // Find current line's rect
+                TextRect* current_rect = rect;
+                int line = 0;
+                while (current_rect) {
+                    int rect_end = current_rect->start_index + current_rect->length;
+                    if (caret->char_offset >= current_rect->start_index && 
+                        caret->char_offset <= rect_end) {
+                        break;
+                    }
+                    line++;
+                    current_rect = current_rect->next;
+                }
+                if (current_rect) {
+                    caret->char_offset = current_rect->start_index + current_rect->length;
+                    caret->line = line;
+                    caret->column = current_rect->length;
+                }
+                break;
+            }
+            case 2:  // doc start
+                caret->char_offset = 0;
+                caret->line = 0;
+                caret->column = 0;
+                break;
+            case 3: {  // doc end
+                // Find last rect and its end
+                TextRect* last_rect = rect;
+                int line = 0;
+                while (last_rect && last_rect->next) {
+                    line++;
+                    last_rect = last_rect->next;
+                }
+                if (last_rect) {
+                    caret->char_offset = last_rect->start_index + last_rect->length;
+                    caret->line = line;
+                    caret->column = last_rect->length;
+                } else if (text->text) {
+                    // Fallback: use text length
+                    caret->char_offset = strlen(text->text);
+                }
+                break;
+            }
+        }
+    } else {
+        // Non-text views: simple handling
+        switch (where) {
+            case 0:  // line start
+                caret->column = 0;
+                break;
+            case 1:  // line end
+                break;
+            case 2:  // doc start
+                caret->char_offset = 0;
+                caret->line = 0;
+                caret->column = 0;
+                break;
+            case 3:  // doc end
+                break;
+        }
     }
 
     caret->visible = true;
     caret->blink_time = 0;
     state->needs_repaint = true;
 
-    log_debug("caret_move_to: where=%d", where);
+    log_debug("caret_move_to: where=%d, offset=%d", where, caret->char_offset);
+}
+
+/**
+ * Helper to find the TextRect (line) containing a given character offset
+ * Also returns the line number (0-based)
+ */
+static TextRect* find_rect_and_line(ViewText* text, int char_offset, int* out_line) {
+    if (!text || !text->rect) return nullptr;
+    
+    TextRect* rect = text->rect;
+    int line = 0;
+    
+    while (rect) {
+        int rect_start = rect->start_index;
+        int rect_end = rect->start_index + rect->length;
+        
+        if (char_offset >= rect_start && char_offset <= rect_end) {
+            if (out_line) *out_line = line;
+            return rect;
+        }
+        
+        line++;
+        if (!rect->next) {
+            // char_offset is beyond all text, return last rect
+            if (out_line) *out_line = line - 1;
+            return rect;
+        }
+        rect = rect->next;
+    }
+    
+    return nullptr;
+}
+
+/**
+ * Helper to get TextRect at a specific line number
+ */
+static TextRect* get_rect_at_line(ViewText* text, int target_line) {
+    if (!text || !text->rect || target_line < 0) return nullptr;
+    
+    TextRect* rect = text->rect;
+    int line = 0;
+    
+    while (rect && line < target_line) {
+        if (!rect->next) return rect;  // clamp to last line
+        rect = rect->next;
+        line++;
+    }
+    
+    return rect;
+}
+
+/**
+ * Helper to count total lines in a text view
+ */
+static int count_text_lines(ViewText* text) {
+    if (!text || !text->rect) return 0;
+    
+    int count = 0;
+    TextRect* rect = text->rect;
+    while (rect) {
+        count++;
+        rect = rect->next;
+    }
+    return count;
+}
+
+/**
+ * Helper to calculate the best character offset at a given visual x position
+ * within a TextRect. This is for maintaining horizontal position when moving
+ * between lines.
+ */
+static int find_offset_at_x(ViewText* text, TextRect* rect, float target_x) {
+    if (!text || !rect) return 0;
+    
+    unsigned char* str = (unsigned char*)text->text;
+    if (!str) return rect->start_index;
+    
+    // Walk through characters to find the closest one to target_x
+    unsigned char* p = str + rect->start_index;
+    unsigned char* end = p + rect->length;
+    int byte_offset = rect->start_index;
+    
+    // For now, return start of rect - visual x matching requires font metrics
+    // which we don't have access to here. The visual position update will
+    // handle the proper x coordinate.
+    // TODO: If we had access to font metrics, we could calculate the exact offset
+    
+    // Simple heuristic: if target_x is near the start, return start
+    // otherwise return end
+    if (target_x <= rect->x + rect->width / 2) {
+        return rect->start_index;
+    } else {
+        return rect->start_index + rect->length;
+    }
+}
+
+/**
+ * Get the absolute visual Y position of a view
+ * Walks up the parent chain to accumulate Y offsets
+ */
+static float get_absolute_y(View* view) {
+    float y = 0;
+    View* v = view;
+    while (v) {
+        y += v->y;
+        v = v->parent;
+    }
+    return y;
+}
+
+/**
+ * Get the absolute visual Y position of a TextRect within a text view
+ */
+static float get_rect_absolute_y(View* view, TextRect* rect) {
+    float base_y = get_absolute_y(view);
+    // TextRect y is relative to the parent block, same as the text view's y
+    // So we need to use parent's absolute position + rect->y
+    if (view->parent) {
+        base_y = get_absolute_y(view->parent) + rect->y;
+    }
+    return base_y;
+}
+
+/**
+ * Get the visual Y position of the caret's current position (absolute)
+ */
+static float get_caret_visual_y(View* view, int char_offset) {
+    if (!view) return 0;
+    
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        TextRect* rect = text->rect;
+        while (rect) {
+            int rect_end = rect->start_index + rect->length;
+            if (char_offset >= rect->start_index && char_offset <= rect_end) {
+                return get_rect_absolute_y(view, rect);
+            }
+            rect = rect->next;
+        }
+        // Default to first rect's Y
+        if (text->rect) return get_rect_absolute_y(view, text->rect);
+    }
+    
+    return get_absolute_y(view);
+}
+
+/**
+ * Find a navigable view/rect at a different visual Y position
+ * For down: find next view/rect with Y > current_y
+ * For up: find prev view/rect with Y < current_y
+ * Returns the view and sets out_offset to the best char offset
+ */
+static View* find_view_at_different_y(View* current_view, int current_offset, 
+    int direction, float current_y, float current_x, int* out_offset) {
+    
+    // Tolerance for "same line" detection (half line height)
+    const float Y_TOLERANCE = 5.0f;
+    
+    if (direction > 0) {
+        // Moving down - search forward for view/rect with higher Y
+        View* view = current_view;
+        
+        // First check remaining rects in current text view
+        if (view->is_text()) {
+            ViewText* text = (ViewText*)view;
+            TextRect* rect = text->rect;
+            bool found_current = false;
+            
+            while (rect) {
+                int rect_end = rect->start_index + rect->length;
+                if (!found_current) {
+                    if (current_offset >= rect->start_index && current_offset <= rect_end) {
+                        found_current = true;
+                    }
+                } else {
+                    // Check if this rect is on a lower line
+                    float rect_y = get_rect_absolute_y(view, rect);
+                    if (rect_y > current_y + Y_TOLERANCE) {
+                        // Found a rect on a lower line in same view
+                        *out_offset = rect->start_index;
+                        return view;
+                    }
+                }
+                rect = rect->next;
+            }
+        }
+        
+        // Search subsequent views
+        View* next = find_next_navigable_view(view);
+        while (next) {
+            if (next->is_text()) {
+                ViewText* next_text = (ViewText*)next;
+                TextRect* rect = next_text->rect;
+                while (rect) {
+                    float rect_y = get_rect_absolute_y(next, rect);
+                    if (rect_y > current_y + Y_TOLERANCE) {
+                        // Found a rect on a lower line
+                        *out_offset = rect->start_index;
+                        return next;
+                    }
+                    rect = rect->next;
+                }
+            } else {
+                // Non-text view - check its Y
+                float view_y = get_absolute_y(next);
+                if (view_y > current_y + Y_TOLERANCE) {
+                    *out_offset = 0;
+                    return next;
+                }
+            }
+            next = find_next_navigable_view(next);
+        }
+        
+    } else {
+        // Moving up - search backward for view/rect with lower Y
+        View* view = current_view;
+        
+        // First check previous rects in current text view
+        if (view->is_text()) {
+            ViewText* text = (ViewText*)view;
+            TextRect* rect = text->rect;
+            TextRect* prev_lower_rect = nullptr;
+            
+            while (rect) {
+                int rect_end = rect->start_index + rect->length;
+                if (current_offset >= rect->start_index && current_offset <= rect_end) {
+                    // Found current rect, use prev_lower_rect if any
+                    if (prev_lower_rect) {
+                        *out_offset = prev_lower_rect->start_index;
+                        return view;
+                    }
+                    break;
+                }
+                float rect_y = get_rect_absolute_y(view, rect);
+                if (rect_y < current_y - Y_TOLERANCE) {
+                    prev_lower_rect = rect;
+                }
+                rect = rect->next;
+            }
+        }
+        
+        // Search previous views
+        View* prev = find_prev_navigable_view(view);
+        while (prev) {
+            if (prev->is_text()) {
+                ViewText* prev_text = (ViewText*)prev;
+                TextRect* rect = prev_text->rect;
+                TextRect* last_lower_rect = nullptr;
+                
+                // Find the last (lowest/rightmost) rect with lower Y
+                while (rect) {
+                    float rect_y = get_rect_absolute_y(prev, rect);
+                    if (rect_y < current_y - Y_TOLERANCE) {
+                        last_lower_rect = rect;
+                    }
+                    rect = rect->next;
+                }
+                
+                if (last_lower_rect) {
+                    *out_offset = last_lower_rect->start_index;
+                    return prev;
+                }
+            } else {
+                // Non-text view - check its Y
+                float view_y = get_absolute_y(prev);
+                if (view_y < current_y - Y_TOLERANCE) {
+                    *out_offset = 0;
+                    return prev;
+                }
+            }
+            prev = find_prev_navigable_view(prev);
+        }
+    }
+    
+    return nullptr;
 }
 
 void caret_move_line(RadiantState* state, int delta) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
-    int new_line = caret->line + delta;
-    if (new_line < 0) new_line = 0;
-    // TODO: clamp to line count
-
-    caret->line = new_line;
+    View* view = caret->view;
+    
+    // Get current visual position
+    float current_y = get_caret_visual_y(view, caret->char_offset);
+    float current_x = caret->x;  // Use stored visual X for column preservation
+    
+    // Find view/rect at different Y position
+    int new_offset = 0;
+    View* new_view = find_view_at_different_y(view, caret->char_offset, 
+        delta, current_y, current_x, &new_offset);
+    
+    if (new_view) {
+        caret->view = new_view;
+        caret->char_offset = new_offset;
+        caret->line = 0;
+        caret->column = new_offset;
+        
+        log_debug("caret_move_line: moved to view %p (type=%d) offset=%d, y: %.1f -> new_y",
+            new_view, new_view->view_type, new_offset, current_y);
+    } else {
+        log_debug("caret_move_line: no line found in direction %d from y=%.1f", delta, current_y);
+    }
+    
     caret->visible = true;
     caret->blink_time = 0;
-
     state->needs_repaint = true;
-
-    log_debug("caret_move_line: delta=%d, new_line=%d", delta, new_line);
 }
 
 void caret_clear(RadiantState* state) {
