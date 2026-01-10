@@ -2630,6 +2630,57 @@
                             "."
                         ],
                         "icon": "📝"
+                    },
+                    {
+                        "source": "test/test_tex_simple_math_gtest.cpp",
+                        "name": "Simple Math Typesetter Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_simple_math_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_simple_math.cpp",
+                            "lambda/tex/dvi_parser.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🧮"
+                    },
+                    {
+                        "source": "test/test_tex_node_gtest.cpp",
+                        "name": "TeX Node System Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_node_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📦"
                     }
                 ],
                 "type": "tex",
