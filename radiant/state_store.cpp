@@ -1082,41 +1082,54 @@ static bool should_preserve_whitespace(View* view) {
 /**
  * Skip over collapsed whitespace when moving forward (right).
  * In HTML, consecutive whitespace is collapsed to a single space.
- * After moving to a new position, skip over any additional whitespace.
+ * Only skip if we PASSED a whitespace char AND there's more whitespace ahead.
+ * This preserves word boundaries (stopping after 'd' in "word  with").
+ * @param prev_offset The offset before the move (to check what char we passed)
+ * @param new_offset The offset after moving one character
  * @param preserve_ws If true, don't skip whitespace (pre/pre-wrap mode)
  */
-static int skip_collapsed_whitespace_forward(unsigned char* str, int offset, int text_length, bool preserve_ws) {
-    if (!str || offset >= text_length || preserve_ws) return offset;
+static int skip_collapsed_whitespace_forward(unsigned char* str, int prev_offset, int new_offset, int text_length, bool preserve_ws) {
+    if (!str || new_offset >= text_length || preserve_ws) return new_offset;
     
-    // If we're on whitespace, we need to skip consecutive whitespace
-    // but stop at the first non-whitespace or after the first space
-    if (is_collapsible_whitespace(str[offset])) {
-        // Move past all consecutive whitespace
-        while (offset < text_length && is_collapsible_whitespace(str[offset])) {
-            offset++;
+    // Check the character we just passed (the one between prev_offset and new_offset)
+    // For ASCII whitespace (single byte), this is str[prev_offset]
+    bool passed_whitespace = (prev_offset < text_length) && is_collapsible_whitespace(str[prev_offset]);
+    bool facing_whitespace = is_collapsible_whitespace(str[new_offset]);
+    
+    // Only skip if we passed whitespace AND there's more whitespace ahead
+    // This prevents skipping at word boundaries (non-ws → ws)
+    if (passed_whitespace && facing_whitespace) {
+        // Skip all consecutive whitespace
+        while (new_offset < text_length && is_collapsible_whitespace(str[new_offset])) {
+            new_offset++;
         }
     }
-    return offset;
+    return new_offset;
 }
 
 /**
  * Skip over collapsed whitespace when moving backward (left).
- * When moving left, if we land on whitespace that follows other whitespace,
- * skip back to the first whitespace in the sequence.
+ * Only skip if we PASSED a whitespace char AND there's more whitespace behind.
+ * @param prev_offset The offset before the move
+ * @param new_offset The offset after moving one character backward
  * @param preserve_ws If true, don't skip whitespace (pre/pre-wrap mode)
  */
-static int skip_collapsed_whitespace_backward(unsigned char* str, int offset, bool preserve_ws) {
-    if (!str || offset <= 0 || preserve_ws) return offset;
+static int skip_collapsed_whitespace_backward(unsigned char* str, int prev_offset, int new_offset, bool preserve_ws) {
+    if (!str || new_offset <= 0 || preserve_ws) return new_offset;
     
-    // If previous char is whitespace, skip back over all consecutive whitespace
-    // to land just after the last non-whitespace
-    if (offset > 0 && is_collapsible_whitespace(str[offset - 1])) {
-        // Move back past all consecutive whitespace
-        while (offset > 0 && is_collapsible_whitespace(str[offset - 1])) {
-            offset--;
+    // Check the character we just passed (the one at prev_offset - 1, or new_offset for leftward move)
+    // When moving left from prev_offset to new_offset, we passed str[new_offset]
+    bool passed_whitespace = is_collapsible_whitespace(str[new_offset]);
+    bool facing_whitespace = (new_offset > 0) && is_collapsible_whitespace(str[new_offset - 1]);
+    
+    // Only skip if we passed whitespace AND there's more whitespace behind
+    if (passed_whitespace && facing_whitespace) {
+        // Skip back over all consecutive whitespace
+        while (new_offset > 0 && is_collapsible_whitespace(str[new_offset - 1])) {
+            new_offset--;
         }
     }
-    return offset;
+    return new_offset;
 }
 
 void caret_move(RadiantState* state, int delta) {
@@ -1149,8 +1162,8 @@ void caret_move(RadiantState* state, int delta) {
                 // Move by one UTF-8 character
                 int new_offset = utf8_offset_by_chars(str, current_offset, 1);
                 
-                // Skip over collapsed whitespace (consecutive spaces/newlines)
-                new_offset = skip_collapsed_whitespace_forward(str, new_offset, text_length, preserve_ws);
+                // Skip consecutive whitespace (only if we passed whitespace and there's more ahead)
+                new_offset = skip_collapsed_whitespace_forward(str, current_offset, new_offset, text_length, preserve_ws);
                 
                 // If we reached the end of text, stop at boundary first (don't cross yet)
                 if (new_offset >= text_length) {
@@ -1167,13 +1180,20 @@ void caret_move(RadiantState* state, int delta) {
                 }
                 if (next_view) {
                     caret->view = next_view;
-                    // Skip leading whitespace in new view
+                    // Skip leading whitespace in new view (when crossing view boundary, treat as if we passed whitespace)
                     if (next_view->is_text()) {
                         ViewText* next_text = (ViewText*)next_view;
                         unsigned char* next_str = next_text->text_data();
                         int next_len = next_str ? strlen((char*)next_str) : 0;
                         bool next_preserve_ws = should_preserve_whitespace(next_view);
-                        caret->char_offset = skip_collapsed_whitespace_forward(next_str, 0, next_len, next_preserve_ws);
+                        // Skip all leading whitespace when crossing view boundary
+                        int offset = 0;
+                        if (!next_preserve_ws && next_str) {
+                            while (offset < next_len && is_collapsible_whitespace(next_str[offset])) {
+                                offset++;
+                            }
+                        }
+                        caret->char_offset = offset;
                     } else {
                         caret->char_offset = 0;
                     }
@@ -1190,8 +1210,8 @@ void caret_move(RadiantState* state, int delta) {
                 // Move back by one UTF-8 character
                 int new_offset = utf8_offset_by_chars(str, current_offset, -1);
                 
-                // Skip over collapsed whitespace backwards
-                new_offset = skip_collapsed_whitespace_backward(str, new_offset, preserve_ws);
+                // Skip consecutive whitespace (only if we passed whitespace and there's more behind)
+                new_offset = skip_collapsed_whitespace_backward(str, current_offset, new_offset, preserve_ws);
                 
                 // If we reached the start, stop at boundary first (don't cross yet)
                 if (new_offset <= 0) {
@@ -1208,13 +1228,20 @@ void caret_move(RadiantState* state, int delta) {
                 }
                 if (prev_view) {
                     caret->view = prev_view;
-                    // Position at end of prev view, skipping trailing whitespace
+                    // Position at end of prev view, skipping trailing whitespace (when crossing view boundary)
                     int prev_length = get_view_content_length(prev_view);
                     if (prev_view->is_text()) {
                         ViewText* prev_text = (ViewText*)prev_view;
                         unsigned char* prev_str = prev_text->text_data();
                         bool prev_preserve_ws = should_preserve_whitespace(prev_view);
-                        caret->char_offset = skip_collapsed_whitespace_backward(prev_str, prev_length, prev_preserve_ws);
+                        // Skip all trailing whitespace when crossing view boundary
+                        int offset = prev_length;
+                        if (!prev_preserve_ws && prev_str) {
+                            while (offset > 0 && is_collapsible_whitespace(prev_str[offset - 1])) {
+                                offset--;
+                            }
+                        }
+                        caret->char_offset = offset;
                     } else {
                         caret->char_offset = prev_length;
                     }
