@@ -1,6 +1,7 @@
 #include "state_store.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/utf.h"
 #include "view.hpp"
 
 #include <string.h>
@@ -810,21 +811,71 @@ void caret_set_position(RadiantState* state, View* view, int line, int column) {
     log_debug("caret_set_position: view=%p, line=%d, col=%d", view, line, column);
 }
 
+int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta) {
+    if (!text_data || delta == 0) return current_offset;
+    
+    if (delta > 0) {
+        // Moving forward: skip over UTF-8 characters
+        int chars_to_move = delta;
+        int new_offset = current_offset;
+        unsigned char* p = text_data + current_offset;
+        while (chars_to_move > 0 && *p) {
+            uint32_t codepoint;
+            int bytes = utf8_to_codepoint(p, &codepoint);
+            if (bytes <= 0) bytes = 1;  // invalid UTF-8, skip one byte
+            new_offset += bytes;
+            p += bytes;
+            chars_to_move--;
+        }
+        return new_offset;
+    } else {
+        // Moving backward: find start of previous UTF-8 characters
+        int chars_to_move = -delta;
+        int new_offset = current_offset;
+        while (chars_to_move > 0 && new_offset > 0) {
+            // Move back one byte at a time until we find a UTF-8 lead byte
+            new_offset--;
+            // Skip continuation bytes (10xxxxxx pattern)
+            while (new_offset > 0 && (text_data[new_offset] & 0xC0) == 0x80) {
+                new_offset--;
+            }
+            chars_to_move--;
+        }
+        return new_offset;
+    }
+}
+
 void caret_move(RadiantState* state, int delta) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
-    int new_offset = caret->char_offset + delta;
-    if (new_offset < 0) new_offset = 0;
-    // TODO: clamp to text length
-
-    caret->char_offset = new_offset;
+    View* view = caret->view;
+    int current_offset = caret->char_offset;
+    
+    // For text views, we need to properly handle UTF-8 character boundaries
+    if (view->is_text()) {
+        ViewText* text_view = (ViewText*)view;
+        unsigned char* str = text_view->text_data();
+        if (str) {
+            caret->char_offset = utf8_offset_by_chars(str, current_offset, delta);
+        } else {
+            // No text data, fall back to simple delta
+            int new_offset = current_offset + delta;
+            if (new_offset < 0) new_offset = 0;
+            caret->char_offset = new_offset;
+        }
+    } else {
+        // Non-text views: simple offset adjustment
+        int new_offset = current_offset + delta;
+        if (new_offset < 0) new_offset = 0;
+        caret->char_offset = new_offset;
+    }
+    
     caret->visible = true;  // reset blink on move
     caret->blink_time = 0;
-
     state->needs_repaint = true;
 
-    log_debug("caret_move: delta=%d, new_offset=%d", delta, new_offset);
+    log_debug("caret_move: delta=%d, new_offset=%d", delta, caret->char_offset);
 }
 
 void caret_move_to(RadiantState* state, int where) {

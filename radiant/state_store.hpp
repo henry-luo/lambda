@@ -326,6 +326,15 @@ void caret_move_to(RadiantState* state, int where);  // 0=line start, 1=line end
 void caret_move_line(RadiantState* state, int delta);
 
 /**
+ * Calculate UTF-8 aware byte offset by moving delta characters
+ * @param text_data Raw text data (UTF-8 encoded)
+ * @param current_offset Current byte offset
+ * @param delta Number of characters to move (positive = forward, negative = backward)
+ * @return New byte offset aligned to UTF-8 character boundary
+ */
+int utf8_offset_by_chars(unsigned char* text_data, int current_offset, int delta);
+
+/**
  * Clear caret (no element focused for text input)
  */
 void caret_clear(RadiantState* state);
