@@ -941,26 +941,38 @@ static View* find_next_navigable_view(View* current) {
 static View* find_prev_navigable_view(View* current) {
     if (!current) return nullptr;
     
+    log_debug("find_prev_navigable_view: current=%p type=%d", current, current->view_type);
+    
     // First try previous sibling and its subtree (find last navigable)
     View* prev = current->prev_placed_view();
     while (prev) {
+        log_debug("  checking prev sibling=%p type=%d", prev, prev->view_type);
         View* found = find_last_navigable_in_subtree(prev);
-        if (found) return found;
+        if (found) {
+            log_debug("  found=%p type=%d in sibling subtree", found, found->view_type);
+            return found;
+        }
         prev = prev->prev_placed_view();
     }
     
     // No more siblings, go up to parent and try its previous sibling
     View* parent = current->parent;
     while (parent) {
+        log_debug("  going up to parent=%p type=%d", parent, parent->view_type);
         View* parent_prev = parent->prev_placed_view();
         while (parent_prev) {
+            log_debug("  checking parent's prev sibling=%p type=%d", parent_prev, parent_prev->view_type);
             View* found = find_last_navigable_in_subtree(parent_prev);
-            if (found) return found;
+            if (found) {
+                log_debug("  found=%p type=%d in parent sibling subtree", found, found->view_type);
+                return found;
+            }
             parent_prev = parent_prev->prev_placed_view();
         }
         parent = parent->parent;
     }
     
+    log_debug("  no prev navigable view found");
     return nullptr;
 }
 
@@ -1336,65 +1348,217 @@ static int find_offset_at_x(ViewText* text, TextRect* rect, float target_x) {
     }
 }
 
+/**
+ * Get the absolute visual Y position of a view
+ * Walks up the parent chain to accumulate Y offsets
+ */
+static float get_absolute_y(View* view) {
+    float y = 0;
+    View* v = view;
+    while (v) {
+        y += v->y;
+        v = v->parent;
+    }
+    return y;
+}
+
+/**
+ * Get the absolute visual Y position of a TextRect within a text view
+ */
+static float get_rect_absolute_y(View* view, TextRect* rect) {
+    float base_y = get_absolute_y(view);
+    // TextRect y is relative to the parent block, same as the text view's y
+    // So we need to use parent's absolute position + rect->y
+    if (view->parent) {
+        base_y = get_absolute_y(view->parent) + rect->y;
+    }
+    return base_y;
+}
+
+/**
+ * Get the visual Y position of the caret's current position (absolute)
+ */
+static float get_caret_visual_y(View* view, int char_offset) {
+    if (!view) return 0;
+    
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        TextRect* rect = text->rect;
+        while (rect) {
+            int rect_end = rect->start_index + rect->length;
+            if (char_offset >= rect->start_index && char_offset <= rect_end) {
+                return get_rect_absolute_y(view, rect);
+            }
+            rect = rect->next;
+        }
+        // Default to first rect's Y
+        if (text->rect) return get_rect_absolute_y(view, text->rect);
+    }
+    
+    return get_absolute_y(view);
+}
+
+/**
+ * Find a navigable view/rect at a different visual Y position
+ * For down: find next view/rect with Y > current_y
+ * For up: find prev view/rect with Y < current_y
+ * Returns the view and sets out_offset to the best char offset
+ */
+static View* find_view_at_different_y(View* current_view, int current_offset, 
+    int direction, float current_y, float current_x, int* out_offset) {
+    
+    // Tolerance for "same line" detection (half line height)
+    const float Y_TOLERANCE = 5.0f;
+    
+    if (direction > 0) {
+        // Moving down - search forward for view/rect with higher Y
+        View* view = current_view;
+        
+        // First check remaining rects in current text view
+        if (view->is_text()) {
+            ViewText* text = (ViewText*)view;
+            TextRect* rect = text->rect;
+            bool found_current = false;
+            
+            while (rect) {
+                int rect_end = rect->start_index + rect->length;
+                if (!found_current) {
+                    if (current_offset >= rect->start_index && current_offset <= rect_end) {
+                        found_current = true;
+                    }
+                } else {
+                    // Check if this rect is on a lower line
+                    float rect_y = get_rect_absolute_y(view, rect);
+                    if (rect_y > current_y + Y_TOLERANCE) {
+                        // Found a rect on a lower line in same view
+                        *out_offset = rect->start_index;
+                        return view;
+                    }
+                }
+                rect = rect->next;
+            }
+        }
+        
+        // Search subsequent views
+        View* next = find_next_navigable_view(view);
+        while (next) {
+            if (next->is_text()) {
+                ViewText* next_text = (ViewText*)next;
+                TextRect* rect = next_text->rect;
+                while (rect) {
+                    float rect_y = get_rect_absolute_y(next, rect);
+                    if (rect_y > current_y + Y_TOLERANCE) {
+                        // Found a rect on a lower line
+                        *out_offset = rect->start_index;
+                        return next;
+                    }
+                    rect = rect->next;
+                }
+            } else {
+                // Non-text view - check its Y
+                float view_y = get_absolute_y(next);
+                if (view_y > current_y + Y_TOLERANCE) {
+                    *out_offset = 0;
+                    return next;
+                }
+            }
+            next = find_next_navigable_view(next);
+        }
+        
+    } else {
+        // Moving up - search backward for view/rect with lower Y
+        View* view = current_view;
+        
+        // First check previous rects in current text view
+        if (view->is_text()) {
+            ViewText* text = (ViewText*)view;
+            TextRect* rect = text->rect;
+            TextRect* prev_lower_rect = nullptr;
+            
+            while (rect) {
+                int rect_end = rect->start_index + rect->length;
+                if (current_offset >= rect->start_index && current_offset <= rect_end) {
+                    // Found current rect, use prev_lower_rect if any
+                    if (prev_lower_rect) {
+                        *out_offset = prev_lower_rect->start_index;
+                        return view;
+                    }
+                    break;
+                }
+                float rect_y = get_rect_absolute_y(view, rect);
+                if (rect_y < current_y - Y_TOLERANCE) {
+                    prev_lower_rect = rect;
+                }
+                rect = rect->next;
+            }
+        }
+        
+        // Search previous views
+        View* prev = find_prev_navigable_view(view);
+        while (prev) {
+            if (prev->is_text()) {
+                ViewText* prev_text = (ViewText*)prev;
+                TextRect* rect = prev_text->rect;
+                TextRect* last_lower_rect = nullptr;
+                
+                // Find the last (lowest/rightmost) rect with lower Y
+                while (rect) {
+                    float rect_y = get_rect_absolute_y(prev, rect);
+                    if (rect_y < current_y - Y_TOLERANCE) {
+                        last_lower_rect = rect;
+                    }
+                    rect = rect->next;
+                }
+                
+                if (last_lower_rect) {
+                    *out_offset = last_lower_rect->start_index;
+                    return prev;
+                }
+            } else {
+                // Non-text view - check its Y
+                float view_y = get_absolute_y(prev);
+                if (view_y < current_y - Y_TOLERANCE) {
+                    *out_offset = 0;
+                    return prev;
+                }
+            }
+            prev = find_prev_navigable_view(prev);
+        }
+    }
+    
+    return nullptr;
+}
+
 void caret_move_line(RadiantState* state, int delta) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
     View* view = caret->view;
     
-    // Only handle text views
-    if (!view->is_text()) {
-        log_debug("caret_move_line: not a text view");
-        return;
+    // Get current visual position
+    float current_y = get_caret_visual_y(view, caret->char_offset);
+    float current_x = caret->x;  // Use stored visual X for column preservation
+    
+    // Find view/rect at different Y position
+    int new_offset = 0;
+    View* new_view = find_view_at_different_y(view, caret->char_offset, 
+        delta, current_y, current_x, &new_offset);
+    
+    if (new_view) {
+        caret->view = new_view;
+        caret->char_offset = new_offset;
+        caret->line = 0;
+        caret->column = new_offset;
+        
+        log_debug("caret_move_line: moved to view %p (type=%d) offset=%d, y: %.1f -> new_y",
+            new_view, new_view->view_type, new_offset, current_y);
+    } else {
+        log_debug("caret_move_line: no line found in direction %d from y=%.1f", delta, current_y);
     }
     
-    ViewText* text = (ViewText*)view;
-    if (!text->rect) {
-        log_debug("caret_move_line: no text rects");
-        return;
-    }
-    
-    // Find current line
-    int current_line = 0;
-    TextRect* current_rect = find_rect_and_line(text, caret->char_offset, &current_line);
-    if (!current_rect) {
-        log_debug("caret_move_line: could not find current rect");
-        return;
-    }
-    
-    // Calculate target line
-    int target_line = current_line + delta;
-    int total_lines = count_text_lines(text);
-    if (target_line < 0) target_line = 0;
-    if (target_line >= total_lines) target_line = total_lines - 1;
-    
-    // Get target rect
-    TextRect* target_rect = get_rect_at_line(text, target_line);
-    if (!target_rect) {
-        log_debug("caret_move_line: could not find target rect for line %d", target_line);
-        return;
-    }
-    
-    // Calculate new offset - try to maintain visual x position
-    // For now, use simple approach: maintain column position within line bounds
-    int current_column = caret->char_offset - current_rect->start_index;
-    int target_line_length = target_rect->length;
-    
-    // Clamp column to target line length
-    if (current_column > target_line_length) {
-        current_column = target_line_length;
-    }
-    
-    caret->char_offset = target_rect->start_index + current_column;
-    caret->line = target_line;
-    caret->column = current_column;
     caret->visible = true;
     caret->blink_time = 0;
-
     state->needs_repaint = true;
-
-    log_debug("caret_move_line: delta=%d, new_line=%d, new_offset=%d", 
-        delta, target_line, caret->char_offset);
 }
 
 void caret_clear(RadiantState* state) {
