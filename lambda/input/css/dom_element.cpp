@@ -2395,6 +2395,31 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         }
     }
 
+    // Set :checked, :disabled pseudo-states for input elements
+    // These boolean attributes set the initial state from HTML
+    if (strcasecmp(tag_name, "input") == 0) {
+        // Store the type attribute for later use
+        const char* type_value = extract_element_attribute(elem, "type", doc->arena);
+        if (type_value) {
+            dom_element_set_attribute(dom_elem, "type", type_value);
+        }
+        // Store the name attribute for radio button grouping
+        const char* name_value = extract_element_attribute(elem, "name", doc->arena);
+        if (name_value) {
+            dom_element_set_attribute(dom_elem, "name", name_value);
+        }
+        // checked attribute sets :checked pseudo-state (for checkbox/radio)
+        const char* checked_value = extract_element_attribute(elem, "checked", doc->arena);
+        if (checked_value) {
+            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_CHECKED);
+        }
+        // disabled attribute sets :disabled pseudo-state
+        const char* disabled_value = extract_element_attribute(elem, "disabled", doc->arena);
+        if (disabled_value) {
+            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_DISABLED);
+        }
+    }
+
     // set parent relationship if provided
     // Use link_child since the Lambda tree already contains this element
     // (we're building DOM wrappers from existing Lambda structure)
