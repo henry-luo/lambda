@@ -80,6 +80,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
+void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
 // render_math_view is declared in render_math.hpp
 
@@ -2008,6 +2009,12 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
     
     // Selection is now rendered inline in render_text_view, so we don't need overlay
     // render_selection(rdcon, state);
+    
+    // Render open dropdown popup (above content)
+    if (state->open_dropdown) {
+        ViewBlock* select = (ViewBlock*)state->open_dropdown;
+        render_select_dropdown(rdcon, select, state);
+    }
     
     // Caret rendered on top of content
     render_caret(rdcon, state);
