@@ -2538,6 +2538,206 @@
                 "parallel": true
             },
             {
+                "suite": "tex",
+                "name": "📝 TeX Typesetting Tests",
+                "category": "extended",
+                "tests": [
+                    {
+                        "source": "test/test_tex_dvi_comparison.cpp",
+                        "name": "TeX DVI Comparison Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_dvi_comparison.exe",
+                        "additional_sources": [
+                            "lambda/tex/dvi_parser.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔍"
+                    },
+                    {
+                        "source": "test/test_latex_integration_gtest.cpp",
+                        "name": "LaTeX Integration Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_latex_integration_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/dvi_parser.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📝"
+                    },
+                    {
+                        "source": "test/test_tex_node_gtest.cpp",
+                        "name": "TeX Node System Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_node_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📦"
+                    },
+                    {
+                        "source": "test/test_tex_vlist_gtest.cpp",
+                        "name": "TeX VList & Page Breaking Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_vlist_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_tex_phase4_gtest.cpp",
+                        "name": "TeX Phase 4 Math Integration Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_phase4_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔢"
+                    },
+                    {
+                        "source": "test/test_tex_phase5_gtest.cpp",
+                        "name": "TeX Phase 5 Output Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_phase5_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_dvi_out.cpp",
+                            "lambda/tex/tex_pdf_out.cpp",
+                            "lambda/tex/dvi_parser.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c",
+                            "lib/arraylist.c",
+                            "lib/pdf_writer.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📤"
+                    },
+                    {
+                        "source": "test/test_tex_hyphen_gtest.cpp",
+                        "name": "TeX Hyphenation Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_hyphen_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "➖"
+                    }
+                ],
+                "type": "tex",
+                "uses_build_config": true,
+                "parallel": true
+            },
+            {
                 "suite": "extended",
                 "name": "🧪 Extended Development Tests",
                 "category": "extended",
