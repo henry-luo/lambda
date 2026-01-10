@@ -2731,6 +2731,35 @@
                             "."
                         ],
                         "icon": "➖"
+                    },
+                    {
+                        "source": "test/test_tex_lambda_bridge_gtest.cpp",
+                        "name": "TeX Lambda Bridge Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_lambda_bridge_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔗"
                     }
                 ],
                 "type": "tex",

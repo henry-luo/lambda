@@ -4,7 +4,7 @@
 
 This document describes the LaTeX typesetting library for Lambda. The goal is to produce publication-quality typeset output comparable to TeX/LaTeX, validated against DVI reference files.
 
-**Status**: All core phases complete (1-5). **173 tests passing.** Legacy code removed. Hyphenation implemented.
+**Status**: All core phases complete (1-5). **205 tests passing.** Legacy code removed. Hyphenation implemented. Lambda integration complete.
 
 ## Implementation Status
 
@@ -22,6 +22,7 @@ This document describes the LaTeX typesetting library for Lambda. The goal is to
 | `tex_font_metrics.hpp` | ✅ Complete | Font metric structures (TFM-compatible) |
 | `tex_math_bridge.hpp/cpp` | ✅ Complete | Math bridge (inline/display math, fractions, radicals, scripts) |
 | `tex_hyphen.hpp/cpp` | ✅ Complete | Liang's hyphenation algorithm (TeXBook Appendix H) |
+| `tex_lambda_bridge.hpp/cpp` | ✅ Complete | Lambda document → TeX typesetter bridge |
 | `dvi_parser.hpp/cpp` | ✅ Complete | DVI parsing for validation |
 
 ### Legacy Components (REMOVED)
@@ -47,6 +48,7 @@ The following legacy files were removed after Phase 4 completion:
 |------|--------|---------|
 | `tex_dvi_out.hpp/cpp` | ✅ Complete | DVI output generation (Phase 5) |
 | `tex_pdf_out.hpp/cpp` | ✅ Complete | PDF output generation (Phase 5) |
+| `tex_latex_bridge.hpp/cpp` | ⏳ Not Started | LaTeX source → TeX typesetter (future) |
 
 ---
 
@@ -509,22 +511,25 @@ lambda/tex/
 ├── tex_vlist.hpp/cpp         # ✅ VList builder
 ├── tex_pagebreak.hpp/cpp     # ✅ Optimal page breaking
 ├── tex_math_bridge.hpp/cpp   # ✅ Math integration (Phase 4)
+├── tex_lambda_bridge.hpp/cpp # ✅ Lambda document bridge
 ├── tex_dvi_out.hpp/cpp       # ✅ DVI output generation
 ├── tex_pdf_out.hpp/cpp       # ✅ PDF output generation
 ├── tex_font_metrics.hpp      # ✅ Font metric structures
 └── dvi_parser.hpp/cpp        # ✅ DVI validation tool
 ```
 
-**22 files total** (11 .hpp + 11 .cpp) - clean, focused implementation.
+**24 files total** (12 .hpp + 12 .cpp) - clean, focused implementation.
 
 ### Test Files
 
 ```
 test/
-├── test_tex_node_gtest.cpp   # ✅ 37 tests (Phase 1 & 2)
-├── test_tex_vlist_gtest.cpp  # ✅ 25 tests (Phase 3)
-├── test_tex_phase4_gtest.cpp # ✅ 41 tests (Phase 4 - Math integration)
-└── test_tex_phase5_gtest.cpp # ✅ 37 tests (Phase 5 - DVI/PDF output)
+├── test_tex_node_gtest.cpp           # ✅ 37 tests (Phase 1 & 2)
+├── test_tex_vlist_gtest.cpp          # ✅ 25 tests (Phase 3)
+├── test_tex_phase4_gtest.cpp         # ✅ 41 tests (Phase 4 - Math integration)
+├── test_tex_phase5_gtest.cpp         # ✅ 37 tests (Phase 5 - DVI/PDF output)
+├── test_tex_hyphen_gtest.cpp         # ✅ 33 tests (Hyphenation)
+└── test_tex_lambda_bridge_gtest.cpp  # ✅ 32 tests (Lambda integration)
 ```
 
 ---
@@ -623,7 +628,7 @@ test/tex/
 
 ## Appendix A: Code Status
 
-### Active Files (24 total)
+### Active Files (26 total)
 - `tex_node.hpp/cpp` - Unified node system (30+ types) ✅
 - `tex_glue.hpp` - Glue/spacing primitives ✅
 - `tex_tfm.hpp/cpp` - TFM parser with built-in fallbacks ✅
@@ -633,6 +638,7 @@ test/tex/
 - `tex_pagebreak.hpp/cpp` - Optimal page breaking ✅
 - `tex_math_bridge.hpp/cpp` - Math integration (Phase 4) ✅
 - `tex_hyphen.hpp/cpp` - Liang's hyphenation algorithm ✅
+- `tex_lambda_bridge.hpp/cpp` - Lambda document bridge ✅
 - `tex_dvi_out.hpp/cpp` - DVI output generation ✅
 - `tex_pdf_out.hpp/cpp` - PDF output generation ✅
 - `dvi_parser.hpp/cpp` - DVI validation tool ✅
@@ -673,5 +679,67 @@ The following legacy/broken files were removed after Phase 4 completion:
 1. ~~**Phase 4**: Bridge Radiant math layout to TexNode system~~ ✅ COMPLETE
 2. ~~**Cleanup**: Remove legacy files after migration complete~~ ✅ COMPLETE (19 files removed)
 3. ~~**Hyphenation**: Implement TeX hyphenation patterns~~ ✅ COMPLETE (Liang's algorithm)
-4. **SVG Output**: Add SVG backend for web rendering (optional)
-5. **Lambda Integration**: Connect TeX typesetter to Lambda document pipeline
+4. ~~**Lambda Integration**: Connect TeX typesetter to Lambda document pipeline~~ ✅ COMPLETE (32 tests)
+5. **SVG Output**: Add SVG backend for web rendering (optional)
+6. **LaTeX Input**: Bridge tree-sitter-latex AST to TeX typesetter (see note below)
+
+---
+
+## Input Sources
+
+### Supported Input Methods
+
+| Input Method | Status | Description |
+|--------------|--------|-------------|
+| Direct API | ✅ Supported | Build TeX nodes programmatically via `text_to_hlist()`, `typeset_paragraph()` |
+| Math strings | ✅ Supported | Parse `$x^2$`, `\frac{a}{b}` via `typeset_math_string()` |
+| Lambda documents | ✅ Supported | HTML-like tree (`<p>`, `<h1>`, `<ul>`) via `tex_lambda_bridge` |
+| LaTeX source | ❌ Not yet | `.tex` files require `tex_latex_bridge` (not implemented) |
+
+### Lambda Document Bridge (tex_lambda_bridge)
+
+Converts Lambda's HTML-like element tree to TeX nodes:
+
+```
+Lambda Document                    TeX Output
+┌─────────────────┐               ┌─────────────────┐
+│ <doc>           │               │ VList           │
+│   <h1>Title</h1>│  ──────────►  │   Heading       │
+│   <p>Text...</p>│               │   Paragraph     │
+│   <ul>...</ul>  │               │   List          │
+│ </doc>          │               │   ...           │
+└─────────────────┘               └─────────────────┘
+```
+
+**Supported elements:**
+- Block: `<p>`, `<h1>`-`<h6>`, `<ul>`, `<ol>`, `<li>`, `<blockquote>`, `<pre>`, `<code>`, `<hr>`
+- Inline: `<em>`, `<strong>`, `<code>`, `<a>`, inline `$math$`
+- Math: `<math>` elements via tex_math_bridge
+
+**API:**
+```cpp
+// Main entry point
+TexNode* content = typeset_document(lambda_item, ctx);
+
+// With page breaking
+PageList pages = break_into_pages(content, ctx);
+```
+
+### Missing: LaTeX Source Input
+
+The project has a tree-sitter LaTeX parser (`tree-sitter-latex`) that parses `.tex` files into an AST. However, there is **no bridge** from this AST to the TeX typesetter:
+
+```
+Current LaTeX flow (HTML output only):
+  .tex → tree-sitter-latex → Lambda AST → format_latex_html_v2 → HTML
+
+Missing flow (TeX-quality output):
+  .tex → tree-sitter-latex → Lambda AST → tex_latex_bridge → TeX nodes → PDF/DVI
+                                          ^^^^^^^^^^^^^^^^
+                                          NOT IMPLEMENTED
+```
+
+To add LaTeX input support, a `tex_latex_bridge.hpp/cpp` would need to:
+1. Walk the tree-sitter-latex AST
+2. Convert LaTeX commands to TeX nodes (`\section` → heading, `\begin{itemize}` → list, etc.)
+3. Handle LaTeX-specific features (environments, counters, cross-references)
