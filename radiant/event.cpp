@@ -1,5 +1,6 @@
 #include "handler.hpp"
 #include "state_store.hpp"
+#include "form_control.hpp"
 
 #include "../lib/log.h"
 #include "../lib/utf.h"
@@ -422,6 +423,281 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
     }
 
     state->needs_repaint = true;
+}
+
+// ============================================================================
+// Checkbox and Radio Button State Handling
+// ============================================================================
+
+/**
+ * Check if an element is a checkbox input
+ */
+static bool is_checkbox(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewElement* elem = (ViewElement*)view;
+    if (elem->tag() != HTM_TAG_INPUT) return false;
+    const char* type = elem->get_attribute("type");
+    return type && strcmp(type, "checkbox") == 0;
+}
+
+/**
+ * Check if an element is a radio button input
+ */
+static bool is_radio(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewElement* elem = (ViewElement*)view;
+    if (elem->tag() != HTM_TAG_INPUT) return false;
+    const char* type = elem->get_attribute("type");
+    return type && strcmp(type, "radio") == 0;
+}
+
+/**
+ * Find all radio buttons in the same name group and uncheck them
+ * @param root The document root to search from
+ * @param name The radio button name attribute to match
+ * @param exclude The radio button to exclude from unchecking (the one being checked)
+ */
+static void uncheck_radio_group(View* root, const char* name, View* exclude, RadiantState* state) {
+    if (!root || !name) return;
+
+    // Traverse view tree to find all radio buttons with matching name
+    View* current = root;
+    while (current) {
+        if (current != exclude && is_radio(current)) {
+            ViewElement* elem = (ViewElement*)current;
+            const char* elem_name = elem->get_attribute("name");
+            if (elem_name && strcmp(elem_name, name) == 0) {
+                // Uncheck this radio button
+                if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
+                    state_set_bool(state, current, STATE_CHECKED, false);
+                    sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
+                    // Also update FormControlProp if present
+                    if (current->is_block()) {
+                        ViewBlock* block = (ViewBlock*)current;
+                        if (block->form) {
+                            block->form->checked = 0;
+                        }
+                    }
+                    log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
+                }
+            }
+        }
+
+        // Traverse to next node (depth-first)
+        if (current->is_block()) {
+            ViewBlock* block = (ViewBlock*)current;
+            if (block->first_child) {
+                current = block->first_child;
+                continue;
+            }
+        }
+        // No children, try next sibling
+        if (current->next()) {
+            current = current->next();
+            continue;
+        }
+        // Go up to find next sibling of ancestor
+        current = current->parent;
+        while (current && !current->next()) {
+            current = current->parent;
+        }
+        if (current) {
+            current = current->next();
+        }
+    }
+}
+
+/**
+ * Find the associated checkbox/radio input for a target element.
+ * If target is already a checkbox/radio, returns it.
+ * If target is inside a label, finds the checkbox/radio:
+ *   - By "for" attribute matching input id
+ *   - By finding an input child inside the label
+ * @return The checkbox/radio input View, or NULL if not found
+ */
+static View* find_checkbox_radio_input(View* target) {
+    if (!target) return nullptr;
+
+    log_info("find_checkbox_radio_input: starting search from target=%p", target);
+
+    // Check if target itself is a checkbox/radio
+    if (is_checkbox(target) || is_radio(target)) {
+        log_info("find_checkbox_radio_input: target is checkbox/radio");
+        return target;
+    }
+
+    // Walk up the tree looking for a label element
+    View* current = target;
+    View* label_element = nullptr;
+    while (current) {
+        if (current->is_element()) {
+            ViewElement* elem = (ViewElement*)current;
+            log_info("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
+            if (elem->tag() == HTM_TAG_LABEL) {
+                label_element = current;
+                log_info("find_checkbox_radio_input: found label element");
+                break;
+            }
+            // If we hit a checkbox/radio directly, use it
+            if (is_checkbox(current) || is_radio(current)) {
+                log_info("find_checkbox_radio_input: found checkbox/radio in ancestor chain");
+                return current;
+            }
+        }
+        current = current->parent;
+    }
+
+    if (!label_element) {
+        log_info("find_checkbox_radio_input: no label found in ancestor chain");
+        return nullptr;
+    }
+
+    ViewElement* label = (ViewElement*)label_element;
+
+    // Check for "for" attribute pointing to an input id
+    const char* for_attr = label->get_attribute("for");
+    if (for_attr && for_attr[0]) {
+        log_info("find_checkbox_radio_input: label has for='%s'", for_attr);
+        // Need to find input with matching id in the document
+        // Walk from document root to find matching id
+        View* root = label_element;
+        while (root->parent) root = root->parent;
+
+        // Simple DFS to find element with matching id
+        View* search = root;
+        while (search) {
+            if (search->is_element()) {
+                ViewElement* elem = (ViewElement*)search;
+                const char* id = elem->get_attribute("id");
+                if (id && strcmp(id, for_attr) == 0) {
+                    if (is_checkbox(search) || is_radio(search)) {
+                        return search;
+                    }
+                }
+            }
+            // Depth-first traversal
+            if (search->is_block()) {
+                ViewBlock* block = (ViewBlock*)search;
+                if (block->first_child) {
+                    search = block->first_child;
+                    continue;
+                }
+            }
+            if (search->next()) {
+                search = search->next();
+                continue;
+            }
+            search = search->parent;
+            while (search && !search->next()) {
+                search = search->parent;
+            }
+            if (search) search = search->next();
+        }
+    }
+
+    // No "for" attribute or not found - look for input child inside label
+    View* child = label->first_child;
+    while (child) {
+        if (is_checkbox(child) || is_radio(child)) {
+            return child;
+        }
+        // Check children recursively
+        if (child->is_block()) {
+            ViewBlock* block = (ViewBlock*)child;
+            View* nested = block->first_child;
+            while (nested) {
+                if (is_checkbox(nested) || is_radio(nested)) {
+                    return nested;
+                }
+                nested = nested->next();
+            }
+        }
+        child = child->next();
+    }
+
+    return nullptr;
+}
+
+/**
+ * Toggle checkbox or radio button state on click
+ * @return true if the click was handled (element was checkbox/radio)
+ */
+static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
+    // Find the actual checkbox/radio input (may be target or associated via label)
+    View* input = find_checkbox_radio_input(target);
+    if (!input) return false;
+
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state) return false;
+
+    ViewElement* elem = (ViewElement*)input;
+
+    // Check if disabled
+    if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_DISABLED)) {
+        log_debug("handle_checkbox_radio_click: element is disabled");
+        return false;
+    }
+
+    if (is_checkbox(input)) {
+        // Toggle checkbox state
+        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool new_state = !is_checked;
+
+        state_set_bool(state, input, STATE_CHECKED, new_state);
+        sync_pseudo_state(input, PSEUDO_STATE_CHECKED, new_state);
+
+        // Update FormControlProp if present
+        log_debug("handle_checkbox_radio_click: input->is_block()=%d view_type=%d", input->is_block(), input->view_type);
+        if (input->is_block()) {
+            ViewBlock* block = (ViewBlock*)input;
+            log_debug("handle_checkbox_radio_click: block->form=%p", (void*)block->form);
+            if (block->form) {
+                block->form->checked = new_state ? 1 : 0;
+                log_debug("handle_checkbox_radio_click: set form->checked=%d", block->form->checked);
+            }
+        }
+
+        log_info("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
+        state->needs_repaint = true;
+        return true;
+    }
+
+    if (is_radio(input)) {
+        // Radio button: only allow checking, not unchecking by click
+        // Also need to uncheck other radio buttons in the same name group
+        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+
+        if (!is_checked) {
+            // Uncheck other radio buttons in the same group
+            const char* name = elem->get_attribute("name");
+            if (name) {
+                // Find the document root
+                View* root = input;
+                while (root->parent) {
+                    root = root->parent;
+                }
+                uncheck_radio_group(root, name, input, state);
+            }
+
+            // Check this radio button
+            state_set_bool(state, input, STATE_CHECKED, true);
+            sync_pseudo_state(input, PSEUDO_STATE_CHECKED, true);
+
+            // Update FormControlProp if present
+            if (input->is_block()) {
+                ViewBlock* block = (ViewBlock*)input;
+                if (block->form) {
+                    block->form->checked = 1;
+                }
+            }
+
+            log_info("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
+            state->needs_repaint = true;
+        }
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -1254,6 +1530,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         } else if (event->type == RDT_EVENT_MOUSE_UP) {
             // Clear :active state
             update_active_state(&evcon, NULL, false);
+
+            // Handle checkbox/radio click toggle
+            log_info("MOUSE_UP: evcon.target=%p", evcon.target);
+            if (evcon.target) {
+                handle_checkbox_radio_click(&evcon, evcon.target);
+            }
 
             // End selection mode
             if (state && state->selection) {
