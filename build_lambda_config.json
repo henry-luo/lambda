@@ -2543,51 +2543,6 @@
                 "category": "extended",
                 "tests": [
                     {
-                        "source": "test/test_tex_ast_gtest.cpp",
-                        "name": "TeX AST Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_tex_ast_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_ast_builder.cpp",
-                            "lambda/tex/tex_box.cpp"
-                        ],
-                        "icon": "🌳"
-                    },
-                    {
-                        "source": "test/test_tex_box_gtest.cpp",
-                        "name": "TeX Box Model Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_tex_box_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_box.cpp"
-                        ],
-                        "icon": "📦"
-                    },
-                    {
-                        "source": "test/test_tex_output_gtest.cpp",
-                        "name": "TeX Output Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_tex_output_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_box.cpp",
-                            "lambda/tex/tex_output.cpp",
-                            "lambda/tex/dvi_parser.cpp"
-                        ],
-                        "icon": "📄"
-                    },
-                    {
                         "source": "test/test_tex_dvi_comparison.cpp",
                         "name": "TeX DVI Comparison Tests",
                         "dependencies": [],
@@ -2630,30 +2585,6 @@
                             "."
                         ],
                         "icon": "📝"
-                    },
-                    {
-                        "source": "test/test_tex_simple_math_gtest.cpp",
-                        "name": "Simple Math Typesetter Tests",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_simple_math_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_simple_math.cpp",
-                            "lambda/tex/dvi_parser.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "🧮"
                     },
                     {
                         "source": "test/test_tex_node_gtest.cpp",
@@ -2729,7 +2660,6 @@
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_simple_math.cpp",
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/log.c",
