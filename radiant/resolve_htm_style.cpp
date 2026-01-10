@@ -757,10 +757,17 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
             }
 
-            // Parse state attributes
-            if (block->get_attribute("disabled")) block->form->disabled = 1;
+            // Parse state attributes - check both attribute and pseudo_state
+            // The pseudo_state may have been set during DOM tree building
+            if (block->get_attribute("disabled") ||
+                (block->pseudo_state & PSEUDO_STATE_DISABLED)) {
+                block->form->disabled = 1;
+            }
             if (block->get_attribute("readonly")) block->form->readonly = 1;
-            if (block->get_attribute("checked")) block->form->checked = 1;
+            if (block->get_attribute("checked") ||
+                (block->pseudo_state & PSEUDO_STATE_CHECKED)) {
+                block->form->checked = 1;
+            }
             if (block->get_attribute("required")) block->form->required = 1;
         }
 
