@@ -3,8 +3,8 @@
 // Parses DVI files for comparison with Lambda's typesetting output.
 
 #include "dvi_parser.hpp"
-#include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "lib/log.h"
+#include "lib/memtrack.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -234,15 +234,20 @@ bool DVIParser::parse_postamble() {
         return false;
     }
 
+    // DVI format: POST_POST | pointer (4 bytes) | id | padding
+    // end_pos now points to last byte of 4-byte pointer
+    // Read pointer to POST (big-endian)
+    uint32_t post_ptr = (data_[end_pos-3] << 24) | (data_[end_pos-2] << 16) |
+                        (data_[end_pos-1] << 8) | data_[end_pos];
+    end_pos -= 4;  // move past the 4-byte pointer
+
     // POST_POST opcode
-    if (data_[end_pos--] != DVI_POST_POST) {
+    if (data_[end_pos] != DVI_POST_POST) {
+        log_error("DVI parser: Expected POST_POST opcode at position %zu, got %d",
+                  end_pos, data_[end_pos]);
         set_error("Expected POST_POST opcode");
         return false;
     }
-
-    // read pointer to POST (4 bytes before POST_POST)
-    uint32_t post_ptr = (data_[end_pos-3] << 24) | (data_[end_pos-2] << 16) |
-                        (data_[end_pos-1] << 8) | data_[end_pos];
 
     // jump to postamble
     pos_ = post_ptr;

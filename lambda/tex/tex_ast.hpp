@@ -10,7 +10,7 @@
 #define LAMBDA_TEX_AST_HPP
 
 #include "../lambda-data.hpp"
-#include "../lib/arena.h"
+#include "lib/arena.h"
 #include "tex_glue.hpp"
 #include <cstdint>
 

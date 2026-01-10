@@ -12,7 +12,7 @@
 #include "tex_font_metrics.hpp"
 #include "tex_math_layout.hpp"
 #include "tex_paragraph.hpp"
-#include "../tree-sitter/api.h"
+#include "lambda/tree-sitter/lib/include/tree_sitter/api.h"
 #include "../../lib/arena.h"
 
 // Forward declarations for Radiant integration
@@ -210,13 +210,15 @@ TexBox* typeset_node(
 // Specific node types
 TexBox* typeset_text(CharNode* node, TypesetContext& ctx);
 TexBox* typeset_math(MathNode* node, TypesetContext& ctx);
-TexBox* typeset_group(GroupNode* node, TypesetContext& ctx);
-TexBox* typeset_paragraph(GroupNode* para, TypesetContext& ctx);
-TexBox* typeset_command(CommandNode* node, TypesetContext& ctx);
+TexBox* typeset_hbox(HBoxNode* node, TypesetContext& ctx);
+TexBox* typeset_vbox(VBoxNode* node, TypesetContext& ctx);
+TexBox* typeset_paragraph_node(ParagraphNode* para, TypesetContext& ctx);
 TexBox* typeset_environment(EnvironmentNode* node, TypesetContext& ctx);
-TexBox* typeset_fraction(FractionNode* node, TypesetContext& ctx);
-TexBox* typeset_radical(RadicalNode* node, TypesetContext& ctx);
-TexBox* typeset_scripts(ScriptNode* node, TypesetContext& ctx);
+
+// TODO: Add these as node types are defined in tex_ast.hpp
+// TexBox* typeset_fraction(FractionNode* node, TypesetContext& ctx);
+// TexBox* typeset_radical(RadicalNode* node, TypesetContext& ctx);
+// TexBox* typeset_scripts(ScriptNode* node, TypesetContext& ctx);
 
 // ============================================================================
 // Utility Functions

@@ -7,9 +7,10 @@
 #define TEX_AST_BUILDER_HPP
 
 #include "tex_ast.hpp"
-#include "../tree-sitter/api.h"
-#include "../../lib/arena.h"
-#include "../../lib/hashmap.h"
+#include "tex_box.hpp"
+#include "lambda/tree-sitter/lib/include/tree_sitter/api.h"
+#include "lib/arena.h"
+#include "lib/hashmap.h"
 
 namespace tex {
 
@@ -21,7 +22,7 @@ struct ASTBuilderConfig {
     bool expand_macros;       // Whether to expand macros during build
     bool track_locations;     // Whether to populate SourceLoc
     bool allow_errors;        // Whether to continue on parse errors
-    Mode initial_mode;        // Starting mode (Text or Math)
+    Mode initial_mode;        // Starting mode (Horizontal or Math)
 };
 
 inline ASTBuilderConfig default_config() {
@@ -29,7 +30,7 @@ inline ASTBuilderConfig default_config() {
         .expand_macros = true,
         .track_locations = true,
         .allow_errors = true,
-        .initial_mode = Mode::Text
+        .initial_mode = Mode::Horizontal
     };
 }
 
@@ -92,7 +93,7 @@ struct ASTBuilder {
 
     // Methods
     Mode current_mode() const {
-        return mode_depth > 0 ? mode_stack[mode_depth - 1] : Mode::Text;
+        return mode_depth > 0 ? mode_stack[mode_depth - 1] : Mode::Horizontal;
     }
 
     void push_mode(Mode m) {

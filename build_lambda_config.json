@@ -2538,6 +2538,105 @@
                 "parallel": true
             },
             {
+                "suite": "tex",
+                "name": "📝 TeX Typesetting Tests",
+                "category": "extended",
+                "tests": [
+                    {
+                        "source": "test/test_tex_ast_gtest.cpp",
+                        "name": "TeX AST Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_tex_ast_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_ast_builder.cpp",
+                            "lambda/tex/tex_box.cpp"
+                        ],
+                        "icon": "🌳"
+                    },
+                    {
+                        "source": "test/test_tex_box_gtest.cpp",
+                        "name": "TeX Box Model Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_tex_box_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_box.cpp"
+                        ],
+                        "icon": "📦"
+                    },
+                    {
+                        "source": "test/test_tex_output_gtest.cpp",
+                        "name": "TeX Output Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_tex_output_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_box.cpp",
+                            "lambda/tex/tex_output.cpp",
+                            "lambda/tex/dvi_parser.cpp"
+                        ],
+                        "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_tex_dvi_comparison.cpp",
+                        "name": "TeX DVI Comparison Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_dvi_comparison.exe",
+                        "additional_sources": [
+                            "lambda/tex/dvi_parser.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔍"
+                    },
+                    {
+                        "source": "test/test_latex_integration_gtest.cpp",
+                        "name": "LaTeX Integration Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_latex_integration_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/dvi_parser.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📝"
+                    }
+                ],
+                "type": "tex",
+                "uses_build_config": true,
+                "parallel": true
+            },
+            {
                 "suite": "extended",
                 "name": "🧪 Extended Development Tests",
                 "category": "extended",
