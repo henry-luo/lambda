@@ -9,10 +9,11 @@
 #define LAMBDA_TEX_BOX_HPP
 
 #include "tex_glue.hpp"
-#include "../lib/arena.h"
+#include "lib/arena.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <new>
+#include <cstring>
 
 namespace tex {
 
@@ -81,7 +82,7 @@ struct TexBox {
     bool is_tight;
 
     // Content data (discriminated union)
-    union {
+    union ContentData {
         // Glyph content
         struct {
             int32_t codepoint;
@@ -142,6 +143,10 @@ struct TexBox {
             TexBox* post_break;
             TexBox* no_break;
         } disc;
+
+        // Default constructor
+        ContentData() { memset(this, 0, sizeof(ContentData)); }
+        ~ContentData() {}
     } content;
 
     // Tree structure

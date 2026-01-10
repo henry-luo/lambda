@@ -9,8 +9,9 @@
 
 #include "tex_box.hpp"
 #include "tex_typeset.hpp"
-#include "../../lib/arena.h"
-#include "../../lib/strbuf.h"
+#include "dvi_parser.hpp"
+#include "lib/arena.h"
+#include "lib/strbuf.h"
 #include <cstdio>
 
 namespace tex {
