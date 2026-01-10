@@ -353,7 +353,7 @@ clean-tree-sitter-minimal:
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-extended test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-reference test-extended test-input run help install uninstall \
 	    lambda format lint check docs intellisense analyze-size \
 	    build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
@@ -410,6 +410,10 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-input-baseline - Run LIBRARY and INPUT baseline test suites only"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline test suite only (alias for test-layout-baseline)"
+	@echo "  test-tex      - Run all TeX typesetting unit tests"
+	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
+	@echo "  test-tex-dvi  - Run TeX DVI comparison tests against reference"
+	@echo "  test-tex-reference - Generate reference DVI files from test/*.tex"
 	@echo "  test-pdf      - Run PDF rendering test suite (compare vs pdf.js)"
 	@echo "  test-pdf-export - Export pdf.js operator lists as JSON references"
 	@echo "  setup-pdf-tests - Set up PDF test fixtures and dependencies"
@@ -771,6 +775,57 @@ test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
 	@echo "=============================================================="
 	@node test/layout/test_radiant_layout.js -c baseline
+
+# TeX Typesetting Test Targets
+# These tests validate LaTeX/TeX typesetting against reference DVI files
+
+test-tex: build-test
+	@echo "Running TeX typesetting test suite..."
+	@echo "=============================================================="
+	@if [ -f "test/test_tex_output_gtest.exe" ]; then \
+		./test/test_tex_output_gtest.exe; \
+	fi
+	@if [ -f "test/test_tex_ast_gtest.exe" ]; then \
+		./test/test_tex_ast_gtest.exe; \
+	fi
+	@if [ -f "test/test_tex_box_gtest.exe" ]; then \
+		./test/test_tex_box_gtest.exe; \
+	fi
+	@if [ -f "test/test_tex_math_layout_gtest.exe" ]; then \
+		./test/test_tex_math_layout_gtest.exe; \
+	fi
+	@if [ -f "test/test_tex_paragraph_gtest.exe" ]; then \
+		./test/test_tex_paragraph_gtest.exe; \
+	fi
+	@if [ -f "test/test_latex_integration_gtest.exe" ]; then \
+		./test/test_latex_integration_gtest.exe; \
+	fi
+
+test-tex-baseline: build-test
+	@echo "Running TeX BASELINE test suite..."
+	@echo "=============================================================="
+	@./test/test_tex_output_gtest.exe --gtest_filter=*Basic*:*Simple* 2>/dev/null || true
+	@./test/test_tex_ast_gtest.exe 2>/dev/null || true
+	@./test/test_tex_box_gtest.exe 2>/dev/null || true
+
+test-tex-dvi: build
+	@echo "Running TeX DVI comparison tests..."
+	@echo "=============================================================="
+	@chmod +x test/latex/run_tex_tests.sh
+	@./test/latex/run_tex_tests.sh
+
+test-tex-reference:
+	@echo "Generating TeX reference DVI files..."
+	@echo "=============================================================="
+	@mkdir -p test/latex/reference
+	@for tex in test/latex/test_*.tex; do \
+		if [ -f "$$tex" ]; then \
+			base=$$(basename "$$tex" .tex); \
+			echo "  Compiling: $$base"; \
+			latex -output-directory=test/latex/reference -interaction=nonstopmode "$$tex" > /dev/null 2>&1 || echo "    Warning: $$base failed"; \
+		fi; \
+	done
+	@echo "Reference DVI files generated in test/latex/reference/"
 
 # PDF Testing targets
 test-pdf: build
