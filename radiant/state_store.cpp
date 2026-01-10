@@ -1152,38 +1152,15 @@ void caret_move(RadiantState* state, int delta) {
                 // Skip over collapsed whitespace (consecutive spaces/newlines)
                 new_offset = skip_collapsed_whitespace_forward(str, new_offset, text_length, preserve_ws);
                 
-                // If we reached the end of text, immediately cross to next view
+                // If we reached the end of text, stop at boundary first (don't cross yet)
                 if (new_offset >= text_length) {
-                    // Find next view with meaningful content
-                    View* next_view = find_next_navigable_view(view);
-                    while (next_view && !has_meaningful_content(next_view)) {
-                        next_view = find_next_navigable_view(next_view);
-                    }
-                    if (next_view) {
-                        caret->view = next_view;
-                        // Skip leading whitespace in new view (check its white-space property)
-                        bool next_preserve_ws = should_preserve_whitespace(next_view);
-                        if (next_view->is_text()) {
-                            ViewText* next_text = (ViewText*)next_view;
-                            unsigned char* next_str = next_text->text_data();
-                            int next_len = next_str ? strlen((char*)next_str) : 0;
-                            caret->char_offset = skip_collapsed_whitespace_forward(next_str, 0, next_len, next_preserve_ws);
-                        } else {
-                            caret->char_offset = 0;
-                        }
-                        caret->line = 0;
-                        caret->column = 0;
-                        log_debug("caret_move: crossed to next view %p (type=%d)", 
-                            next_view, next_view->view_type);
-                    } else {
-                        // No next view, stay at end
-                        caret->char_offset = text_length;
-                    }
+                    caret->char_offset = text_length;
+                    log_debug("caret_move: stopped at end of view %p (offset=%d)", view, text_length);
                 } else {
                     caret->char_offset = new_offset;
                 }
             } else {
-                // Already at end of text, try to move to next view
+                // Already at end of text, now cross to next view
                 View* next_view = find_next_navigable_view(view);
                 while (next_view && !has_meaningful_content(next_view)) {
                     next_view = find_next_navigable_view(next_view);
@@ -1216,36 +1193,15 @@ void caret_move(RadiantState* state, int delta) {
                 // Skip over collapsed whitespace backwards
                 new_offset = skip_collapsed_whitespace_backward(str, new_offset, preserve_ws);
                 
-                // If we reached the start, cross to previous view
+                // If we reached the start, stop at boundary first (don't cross yet)
                 if (new_offset <= 0) {
-                    View* prev_view = find_prev_navigable_view(view);
-                    while (prev_view && !has_meaningful_content(prev_view)) {
-                        prev_view = find_prev_navigable_view(prev_view);
-                    }
-                    if (prev_view) {
-                        caret->view = prev_view;
-                        // Position at end of prev view, skipping trailing whitespace
-                        int prev_length = get_view_content_length(prev_view);
-                        if (prev_view->is_text()) {
-                            ViewText* prev_text = (ViewText*)prev_view;
-                            unsigned char* prev_str = prev_text->text_data();
-                            bool prev_preserve_ws = should_preserve_whitespace(prev_view);
-                            caret->char_offset = skip_collapsed_whitespace_backward(prev_str, prev_length, prev_preserve_ws);
-                        } else {
-                            caret->char_offset = prev_length;
-                        }
-                        caret->line = 0;
-                        caret->column = caret->char_offset;
-                        log_debug("caret_move: crossed to prev view %p at offset %d", 
-                            prev_view, caret->char_offset);
-                    } else {
-                        caret->char_offset = 0;
-                    }
+                    caret->char_offset = 0;
+                    log_debug("caret_move: stopped at start of view %p", view);
                 } else {
                     caret->char_offset = new_offset;
                 }
             } else {
-                // At start of text, try to move to previous view with meaningful content
+                // At start of text, now cross to previous view
                 View* prev_view = find_prev_navigable_view(view);
                 while (prev_view && !has_meaningful_content(prev_view)) {
                     prev_view = find_prev_navigable_view(prev_view);
