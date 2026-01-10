@@ -688,6 +688,13 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
               mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
 
+    // Skip leading collapsed whitespace (spaces, tabs, newlines at the start)
+    // These characters don't contribute to visual width but are part of the text
+    while (p < end && (is_space(*p) || *p == '\n' || *p == '\r' || *p == '\t')) {
+        p++;
+        byte_offset++;
+    }
+
     while (p < end) {
         float wd = 0;
         int bytes = 1;  // number of bytes for current character
@@ -697,7 +704,6 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
             // At end of visual content - treat rest as trailing whitespace
             break;
         }
-
         if (is_space(*p)) {
             if (has_space) {
                 // Consecutive spaces are collapsed - skip without adding width
