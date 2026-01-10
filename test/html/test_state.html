@@ -526,6 +526,53 @@
             gap: 15px;
         }
         
+        /* ============================================
+           TEST 12: Select dropdown
+           ============================================ */
+        .select-test {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .select-row {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .select-label {
+            font-weight: 600;
+            min-width: 100px;
+        }
+        
+        .styled-select {
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            background-color: #fff;
+            cursor: pointer;
+            min-width: 150px;
+        }
+        
+        .styled-select:hover {
+            border-color: #4a90d9;
+        }
+        
+        .styled-select:focus {
+            border-color: #4a90d9;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.2);
+        }
+        
+        .styled-select:disabled {
+            background-color: #f0f0f0;
+            color: #999;
+            cursor: not-allowed;
+        }
+        
         .selection-textarea {
             width: 100%;
             max-width: 500px;
@@ -645,6 +692,77 @@
             <li>Click to focus, observe <code>:focus</code> styles</li>
             <li>Tab to focus, observe <code>:focus-visible</code> outline (dashed orange)</li>
         </ul>
+    </div>
+
+    <!-- TEST 12: Select Dropdown -->
+    <div class="section">
+        <h2>Test 12: Select Dropdown</h2>
+        <p class="description">Click on select elements to open dropdown. Use arrow keys to navigate, Enter to select, Escape to close.</p>
+        <div class="select-test">
+            <div class="select-row">
+                <span class="select-label">Basic select:</span>
+                <select class="styled-select" id="select-basic">
+                    <option value="apple">Apple</option>
+                    <option value="banana">Banana</option>
+                    <option value="cherry">Cherry</option>
+                    <option value="date">Date</option>
+                    <option value="elderberry">Elderberry</option>
+                </select>
+            </div>
+            
+            <div class="select-row">
+                <span class="select-label">Pre-selected:</span>
+                <select class="styled-select" id="select-preselected">
+                    <option value="red">Red</option>
+                    <option value="green" selected>Green (pre-selected)</option>
+                    <option value="blue">Blue</option>
+                    <option value="yellow">Yellow</option>
+                </select>
+            </div>
+            
+            <div class="select-row">
+                <span class="select-label">Disabled:</span>
+                <select class="styled-select" id="select-disabled" disabled>
+                    <option value="1">Option 1</option>
+                    <option value="2">Option 2</option>
+                    <option value="3">Option 3</option>
+                </select>
+            </div>
+            
+            <div class="select-row">
+                <span class="select-label">Many options:</span>
+                <select class="styled-select" id="select-many">
+                    <option value="jan">January</option>
+                    <option value="feb">February</option>
+                    <option value="mar">March</option>
+                    <option value="apr">April</option>
+                    <option value="may">May</option>
+                    <option value="jun">June</option>
+                    <option value="jul">July</option>
+                    <option value="aug">August</option>
+                    <option value="sep">September</option>
+                    <option value="oct">October</option>
+                    <option value="nov">November</option>
+                    <option value="dec">December</option>
+                </select>
+            </div>
+            
+            <div class="select-row">
+                <span class="select-label">With optgroup:</span>
+                <select class="styled-select" id="select-optgroup">
+                    <optgroup label="Fruits">
+                        <option value="apple">Apple</option>
+                        <option value="banana">Banana</option>
+                        <option value="orange">Orange</option>
+                    </optgroup>
+                    <optgroup label="Vegetables">
+                        <option value="carrot">Carrot</option>
+                        <option value="broccoli">Broccoli</option>
+                        <option value="spinach">Spinach</option>
+                    </optgroup>
+                </select>
+            </div>
+        </div>
     </div>
 
     <!-- TEST 7: :checked -->

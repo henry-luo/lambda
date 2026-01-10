@@ -849,6 +849,40 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->name = block->get_attribute("name");
             if (block->get_attribute("disabled")) block->form->disabled = 1;
             if (block->get_attribute("multiple")) block->form->multiple = 1;
+            
+            // Count options and find selected index
+            int option_count = 0;
+            int selected_idx = -1;
+            DomNode* child = block->first_child;
+            while (child) {
+                if (child->is_element()) {
+                    DomElement* child_elem = (DomElement*)child;
+                    if (child_elem->tag() == HTM_TAG_OPTION) {
+                        if (child_elem->get_attribute("selected") && selected_idx < 0) {
+                            selected_idx = option_count;
+                        }
+                        option_count++;
+                    } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
+                        // Count options inside optgroup
+                        DomNode* opt_child = child_elem->first_child;
+                        while (opt_child) {
+                            if (opt_child->is_element()) {
+                                DomElement* opt_elem = (DomElement*)opt_child;
+                                if (opt_elem->tag() == HTM_TAG_OPTION) {
+                                    if (opt_elem->get_attribute("selected") && selected_idx < 0) {
+                                        selected_idx = option_count;
+                                    }
+                                    option_count++;
+                                }
+                            }
+                            opt_child = opt_child->next_sibling;
+                        }
+                    }
+                }
+                child = child->next_sibling;
+            }
+            block->form->option_count = option_count;
+            block->form->selected_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->form->intrinsic_width = FormDefaults::SELECT_WIDTH;
