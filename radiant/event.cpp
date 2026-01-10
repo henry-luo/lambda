@@ -828,6 +828,129 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     *out_height = rect->height;  // use rect height as caret height
 }
 
+/**
+ * Find the TextRect containing a given character offset
+ * Returns the TextRect that contains the offset, or the last rect if offset is beyond all rects
+ */
+TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
+    if (!text || !text->rect) return nullptr;
+    
+    TextRect* rect = text->rect;
+    TextRect* prev_rect = rect;
+    
+    while (rect) {
+        int rect_start = rect->start_index;
+        int rect_end = rect->start_index + rect->length;
+        
+        // Check if offset is within this rect
+        if (char_offset >= rect_start && char_offset <= rect_end) {
+            return rect;
+        }
+        
+        prev_rect = rect;
+        rect = rect->next;
+    }
+    
+    // If offset is beyond all rects, return the last one
+    return prev_rect;
+}
+
+/**
+ * Update caret visual position after movement operations
+ * Must be called after caret_move, caret_move_line, caret_move_to
+ * Handles text views, images, and other navigable views
+ */
+void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
+    if (!uicon || !state || !state->caret || !state->caret->view) return;
+    
+    CaretState* caret = state->caret;
+    View* view = caret->view;
+    
+    float caret_x = 0, caret_y = 0, caret_height = 16;
+    
+    // Handle different view types
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        if (!text->rect) {
+            log_debug("[CARET-VISUAL] Text view has no rect");
+            return;
+        }
+        
+        // Find the TextRect containing the current offset
+        TextRect* rect = find_text_rect_for_offset(text, caret->char_offset);
+        if (!rect) {
+            log_debug("[CARET-VISUAL] Could not find rect for offset %d", caret->char_offset);
+            return;
+        }
+        
+        // Setup event context for font access
+        EventContext evcon;
+        memset(&evcon, 0, sizeof(EventContext));
+        evcon.ui_context = uicon;
+        
+        // Setup font from text view
+        if (text->font) {
+            setup_font(uicon, &evcon.font, text->font);
+        } else {
+            // Fall back to default font
+            DomDocument* doc = uicon->document;
+            if (doc && doc->view_tree) {
+                FontProp* default_font = doc->view_tree->html_version == HTML5 
+                    ? &uicon->default_font : &uicon->legacy_default_font;
+                setup_font(uicon, &evcon.font, default_font);
+            }
+        }
+        
+        // Calculate visual position for text
+        calculate_position_from_char_offset(&evcon, text, rect, caret->char_offset,
+            &caret_x, &caret_y, &caret_height);
+            
+    } else if (view->view_type == RDT_VIEW_MARKER) {
+        // For markers: caret is at left edge (offset 0) or right edge (offset 1)
+        ViewMarker* marker = (ViewMarker*)view;
+        if (caret->char_offset == 0) {
+            caret_x = view->x;
+        } else {
+            caret_x = view->x + marker->width;
+        }
+        caret_y = view->y;
+        caret_height = marker->height;
+        log_debug("[CARET-VISUAL] Marker view: x=%.1f y=%.1f height=%.1f",
+            caret_x, caret_y, caret_height);
+            
+    } else {
+        // Unsupported view type
+        log_debug("[CARET-VISUAL] Unsupported view type %d", view->view_type);
+        return;
+    }
+    
+    // Update caret visual position
+    caret->x = caret_x;
+    caret->y = caret_y;
+    caret->height = caret_height;
+    
+    // Calculate iframe offset by walking up parent chain
+    float chain_x = 0, chain_y = 0;
+    View* parent = view->parent;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
+            chain_x += ((ViewBlock*)parent)->x;
+            chain_y += ((ViewBlock*)parent)->y;
+        }
+        parent = parent->parent;
+    }
+    
+    // For now, assume no iframe (simple case)
+    // TODO: detect iframe context and calculate proper offset
+    caret->iframe_offset_x = 0;
+    caret->iframe_offset_y = 0;
+    
+    log_debug("[CARET-VISUAL] Updated caret: view_type=%d offset=%d x=%.1f y=%.1f height=%.1f",
+        view->view_type, caret->char_offset, caret_x, caret_y, caret_height);
+}
+
 // ============================================================================
 // Main Event Handler
 // ============================================================================
@@ -1273,16 +1396,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             break;
         }
 
-        // Handle caret/selection navigation for focused editable elements
-        if (focused && state->caret) {
+        // Handle caret/selection navigation when we have a caret with a view
+        // The caret view is set when clicking on text, which may not be a focusable element
+        View* caret_view = (state->caret && state->caret->view) ? state->caret->view : nullptr;
+        if (caret_view) {
             bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
             bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
             
             // Get text data for UTF-8 aware navigation
             unsigned char* text_data = nullptr;
-            if (focused->is_text()) {
-                text_data = ((ViewText*)focused)->text_data();
+            if (caret_view->is_text()) {
+                text_data = ((ViewText*)caret_view)->text_data();
             }
 
             switch (key_event->key) {
@@ -1290,7 +1415,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (shift) {
                         // Extend selection left (UTF-8 aware)
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         int new_offset = text_data 
                             ? utf8_offset_by_chars(text_data, state->caret->char_offset, -1)
@@ -1300,6 +1425,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move(state, ctrl ? -10 : -1);  // word jump with ctrl
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
@@ -1307,7 +1433,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (shift) {
                         // Extend selection right (UTF-8 aware)
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         int new_offset = text_data
                             ? utf8_offset_by_chars(text_data, state->caret->char_offset, 1)
@@ -1317,13 +1443,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move(state, ctrl ? 10 : 1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_UP:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         // Calculate line start/end for extending selection
                         caret_move_line(state, -1);
@@ -1332,13 +1459,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_line(state, -1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_DOWN:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         caret_move_line(state, 1);
                         selection_extend(state, state->caret->char_offset);
@@ -1346,13 +1474,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_line(state, 1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_HOME:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         caret_move_to(state, cmd ? 2 : 0);  // doc start or line start
                         selection_extend(state, state->caret->char_offset);
@@ -1360,13 +1489,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_to(state, cmd ? 2 : 0);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_END:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         caret_move_to(state, cmd ? 3 : 1);  // doc end or line end
                         selection_extend(state, state->caret->char_offset);
@@ -1374,6 +1504,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_to(state, cmd ? 3 : 1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
