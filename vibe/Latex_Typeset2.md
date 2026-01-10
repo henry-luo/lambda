@@ -4,7 +4,7 @@
 
 This document describes the LaTeX typesetting library for Lambda. The goal is to produce publication-quality typeset output comparable to TeX/LaTeX, validated against DVI reference files.
 
-**Status**: All core phases complete (1-5). **140 tests passing.** Legacy code removed.
+**Status**: All core phases complete (1-5). **173 tests passing.** Legacy code removed. Hyphenation implemented.
 
 ## Implementation Status
 
@@ -21,6 +21,7 @@ This document describes the LaTeX typesetting library for Lambda. The goal is to
 | `tex_pagebreak.hpp/cpp` | ✅ Complete | Optimal page breaking |
 | `tex_font_metrics.hpp` | ✅ Complete | Font metric structures (TFM-compatible) |
 | `tex_math_bridge.hpp/cpp` | ✅ Complete | Math bridge (inline/display math, fractions, radicals, scripts) |
+| `tex_hyphen.hpp/cpp` | ✅ Complete | Liang's hyphenation algorithm (TeXBook Appendix H) |
 | `dvi_parser.hpp/cpp` | ✅ Complete | DVI parsing for validation |
 
 ### Legacy Components (REMOVED)
@@ -622,7 +623,7 @@ test/tex/
 
 ## Appendix A: Code Status
 
-### Active Files (22 total)
+### Active Files (24 total)
 - `tex_node.hpp/cpp` - Unified node system (30+ types) ✅
 - `tex_glue.hpp` - Glue/spacing primitives ✅
 - `tex_tfm.hpp/cpp` - TFM parser with built-in fallbacks ✅
@@ -631,6 +632,7 @@ test/tex/
 - `tex_vlist.hpp/cpp` - VList builder ✅
 - `tex_pagebreak.hpp/cpp` - Optimal page breaking ✅
 - `tex_math_bridge.hpp/cpp` - Math integration (Phase 4) ✅
+- `tex_hyphen.hpp/cpp` - Liang's hyphenation algorithm ✅
 - `tex_dvi_out.hpp/cpp` - DVI output generation ✅
 - `tex_pdf_out.hpp/cpp` - PDF output generation ✅
 - `dvi_parser.hpp/cpp` - DVI validation tool ✅
@@ -658,11 +660,11 @@ The following legacy/broken files were removed after Phase 4 completion:
 | 12 | Glue | tex_glue.hpp | ✅ |
 | 14 | Line breaking | tex_linebreak.cpp | ✅ |
 | 15 | Page breaking | tex_pagebreak.cpp | ✅ |
-| 17 | Math modes | tex_math_bridge.cpp | 📋 |
-| 18 | Math spacing | radiant/layout_math.cpp | ✅ |
+| 17 | Math modes | tex_math_bridge.cpp | ✅ |
+| 18 | Math spacing | tex_math_bridge.cpp | ✅ |
 | Appendix A | DVI format | tex_dvi_out.cpp | ✅ |
-| Appendix G | Math typesetting | radiant/layout_math.cpp | ✅ |
-| Appendix H | Hyphenation | tex_hyphen.cpp | 📋 |
+| Appendix G | Math typesetting | tex_math_bridge.cpp | ✅ |
+| Appendix H | Hyphenation | tex_hyphen.cpp | ✅ |
 
 ---
 
@@ -670,6 +672,6 @@ The following legacy/broken files were removed after Phase 4 completion:
 
 1. ~~**Phase 4**: Bridge Radiant math layout to TexNode system~~ ✅ COMPLETE
 2. ~~**Cleanup**: Remove legacy files after migration complete~~ ✅ COMPLETE (19 files removed)
-3. **SVG Output**: Add SVG backend for web rendering (optional)
-4. **Hyphenation**: Implement TeX hyphenation patterns (optional)
+3. ~~**Hyphenation**: Implement TeX hyphenation patterns~~ ✅ COMPLETE (Liang's algorithm)
+4. **SVG Output**: Add SVG backend for web rendering (optional)
 5. **Lambda Integration**: Connect TeX typesetter to Lambda document pipeline

@@ -2705,6 +2705,32 @@
                             "."
                         ],
                         "icon": "📤"
+                    },
+                    {
+                        "source": "test/test_tex_hyphen_gtest.cpp",
+                        "name": "TeX Hyphenation Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_hyphen_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "➖"
                     }
                 ],
                 "type": "tex",
