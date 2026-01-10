@@ -623,6 +623,12 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
 
         ui_context.document = doc;
 
+        // Create RadiantState for interactive state management (caret, selection, focus, etc.)
+        if (!doc->state) {
+            doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
+            log_debug("view_doc_in_window: created RadiantState for document");
+        }
+
         // Process @font-face rules before layout
         process_document_font_faces(&ui_context, doc);
 
