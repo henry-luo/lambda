@@ -409,6 +409,25 @@
             font-weight: 600;
         }
         
+        /* Direct checkbox/radio :checked styling for testing */
+        input[type="checkbox"]:checked,
+        input[type="radio"]:checked {
+            outline: 2px solid #4a90d9;
+            outline-offset: 1px;
+        }
+        
+        /* Checkbox/radio styling for visual feedback */
+        .standalone-check {
+            width: 20px;
+            height: 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        
+        .standalone-check:checked {
+            background-color: #4a90d9;
+        }
+        
         /* ============================================
            TEST 8: :disabled state
            ============================================ */
@@ -628,6 +647,72 @@
         </ul>
     </div>
 
+    <!-- TEST 7: :checked -->
+    <div class="section">
+        <h2>Test 7: :checked State</h2>
+        <p class="description">Toggle checkboxes and radio buttons. Label text changes style when checked.</p>
+        <div class="checked-test">
+            <div class="checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox">
+                    <span class="checkbox-text">Option A (checkbox)</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" checked>
+                    <span class="checkbox-text">Option B (pre-checked)</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox">
+                    <span class="checkbox-text">Option C (checkbox)</span>
+                </label>
+            </div>
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="radio-test">
+                    <span class="radio-text">Choice 1 (radio)</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="radio-test" checked>
+                    <span class="radio-text">Choice 2 (pre-selected)</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="radio-test">
+                    <span class="radio-text">Choice 3 (radio)</span>
+                </label>
+            </div>
+            
+            <p class="description" style="margin-top: 15px;">Standalone checkboxes and radios (click directly on the control):</p>
+            <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <input type="checkbox" class="standalone-check" id="check1">
+                    <label for="check1">Checkbox 1</label>
+                </div>
+                <div>
+                    <input type="checkbox" class="standalone-check" id="check2" checked>
+                    <label for="check2">Checkbox 2 (pre-checked)</label>
+                </div>
+                <div>
+                    <input type="checkbox" class="standalone-check" id="check3" disabled>
+                    <label for="check3">Checkbox 3 (disabled)</label>
+                </div>
+            </div>
+            <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin-top: 10px;">
+                <div>
+                    <input type="radio" class="standalone-check" name="standalone-radio" id="radio1">
+                    <label for="radio1">Radio 1</label>
+                </div>
+                <div>
+                    <input type="radio" class="standalone-check" name="standalone-radio" id="radio2" checked>
+                    <label for="radio2">Radio 2 (pre-selected)</label>
+                </div>
+                <div>
+                    <input type="radio" class="standalone-check" name="standalone-radio" id="radio3">
+                    <label for="radio3">Radio 3</label>
+                </div>
+            </div>
+        </div>
+    </div>    
+
     <!-- TEST 1: :hover -->
     <div class="section">
         <h2>Test 1: :hover State</h2>
@@ -720,42 +805,6 @@
                 <button class="tab-item tab-custom" tabindex="10">tabindex=10 (later)</button>
                 <button class="tab-item tab-skip" tabindex="-1">tabindex=-1 (skipped)</button>
                 <button class="tab-item tab-custom" tabindex="1">tabindex=1 (earlier)</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- TEST 7: :checked -->
-    <div class="section">
-        <h2>Test 7: :checked State</h2>
-        <p class="description">Toggle checkboxes and radio buttons. Label text changes style when checked.</p>
-        <div class="checked-test">
-            <div class="checkbox-group">
-                <label class="checkbox-label">
-                    <input type="checkbox">
-                    <span class="checkbox-text">Option A (checkbox)</span>
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" checked>
-                    <span class="checkbox-text">Option B (pre-checked)</span>
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox">
-                    <span class="checkbox-text">Option C (checkbox)</span>
-                </label>
-            </div>
-            <div class="radio-group">
-                <label class="radio-label">
-                    <input type="radio" name="radio-test">
-                    <span class="radio-text">Choice 1 (radio)</span>
-                </label>
-                <label class="radio-label">
-                    <input type="radio" name="radio-test" checked>
-                    <span class="radio-text">Choice 2 (pre-selected)</span>
-                </label>
-                <label class="radio-label">
-                    <input type="radio" name="radio-test">
-                    <span class="radio-text">Choice 3 (radio)</span>
-                </label>
             </div>
         </div>
     </div>
