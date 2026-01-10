@@ -1,7 +1,9 @@
 #include "handler.hpp"
 #include "state_store.hpp"
+#include "form_control.hpp"
 
 #include "../lib/log.h"
+#include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -423,6 +425,281 @@ void update_active_state(EventContext* evcon, View* target, bool is_active) {
     state->needs_repaint = true;
 }
 
+// ============================================================================
+// Checkbox and Radio Button State Handling
+// ============================================================================
+
+/**
+ * Check if an element is a checkbox input
+ */
+static bool is_checkbox(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewElement* elem = (ViewElement*)view;
+    if (elem->tag() != HTM_TAG_INPUT) return false;
+    const char* type = elem->get_attribute("type");
+    return type && strcmp(type, "checkbox") == 0;
+}
+
+/**
+ * Check if an element is a radio button input
+ */
+static bool is_radio(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewElement* elem = (ViewElement*)view;
+    if (elem->tag() != HTM_TAG_INPUT) return false;
+    const char* type = elem->get_attribute("type");
+    return type && strcmp(type, "radio") == 0;
+}
+
+/**
+ * Find all radio buttons in the same name group and uncheck them
+ * @param root The document root to search from
+ * @param name The radio button name attribute to match
+ * @param exclude The radio button to exclude from unchecking (the one being checked)
+ */
+static void uncheck_radio_group(View* root, const char* name, View* exclude, RadiantState* state) {
+    if (!root || !name) return;
+
+    // Traverse view tree to find all radio buttons with matching name
+    View* current = root;
+    while (current) {
+        if (current != exclude && is_radio(current)) {
+            ViewElement* elem = (ViewElement*)current;
+            const char* elem_name = elem->get_attribute("name");
+            if (elem_name && strcmp(elem_name, name) == 0) {
+                // Uncheck this radio button
+                if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED)) {
+                    state_set_bool(state, current, STATE_CHECKED, false);
+                    sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
+                    // Also update FormControlProp if present
+                    if (current->is_block()) {
+                        ViewBlock* block = (ViewBlock*)current;
+                        if (block->form) {
+                            block->form->checked = 0;
+                        }
+                    }
+                    log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
+                }
+            }
+        }
+
+        // Traverse to next node (depth-first)
+        if (current->is_block()) {
+            ViewBlock* block = (ViewBlock*)current;
+            if (block->first_child) {
+                current = block->first_child;
+                continue;
+            }
+        }
+        // No children, try next sibling
+        if (current->next()) {
+            current = current->next();
+            continue;
+        }
+        // Go up to find next sibling of ancestor
+        current = current->parent;
+        while (current && !current->next()) {
+            current = current->parent;
+        }
+        if (current) {
+            current = current->next();
+        }
+    }
+}
+
+/**
+ * Find the associated checkbox/radio input for a target element.
+ * If target is already a checkbox/radio, returns it.
+ * If target is inside a label, finds the checkbox/radio:
+ *   - By "for" attribute matching input id
+ *   - By finding an input child inside the label
+ * @return The checkbox/radio input View, or NULL if not found
+ */
+static View* find_checkbox_radio_input(View* target) {
+    if (!target) return nullptr;
+
+    log_info("find_checkbox_radio_input: starting search from target=%p", target);
+
+    // Check if target itself is a checkbox/radio
+    if (is_checkbox(target) || is_radio(target)) {
+        log_info("find_checkbox_radio_input: target is checkbox/radio");
+        return target;
+    }
+
+    // Walk up the tree looking for a label element
+    View* current = target;
+    View* label_element = nullptr;
+    while (current) {
+        if (current->is_element()) {
+            ViewElement* elem = (ViewElement*)current;
+            log_info("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
+            if (elem->tag() == HTM_TAG_LABEL) {
+                label_element = current;
+                log_info("find_checkbox_radio_input: found label element");
+                break;
+            }
+            // If we hit a checkbox/radio directly, use it
+            if (is_checkbox(current) || is_radio(current)) {
+                log_info("find_checkbox_radio_input: found checkbox/radio in ancestor chain");
+                return current;
+            }
+        }
+        current = current->parent;
+    }
+
+    if (!label_element) {
+        log_info("find_checkbox_radio_input: no label found in ancestor chain");
+        return nullptr;
+    }
+
+    ViewElement* label = (ViewElement*)label_element;
+
+    // Check for "for" attribute pointing to an input id
+    const char* for_attr = label->get_attribute("for");
+    if (for_attr && for_attr[0]) {
+        log_info("find_checkbox_radio_input: label has for='%s'", for_attr);
+        // Need to find input with matching id in the document
+        // Walk from document root to find matching id
+        View* root = label_element;
+        while (root->parent) root = root->parent;
+
+        // Simple DFS to find element with matching id
+        View* search = root;
+        while (search) {
+            if (search->is_element()) {
+                ViewElement* elem = (ViewElement*)search;
+                const char* id = elem->get_attribute("id");
+                if (id && strcmp(id, for_attr) == 0) {
+                    if (is_checkbox(search) || is_radio(search)) {
+                        return search;
+                    }
+                }
+            }
+            // Depth-first traversal
+            if (search->is_block()) {
+                ViewBlock* block = (ViewBlock*)search;
+                if (block->first_child) {
+                    search = block->first_child;
+                    continue;
+                }
+            }
+            if (search->next()) {
+                search = search->next();
+                continue;
+            }
+            search = search->parent;
+            while (search && !search->next()) {
+                search = search->parent;
+            }
+            if (search) search = search->next();
+        }
+    }
+
+    // No "for" attribute or not found - look for input child inside label
+    View* child = label->first_child;
+    while (child) {
+        if (is_checkbox(child) || is_radio(child)) {
+            return child;
+        }
+        // Check children recursively
+        if (child->is_block()) {
+            ViewBlock* block = (ViewBlock*)child;
+            View* nested = block->first_child;
+            while (nested) {
+                if (is_checkbox(nested) || is_radio(nested)) {
+                    return nested;
+                }
+                nested = nested->next();
+            }
+        }
+        child = child->next();
+    }
+
+    return nullptr;
+}
+
+/**
+ * Toggle checkbox or radio button state on click
+ * @return true if the click was handled (element was checkbox/radio)
+ */
+static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
+    // Find the actual checkbox/radio input (may be target or associated via label)
+    View* input = find_checkbox_radio_input(target);
+    if (!input) return false;
+
+    RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
+    if (!state) return false;
+
+    ViewElement* elem = (ViewElement*)input;
+
+    // Check if disabled
+    if (dom_element_has_pseudo_state(elem, PSEUDO_STATE_DISABLED)) {
+        log_debug("handle_checkbox_radio_click: element is disabled");
+        return false;
+    }
+
+    if (is_checkbox(input)) {
+        // Toggle checkbox state
+        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool new_state = !is_checked;
+
+        state_set_bool(state, input, STATE_CHECKED, new_state);
+        sync_pseudo_state(input, PSEUDO_STATE_CHECKED, new_state);
+
+        // Update FormControlProp if present
+        log_debug("handle_checkbox_radio_click: input->is_block()=%d view_type=%d", input->is_block(), input->view_type);
+        if (input->is_block()) {
+            ViewBlock* block = (ViewBlock*)input;
+            log_debug("handle_checkbox_radio_click: block->form=%p", (void*)block->form);
+            if (block->form) {
+                block->form->checked = new_state ? 1 : 0;
+                log_debug("handle_checkbox_radio_click: set form->checked=%d", block->form->checked);
+            }
+        }
+
+        log_info("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
+        state->needs_repaint = true;
+        return true;
+    }
+
+    if (is_radio(input)) {
+        // Radio button: only allow checking, not unchecking by click
+        // Also need to uncheck other radio buttons in the same name group
+        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+
+        if (!is_checked) {
+            // Uncheck other radio buttons in the same group
+            const char* name = elem->get_attribute("name");
+            if (name) {
+                // Find the document root
+                View* root = input;
+                while (root->parent) {
+                    root = root->parent;
+                }
+                uncheck_radio_group(root, name, input, state);
+            }
+
+            // Check this radio button
+            state_set_bool(state, input, STATE_CHECKED, true);
+            sync_pseudo_state(input, PSEUDO_STATE_CHECKED, true);
+
+            // Update FormControlProp if present
+            if (input->is_block()) {
+                ViewBlock* block = (ViewBlock*)input;
+                if (block->form) {
+                    block->form->checked = 1;
+                }
+            }
+
+            log_info("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
+            state->needs_repaint = true;
+        }
+        return true;
+    }
+
+    return false;
+}
+
 /**
  * Check if an element is focusable
  */
@@ -663,7 +940,7 @@ void view_to_absolute_position(View* view, float rel_x, float rel_y,
 
 /**
  * Calculate character offset from mouse click position within a text rect
- * Returns the character offset closest to the click position
+ * Returns the byte offset closest to the click position, aligned to UTF-8 character boundaries
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, int mouse_x, int mouse_y) {
@@ -673,7 +950,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
 
     unsigned char* p = str + rect->start_index;
     unsigned char* end = p + max(rect->length, 0);
-    int char_offset = rect->start_index;
+    int byte_offset = rect->start_index;  // track byte offset for return value
 
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
@@ -687,57 +964,82 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
               mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
 
-    for (; p < end; p++, char_offset++) {
+    // Skip leading collapsed whitespace (spaces, tabs, newlines at the start)
+    // These characters don't contribute to visual width but are part of the text
+    while (p < end && (is_space(*p) || *p == '\n' || *p == '\r' || *p == '\t')) {
+        p++;
+        byte_offset++;
+    }
+
+    while (p < end) {
         float wd = 0;
+        int bytes = 1;  // number of bytes for current character
 
         // Skip newlines and carriage returns - they don't have visual width
         if (*p == '\n' || *p == '\r') {
             // At end of visual content - treat rest as trailing whitespace
             break;
         }
-
         if (is_space(*p)) {
             if (has_space) {
                 // Consecutive spaces are collapsed - skip without adding width
+                p++;
+                byte_offset++;
                 continue;
             }
             has_space = true;
             wd = evcon->font.style->space_width;
+            bytes = 1;  // spaces are always single byte
         } else {
             has_space = false;
+            // Decode UTF-8 codepoint to handle multi-byte characters
+            uint32_t codepoint;
+            bytes = utf8_to_codepoint(p, &codepoint);
+            if (bytes <= 0) {
+                // Invalid UTF-8 sequence, skip single byte
+                bytes = 1;
+                codepoint = *p;
+            }
             // Use load_glyph to match layout calculation
-            FT_GlyphSlot glyph = load_glyph(evcon->ui_context, evcon->font.ft_face, evcon->font.style, *p, false);
+            FT_GlyphSlot glyph = load_glyph(evcon->ui_context, evcon->font.ft_face, evcon->font.style, codepoint, false);
             if (!glyph) {
-                log_error("Could not load character '%c'", *p);
+                log_error("Could not load codepoint U+%04X", codepoint);
+                p += bytes;
+                byte_offset += bytes;
                 continue;
             }
             wd = glyph->advance.x / 64.0 / pixel_ratio;
         }
 
         // Add letter-spacing (applied after each character except the last)
-        if (p + 1 < end && *(p+1) != '\n' && *(p+1) != '\r') {
+        unsigned char* next_p = p + bytes;
+        if (next_p < end && *next_p != '\n' && *next_p != '\r') {
             wd += letter_spacing;
         }
 
         float char_mid = x + wd / 2.0f;
 
-        // If mouse is before the midpoint of this character, return previous offset
+        // If mouse is before the midpoint of this character, return current byte offset
+        // (caret should be placed before this character)
         if (mouse_x < char_mid) {
-            log_debug("calculate_char_offset: matched char='%c' at offset %d", *p, char_offset);
-            return char_offset;
+            log_debug("calculate_char_offset: matched at byte_offset %d", byte_offset);
+            return byte_offset;
         }
 
         prev_x = x;
         x += wd;
+        p += bytes;
+        byte_offset += bytes;
     }
 
-    log_debug("calculate_char_offset: end of text, returning offset=%d", char_offset);
+    log_debug("calculate_char_offset: end of text, returning byte_offset=%d", byte_offset);
     // Mouse is after all characters - return end offset
-    return char_offset;
+    return byte_offset;
 }
 
 /**
- * Calculate visual position (x, y, height) from character offset within a text rect
+ * Calculate visual position (x, y, height) from byte offset within a text rect
+ * The target_offset is a byte offset aligned to UTF-8 character boundaries
  * Returns the x position relative to the text rect's origin
  */
 void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
@@ -749,7 +1051,7 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
 
     unsigned char* p = str + rect->start_index;
     unsigned char* end = p + max(rect->length, 0);
-    int char_offset = rect->start_index;
+    int byte_offset = rect->start_index;  // track byte offset
     float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
         ? evcon->ui_context->pixel_ratio : 1.0f;
     bool has_space = false;
@@ -759,34 +1061,164 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
         target_offset, rect->x, rect->start_index, pixel_ratio,
         evcon->font.ft_face ? evcon->font.ft_face->size->metrics.y_ppem : -1);
     
-    for (; p < end && char_offset < target_offset; p++, char_offset++) {
+    while (p < end && byte_offset < target_offset) {
         float wd = 0;
+        int bytes = 1;  // number of bytes for current character
+        
         if (is_space(*p)) {
-            if (has_space) continue;
+            if (has_space) {
+                p++;
+                byte_offset++;
+                continue;
+            }
             has_space = true;
             wd = evcon->font.style->space_width;
+            bytes = 1;
         } else {
             has_space = false;
+            // Decode UTF-8 codepoint to handle multi-byte characters
+            uint32_t codepoint;
+            bytes = utf8_to_codepoint(p, &codepoint);
+            if (bytes <= 0) {
+                // Invalid UTF-8 sequence, skip single byte
+                bytes = 1;
+                codepoint = *p;
+            }
             FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-            if (FT_Load_Char(evcon->font.ft_face, *p, load_flags)) {
+            if (FT_Load_Char(evcon->font.ft_face, codepoint, load_flags)) {
+                p += bytes;
+                byte_offset += bytes;
                 continue;
             }
             wd = evcon->font.ft_face->glyph->advance.x / 64.0f / pixel_ratio;
             
             // Debug: log per-character advance for first 15 chars
-            if (char_offset < 15) {
-                log_debug("[CALC-POS] char_offset=%d codepoint=U+%04X '%c' x=%.1f wd=%.1f (raw advance=%.1f)",
-                    char_offset, *p, (*p >= 32 && *p < 127) ? *p : '?',
+            if (byte_offset - rect->start_index < 30) {
+                log_debug("[CALC-POS] byte_offset=%d codepoint=U+%04X x=%.1f wd=%.1f (raw advance=%.1f)",
+                    byte_offset, codepoint,
                     x, wd, evcon->font.ft_face->glyph->advance.x / 64.0f);
             }
         }
         x += wd;
+        p += bytes;
+        byte_offset += bytes;
     }
     log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
 
     *out_x = x;
     *out_y = y;
     *out_height = rect->height;  // use rect height as caret height
+}
+
+/**
+ * Find the TextRect containing a given character offset
+ * Returns the TextRect that contains the offset, or the last rect if offset is beyond all rects
+ */
+TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
+    if (!text || !text->rect) return nullptr;
+    
+    TextRect* rect = text->rect;
+    TextRect* prev_rect = rect;
+    
+    while (rect) {
+        int rect_start = rect->start_index;
+        int rect_end = rect->start_index + rect->length;
+        
+        // Check if offset is within this rect
+        if (char_offset >= rect_start && char_offset <= rect_end) {
+            return rect;
+        }
+        
+        prev_rect = rect;
+        rect = rect->next;
+    }
+    
+    // If offset is beyond all rects, return the last one
+    return prev_rect;
+}
+
+/**
+ * Update caret visual position after movement operations
+ * Must be called after caret_move, caret_move_line, caret_move_to
+ * Handles text views, images, and other navigable views
+ */
+void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
+    if (!uicon || !state || !state->caret || !state->caret->view) return;
+    
+    CaretState* caret = state->caret;
+    View* view = caret->view;
+    
+    float caret_x = 0, caret_y = 0, caret_height = 16;
+    
+    // Handle different view types
+    if (view->is_text()) {
+        ViewText* text = (ViewText*)view;
+        if (!text->rect) {
+            log_debug("[CARET-VISUAL] Text view has no rect");
+            return;
+        }
+        
+        // Find the TextRect containing the current offset
+        TextRect* rect = find_text_rect_for_offset(text, caret->char_offset);
+        if (!rect) {
+            log_debug("[CARET-VISUAL] Could not find rect for offset %d", caret->char_offset);
+            return;
+        }
+        
+        // Setup event context for font access
+        EventContext evcon;
+        memset(&evcon, 0, sizeof(EventContext));
+        evcon.ui_context = uicon;
+        
+        // Setup font from text view
+        if (text->font) {
+            setup_font(uicon, &evcon.font, text->font);
+        } else {
+            // Fall back to default font
+            DomDocument* doc = uicon->document;
+            if (doc && doc->view_tree) {
+                FontProp* default_font = doc->view_tree->html_version == HTML5 
+                    ? &uicon->default_font : &uicon->legacy_default_font;
+                setup_font(uicon, &evcon.font, default_font);
+            }
+        }
+        
+        // Calculate visual position for text
+        calculate_position_from_char_offset(&evcon, text, rect, caret->char_offset,
+            &caret_x, &caret_y, &caret_height);
+            
+    } else if (view->view_type == RDT_VIEW_MARKER) {
+        // For markers: caret is at left edge (offset 0) or right edge (offset 1)
+        ViewMarker* marker = (ViewMarker*)view;
+        if (caret->char_offset == 0) {
+            caret_x = view->x;
+        } else {
+            caret_x = view->x + marker->width;
+        }
+        caret_y = view->y;
+        caret_height = marker->height;
+        log_debug("[CARET-VISUAL] Marker view: x=%.1f y=%.1f height=%.1f",
+            caret_x, caret_y, caret_height);
+            
+    } else {
+        // Unsupported view type
+        log_debug("[CARET-VISUAL] Unsupported view type %d", view->view_type);
+        return;
+    }
+    
+    // Update caret visual position
+    caret->x = caret_x;
+    caret->y = caret_y;
+    caret->height = caret_height;
+    
+    // Preserve the existing iframe offset - it was correctly calculated when
+    // the caret was initially placed via mouse click. During keyboard navigation,
+    // we stay in the same iframe context, so the offset remains valid.
+    // Note: chain_x/chain_y calculation above is for debugging only
+    
+    log_debug("[CARET-VISUAL] Updated caret: view_type=%d offset=%d x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
+        view->view_type, caret->char_offset, caret_x, caret_y, caret_height,
+        caret->iframe_offset_x, caret->iframe_offset_y);
 }
 
 // ============================================================================
@@ -1087,6 +1519,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Clear :active state
             update_active_state(&evcon, NULL, false);
 
+            // Handle checkbox/radio click toggle
+            log_info("MOUSE_UP: evcon.target=%p", evcon.target);
+            if (evcon.target) {
+                handle_checkbox_radio_click(&evcon, evcon.target);
+            }
+
             // End selection mode
             if (state && state->selection) {
                 state->selection->is_selecting = false;
@@ -1234,44 +1672,61 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             break;
         }
 
-        // Handle caret/selection navigation for focused editable elements
-        if (focused && state->caret) {
+        // Handle caret/selection navigation when we have a caret with a view
+        // The caret view is set when clicking on text, which may not be a focusable element
+        View* caret_view = (state->caret && state->caret->view) ? state->caret->view : nullptr;
+        if (caret_view) {
             bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
             bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+            
+            // Get text data for UTF-8 aware navigation
+            unsigned char* text_data = nullptr;
+            if (caret_view->is_text()) {
+                text_data = ((ViewText*)caret_view)->text_data();
+            }
 
             switch (key_event->key) {
                 case RDT_KEY_LEFT:
                     if (shift) {
-                        // Extend selection left
+                        // Extend selection left (UTF-8 aware)
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
-                        selection_extend(state, state->caret->char_offset - 1);
+                        int new_offset = text_data 
+                            ? utf8_offset_by_chars(text_data, state->caret->char_offset, -1)
+                            : state->caret->char_offset - 1;
+                        selection_extend(state, new_offset);
                     } else {
                         selection_clear(state);
                         caret_move(state, ctrl ? -10 : -1);  // word jump with ctrl
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_RIGHT:
                     if (shift) {
+                        // Extend selection right (UTF-8 aware)
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
-                        selection_extend(state, state->caret->char_offset + 1);
+                        int new_offset = text_data
+                            ? utf8_offset_by_chars(text_data, state->caret->char_offset, 1)
+                            : state->caret->char_offset + 1;
+                        selection_extend(state, new_offset);
                     } else {
                         selection_clear(state);
                         caret_move(state, ctrl ? 10 : 1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_UP:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         // Calculate line start/end for extending selection
                         caret_move_line(state, -1);
@@ -1280,13 +1735,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_line(state, -1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_DOWN:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         caret_move_line(state, 1);
                         selection_extend(state, state->caret->char_offset);
@@ -1294,13 +1750,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_line(state, 1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_HOME:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         caret_move_to(state, cmd ? 2 : 0);  // doc start or line start
                         selection_extend(state, state->caret->char_offset);
@@ -1308,13 +1765,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_to(state, cmd ? 2 : 0);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
                 case RDT_KEY_END:
                     if (shift) {
                         if (!state->selection || state->selection->is_collapsed) {
-                            selection_start(state, focused, state->caret->char_offset);
+                            selection_start(state, caret_view, state->caret->char_offset);
                         }
                         caret_move_to(state, cmd ? 3 : 1);  // doc end or line end
                         selection_extend(state, state->caret->char_offset);
@@ -1322,6 +1780,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         selection_clear(state);
                         caret_move_to(state, cmd ? 3 : 1);
                     }
+                    update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
                     break;
 
