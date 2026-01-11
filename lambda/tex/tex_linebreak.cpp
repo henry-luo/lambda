@@ -458,6 +458,7 @@ static void try_break(BreakState* state, int break_idx) {
         // Check if this break is feasible
         bool feasible = (badness <= state->threshold) || (penalty <= EJECT_PENALTY);
 
+
         if (feasible) {
             // Compute fitness
             Fitness fitness = compute_fitness(ratio);

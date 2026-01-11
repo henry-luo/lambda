@@ -513,14 +513,24 @@ int run_layout(const char* html_file) {
         return 1;
     }
 
-    // Load HTML document
+    // Create memory pool for document loading
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("Error: Failed to create memory pool");
+        url_destroy(cwd);
+        ui_context_cleanup(&ui_context);
+        return 1;
+    }
+
+    // Load document based on format (respects LAMBDA_TEX_PIPELINE for .tex files)
     // CSS media queries should use CSS pixels (logical pixels), not physical pixels
     int css_viewport_width = (int)(ui_context.window_width / ui_context.pixel_ratio);
     int css_viewport_height = (int)(ui_context.window_height / ui_context.pixel_ratio);
-    log_debug("Loading HTML document...");
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, css_viewport_width, css_viewport_height);
+    log_debug("Loading document...");
+    DomDocument* doc = load_doc_by_format(html_file, cwd, css_viewport_width, css_viewport_height, pool);
     if (!doc) {
-        log_error("Error: Could not load HTML file: %s", html_file);
+        log_error("Error: Could not load file: %s", html_file);
+        pool_destroy(pool);
         url_destroy(cwd);
         ui_context_cleanup(&ui_context);
         return 1;
