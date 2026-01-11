@@ -114,10 +114,11 @@ TFMFont* DocumentContext::current_tfm() const {
 LineBreakParams DocumentContext::line_break_params() const {
     LineBreakParams params = LineBreakParams::defaults();
     params.hsize = text_width;
-    params.tolerance = 200.0f;
-    params.pretolerance = 100.0f;
+    params.tolerance = 10000.0f;  // High tolerance to accept looser lines
+    params.pretolerance = 1000.0f;  // Also increase pretolerance
     params.line_penalty = 10.0f;
     params.hyphen_penalty = 50.0f;
+    params.emergency_stretch = 50.0f;  // Allow emergency stretch
     return params;
 }
 

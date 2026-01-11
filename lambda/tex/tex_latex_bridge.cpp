@@ -185,10 +185,13 @@ static void transfer_nodes(TexNode* target, TexNode* source) {
 
 bool is_section_command(const char* cmd) {
     if (!cmd) return false;
+    // Note: LaTeX \paragraph{} and \subparagraph{} commands create section-like headings,
+    // but tree-sitter-latex uses "paragraph" tag for text paragraph elements.
+    // The \paragraph{} command appears as "section" node type with command name containing "paragraph".
+    // We only match explicit section/chapter commands here to avoid confusion with paragraph content.
     return tag_eq(cmd, "part") || tag_eq(cmd, "chapter") ||
            tag_eq(cmd, "section") || tag_eq(cmd, "subsection") ||
-           tag_eq(cmd, "subsubsection") || tag_eq(cmd, "paragraph") ||
-           tag_eq(cmd, "subparagraph");
+           tag_eq(cmd, "subsubsection");
 }
 
 int get_section_level(const char* cmd) {
@@ -198,8 +201,8 @@ int get_section_level(const char* cmd) {
     if (tag_eq(cmd, "section")) return 1;
     if (tag_eq(cmd, "subsection")) return 2;
     if (tag_eq(cmd, "subsubsection")) return 3;
-    if (tag_eq(cmd, "paragraph")) return 4;
-    if (tag_eq(cmd, "subparagraph")) return 5;
+    // Note: \paragraph{} and \subparagraph{} are handled differently since
+    // tree-sitter-latex uses "paragraph" for text content elements
     return -1;
 }
 
@@ -1350,13 +1353,15 @@ TexNode* convert_latex_alignment(const ElementReader& elem, int alignment, LaTeX
 // ============================================================================
 
 TexNode* typeset_latex_document(Item latex_root, LaTeXContext& ctx) {
+    log_info("latex_bridge: typeset_latex_document(Item) called");
     if (latex_root.item == ItemNull.item) {
+        log_error("latex_bridge: null latex_root");
         return make_vlist(ctx.doc_ctx.arena);
     }
 
     TypeId type = get_type_id(latex_root);
     if (type != LMD_TYPE_ELEMENT) {
-        log_error("latex_bridge: document root must be an Element");
+        log_error("latex_bridge: document root must be an Element (got type=%d)", (int)type);
         return make_vlist(ctx.doc_ctx.arena);
     }
 
