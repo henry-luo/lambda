@@ -48,6 +48,9 @@ extern "C" {
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
 #include "../radiant/pdf/pdf_to_view.hpp"
+#include "../lambda/tex/tex_latex_bridge.hpp"
+#include "../lambda/tex/tex_pdf_out.hpp"
+#include "../lambda/tex/tex_to_view.hpp"
 
 // Forward declaration of format_latex_html_v2 in lambda namespace
 namespace lambda {
@@ -74,6 +77,7 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_latex_doc_tex(Url* latex_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
@@ -2802,6 +2806,171 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     dom_doc->state = nullptr;
 
     log_debug("[Lambda LaTeX] LaTeX document loaded, converted to HTML, and styled");
+    return dom_doc;
+}
+
+/**
+ * Load LaTeX document using TeX typesetting pipeline
+ *
+ * This function uses the direct LaTeX→TeX→PDF pipeline:
+ * 1. Parse LaTeX with tree-sitter-latex → Lambda Element tree
+ * 2. Convert to TeX nodes via tex_latex_bridge
+ * 3. Apply line breaking and page breaking
+ * 4. Generate PDF in memory
+ * 5. Load PDF to ViewTree for display
+ *
+ * @param latex_url URL to LaTeX file
+ * @param viewport_width Viewport width (unused for PDF)
+ * @param viewport_height Viewport height (unused for PDF)
+ * @param pool Memory pool for allocations
+ * @param pixel_ratio Display pixel ratio for high-DPI
+ * @return DomDocument structure with pre-rendered ViewTree
+ */
+DomDocument* load_latex_doc_tex(Url* latex_url, int viewport_width, int viewport_height,
+                                 Pool* pool, float pixel_ratio) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    if (!latex_url || !pool) {
+        log_error("load_latex_doc_tex: invalid parameters");
+        return nullptr;
+    }
+
+    char* latex_filepath = url_to_local_path(latex_url);
+    log_info("[TeX Pipeline] Loading LaTeX document: %s", latex_filepath);
+
+    // Step 1: Read LaTeX file
+    auto step1_start = std::chrono::high_resolution_clock::now();
+    char* latex_content = read_text_file(latex_filepath);
+    if (!latex_content) {
+        log_error("Failed to read LaTeX file: %s", latex_filepath);
+        return nullptr;
+    }
+
+    auto step1_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 1 - Read LaTeX file: %.1fms",
+             std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
+
+    // Step 2: Parse LaTeX with tree-sitter
+    auto step2_start = std::chrono::high_resolution_clock::now();
+
+    String* type_str = (String*)pool_alloc(pool, sizeof(String) + 6);
+    type_str->len = 5;
+    strcpy(type_str->chars, "latex");
+
+    Input* latex_input = input_from_source(latex_content, latex_url, type_str, nullptr);
+    free(latex_content);
+
+    if (!latex_input || !latex_input->root.item) {
+        log_error("Failed to parse LaTeX file: %s", latex_filepath);
+        return nullptr;
+    }
+
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Parse LaTeX: %.1fms",
+             std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+
+    // Step 3: Set up TeX typesetting context
+    auto step3_start = std::chrono::high_resolution_clock::now();
+
+    Arena* arena = arena_create_default(pool);
+    if (!arena) {
+        log_error("Failed to create arena for TeX typesetting");
+        return nullptr;
+    }
+
+    // Create TFM font manager
+    tex::TFMFontManager* fonts = tex::create_font_manager(arena);
+
+    // Create LaTeX context with default document class
+    tex::LaTeXContext ctx = tex::LaTeXContext::create(arena, fonts, "article");
+
+    // Set page dimensions (US Letter default)
+    ctx.doc_ctx.page_width = 612.0f;   // 8.5 inches
+    ctx.doc_ctx.page_height = 792.0f;  // 11 inches
+    ctx.doc_ctx.margin_left = 72.0f;   // 1 inch
+    ctx.doc_ctx.margin_right = 72.0f;
+    ctx.doc_ctx.margin_top = 72.0f;
+    ctx.doc_ctx.margin_bottom = 72.0f;
+    ctx.doc_ctx.text_width = ctx.doc_ctx.page_width - ctx.doc_ctx.margin_left - ctx.doc_ctx.margin_right;
+    ctx.doc_ctx.text_height = ctx.doc_ctx.page_height - ctx.doc_ctx.margin_top - ctx.doc_ctx.margin_bottom;
+
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - Setup context: %.1fms",
+             std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
+    // Step 4: Typeset document
+    auto step4_start = std::chrono::high_resolution_clock::now();
+
+    tex::TexNode* document = tex::typeset_latex_document(latex_input->root, ctx);
+    if (!document) {
+        log_error("Failed to typeset LaTeX document");
+        arena_destroy(arena);
+        return nullptr;
+    }
+
+    auto step4_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 4 - Typeset document: %.1fms",
+             std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
+
+    // Step 5: Break into pages
+    auto step5_start = std::chrono::high_resolution_clock::now();
+
+    tex::PageList pages = tex::break_latex_into_pages(document, ctx);
+    if (pages.page_count == 0) {
+        log_error("Failed to break document into pages");
+        arena_destroy(arena);
+        return nullptr;
+    }
+
+    log_info("[TeX Pipeline] Document has %d pages", pages.page_count);
+
+    auto step5_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 5 - Page break: %.1fms",
+             std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
+
+    // Step 6: Convert TeX nodes directly to ViewTree
+    auto step6_start = std::chrono::high_resolution_clock::now();
+
+    // Store arena reference in doc_ctx for view conversion
+    ctx.doc_ctx.arena = arena;
+
+    // Convert pages to ViewTree directly (no PDF intermediate)
+    ViewTree* view_tree = tex::tex_pages_to_view_tree(pages, ctx.doc_ctx, pool);
+    if (!view_tree) {
+        log_error("Failed to convert TeX pages to ViewTree");
+        arena_destroy(arena);
+        return nullptr;
+    }
+
+    auto step6_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 6 - Convert to ViewTree: %.1fms",
+             std::chrono::duration<double, std::milli>(step6_end - step6_start).count());
+
+    // Step 7: Create DomDocument wrapper
+    auto step7_start = std::chrono::high_resolution_clock::now();
+
+    // Allocate DomDocument with malloc (not from pool) to avoid double-free
+    // The document structure itself needs to outlive pool destruction
+    DomDocument* dom_doc = (DomDocument*)malloc(sizeof(DomDocument));
+    memset(dom_doc, 0, sizeof(DomDocument));
+    dom_doc->pool = pool;  // Pool is shared with view_tree, will be freed by view_pool_destroy
+    dom_doc->arena = arena;  // Set arena so it will be properly cleaned up
+    dom_doc->url = latex_url;
+    dom_doc->view_tree = view_tree;
+
+    auto step7_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 7 - Create document: %.1fms",
+             std::chrono::duration<double, std::milli>(step7_end - step7_start).count());
+
+    // Arena will be destroyed by dom_document_destroy during cleanup
+    // Pool will be destroyed by view_pool_destroy during cleanup
+    // DomDocument will be freed by mem_free in dom_document_destroy
+    // Don't destroy them here - they're needed for font metrics and view tree data
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] load_latex_doc_tex total: %.1fms",
+             std::chrono::duration<double, std::milli>(total_end - total_start).count());
+
     return dom_doc;
 }
 

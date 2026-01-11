@@ -320,6 +320,9 @@ TFMFont* load_tfm_by_name(const char* name, Arena* arena) {
         "/usr/share/texlive/texmf-dist/fonts/tfm/public/cm",
         "/opt/homebrew/share/texmf-dist/fonts/tfm/public/cm",
         "/usr/local/texlive/texmf-dist/fonts/tfm/public/cm",
+        "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/cm",
+        "/usr/local/texlive/2024/texmf-dist/fonts/tfm/public/cm",
+        "/usr/local/texlive/2023/texmf-dist/fonts/tfm/public/cm",
         "~/.texlive/texmf-dist/fonts/tfm/public/cm",
         nullptr
     };
@@ -328,6 +331,7 @@ TFMFont* load_tfm_by_name(const char* name, Arena* arena) {
         snprintf(path, sizeof(path), "%s/%s.tfm", search_paths[i], name);
         font = load_tfm_file(path, arena);
         if (font) {
+            log_debug("tex_tfm: loaded font %s from %s", name, path);
             font->name = name;
             return font;
         }
