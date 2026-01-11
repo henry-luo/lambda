@@ -7,6 +7,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/arraylist.h"
 #include "../../lambda/lambda-data.hpp"
 #include "../../lambda/mark_reader.hpp"
 #include "../../lambda/input/input.hpp"
@@ -16,6 +17,43 @@
 // Forward declarations
 extern "C" void parse_json(Input* input, const char* json_string);
 static void webdriver_request_handler(struct evhttp_request* req, void* user_data);
+
+// Simple JSON string extraction (for keys like "url", "using", "value")
+static const char* extract_json_string(const char* json, const char* key, char* buf, size_t buf_size) {
+    if (!json || !key || !buf) return NULL;
+    
+    // Build search pattern: "key":"
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    
+    const char* start = strstr(json, pattern);
+    if (!start) {
+        // Try with space: "key": "
+        snprintf(pattern, sizeof(pattern), "\"%s\": \"", key);
+        start = strstr(json, pattern);
+    }
+    if (!start) return NULL;
+    
+    // Move past the pattern to the value
+    start = strchr(start, ':');
+    if (!start) return NULL;
+    start++;
+    while (*start == ' ') start++;
+    if (*start != '"') return NULL;
+    start++;  // Skip opening quote
+    
+    // Copy until closing quote
+    size_t i = 0;
+    while (*start && *start != '"' && i < buf_size - 1) {
+        if (*start == '\\' && *(start + 1)) {
+            start++;  // Skip escape
+        }
+        buf[i++] = *start++;
+    }
+    buf[i] = '\0';
+    
+    return buf;
+}
 
 // JSON response helpers
 static void json_send_success(http_response_t* resp, const char* value_json);
@@ -122,16 +160,16 @@ WebDriverServer* webdriver_server_create(const char* host, int port) {
     server->arena = arena;
     server->port = port;
     
-    // Create session hashmap
+    // Create session hashmap (stores WebDriverSession* values, keyed by session id)
     server->sessions = hashmap_new(sizeof(WebDriverSession*), 16, 0, 0,
         [](const void* item, uint64_t seed0, uint64_t seed1) -> uint64_t {
-            const char* id = *(const char**)item;
-            return hashmap_murmur(id, strlen(id), seed0, seed1);
+            const WebDriverSession* sess = *(const WebDriverSession**)item;
+            return hashmap_murmur(sess->id, strlen(sess->id), seed0, seed1);
         },
         [](const void* a, const void* b, void* udata) -> int {
-            const char* id_a = *(const char**)a;
-            const char* id_b = *(const char**)b;
-            return strcmp(id_a, id_b);
+            const WebDriverSession* sess_a = *(const WebDriverSession**)a;
+            const WebDriverSession* sess_b = *(const WebDriverSession**)b;
+            return strcmp(sess_a->id, sess_b->id);
         },
         NULL, NULL);
     
@@ -272,24 +310,39 @@ static bool parse_path(const char* path, char* session_id, char* element_id, cha
     // Check for /element
     if (strncmp(p, "/element", 8) == 0) {
         p += 8;
-        if (*p == '/') {
+        if (*p == '\0') {
+            // Just /session/{id}/element - for finding elements
+            if (extra) strcpy(extra, "element");
+        } else if (*p == 's' && strncmp(p, "s", 1) == 0) {
+            // /session/{id}/elements
+            if (extra) strcpy(extra, "elements");
+        } else if (*p == '/') {
             p++;
-            const char* end = strchr(p, '/');
-            if (end) {
-                size_t len = end - p;
-                if (len < WD_ELEMENT_ID_LEN) {
-                    strncpy(element_id, p, len);
-                    element_id[len] = '\0';
-                }
-                p = end;
-                if (extra && *p == '/') {
-                    strncpy(extra, p + 1, 64);
-                }
+            // Check for /element/active
+            if (strncmp(p, "active", 6) == 0 && (p[6] == '\0' || p[6] == '/')) {
+                if (extra) strcpy(extra, "element/active");
             } else {
-                strncpy(element_id, p, WD_ELEMENT_ID_LEN - 1);
-                element_id[WD_ELEMENT_ID_LEN - 1] = '\0';
+                // /session/{id}/element/{elementId}
+                const char* end = strchr(p, '/');
+                if (end) {
+                    size_t len = end - p;
+                    if (len < WD_ELEMENT_ID_LEN) {
+                        strncpy(element_id, p, len);
+                        element_id[len] = '\0';
+                    }
+                    p = end;
+                    if (extra && *p == '/') {
+                        strncpy(extra, p + 1, 64);
+                    }
+                } else {
+                    strncpy(element_id, p, WD_ELEMENT_ID_LEN - 1);
+                    element_id[WD_ELEMENT_ID_LEN - 1] = '\0';
+                }
             }
         }
+    } else if (strncmp(p, "/elements", 9) == 0) {
+        // /session/{id}/elements
+        if (extra) strcpy(extra, "elements");
     } else if (extra) {
         // Copy remaining path for pattern matching
         strncpy(extra, p + 1, 64);
@@ -474,7 +527,14 @@ static void json_send_value(http_response_t* resp, const char* key, const char* 
 static WebDriverSession* get_session(WebDriverServer* server, const char* session_id) {
     if (!session_id || !session_id[0]) return NULL;
     
-    WebDriverSession** found = (WebDriverSession**)hashmap_get(server->sessions, &session_id);
+    // Create a temporary lookup key (only the id field is used for comparison)
+    WebDriverSession lookup_key;
+    memset(&lookup_key, 0, sizeof(lookup_key));
+    strncpy(lookup_key.id, session_id, WD_ELEMENT_ID_LEN - 1);
+    lookup_key.id[WD_ELEMENT_ID_LEN - 1] = '\0';
+    
+    WebDriverSession* key_ptr = &lookup_key;
+    WebDriverSession** found = (WebDriverSession**)hashmap_get(server->sessions, &key_ptr);
     return found ? *found : NULL;
 }
 
@@ -496,8 +556,8 @@ static void handle_new_session(WebDriverServer* server, http_request_t* req, htt
         return;
     }
     
-    // Add to sessions map
-    hashmap_set(server->sessions, &session->id);
+    // Add to sessions map (store pointer to session)
+    hashmap_set(server->sessions, &session);
     
     // Build capabilities response
     http_response_set_status(resp, 200);
@@ -534,7 +594,7 @@ static void handle_delete_session(WebDriverServer* server, http_request_t* req, 
         return;
     }
     
-    hashmap_delete(server->sessions, &session_id);
+    hashmap_delete(server->sessions, &session);
     webdriver_session_destroy(session);
     json_send_success(resp, "null");
 }
@@ -573,15 +633,27 @@ static void handle_navigate(WebDriverServer* server, http_request_t* req, http_r
         return;
     }
     
-    // TODO: Parse JSON body for URL and navigate
     char* body = http_request_get_body(req);
     if (!body) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
         return;
     }
     
-    // TODO: Parse {"url": "..."} and call webdriver_session_navigate
+    char url_buf[1024];
+    const char* url = extract_json_string(body, "url", url_buf, sizeof(url_buf));
     free(body);
+    
+    if (!url) {
+        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'url' in request");
+        return;
+    }
+    
+    WebDriverError err = webdriver_session_navigate(session, url);
+    if (err != WD_SUCCESS) {
+        json_send_error(resp, err, "Navigation failed");
+        return;
+    }
+    
     json_send_success(resp, "null");
 }
 
@@ -627,7 +699,7 @@ static void handle_get_source(WebDriverServer* server, http_request_t* req, http
     }
 }
 
-// Element finding handlers - stub implementations
+// Element finding handlers
 static void handle_find_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
                                  const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
@@ -636,9 +708,39 @@ static void handle_find_element(WebDriverServer* server, http_request_t* req, ht
         return;
     }
     
-    // TODO: Parse body for {"using": "css selector", "value": "..."}
-    // and call webdriver_find_element
-    json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+    char* body = http_request_get_body(req);
+    if (!body) {
+        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
+        return;
+    }
+    
+    char using_buf[64], value_buf[256];
+    const char* using_strategy = extract_json_string(body, "using", using_buf, sizeof(using_buf));
+    const char* value = extract_json_string(body, "value", value_buf, sizeof(value_buf));
+    free(body);
+    
+    if (!value) {
+        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
+        return;
+    }
+    
+    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
+    View* element = webdriver_find_element(session, strategy, value, NULL);
+    
+    if (!element) {
+        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+    
+    // Register element and return reference
+    const char* elem_id = element_registry_add(session->elements, element, session->document_version);
+    if (!elem_id) {
+        json_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Failed to register element");
+        return;
+    }
+    
+    http_response_set_status(resp, 200);
+    http_response_add_printf(resp, "{\"value\":{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}}", elem_id);
 }
 
 static void handle_find_elements(WebDriverServer* server, http_request_t* req, http_response_t* resp,
@@ -649,8 +751,48 @@ static void handle_find_elements(WebDriverServer* server, http_request_t* req, h
         return;
     }
     
-    // TODO: Implement
-    json_send_success(resp, "[]");
+    char* body = http_request_get_body(req);
+    if (!body) {
+        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
+        return;
+    }
+    
+    char using_buf[64], value_buf[256];
+    const char* using_strategy = extract_json_string(body, "using", using_buf, sizeof(using_buf));
+    const char* value = extract_json_string(body, "value", value_buf, sizeof(value_buf));
+    free(body);
+    
+    if (!value) {
+        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
+        return;
+    }
+    
+    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
+    
+    ArrayList* results = arraylist_new(16);
+    int count = webdriver_find_elements(session, strategy, value, NULL, results);
+    
+    // Build response array
+    StrBuf* buf = strbuf_new_cap(256);
+    strbuf_append_str(buf, "[");
+    
+    for (int i = 0; i < count; i++) {
+        View* elem = (View*)results->data[i];
+        const char* elem_id = element_registry_add(session->elements, elem, session->document_version);
+        if (elem_id) {
+            if (i > 0) strbuf_append_str(buf, ",");
+            char entry[128];
+            snprintf(entry, sizeof(entry), "{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}", elem_id);
+            strbuf_append_str(buf, entry);
+        }
+    }
+    
+    strbuf_append_str(buf, "]");
+    
+    json_send_success(resp, buf->str);
+    
+    strbuf_free(buf);
+    arraylist_free(results);
 }
 
 static void handle_find_element_from_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
