@@ -1,0 +1,16 @@
+flowchart TB
+    Start((Start))
+    Input[Get Input]
+    Process[Process Data]
+    Check{Valid?}
+    Save[Save Result]
+    Error[Show Error]
+    End((End))
+    
+    Start --> Input
+    Input --> Process
+    Process --> Check
+    Check -->|Yes| Save
+    Check -->|No| Error
+    Save --> End
+    Error --> Input

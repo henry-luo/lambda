@@ -2,13 +2,12 @@
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lib/log.h"
-#include "../lib/strbuf.h"
+#include "../lib/stringbuf.h"
+#include "../lib/mempool.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-
-using namespace lambda;
 
 // Create default SVG generator options
 SvgGeneratorOptions* create_default_svg_options() {
@@ -26,39 +25,38 @@ SvgGeneratorOptions* create_default_svg_options() {
 // Helper: get attribute from graph element or use default
 static const char* get_node_attribute(Element* graph, const char* node_id, 
                                      const char* attr_name, const char* default_value) {
-    if (!graph || !graph->children.list) return default_value;
+    if (!graph) return default_value;
     
-    MarkReader reader(graph);
-    Item children = reader.getChildren();
+    ElementReader graph_reader(graph);
+    ElementReader::ChildIterator children = graph_reader.children();
+    ItemReader child_item;
     
-    if (!is_list(children)) return default_value;
-    
-    List* child_list = children.list;
-    for (size_t i = 0; i < child_list->length; i++) {
-        Item child_item = list_get(child_list, i);
-        if (!is_element(child_item)) continue;
+    while (children.next(&child_item)) {
+        if (!child_item.isElement()) continue;
         
-        Element* child = child_item.element;
-        if (strcmp(child->tag->chars, "node") != 0) continue;
+        ElementReader child_reader = child_item.asElement();
+        const char* tag = child_reader.tagName();
+        if (!tag || strcmp(tag, "node") != 0) continue;
         
-        Item id_item = map_get(child->attrs.map, "id");
-        if (!is_string(id_item)) continue;
-        if (strcmp(id_item.string_ptr->chars, node_id) != 0) continue;
+        ItemReader id_reader = child_reader.get_attr("id");
+        if (!id_reader.isString()) continue;
+        if (strcmp(id_reader.cstring(), node_id) != 0) continue;
         
         // found the node, get attribute
-        Item attr_item = map_get(child->attrs.map, attr_name);
-        if (is_string(attr_item)) {
-            return attr_item.string_ptr->chars;
+        ItemReader attr_reader = child_reader.get_attr(attr_name);
+        if (attr_reader.isString()) {
+            return attr_reader.cstring();
         }
+        break;
     }
     
     return default_value;
 }
 
-// Helper: render node shape
-static Element* render_node_shape(MarkBuilder& builder, NodePosition* pos, 
-                                  const char* shape, const char* fill, 
-                                  const char* stroke, float stroke_width) {
+// Helper: render node shape - returns Item (Element)
+static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* pos, 
+                              const char* shape, const char* fill, 
+                              const char* stroke, float stroke_width) {
     float x = pos->x - pos->width / 2.0f;
     float y = pos->y - pos->height / 2.0f;
     float cx = pos->x;
@@ -66,198 +64,202 @@ static Element* render_node_shape(MarkBuilder& builder, NodePosition* pos,
     float w = pos->width;
     float h = pos->height;
     
-    Element* shape_elem = nullptr;
-    
     if (strcmp(shape, "circle") == 0) {
         float r = fminf(w, h) / 2.0f;
-        shape_elem = builder.createElement("circle");
-        builder.setAttribute(shape_elem, "cx", cx);
-        builder.setAttribute(shape_elem, "cy", cy);
-        builder.setAttribute(shape_elem, "r", r);
+        return builder.element("circle")
+            .attr("cx", (double)cx)
+            .attr("cy", (double)cy)
+            .attr("r", (double)r)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
     } else if (strcmp(shape, "ellipse") == 0) {
-        shape_elem = builder.createElement("ellipse");
-        builder.setAttribute(shape_elem, "cx", cx);
-        builder.setAttribute(shape_elem, "cy", cy);
-        builder.setAttribute(shape_elem, "rx", w / 2.0f);
-        builder.setAttribute(shape_elem, "ry", h / 2.0f);
+        return builder.element("ellipse")
+            .attr("cx", (double)cx)
+            .attr("cy", (double)cy)
+            .attr("rx", (double)(w / 2.0f))
+            .attr("ry", (double)(h / 2.0f))
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
     } else if (strcmp(shape, "diamond") == 0) {
         // diamond as polygon (4 points)
-        StringBuf* sb = stringbuf_create();
-        stringbuf_appendf(sb, "%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f",
+        StringBuf* sb = stringbuf_new(pool);
+        stringbuf_append_format(sb, "%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f",
                          cx, y,           // top
                          x + w, cy,       // right
                          cx, y + h,       // bottom
                          x, cy);          // left
         
-        shape_elem = builder.createElement("polygon");
-        builder.setAttribute(shape_elem, "points", sb->str->chars);
-        stringbuf_destroy(sb);
+        Item result = builder.element("polygon")
+            .attr("points", sb->str->chars)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+        stringbuf_free(sb);
+        return result;
     } else if (strcmp(shape, "hexagon") == 0) {
         // hexagon as polygon (6 points)
         float r = fminf(w, h) / 2.0f;
-        StringBuf* sb = stringbuf_create();
+        StringBuf* sb = stringbuf_new(pool);
         for (int i = 0; i < 6; i++) {
-            float angle = (float)i * 3.14159f / 3.0f;
+            float angle = (float)i * 3.14159f / 3.0f - 3.14159f / 6.0f;
             float px = cx + r * cosf(angle);
             float py = cy + r * sinf(angle);
-            stringbuf_appendf(sb, "%.1f,%.1f ", px, py);
+            if (i > 0) stringbuf_append_str(sb, " ");
+            stringbuf_append_format(sb, "%.1f,%.1f", px, py);
         }
         
-        shape_elem = builder.createElement("polygon");
-        builder.setAttribute(shape_elem, "points", sb->str->chars);
-        stringbuf_destroy(sb);
+        Item result = builder.element("polygon")
+            .attr("points", sb->str->chars)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+        stringbuf_free(sb);
+        return result;
     } else if (strcmp(shape, "triangle") == 0) {
         // triangle pointing up
-        StringBuf* sb = stringbuf_create();
-        stringbuf_appendf(sb, "%.1f,%.1f %.1f,%.1f %.1f,%.1f",
+        StringBuf* sb = stringbuf_new(pool);
+        stringbuf_append_format(sb, "%.1f,%.1f %.1f,%.1f %.1f,%.1f",
                          cx, y,           // top
                          x + w, y + h,    // bottom-right
                          x, y + h);       // bottom-left
         
-        shape_elem = builder.createElement("polygon");
-        builder.setAttribute(shape_elem, "points", sb->str->chars);
-        stringbuf_destroy(sb);
+        Item result = builder.element("polygon")
+            .attr("points", sb->str->chars)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+        stringbuf_free(sb);
+        return result;
     } else {
         // default: rectangle (box)
-        shape_elem = builder.createElement("rect");
-        builder.setAttribute(shape_elem, "x", x);
-        builder.setAttribute(shape_elem, "y", y);
-        builder.setAttribute(shape_elem, "width", w);
-        builder.setAttribute(shape_elem, "height", h);
-        builder.setAttribute(shape_elem, "rx", 5.0f); // rounded corners
+        return builder.element("rect")
+            .attr("x", (double)x)
+            .attr("y", (double)y)
+            .attr("width", (double)w)
+            .attr("height", (double)h)
+            .attr("rx", 5.0)  // rounded corners
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
     }
-    
-    // apply styling
-    if (shape_elem) {
-        builder.setAttribute(shape_elem, "fill", fill);
-        builder.setAttribute(shape_elem, "stroke", stroke);
-        builder.setAttribute(shape_elem, "stroke-width", stroke_width);
-    }
-    
-    return shape_elem;
 }
 
 // Helper: render edge path
-static Element* render_edge_path(MarkBuilder& builder, EdgePath* path, 
-                                 const char* stroke, float stroke_width) {
+static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path, 
+                             const char* stroke, float stroke_width) {
     if (!path->points || path->points->length < 2) {
-        return nullptr;
+        return ItemNull;
     }
     
     // build path data string
-    StringBuf* sb = stringbuf_create();
+    StringBuf* sb = stringbuf_new(pool);
     
-    Point2D* first = (Point2D*)arraylist_at(path->points, 0);
-    stringbuf_appendf(sb, "M %.1f,%.1f", first->x, first->y);
+    Point2D* first = (Point2D*)path->points->data[0];
+    stringbuf_append_format(sb, "M %.1f,%.1f", first->x, first->y);
     
     if (path->is_bezier && path->points->length >= 4) {
         // use cubic bezier curves
-        for (size_t i = 1; i + 2 < path->points->length; i += 3) {
-            Point2D* cp1 = (Point2D*)arraylist_at(path->points, i);
-            Point2D* cp2 = (Point2D*)arraylist_at(path->points, i + 1);
-            Point2D* end = (Point2D*)arraylist_at(path->points, i + 2);
-            stringbuf_appendf(sb, " C %.1f,%.1f %.1f,%.1f %.1f,%.1f",
+        for (int i = 1; i + 2 < path->points->length; i += 3) {
+            Point2D* cp1 = (Point2D*)path->points->data[i];
+            Point2D* cp2 = (Point2D*)path->points->data[i + 1];
+            Point2D* end = (Point2D*)path->points->data[i + 2];
+            stringbuf_append_format(sb, " C %.1f,%.1f %.1f,%.1f %.1f,%.1f",
                             cp1->x, cp1->y, cp2->x, cp2->y, end->x, end->y);
         }
     } else {
         // straight lines
-        for (size_t i = 1; i < path->points->length; i++) {
-            Point2D* pt = (Point2D*)arraylist_at(path->points, i);
-            stringbuf_appendf(sb, " L %.1f,%.1f", pt->x, pt->y);
+        for (int i = 1; i < path->points->length; i++) {
+            Point2D* pt = (Point2D*)path->points->data[i];
+            stringbuf_append_format(sb, " L %.1f,%.1f", pt->x, pt->y);
         }
     }
     
-    Element* path_elem = builder.createElement("path");
-    builder.setAttribute(path_elem, "d", sb->str->chars);
-    builder.setAttribute(path_elem, "stroke", stroke);
-    builder.setAttribute(path_elem, "stroke-width", stroke_width);
-    builder.setAttribute(path_elem, "fill", "none");
+    ElementBuilder path_builder = builder.element("path");
+    path_builder.attr("d", sb->str->chars);
+    path_builder.attr("stroke", stroke);
+    path_builder.attr("stroke-width", (double)stroke_width);
+    path_builder.attr("fill", "none");
     
     // add arrow marker if directed
     if (path->directed) {
-        builder.setAttribute(path_elem, "marker-end", "url(#arrowhead)");
+        path_builder.attr("marker-end", "url(#arrowhead)");
     }
     
-    stringbuf_destroy(sb);
-    return path_elem;
+    stringbuf_free(sb);
+    return path_builder.final();
 }
 
 // Helper: create arrow marker definition
-static Element* create_arrow_marker(MarkBuilder& builder, const char* stroke) {
-    Element* marker = builder.createElement("marker");
-    builder.setAttribute(marker, "id", "arrowhead");
-    builder.setAttribute(marker, "markerWidth", 10.0f);
-    builder.setAttribute(marker, "markerHeight", 10.0f);
-    builder.setAttribute(marker, "refX", 9.0f);
-    builder.setAttribute(marker, "refY", 3.0f);
-    builder.setAttribute(marker, "orient", "auto");
-    
+static Item create_arrow_marker(MarkBuilder& builder, const char* stroke) {
     // arrow shape as polygon
-    Element* polygon = builder.createElement("polygon");
-    builder.setAttribute(polygon, "points", "0,0 10,3 0,6");
-    builder.setAttribute(polygon, "fill", stroke);
+    Item polygon = builder.element("polygon")
+        .attr("points", "0,0 10,3 0,6")
+        .attr("fill", stroke)
+        .final();
     
-    builder.appendChild(marker, polygon);
-    
-    return marker;
+    return builder.element("marker")
+        .attr("id", "arrowhead")
+        .attr("markerWidth", 10.0)
+        .attr("markerHeight", 10.0)
+        .attr("refX", 9.0)
+        .attr("refY", 3.0)
+        .attr("orient", "auto")
+        .child(polygon)
+        .final();
 }
 
 // Main SVG generation
-Element* graph_to_svg_with_options(Element* graph, GraphLayout* layout, 
-                                   SvgGeneratorOptions* opts, Input* input) {
+Item graph_to_svg_with_options(Element* graph, GraphLayout* layout, 
+                               SvgGeneratorOptions* opts, Input* input) {
     if (!graph || !layout) {
         log_error("graph_to_svg: null graph or layout");
-        return nullptr;
+        return ItemNull;
     }
     
     log_info("generating SVG from graph layout");
     
     MarkBuilder builder(input);
+    Pool* pool = builder.pool();
     
     // create root SVG element
     float svg_width = layout->graph_width + 2 * opts->canvas_padding;
     float svg_height = layout->graph_height + 2 * opts->canvas_padding;
     
-    Element* svg = builder.createElement("svg");
-    builder.setAttribute(svg, "width", svg_width);
-    builder.setAttribute(svg, "height", svg_height);
-    builder.setAttribute(svg, "xmlns", "http://www.w3.org/2000/svg");
-    
     // create defs section for markers
-    Element* defs = builder.createElement("defs");
-    Element* arrow_marker = create_arrow_marker(builder, opts->default_stroke);
-    builder.appendChild(defs, arrow_marker);
-    builder.appendChild(svg, defs);
-    
-    // create main group with padding offset
-    Element* main_group = builder.createElement("g");
-    StringBuf* transform_sb = stringbuf_create();
-    stringbuf_appendf(transform_sb, "translate(%.1f, %.1f)", 
-                     opts->canvas_padding, opts->canvas_padding);
-    builder.setAttribute(main_group, "transform", transform_sb->str->chars);
-    stringbuf_destroy(transform_sb);
+    Item arrow_marker = create_arrow_marker(builder, opts->default_stroke);
+    Item defs = builder.element("defs")
+        .child(arrow_marker)
+        .final();
     
     // render edges first (so they appear behind nodes)
-    Element* edges_group = builder.createElement("g");
-    builder.setAttribute(edges_group, "class", "edges");
+    ElementBuilder edges_group_builder = builder.element("g");
+    edges_group_builder.attr("class", "edges");
     
-    for (size_t i = 0; i < layout->edge_paths->length; i++) {
-        EdgePath* edge_path = (EdgePath*)arraylist_at(layout->edge_paths, i);
-        Element* path_elem = render_edge_path(builder, edge_path, 
-                                              opts->default_stroke, 
-                                              opts->default_stroke_width);
-        if (path_elem) {
-            builder.appendChild(edges_group, path_elem);
+    for (int i = 0; i < layout->edge_paths->length; i++) {
+        EdgePath* edge_path = (EdgePath*)layout->edge_paths->data[i];
+        Item path_item = render_edge_path(builder, pool, edge_path, 
+                                          opts->default_stroke, 
+                                          opts->default_stroke_width);
+        if (path_item.item != 0) {
+            edges_group_builder.child(path_item);
         }
     }
-    builder.appendChild(main_group, edges_group);
+    Item edges_group = edges_group_builder.final();
     
     // render nodes
-    Element* nodes_group = builder.createElement("g");
-    builder.setAttribute(nodes_group, "class", "nodes");
+    ElementBuilder nodes_group_builder = builder.element("g");
+    nodes_group_builder.attr("class", "nodes");
     
-    for (size_t i = 0; i < layout->node_positions->length; i++) {
-        NodePosition* pos = (NodePosition*)arraylist_at(layout->node_positions, i);
+    for (int i = 0; i < layout->node_positions->length; i++) {
+        NodePosition* pos = (NodePosition*)layout->node_positions->data[i];
         const char* node_id = pos->node_id;
         
         // get node attributes from original graph
@@ -265,48 +267,64 @@ Element* graph_to_svg_with_options(Element* graph, GraphLayout* layout,
         const char* label = get_node_attribute(graph, node_id, "label", node_id);
         const char* fill = get_node_attribute(graph, node_id, "fill", opts->default_fill);
         
-        // create node group
-        Element* node_group = builder.createElement("g");
-        builder.setAttribute(node_group, "class", "node");
-        builder.setAttribute(node_group, "id", node_id);
-        
         // render shape
-        Element* shape_elem = render_node_shape(builder, pos, shape, fill, 
-                                               opts->default_stroke, 
-                                               opts->default_stroke_width);
-        if (shape_elem) {
-            builder.appendChild(node_group, shape_elem);
-        }
+        Item shape_item = render_node_shape(builder, pool, pos, shape, fill, 
+                                           opts->default_stroke, 
+                                           opts->default_stroke_width);
         
         // render label
-        Element* text_elem = builder.createElement("text");
-        builder.setAttribute(text_elem, "x", pos->x);
-        builder.setAttribute(text_elem, "y", pos->y);
-        builder.setAttribute(text_elem, "text-anchor", "middle");
-        builder.setAttribute(text_elem, "dominant-baseline", "middle");
-        builder.setAttribute(text_elem, "font-family", opts->font_family);
-        builder.setAttribute(text_elem, "font-size", opts->font_size);
-        builder.setAttribute(text_elem, "fill", "black");
+        Item text_item = builder.element("text")
+            .attr("x", (double)pos->x)
+            .attr("y", (double)pos->y)
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "middle")
+            .attr("font-family", opts->font_family)
+            .attr("font-size", (double)opts->font_size)
+            .attr("fill", "black")
+            .text(label)
+            .final();
         
-        // set text content
-        Element* text_content = builder.createText(label);
-        builder.appendChild(text_elem, text_content);
-        builder.appendChild(node_group, text_elem);
+        // create node group
+        Item node_group = builder.element("g")
+            .attr("class", "node")
+            .attr("id", node_id)
+            .child(shape_item)
+            .child(text_item)
+            .final();
         
-        builder.appendChild(nodes_group, node_group);
+        nodes_group_builder.child(node_group);
     }
+    Item nodes_group = nodes_group_builder.final();
     
-    builder.appendChild(main_group, nodes_group);
-    builder.appendChild(svg, main_group);
+    // create main group with padding offset
+    StringBuf* transform_sb = stringbuf_new(pool);
+    stringbuf_append_format(transform_sb, "translate(%.1f, %.1f)", 
+                     opts->canvas_padding, opts->canvas_padding);
+    
+    Item main_group = builder.element("g")
+        .attr("transform", transform_sb->str->chars)
+        .child(edges_group)
+        .child(nodes_group)
+        .final();
+    stringbuf_free(transform_sb);
+    
+    // create root SVG element with all children
+    Item svg = builder.element("svg")
+        .attr("width", (double)svg_width)
+        .attr("height", (double)svg_height)
+        .attr("xmlns", "http://www.w3.org/2000/svg")
+        .child(defs)
+        .child(main_group)
+        .final();
     
     log_info("SVG generation complete: %.1f x %.1f", svg_width, svg_height);
     
     return svg;
 }
 
-Element* graph_to_svg(Element* graph, GraphLayout* layout, Input* input) {
+Item graph_to_svg(Element* graph, GraphLayout* layout, Input* input) {
     SvgGeneratorOptions* opts = create_default_svg_options();
-    Element* result = graph_to_svg_with_options(graph, layout, opts, input);
+    Item result = graph_to_svg_with_options(graph, layout, opts, input);
     free(opts);
     return result;
 }
