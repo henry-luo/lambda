@@ -9,7 +9,8 @@
         "lambda/input/css",
         "lambda/input/html5",
         "lambda/format",
-        "lambda/validator"
+        "lambda/validator",
+        "lambda/tex"
     ],
     "source_files": [
         "lib/strbuf.c",
@@ -2755,6 +2756,65 @@
                             "."
                         ],
                         "icon": "➖"
+                    },
+                    {
+                        "source": "test/test_tex_lambda_bridge_gtest.cpp",
+                        "name": "TeX Lambda Bridge Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_lambda_bridge_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔗"
+                    },
+                    {
+                        "source": "test/test_tex_latex_bridge_gtest.cpp",
+                        "name": "TeX LaTeX Bridge Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_latex_bridge_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp",
+                            "lambda/tex/tex_latex_bridge.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📝"
                     }
                 ],
                 "type": "tex",
