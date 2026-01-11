@@ -152,10 +152,11 @@ int TexNode::child_count() const {
 
 Glue interword_glue(const FontSpec& font) {
     // Standard interword space: typically font_size/3 with stretch/shrink
+    // Keep in points for TeX internal units
     float space = font.size_pt * 0.333f;
     float stretch = font.size_pt * 0.166f;
     float shrink = font.size_pt * 0.111f;
-    return Glue::flexible(pt_to_px(space), pt_to_px(stretch), pt_to_px(shrink));
+    return Glue::flexible(space, stretch, shrink);
 }
 
 Glue hfil_glue() {
@@ -190,13 +191,13 @@ Glue vss_glue() {
 }
 
 Glue parskip_glue(float base) {
-    // Parskip: base + 1pt stretch
-    return Glue::flexible(pt_to_px(base), pt_to_px(1.0f), 0);
+    // Parskip: base + 1pt stretch (keep in points)
+    return Glue::flexible(base, 1.0f, 0);
 }
 
 Glue baselineskip_glue(float skip) {
-    // Baselineskip is usually fixed
-    return Glue::fixed(pt_to_px(skip));
+    // Baselineskip is usually fixed (keep in points)
+    return Glue::fixed(skip);
 }
 
 } // namespace tex
