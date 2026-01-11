@@ -3,6 +3,7 @@
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
+#include "../lib/strbuf.h"  // For string buffer
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
@@ -14,6 +15,11 @@
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
+
+// Graph layout includes
+#include "../radiant/layout_graph.hpp"
+#include "../radiant/graph_to_svg.hpp"
+#include "input/input-graph.h"
 
 // Forward declaration for LaTeX HTML v2 formatter
 namespace lambda {
@@ -874,6 +880,9 @@ int main(int argc, char *argv[]) {
             printf("  .html, .htm    HTML documents\n");
             printf("  .tex, .latex   LaTeX documents (converted to HTML)\n");
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
+            printf("  .mmd           Mermaid diagrams (rendered via graph layout)\n");
+            printf("  .d2            D2 diagrams (rendered via graph layout)\n");
+            printf("  .dot, .gv      GraphViz DOT files (rendered via graph layout)\n");
             printf("\nSupported Output Formats:\n");
             printf("  .svg    Scalable Vector Graphics (SVG)\n");
             printf("  .pdf    Portable Document Format (PDF)\n");
@@ -1005,13 +1014,128 @@ int main(int argc, char *argv[]) {
 
         // Check if HTML file exists
         if (access(html_file, F_OK) != 0) {
-            printf("Error: HTML file '%s' does not exist\n", html_file);
+            printf("Error: Input file '%s' does not exist\n", html_file);
             log_finish();
             return 1;
         }
 
-        log_debug("Rendering HTML '%s' to output '%s' with viewport %dx%d, scale=%.2f, pixel_ratio=%.2f",
+        // Detect if input is a graph format (Mermaid, D2, DOT)
+        const char* input_ext = strrchr(html_file, '.');
+        bool is_graph_input = false;
+        if (input_ext) {
+            if (strcmp(input_ext, ".mmd") == 0 || 
+                strcmp(input_ext, ".d2") == 0 ||
+                strcmp(input_ext, ".dot") == 0 ||
+                strcmp(input_ext, ".gv") == 0) {
+                is_graph_input = true;
+            }
+        }
+
+        log_debug("Rendering input '%s' to output '%s' with viewport %dx%d, scale=%.2f, pixel_ratio=%.2f",
                   html_file, output_file, viewport_width, viewport_height, render_scale, pixel_ratio);
+
+        // Handle graph inputs - convert to SVG first, then render if needed
+        if (is_graph_input) {
+            log_info("Detected graph input format");
+            
+            // Read graph file
+            char* graph_content = read_text_file(html_file);
+            if (!graph_content) {
+                printf("Error: Failed to read graph file '%s'\n", html_file);
+                log_finish();
+                return 1;
+            }
+            
+            // Parse graph based on format
+            Input* input = input_create();
+            if (strcmp(input_ext, ".mmd") == 0) {
+                parse_graph_mermaid(input, graph_content);
+            } else if (strcmp(input_ext, ".d2") == 0) {
+                parse_graph_d2(input, graph_content);
+            } else if (strcmp(input_ext, ".dot") == 0 || strcmp(input_ext, ".gv") == 0) {
+                parse_graph_dot(input, graph_content);
+            }
+            free(graph_content);
+            
+            if (!input->root.element) {
+                printf("Error: Failed to parse graph file '%s'\n", html_file);
+                input_destroy(input);
+                log_finish();
+                return 1;
+            }
+            
+            // Layout graph using Dagre
+            GraphLayout* layout = layout_graph(input->root.element);
+            if (!layout) {
+                printf("Error: Failed to compute graph layout\n");
+                input_destroy(input);
+                log_finish();
+                return 1;
+            }
+            
+            // Generate SVG from layout
+            Element* svg_root = graph_to_svg(input->root.element, layout, input);
+            if (!svg_root) {
+                printf("Error: Failed to generate SVG from graph\n");
+                free_graph_layout(layout);
+                input_destroy(input);
+                log_finish();
+                return 1;
+            }
+            
+            // Update input root to SVG
+            input->root = {.element = svg_root};
+            
+            // Determine output format
+            const char* output_ext = strrchr(output_file, '.');
+            if (output_ext && strcmp(output_ext, ".svg") == 0) {
+                // Direct SVG output
+                log_info("Writing SVG output to '%s'", output_file);
+                StrBuf* svg_buf = strbuf_new();
+                format_svg(svg_buf, input, true); // true for standalone
+                write_text_file(output_file, svg_buf->str);
+                strbuf_free(svg_buf);
+                
+                printf("Graph rendered successfully to '%s'\n", output_file);
+                free_graph_layout(layout);
+                input_destroy(input);
+                log_finish();
+                return 0;
+            } else {
+                // For other formats (PDF, PNG), we need to save SVG temp file and render it
+                // Create a temporary SVG file
+                const char* temp_svg = "/tmp/lambda_graph_temp.svg";
+                StrBuf* svg_buf = strbuf_new();
+                format_svg(svg_buf, input, true);
+                write_text_file(temp_svg, svg_buf->str);
+                strbuf_free(svg_buf);
+                
+                // Now render the SVG using the appropriate renderer
+                int exit_code = 0;
+                if (output_ext && strcmp(output_ext, ".pdf") == 0) {
+                    exit_code = render_html_to_pdf(temp_svg, output_file, 0, 0, render_scale);
+                } else if (output_ext && strcmp(output_ext, ".png") == 0) {
+                    exit_code = render_html_to_png(temp_svg, output_file, 0, 0, render_scale, pixel_ratio);
+                } else if (output_ext && (strcmp(output_ext, ".jpg") == 0 || strcmp(output_ext, ".jpeg") == 0)) {
+                    exit_code = render_html_to_jpeg(temp_svg, output_file, 85, 0, 0, render_scale, pixel_ratio);
+                } else {
+                    printf("Error: Unsupported output format for graph rendering: %s\n", output_ext);
+                    exit_code = 1;
+                }
+                
+                // Clean up temp file
+                unlink(temp_svg);
+                
+                if (exit_code == 0) {
+                    printf("Graph rendered successfully to '%s'\n", output_file);
+                }
+                
+                free_graph_layout(layout);
+                input_destroy(input);
+                log_finish();
+                return exit_code;
+            }
+        }
 
         // Determine output format based on file extension
         const char* ext = strrchr(output_file, '.');
