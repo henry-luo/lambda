@@ -233,14 +233,17 @@ ViewSpan* tex_char_to_view(TexNode* char_node, TexViewContext& ctx) {
     bool bold = (font_name && strstr(font_name, "bx") != nullptr);
     bool italic = (font_name && (strstr(font_name, "ti") != nullptr ||
                                   strstr(font_name, "sl") != nullptr));
-    float font_size = char_node->content.ch.font.size_pt > 0 ?
-                      char_node->content.ch.font.size_pt : ctx.cur_font_size;
-    span->font = create_font_prop(ctx.pool, sys_font, font_size, bold, italic);
+    float font_size_pt = char_node->content.ch.font.size_pt > 0 ?
+                         char_node->content.ch.font.size_pt : ctx.cur_font_size;
+    // Convert TeX points to CSS pixels for rendering
+    float font_size_px = pt_to_px(font_size_pt);
+    span->font = create_font_prop(ctx.pool, sys_font, font_size_px, bold, italic);
 
     // Create TextRect for rendering (required by render_text_view)
     TextRect* text_rect = (TextRect*)pool_calloc(ctx.pool, sizeof(TextRect));
-    text_rect->x = 0;
-    text_rect->y = 0;
+    // Use span's x/y position for text rendering (relative to parent block)
+    text_rect->x = span->x;
+    text_rect->y = span->y;
     text_rect->width = span->width;
     text_rect->height = span->height;
     text_rect->start_index = 0;
@@ -334,12 +337,17 @@ static void process_hlist_nodes(TexNode* hlist, ViewBlock* parent, TexViewContex
                 const char* sys_font = tex_font_to_system_font(font_name);
                 bool bold = (font_name && strstr(font_name, "bx") != nullptr);
                 bool italic = (font_name && strstr(font_name, "ti") != nullptr);
-                span->font = create_font_prop(ctx.pool, sys_font, ctx.cur_font_size, bold, italic);
+                float font_size_pt = node->content.lig.font.size_pt > 0 ?
+                                     node->content.lig.font.size_pt : ctx.cur_font_size;
+                // Convert TeX points to CSS pixels for rendering
+                float font_size_px = pt_to_px(font_size_pt);
+                span->font = create_font_prop(ctx.pool, sys_font, font_size_px, bold, italic);
 
                 // Create TextRect for rendering (required by render_text_view)
                 TextRect* text_rect = (TextRect*)pool_calloc(ctx.pool, sizeof(TextRect));
-                text_rect->x = 0;
-                text_rect->y = 0;
+                // Use span's x/y position for text rendering (relative to parent block)
+                text_rect->x = span->x;
+                text_rect->y = span->y;
                 text_rect->width = span->width;
                 text_rect->height = span->height;
                 text_rect->start_index = 0;
