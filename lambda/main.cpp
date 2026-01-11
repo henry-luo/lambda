@@ -49,6 +49,9 @@ int exec_convert(int argc, char* argv[]);
 // Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
 int cmd_layout(int argc, char** argv);
 
+// WebDriver server command implementation
+int cmd_webdriver(int argc, char** argv);
+
 // Legacy layout function from radiant (for backward compatibility)
 int run_layout(const char* html_file);
 
@@ -1158,6 +1161,18 @@ int main(int argc, char *argv[]) {
         }
 
         log_debug("view command completed with result: %d", exit_code);
+        log_finish();
+        return exit_code;
+    }
+
+    // Handle webdriver command
+    log_debug("Checking for webdriver command");
+    if (argc >= 2 && strcmp(argv[1], "webdriver") == 0) {
+        log_debug("Entering webdriver command handler");
+        
+        int exit_code = cmd_webdriver(argc - 2, argv + 2);
+        
+        log_debug("webdriver command completed with result: %d", exit_code);
         log_finish();
         return exit_code;
     }
