@@ -59,8 +59,8 @@ float TFMFont::get_kern(int left, int right) const {
         const LigKernStep& step = lig_kern[i];
 
         if (step.next_char == right) {
-            if (step.skip_byte > 128) {
-                // This is a kern
+            if (step.op_byte >= 128) {
+                // This is a kern (op_byte >= 128 indicates kern operation)
                 int kern_idx = 256 * (step.op_byte - 128) + step.remainder;
                 if (kern_idx < nk) {
                     return kerns[kern_idx];
@@ -157,9 +157,11 @@ static float fixword_to_float(uint32_t fw) {
 TFMFont* load_tfm_file(const char* path, Arena* arena) {
     FILE* f = fopen(path, "rb");
     if (!f) {
-        log_error("tex_tfm: cannot open %s", path);
+        // Don't log - caller will try multiple paths
         return nullptr;
     }
+
+    fprintf(stderr, "[DEBUG] tex_tfm: loading %s\n", path);
 
     // Read header lengths (first 6 halfwords)
     uint16_t lf = read_u16(f);  // File length in words
@@ -331,13 +333,14 @@ TFMFont* load_tfm_by_name(const char* name, Arena* arena) {
         snprintf(path, sizeof(path), "%s/%s.tfm", search_paths[i], name);
         font = load_tfm_file(path, arena);
         if (font) {
-            log_debug("tex_tfm: loaded font %s from %s", name, path);
+            log_info("tex_tfm: loaded font %s from %s", name, path);
             font->name = name;
             return font;
         }
     }
 
     // Use built-in fallback
+    log_info("tex_tfm: using builtin fallback for %s", name);
     if (strcmp(name, "cmr10") == 0) return get_builtin_cmr10(arena);
     if (strcmp(name, "cmmi10") == 0) return get_builtin_cmmi10(arena);
     if (strcmp(name, "cmsy10") == 0) return get_builtin_cmsy10(arena);
