@@ -1,0 +1,17 @@
+{
+  "name": "radiant-webdriver-tests",
+  "version": "1.0.0",
+  "description": "WebDriver tests for Radiant HTML/CSS engine",
+  "main": "test_webdriver.js",
+  "scripts": {
+    "test": "node test_webdriver.js",
+    "test:raw": "node test_raw_api.js"
+  },
+  "dependencies": {
+    "selenium-webdriver": "^4.16.0"
+  },
+  "devDependencies": {},
+  "keywords": ["webdriver", "selenium", "radiant", "test"],
+  "author": "",
+  "license": "MIT"
+}
