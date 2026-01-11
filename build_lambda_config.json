@@ -37,6 +37,10 @@
         "lib/mime-types.c",
         "lib/font_config.c",
         "lib/base64.c",
+        "lib/serve/server.c",
+        "lib/serve/http_handler.c",
+        "lib/serve/tls_handler.c",
+        "lib/serve/utils.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
@@ -129,6 +133,12 @@
         "radiant/state_store.cpp",
         "radiant/event.cpp",
         "radiant/event_sim.cpp",
+        "radiant/webdriver/webdriver_errors.cpp",
+        "radiant/webdriver/webdriver_server.cpp",
+        "radiant/webdriver/webdriver_locator.cpp",
+        "radiant/webdriver/webdriver_session.cpp",
+        "radiant/webdriver/webdriver_actions.cpp",
+        "radiant/webdriver/cmd_webdriver.cpp",
         "radiant/cmd_layout.cpp",
         "radiant/window.cpp",
         "lambda/main-repl.cpp",
@@ -218,6 +228,20 @@
             "description": "mbedTLS - Cryptographic primitives",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libmbedcrypto.a",
+            "link": "static"
+        },
+        {
+            "name": "libevent",
+            "description": "Event notification library for HTTP server",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libevent.a",
+            "link": "static"
+        },
+        {
+            "name": "libevent_openssl",
+            "description": "Event notification library OpenSSL support",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libevent_openssl.a",
             "link": "static"
         },
         {
