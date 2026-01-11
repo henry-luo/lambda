@@ -412,7 +412,10 @@ TexNode* build_page_vbox(
     bool started = false;
     float total_height = params.top_skip;
 
-    for (TexNode* c = vlist->first_child; c; c = c->next_sibling) {
+    for (TexNode* c = vlist->first_child; c; ) {
+        // Save next sibling BEFORE append_child modifies it
+        TexNode* next = c->next_sibling;
+
         if (index >= start_index) {
             started = true;
         }
@@ -421,6 +424,7 @@ TexNode* build_page_vbox(
             // Skip discardable items at page start
             if (index == start_index && is_page_discardable(c)) {
                 index++;
+                c = next;
                 continue;
             }
 
@@ -437,6 +441,7 @@ TexNode* build_page_vbox(
         }
 
         index++;
+        c = next;
     }
 
     // Set page dimensions
