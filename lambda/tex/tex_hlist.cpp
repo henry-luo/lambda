@@ -80,10 +80,11 @@ static TexNode* make_char_node(HListContext& ctx, int32_t codepoint) {
     get_char_metrics(ctx, codepoint, &w, &h, &d, &i);
 
     TexNode* node = make_char(ctx.arena, codepoint, ctx.current_font);
-    node->width = pt_to_px(w);
-    node->height = pt_to_px(h);
-    node->depth = pt_to_px(d);
-    node->italic = pt_to_px(i);
+    // Keep dimensions in points for TeX internal units
+    node->width = w;
+    node->height = h;
+    node->depth = d;
+    node->italic = i;
 
     return node;
 }
@@ -94,21 +95,23 @@ static TexNode* make_char_node(HListContext& ctx, int32_t codepoint) {
 
 TexNode* make_interword_glue(HListContext& ctx) {
     if (!ctx.current_tfm) {
-        // Fallback: 1/3 em space
+        // Fallback: 1/3 em space (in points for TeX internal units)
         float em = ctx.current_font.size_pt;
         Glue g = Glue::flexible(
-            pt_to_px(em / 3.0f),
-            pt_to_px(em / 6.0f),
-            pt_to_px(em / 9.0f)
+            em / 3.0f,
+            em / 6.0f,
+            em / 9.0f
         );
         return make_glue(ctx.arena, g, "interword");
     }
 
+    // TFM space values are already in points (scaled by design size)
+    // Keep them in points for TeX line breaking
     float scale = ctx.current_font.size_pt / ctx.current_tfm->design_size;
     Glue g = Glue::flexible(
-        pt_to_px(ctx.current_tfm->space * scale),
-        pt_to_px(ctx.current_tfm->space_stretch * scale),
-        pt_to_px(ctx.current_tfm->space_shrink * scale)
+        ctx.current_tfm->space * scale,
+        ctx.current_tfm->space_stretch * scale,
+        ctx.current_tfm->space_shrink * scale
     );
 
     return make_glue(ctx.arena, g, "interword");
@@ -206,13 +209,13 @@ void apply_ligatures(TexNode* first, HListContext& ctx) {
             char orig[3] = {(char)c1, (char)c2, 0};
             TexNode* lig = make_ligature(ctx.arena, lig_char, orig, 2, ctx.current_font);
 
-            // Get metrics for ligature
+            // Get metrics for ligature (in points)
             float w, h, d, it;
             get_char_metrics(ctx, lig_char, &w, &h, &d, &it);
-            lig->width = pt_to_px(w);
-            lig->height = pt_to_px(h);
-            lig->depth = pt_to_px(d);
-            lig->italic = pt_to_px(it);
+            lig->width = w;
+            lig->height = h;
+            lig->depth = d;
+            lig->italic = it;
 
             // Replace the two nodes with the ligature
             lig->prev_sibling = node->prev_sibling;
@@ -262,10 +265,11 @@ void apply_kerning(TexNode* first, HListContext& ctx) {
         }
 
         if (c1 && c2) {
-            float kern = ctx.current_tfm->get_kern(c1, c2) * scale;
+            float kern_raw = ctx.current_tfm->get_kern(c1, c2);
+            float kern = kern_raw * scale;
             if (kern != 0) {
-                // Insert kern node
-                TexNode* kern_node = make_kern(ctx.arena, pt_to_px(kern));
+                // Insert kern node (keep in points)
+                TexNode* kern_node = make_kern(ctx.arena, kern);
 
                 kern_node->prev_sibling = node;
                 kern_node->next_sibling = next;
