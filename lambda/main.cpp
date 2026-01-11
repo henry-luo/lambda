@@ -58,6 +58,9 @@ int run_layout(const char* html_file);
 // SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f);
 
+// DVI rendering function for LaTeX files (TeX typesetting pipeline)
+int render_latex_to_dvi(const char* latex_file, const char* dvi_file);
+
 // PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200, float scale = 1.0f);
 
@@ -68,8 +71,14 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f, float pixel_ratio = 1.0f);
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
+// LaTeX flavor enum (matches window.cpp)
+enum LatexFlavorMain {
+    LATEX_FLAVOR_AUTO_M,      // Use environment variable or default
+    LATEX_FLAVOR_JS_M,        // LaTeX→HTML→CSS pipeline (latex-js)
+    LATEX_FLAVOR_TEX_PROPER_M // LaTeX→TeX→ViewTree pipeline (tex-proper)
+};
 extern int view_doc_in_window(const char* doc_file);
-extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file);
+extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, int flavor = LATEX_FLAVOR_AUTO_M);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -824,6 +833,7 @@ int main(int argc, char *argv[]) {
             printf("  -c, --css FILE                     External CSS file to apply (HTML only)\n");
             printf("  -vw, --viewport-width WIDTH        Viewport width in pixels (default: 1200)\n");
             printf("  -vh, --viewport-height HEIGHT      Viewport height in pixels (default: 800)\n");
+            printf("  --flavor FLAVOR                    LaTeX rendering: latex-js (default), tex-proper\n");
             printf("  --continue-on-error                Continue processing on errors in batch mode\n");
             printf("  --summary                          Print summary statistics\n");
             printf("  --debug                            Enable debug output\n");
@@ -865,14 +875,14 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
+            printf("Usage: %s render <input.html|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg|output.dvi> [options]\n", argv[0]);
             printf("\nDescription:\n");
-            printf("  The 'render' command layouts an HTML, LaTeX, or Lambda script file and renders the result as SVG, PDF, or PNG.\n");
+            printf("  The 'render' command layouts an HTML, LaTeX, or Lambda script file and renders the result as SVG, PDF, PNG, JPEG, or DVI.\n");
             printf("  It parses the input (converting LaTeX to HTML or evaluating Lambda script if needed), applies CSS styles,\n");
             printf("  calculates layout, and generates output in the specified format based on file extension.\n");
             printf("\nSupported Input Formats:\n");
             printf("  .html, .htm    HTML documents\n");
-            printf("  .tex, .latex   LaTeX documents (converted to HTML)\n");
+            printf("  .tex, .latex   LaTeX documents (converted to HTML for svg/pdf/png/jpg, or TeX typeset for dvi)\n");
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
             printf("\nSupported Output Formats:\n");
             printf("  .svg    Scalable Vector Graphics (SVG)\n");
@@ -880,12 +890,14 @@ int main(int argc, char *argv[]) {
             printf("  .png    Portable Network Graphics (PNG)\n");
             printf("  .jpg    Joint Photographic Experts Group (JPEG)\n");
             printf("  .jpeg   Joint Photographic Experts Group (JPEG)\n");
+            printf("  .dvi    DeVice Independent format (TeX output, LaTeX files only)\n");
             printf("\nOptions:\n");
             printf("  -o <output>              Output file path (required, format detected by extension)\n");
             printf("  -vw, --viewport-width    Viewport width in CSS pixels (default: auto-size to content)\n");
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
             printf("  -s, --scale              User zoom scale factor (default: 1.0)\n");
             printf("  --pixel-ratio            Device pixel ratio for HiDPI/Retina (default: 1.0, use 2.0 for crisp text)\n");
+            printf("  --flavor <flavor>        LaTeX rendering pipeline: latex-js (default), tex-proper\n");
             printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Auto-size to content\n", argv[0]);
@@ -893,6 +905,7 @@ int main(int argc, char *argv[]) {
             printf("  %s render index.html -o output.pdf        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.png        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
+            printf("  %s render paper.tex -o output.dvi         # LaTeX to DVI (TeX typesetting)\n", argv[0]);
             printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
             printf("  %s render index.html -o out.png -s 2.0           # Render at 2x zoom\n", argv[0]);
             printf("  %s render index.html -o out.png --pixel-ratio 2  # Crisp text on Retina\n", argv[0]);
@@ -908,6 +921,7 @@ int main(int argc, char *argv[]) {
         int viewport_height = 0;  // 0 means use format-specific default
         float render_scale = 1.0f;  // Default user zoom scale
         float pixel_ratio = 1.0f;  // Default device pixel ratio (use 2.0 for Retina)
+        const char* latex_flavor_str = NULL;  // LaTeX rendering flavor
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -970,6 +984,19 @@ int main(int argc, char *argv[]) {
                     log_finish();
                     return 1;
                 }
+            } else if (strcmp(argv[i], "--flavor") == 0) {
+                if (i + 1 < argc) {
+                    latex_flavor_str = argv[++i];
+                    if (strcmp(latex_flavor_str, "latex-js") != 0 && strcmp(latex_flavor_str, "tex-proper") != 0) {
+                        printf("Error: unknown flavor '%s'. Use 'latex-js' or 'tex-proper'\n", latex_flavor_str);
+                        log_finish();
+                        return 1;
+                    }
+                } else {
+                    printf("Error: --flavor option requires an argument\n");
+                    log_finish();
+                    return 1;
+                }
             } else if (argv[i][0] != '-') {
                 // This should be the HTML input file
                 if (html_file == NULL) {
@@ -1013,11 +1040,36 @@ int main(int argc, char *argv[]) {
         log_debug("Rendering HTML '%s' to output '%s' with viewport %dx%d, scale=%.2f, pixel_ratio=%.2f",
                   html_file, output_file, viewport_width, viewport_height, render_scale, pixel_ratio);
 
+        // Set environment variable for LaTeX flavor (used by load_html_doc and load_doc_by_format)
+        if (latex_flavor_str) {
+            if (strcmp(latex_flavor_str, "tex-proper") == 0) {
+                setenv("LAMBDA_TEX_PIPELINE", "1", 1);
+                log_info("LaTeX flavor set to tex-proper");
+            } else {
+                setenv("LAMBDA_TEX_PIPELINE", "0", 1);
+                log_info("LaTeX flavor set to latex-js");
+            }
+        }
+
         // Determine output format based on file extension
         const char* ext = strrchr(output_file, '.');
         int exit_code;
 
-        if (ext && strcmp(ext, ".pdf") == 0) {
+        if (ext && strcmp(ext, ".dvi") == 0) {
+            // DVI output - only for LaTeX files, uses TeX typesetting pipeline
+            log_debug("Detected DVI output format");
+
+            // Check if input is LaTeX
+            const char* input_ext = strrchr(html_file, '.');
+            if (!input_ext || (strcmp(input_ext, ".tex") != 0 && strcmp(input_ext, ".latex") != 0)) {
+                printf("Error: DVI output is only supported for LaTeX input files (.tex, .latex)\n");
+                printf("Input file: %s\n", html_file);
+                log_finish();
+                return 1;
+            }
+
+            exit_code = render_latex_to_dvi(html_file, output_file);
+        } else if (ext && strcmp(ext, ".pdf") == 0) {
             // Call the PDF rendering function (pass 0 for auto-sizing)
             log_debug("Detected PDF output format");
             int pdf_width = viewport_width;   // 0 means auto-size
@@ -1089,6 +1141,7 @@ int main(int argc, char *argv[]) {
             printf("  .csv       Comma-separated values (source view)\n");
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
+            printf("  --flavor <flavor>          LaTeX rendering pipeline: latex-js (default), tex-proper\n");
             printf("\nExamples:\n");
             printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
@@ -1096,6 +1149,7 @@ int main(int argc, char *argv[]) {
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
             printf("  %s view script.ls                # View Lambda script result\n", argv[0]);
             printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
+            printf("  %s view paper.tex --flavor tex-proper  # View with TeX typesetting\n", argv[0]);
             printf("  %s view config.xml               # View XML document\n", argv[0]);
             printf("  %s view data.json                # View JSON source\n", argv[0]);
             printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
@@ -1110,10 +1164,22 @@ int main(int argc, char *argv[]) {
         // Parse arguments for view command
         const char* filename = NULL;
         const char* event_file = NULL;
+        int latex_flavor = LATEX_FLAVOR_AUTO_M;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
                 event_file = argv[++i];
+            } else if (strcmp(argv[i], "--flavor") == 0 && i + 1 < argc) {
+                const char* flavor = argv[++i];
+                if (strcmp(flavor, "latex-js") == 0) {
+                    latex_flavor = LATEX_FLAVOR_JS_M;
+                } else if (strcmp(flavor, "tex-proper") == 0) {
+                    latex_flavor = LATEX_FLAVOR_TEX_PROPER_M;
+                } else {
+                    printf("Error: unknown flavor '%s'. Use 'latex-js' or 'tex-proper'\n", flavor);
+                    log_finish();
+                    return 1;
+                }
             } else if (argv[i][0] != '-' && filename == NULL) {
                 filename = argv[i];
             }
@@ -1151,8 +1217,8 @@ int main(int argc, char *argv[]) {
                     strcmp(ext, ".ini") == 0 || strcmp(ext, ".conf") == 0 ||
                     strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
             // Use unified document viewer for all document types including PDF
-            log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
-            exit_code = view_doc_in_window_with_events(filename, event_file);
+            log_info("Opening document file: %s (event_file: %s, flavor: %d)", filename, event_file ? event_file : "none", latex_flavor);
+            exit_code = view_doc_in_window_with_events(filename, event_file, latex_flavor);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
@@ -1169,9 +1235,9 @@ int main(int argc, char *argv[]) {
     log_debug("Checking for webdriver command");
     if (argc >= 2 && strcmp(argv[1], "webdriver") == 0) {
         log_debug("Entering webdriver command handler");
-        
+
         int exit_code = cmd_webdriver(argc - 2, argv + 2);
-        
+
         log_debug("webdriver command completed with result: %d", exit_code);
         log_finish();
         return exit_code;
