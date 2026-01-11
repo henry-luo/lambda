@@ -215,7 +215,7 @@ static void parse_mermaid_node_def(InputContext& ctx, Element* graph) {
     add_node_to_graph(ctx.input(), graph, node);
 }
 
-// Parse Mermaid edge definition: nodeA --> nodeB or nodeA -.-> nodeB etc.
+// Parse Mermaid edge definition: nodeA --> nodeB or nodeA -->|label| nodeB etc.
 static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
@@ -237,7 +237,15 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
             tracker.advance();
         }
 
-        // check for label inside |text|
+        // check for arrow head
+        if (tracker.current() == '>') {
+            tracker.advance();
+            is_directed = true;
+        } else {
+            is_directed = false;
+        }
+        
+        // check for label inside |text| AFTER arrow head (Mermaid syntax: -->|label| target)
         if (tracker.current() == '|') {
             tracker.advance();
             StringBuf* sb = ctx.sb;
@@ -252,19 +260,6 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
                 tracker.advance();
                 label = ctx.builder.createString(sb->str->chars);
             }
-
-            // skip remaining dashes after label
-            while (!tracker.atEnd() && tracker.current() == '-') {
-                tracker.advance();
-            }
-        }
-
-        // check for arrow
-        if (tracker.current() == '>') {
-            tracker.advance();
-            is_directed = true;
-        } else {
-            is_directed = false;
         }
     } else {
         std::string msg = "Invalid edge syntax, expected edge arrow like '-->', '--->', or '-.->'";;
@@ -279,6 +274,30 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
     if (!to_id) {
         ctx.addError(tracker.location(), "Expected target node identifier");
         return;
+    }
+    
+    // check if target node has a shape and create node if so
+    skip_whitespace_and_comments_mermaid(tracker);
+    if (tracker.current() == '[' || tracker.current() == '(' ||
+        tracker.current() == '{' || tracker.current() == '>') {
+        // determine shape from opening char
+        char open_char = tracker.current();
+        const char* node_shape = nullptr;
+        if (open_char == '[') node_shape = "box";
+        else if (open_char == '(') node_shape = "ellipse";
+        else if (open_char == '{') node_shape = "diamond";
+        else if (open_char == '>') node_shape = "pentagon";
+        
+        // parse node shape and get label
+        String* to_label = parse_mermaid_node_shape(ctx, to_id->chars);
+        
+        // create and add target node element
+        Element* to_node = create_node_element(ctx.input(), to_id->chars, 
+            to_label ? to_label->chars : to_id->chars);
+        if (node_shape) {
+            add_graph_attribute(ctx.input(), to_node, "shape", node_shape);
+        }
+        add_node_to_graph(ctx.input(), graph, to_node);
     }
 
     // create edge element
@@ -392,13 +411,31 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         String* potential_node = parse_mermaid_identifier(ctx);
 
         if (potential_node) {
-            // check if node has shape
+            // check if node has shape and create node if so
             skip_whitespace_and_comments_mermaid(tracker);
+            String* node_label = nullptr;
+            const char* node_shape = nullptr;
+            
             if (tracker.current() == '[' || tracker.current() == '(' ||
                 tracker.current() == '{' || tracker.current() == '>') {
-                // skip node shape
-                parse_mermaid_node_shape(ctx, potential_node->chars);
+                // determine shape from opening char
+                char open_char = tracker.current();
+                if (open_char == '[') node_shape = "box";
+                else if (open_char == '(') node_shape = "ellipse";
+                else if (open_char == '{') node_shape = "diamond";
+                else if (open_char == '>') node_shape = "pentagon";
+                
+                // parse node shape and get label
+                node_label = parse_mermaid_node_shape(ctx, potential_node->chars);
                 skip_whitespace_and_comments_mermaid(tracker);
+                
+                // create and add node element
+                Element* node = create_node_element(ctx.input(), potential_node->chars, 
+                    node_label ? node_label->chars : potential_node->chars);
+                if (node_shape) {
+                    add_graph_attribute(ctx.input(), node, "shape", node_shape);
+                }
+                add_node_to_graph(ctx.input(), graph, node);
             }
 
             // look for edge operator
@@ -407,8 +444,8 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
                 tracker.match("-.-") || tracker.match("===")) {
                 // this is an edge
                 parse_mermaid_edge_def(ctx, graph, potential_node);
-            } else {
-                // this is a standalone node
+            } else if (!node_label) {
+                // this is a standalone node without shape
                 parse_mermaid_node_def(ctx, graph);
             }
         }
