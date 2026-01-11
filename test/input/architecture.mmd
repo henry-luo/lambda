@@ -1,0 +1,7 @@
+graph LR
+    Client[Client App] --> API[API Gateway]
+    API --> Auth[Auth Service]
+    API --> Data[Data Service]
+    Data --> DB[(Database)]
+    Data --> Cache[(Redis Cache)]
+    Auth --> DB
