@@ -1,0 +1,16 @@
+# System Architecture
+
+web: Web Server
+app: Application Server
+db: Database
+cache: Cache Layer
+
+web -> app: HTTP
+app -> db: SQL Query
+app -> cache: Get/Set
+cache -> db: Cache Miss
+
+web.shape: rectangle
+app.shape: rectangle
+db.shape: cylinder
+cache.shape: ellipse
