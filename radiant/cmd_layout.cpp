@@ -3597,8 +3597,18 @@ static bool layout_single_file(
         log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(input_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
-        doc = load_latex_doc(input_url, viewport_width, viewport_height, pool);
+        // Check environment variable to select pipeline
+        // LAMBDA_TEX_PIPELINE=1 uses direct LaTeX→TeX→ViewTree pipeline
+        // Default (unset or 0) uses LaTeX→HTML→CSS pipeline
+        const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
+        if (use_tex && strcmp(use_tex, "1") == 0) {
+            log_info("[Layout] Detected LaTeX file, using TeX typesetting pipeline");
+            extern DomDocument* load_latex_doc_tex(Url*, int, int, Pool*, float);
+            doc = load_latex_doc_tex(input_url, viewport_width, viewport_height, pool, 1.0f);
+        } else {
+            log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
+            doc = load_latex_doc(input_url, viewport_width, viewport_height, pool);
+        }
     } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
         log_info("[Layout] Detected Markdown file, using Markdown→HTML pipeline");
         doc = load_markdown_doc(input_url, viewport_width, viewport_height, pool);
