@@ -14,6 +14,7 @@
  *   -vh, --viewport-height HEIGHT  Viewport height in pixels (default: 800)
  *   --format FORMAT                Output format: json, text (default: text)
  *   --debug                        Enable debug output
+ *   --flavor FLAVOR                LaTeX rendering pipeline: latex-js (default), tex-proper
  */
 
 #include <stdio.h>
@@ -1606,9 +1607,17 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         log_info("[load_html_doc] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        // Load LaTeX document: parse LaTeX → convert to HTML → layout
-        log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline");
-        doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
+        // Load LaTeX document
+        // Check LAMBDA_TEX_PIPELINE env var to select pipeline (supports --flavor from CLI)
+        const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
+        if (use_tex && strcmp(use_tex, "1") == 0) {
+            log_info("[load_html_doc] Detected LaTeX file, using TeX typesetting pipeline (tex-proper)");
+            extern DomDocument* load_latex_doc_tex(Url*, int, int, Pool*, float);
+            doc = load_latex_doc_tex(full_url, viewport_width, viewport_height, pool, 1.0f);
+        } else {
+            log_info("[load_html_doc] Detected LaTeX file, using LaTeX→HTML pipeline (latex-js)");
+            doc = load_latex_doc(full_url, viewport_width, viewport_height, pool);
+        }
     } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
         // Load Markdown document: parse Markdown → convert to HTML → layout
         log_info("[load_html_doc] Detected Markdown file, using Markdown→HTML pipeline");
@@ -3452,6 +3461,13 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
  */
 #define MAX_INPUT_FILES 1024
 
+// LaTeX rendering flavor
+enum LatexFlavor {
+    LATEX_FLAVOR_AUTO,      // Use environment variable or default
+    LATEX_FLAVOR_JS,        // LaTeX→HTML→CSS pipeline (latex-js)
+    LATEX_FLAVOR_TEX_PROPER // LaTeX→TeX→ViewTree pipeline (tex-proper)
+};
+
 struct LayoutOptions {
     const char* input_files[MAX_INPUT_FILES];  // array of input file paths
     int input_file_count;                       // number of input files
@@ -3464,6 +3480,7 @@ struct LayoutOptions {
     bool debug;
     bool continue_on_error;                     // continue processing on errors in batch mode
     bool summary;                               // print summary statistics
+    LatexFlavor latex_flavor;                   // LaTeX rendering pipeline to use
 };
 
 bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
@@ -3478,6 +3495,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->debug = false;
     opts->continue_on_error = false;
     opts->summary = false;
+    opts->latex_flavor = LATEX_FLAVOR_AUTO;
 
     // Parse arguments
     for (int i = 0; i < argc; i++) {
@@ -3538,6 +3556,22 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         else if (strcmp(argv[i], "--summary") == 0) {
             opts->summary = true;
         }
+        else if (strcmp(argv[i], "--flavor") == 0) {
+            if (i + 1 < argc) {
+                const char* flavor = argv[++i];
+                if (strcmp(flavor, "latex-js") == 0) {
+                    opts->latex_flavor = LATEX_FLAVOR_JS;
+                } else if (strcmp(flavor, "tex-proper") == 0) {
+                    opts->latex_flavor = LATEX_FLAVOR_TEX_PROPER;
+                } else {
+                    log_error("Error: unknown flavor '%s'. Use 'latex-js' or 'tex-proper'", flavor);
+                    return false;
+                }
+            } else {
+                log_error("Error: --flavor requires an argument");
+                return false;
+            }
+        }
         else if (argv[i][0] != '-') {
             // Collect all non-option arguments as input files
             if (opts->input_file_count < MAX_INPUT_FILES) {
@@ -3576,7 +3610,8 @@ static bool layout_single_file(
     int viewport_width,
     int viewport_height,
     UiContext* ui_context,
-    Url* cwd
+    Url* cwd,
+    LatexFlavor latex_flavor = LATEX_FLAVOR_AUTO
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
 
@@ -3597,16 +3632,25 @@ static bool layout_single_file(
         log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(input_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
-        // Check environment variable to select pipeline
-        // LAMBDA_TEX_PIPELINE=1 uses direct LaTeX→TeX→ViewTree pipeline
-        // Default (unset or 0) uses LaTeX→HTML→CSS pipeline
-        const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
-        if (use_tex && strcmp(use_tex, "1") == 0) {
-            log_info("[Layout] Detected LaTeX file, using TeX typesetting pipeline");
+        // Determine which pipeline to use
+        // Priority: --flavor flag > LAMBDA_TEX_PIPELINE env var > default (latex-js)
+        bool use_native = false;
+        if (latex_flavor == LATEX_FLAVOR_TEX_PROPER) {
+            use_native = true;
+        } else if (latex_flavor == LATEX_FLAVOR_JS) {
+            use_native = false;
+        } else {
+            // Auto: check environment variable
+            const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
+            use_native = (use_tex && strcmp(use_tex, "1") == 0);
+        }
+
+        if (use_native) {
+            log_info("[Layout] Detected LaTeX file, using TeX typesetting pipeline (tex-proper)");
             extern DomDocument* load_latex_doc_tex(Url*, int, int, Pool*, float);
             doc = load_latex_doc_tex(input_url, viewport_width, viewport_height, pool, 1.0f);
         } else {
-            log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline");
+            log_info("[Layout] Detected LaTeX file, using LaTeX→HTML pipeline (latex-js)");
             doc = load_latex_doc(input_url, viewport_width, viewport_height, pool);
         }
     } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
@@ -3794,7 +3838,8 @@ int cmd_layout(int argc, char** argv) {
             opts.viewport_width,
             opts.viewport_height,
             &ui_context,
-            cwd
+            cwd,
+            opts.latex_flavor
         );
 
         if (success) {
