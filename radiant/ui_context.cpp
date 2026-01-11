@@ -162,6 +162,12 @@ void free_document(DomDocument* doc) {
         // Note: view_pool_destroy destroys the pool that contains all view allocations
         // including the ViewTree itself (if it was pool-allocated).
         // Do NOT call free(doc->view_tree) after this - it would double-free.
+
+        // Check if doc->pool is the same as view_tree->pool to avoid double-free
+        if (doc->pool == doc->view_tree->pool) {
+            doc->pool = nullptr;  // Pool will be destroyed by view_pool_destroy
+        }
+
         view_pool_destroy(doc->view_tree);
         // Don't free view_tree - it was allocated from the pool that was just destroyed
     }

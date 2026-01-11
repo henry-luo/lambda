@@ -106,10 +106,27 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             return doc;
         }
 
-        case DOC_FORMAT_LATEX:
+        case DOC_FORMAT_LATEX: {
             log_debug("Loading as LaTeX document");
-            // load_html_doc will detect .tex/.latex extension and route to load_latex_doc
+
+            // Check environment variable to select pipeline
+            // LAMBDA_TEX_PIPELINE=1 uses direct LaTeX→TeX→PDF pipeline
+            // Default (unset or 0) uses LaTeX→HTML→CSS pipeline
+            const char* use_tex = getenv("LAMBDA_TEX_PIPELINE");
+            if (use_tex && strcmp(use_tex, "1") == 0) {
+                log_info("Using TeX typesetting pipeline for LaTeX");
+                Url* doc_url = url_parse_with_base(filename, base_url);
+                if (!doc_url) {
+                    log_error("Failed to parse document URL: %s", filename);
+                    return NULL;
+                }
+                extern DomDocument* load_latex_doc_tex(Url*, int, int, Pool*, float);
+                return load_latex_doc_tex(doc_url, width, height, pool, 1.0f);
+            }
+
+            // Default: use HTML conversion pipeline
             return load_html_doc(base_url, (char*)filename, width, height);
+        }
 
         case DOC_FORMAT_XML:
             log_debug("Loading as XML document with CSS stylesheet");
@@ -195,7 +212,7 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     doc->scale = doc->given_scale * ui_context.pixel_ratio;
 
     ui_context.document = doc;
-    
+
     // Create RadiantState for interactive state management (caret, selection, focus, etc.)
     if (!doc->state) {
         doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
@@ -234,7 +251,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
         glfwSetWindowShouldClose(window, GLFW_TRUE);
         return;
     }
-    
+
     // Build keyboard event
     RdtEvent event;
     event.key.type = (action == GLFW_PRESS || action == GLFW_REPEAT) ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP;
@@ -246,7 +263,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     if (mods & GLFW_MOD_CONTROL) event.key.mods |= RDT_MOD_CTRL;
     if (mods & GLFW_MOD_ALT) event.key.mods |= RDT_MOD_ALT;
     if (mods & GLFW_MOD_SUPER) event.key.mods |= RDT_MOD_SUPER;
-    
+
     // Handle key events
     handle_event(&ui_context, ui_context.document, &event);
 }
@@ -257,13 +274,13 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
     event.text_input.type = RDT_EVENT_TEXT_INPUT;
     event.text_input.timestamp = glfwGetTime();
     event.text_input.codepoint = codepoint;
-    
+
     if (codepoint > 127) {
         log_debug("Unicode character entered: U+%04X", codepoint);
     } else {
         log_debug("Character entered: %u '%c'", codepoint, codepoint);
     }
-    
+
     handle_event(&ui_context, ui_context.document, &event);
 }
 
@@ -284,13 +301,13 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
     event.mouse_button.type = action == GLFW_PRESS ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
     event.mouse_button.timestamp = glfwGetTime();
     event.mouse_button.button = button;
-    
+
     // Get cursor position for all mouse button events
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
     event.mouse_button.x = xpos;
     event.mouse_button.y = ypos;
-    
+
     // Map GLFW modifiers to RDT modifiers
     event.mouse_button.mods = 0;
     if (mods & GLFW_MOD_SHIFT) event.mouse_button.mods |= RDT_MOD_SHIFT;
@@ -429,7 +446,7 @@ void render(GLFWwindow* window) {
         }
         log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
-    
+
     // Check for incremental reflow due to state changes (pseudo-classes, etc.)
     RadiantState* state = ui_context.document ? ui_context.document->state : nullptr;
     if (state && state->needs_reflow) {
@@ -442,9 +459,9 @@ void render(GLFWwindow* window) {
         state->needs_reflow = false;
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
-    
+
     // rerender if the document is dirty or needs repaint (e.g., caret changed)
-    if (ui_context.document && ui_context.document->state && 
+    if (ui_context.document && ui_context.document->state &&
         (ui_context.document->state->is_dirty || ui_context.document->state->needs_repaint)) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
         ui_context.document->state->needs_repaint = false;
@@ -527,7 +544,7 @@ int run_layout(const char* html_file) {
 // event_file: optional JSON file with simulated events for automated testing
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file) {
     log_init_wrapper();
-    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s", 
+    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s",
              doc_file ? doc_file : "NULL", event_file ? event_file : "NULL");
     ui_context_init(&ui_context, false);
     log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, pixel_ratio=%.2f",
@@ -537,7 +554,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
         ui_context_cleanup(&ui_context);
         return -1;
     }
-    
+
     // Load event simulation if specified
     EventSimContext* sim_ctx = NULL;
     if (event_file) {
@@ -671,7 +688,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
     double caretBlinkTime = 0.0;
     const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
     int frames = 0;
-    
+
     // Give the window a moment to render before starting simulation
     double sim_start_delay = sim_ctx ? 0.5 : 0.0;  // 500ms delay before starting simulation
     double sim_start_time = glfwGetTime() + sim_start_delay;
@@ -684,7 +701,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
 
         // poll for new events
         glfwPollEvents();
-        
+
         // Process simulated events if simulation is active
         if (sim_ctx && sim_ctx->is_running && currentTime >= sim_start_time) {
             bool sim_running = event_sim_update(sim_ctx, &ui_context, window, currentTime);
@@ -729,7 +746,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
     log_info("End of document viewer");
     ui_context_cleanup(&ui_context);
     log_cleanup();
-    
+
     // Return non-zero if simulation had failures
     return sim_fail_count > 0 ? 1 : 0;
 }
