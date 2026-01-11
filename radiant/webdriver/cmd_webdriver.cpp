@@ -118,7 +118,7 @@ int cmd_webdriver(int argc, char** argv) {
     printf("Press Ctrl+C to stop\n\n");
     
     // Run server (blocks until stopped)
-    int result = webdriver_server_start(g_server);
+    int result = webdriver_server_run(g_server);
     
     // Cleanup
     webdriver_server_destroy(g_server);
