@@ -16,7 +16,7 @@ SvgGeneratorOptions* create_default_svg_options() {
     opts->default_fill = "lightblue";
     opts->default_stroke = "black";
     opts->default_stroke_width = 2.0f;
-    opts->font_family = "Arial, sans-serif";
+    opts->font_family = "Arial";  // simple name without fallback - ThorVG doesn't handle CSS font lists
     opts->font_size = 14.0f;
     opts->include_grid = false;
     return opts;
@@ -272,12 +272,19 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
                                            opts->default_stroke, 
                                            opts->default_stroke_width);
         
-        // render label
+        // render label with manual centering
+        // ThorVG doesn't support text-anchor/dominant-baseline, so we calculate offsets manually
+        // Estimate text width: average character width is approximately 0.5-0.6 of font size
+        size_t label_len = strlen(label);
+        float text_width = label_len * opts->font_size * 0.55f;
+        // Offset x by half the text width to center horizontally
+        float text_x = pos->x - text_width / 2.0f;
+        // Offset y by approximately 0.35 * font_size to center vertically (baseline adjustment)
+        float text_y = pos->y + opts->font_size * 0.35f;
+        
         Item text_item = builder.element("text")
-            .attr("x", (double)pos->x)
-            .attr("y", (double)pos->y)
-            .attr("text-anchor", "middle")
-            .attr("dominant-baseline", "middle")
+            .attr("x", (double)text_x)
+            .attr("y", (double)text_y)
             .attr("font-family", opts->font_family)
             .attr("font-size", (double)opts->font_size)
             .attr("fill", "black")
