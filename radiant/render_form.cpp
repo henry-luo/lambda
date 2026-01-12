@@ -37,8 +37,8 @@ static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, 
 
     tvg_canvas_remove(canvas, NULL);
     tvg_canvas_push(canvas, shape);
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(canvas, NULL);
 }
 
 // Helper to draw a circle outline (ring) using ThorVG
@@ -52,8 +52,8 @@ static void stroke_circle(RenderContext* rdcon, float cx, float cy, float radius
 
     tvg_canvas_remove(canvas, NULL);
     tvg_canvas_push(canvas, shape);
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(canvas, NULL);
 }
 
 // Helper to draw a 3D border effect (inset or outset)
@@ -256,8 +256,8 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_ROUND);
 
         tvg_canvas_push(canvas, shape);
-        tvg_canvas_draw(canvas, false);
-        tvg_canvas_sync(canvas);
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(canvas, NULL);
     }
 
     log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, form->checked);
