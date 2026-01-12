@@ -532,6 +532,105 @@ static TexNode* make_char_with_metrics(Arena* arena, int char_code,
     return node;
 }
 
+// Build an extensible delimiter from TFM recipe
+// Returns a VBox containing the assembled delimiter pieces
+TexNode* build_extensible_delimiter(Arena* arena, int base_char,
+                                    float target_height, FontSpec& font,
+                                    TFMFont* tfm, float size) {
+    if (!tfm) return nullptr;
+
+    // First, try finding a pre-built size that's large enough
+    int current_char = base_char;
+    int steps = 0;
+    while (steps < 8) {  // Limit chain length
+        float char_height = tfm->char_height(current_char) * size +
+                           tfm->char_depth(current_char) * size;
+        if (char_height >= target_height) {
+            // Found a pre-built size that works
+            return make_char_with_metrics(arena, current_char, AtomType::Ord, font, tfm, size);
+        }
+
+        int next = tfm->get_next_larger(current_char);
+        if (next == 0 || next == current_char) break;
+        current_char = next;
+        steps++;
+    }
+
+    // Need to build from extensible recipe
+    const ExtensibleRecipe* recipe = tfm->get_extensible(current_char);
+    if (!recipe) {
+        // No extensible recipe - use largest available
+        return make_char_with_metrics(arena, current_char, AtomType::Ord, font, tfm, size);
+    }
+
+    // Build the extensible delimiter as a VBox
+    TexNode* vbox = make_vbox(arena, target_height);
+
+    // Get heights of each piece
+    float top_h = (recipe->top != 0) ? (tfm->char_height(recipe->top) + tfm->char_depth(recipe->top)) * size : 0;
+    float mid_h = (recipe->mid != 0) ? (tfm->char_height(recipe->mid) + tfm->char_depth(recipe->mid)) * size : 0;
+    float bot_h = (recipe->bot != 0) ? (tfm->char_height(recipe->bot) + tfm->char_depth(recipe->bot)) * size : 0;
+    float rep_h = (tfm->char_height(recipe->rep) + tfm->char_depth(recipe->rep)) * size;
+
+    // Calculate how much space needs to be filled with repeaters
+    float fixed_h = top_h + mid_h + bot_h;
+    float remaining = target_height - fixed_h;
+
+    // Number of repeater copies needed (divide between top-mid and mid-bot if mid exists)
+    int rep_count = (rep_h > 0) ? (int)ceil(remaining / rep_h) : 0;
+    if (rep_count < 0) rep_count = 0;
+
+    // Build from top to bottom
+    float total_width = 0;
+
+    // Top piece
+    if (recipe->top != 0) {
+        TexNode* top_node = make_char_with_metrics(arena, recipe->top, AtomType::Ord, font, tfm, size);
+        vbox->append_child(top_node);
+        if (top_node->width > total_width) total_width = top_node->width;
+    }
+
+    // Repeaters (first half if we have middle)
+    int reps_before_mid = (recipe->mid != 0) ? rep_count / 2 : rep_count;
+    for (int r = 0; r < reps_before_mid; r++) {
+        TexNode* rep_node = make_char_with_metrics(arena, recipe->rep, AtomType::Ord, font, tfm, size);
+        vbox->append_child(rep_node);
+        if (rep_node->width > total_width) total_width = rep_node->width;
+    }
+
+    // Middle piece
+    if (recipe->mid != 0) {
+        TexNode* mid_node = make_char_with_metrics(arena, recipe->mid, AtomType::Ord, font, tfm, size);
+        vbox->append_child(mid_node);
+        if (mid_node->width > total_width) total_width = mid_node->width;
+
+        // More repeaters after middle
+        int reps_after_mid = rep_count - reps_before_mid;
+        for (int r = 0; r < reps_after_mid; r++) {
+            TexNode* rep_node = make_char_with_metrics(arena, recipe->rep, AtomType::Ord, font, tfm, size);
+            vbox->append_child(rep_node);
+            if (rep_node->width > total_width) total_width = rep_node->width;
+        }
+    }
+
+    // Bottom piece
+    if (recipe->bot != 0) {
+        TexNode* bot_node = make_char_with_metrics(arena, recipe->bot, AtomType::Ord, font, tfm, size);
+        vbox->append_child(bot_node);
+        if (bot_node->width > total_width) total_width = bot_node->width;
+    }
+
+    // Set vbox dimensions
+    vbox->width = total_width;
+    vbox->height = target_height / 2.0f;  // Above axis
+    vbox->depth = target_height / 2.0f;   // Below axis
+
+    log_debug("math_bridge: built extensible delimiter char=%d target=%.1f pieces=%d+%d",
+              base_char, target_height, reps_before_mid, rep_count - reps_before_mid);
+
+    return vbox;
+}
+
 // Parse LaTeX math and return TexNode tree
 static TexNode* parse_latex_math_internal(const char* str, size_t len, MathContext& ctx) {
     if (!str || len == 0) {
@@ -626,21 +725,109 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                 continue;
             }
 
+            // Handle math accents (\hat, \bar, \dot, \vec, \tilde, etc.)
+            // These use cmmi10 accents placed over the argument
+            int accent_code = -1;
+            bool is_wide_accent = false;
+            if (cmd_len == 3 && strncmp(cmd, "hat", 3) == 0) accent_code = 94;    // cmmi10 circumflex
+            else if (cmd_len == 3 && strncmp(cmd, "bar", 3) == 0) accent_code = 22;   // cmmi10 macron
+            else if (cmd_len == 3 && strncmp(cmd, "dot", 3) == 0) accent_code = 95;   // cmmi10 dot
+            else if (cmd_len == 4 && strncmp(cmd, "ddot", 4) == 0) accent_code = 127; // cmmi10 double dot
+            else if (cmd_len == 3 && strncmp(cmd, "vec", 3) == 0) accent_code = 126;  // cmmi10 vector arrow
+            else if (cmd_len == 5 && strncmp(cmd, "tilde", 5) == 0) accent_code = 126; // cmmi10 tilde
+            else if (cmd_len == 5 && strncmp(cmd, "breve", 5) == 0) accent_code = 21;  // cmmi10 breve
+            else if (cmd_len == 5 && strncmp(cmd, "check", 5) == 0) accent_code = 20;  // cmmi10 hacek
+            else if (cmd_len == 5 && strncmp(cmd, "acute", 5) == 0) accent_code = 19;  // cmmi10 acute
+            else if (cmd_len == 5 && strncmp(cmd, "grave", 5) == 0) accent_code = 18;  // cmmi10 grave
+            else if (cmd_len == 7 && strncmp(cmd, "widehat", 7) == 0) { accent_code = 98; is_wide_accent = true; }  // cmex10 wide hat
+            else if (cmd_len == 9 && strncmp(cmd, "widetilde", 9) == 0) { accent_code = 101; is_wide_accent = true; }  // cmex10 wide tilde
+
+            if (accent_code >= 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+                if (content) {
+                    // Create accent character
+                    FontSpec accent_font = is_wide_accent ? ctx.symbol_font : ctx.italic_font;
+                    accent_font.size_pt = size * 0.8f;  // Accents slightly smaller
+
+                    TFMFont* accent_tfm = is_wide_accent ? symbol_tfm : italic_tfm;
+                    TexNode* accent_char = make_char_with_metrics(arena, accent_code, AtomType::Ord,
+                                                                   accent_font, accent_tfm, size * 0.8f);
+
+                    // Build VBox: accent on top, content below
+                    TexNode* vbox = make_vbox(arena);
+
+                    // Center accent over content
+                    float accent_offset = (content->width - accent_char->width) / 2.0f;
+                    // Adjust for skewchar (italic correction) - TODO: get from TFM
+                    accent_char->x = accent_offset;
+
+                    float gap = ctx.base_size_pt * 0.05f;
+
+                    vbox->append_child(accent_char);
+                    vbox->append_child(make_kern(arena, gap));
+                    vbox->append_child(content);
+
+                    vbox->width = content->width;
+                    vbox->height = content->height + gap + accent_char->height;
+                    vbox->depth = content->depth;
+
+                    add_node(vbox, AtomType::Ord);
+                    log_debug("math_bridge: Math accent \\%.*s code=%d", (int)cmd_len, cmd, accent_code);
+                }
+                continue;
+            }
+
             // Try symbols (cmsy10)
             int sym_code = lookup_symbol(cmd, cmd_len);
             if (sym_code >= 0) {
                 FontSpec font = ctx.symbol_font;
                 font.size_pt = size;
                 AtomType atom = AtomType::Ord;
-                // Classify symbol type
-                if (strncmp(cmd, "sum", 3) == 0 || strncmp(cmd, "prod", 4) == 0 ||
-                    strncmp(cmd, "int", 3) == 0 || strncmp(cmd, "bigcup", 6) == 0 ||
-                    strncmp(cmd, "bigcap", 6) == 0) {
+
+                // Check if this is a big operator
+                bool is_big_op = (strncmp(cmd, "sum", 3) == 0 || strncmp(cmd, "prod", 4) == 0 ||
+                                  strncmp(cmd, "int", 3) == 0 || strncmp(cmd, "bigcup", 6) == 0 ||
+                                  strncmp(cmd, "bigcap", 6) == 0 || strncmp(cmd, "bigvee", 6) == 0 ||
+                                  strncmp(cmd, "bigwedge", 8) == 0 || strncmp(cmd, "oint", 4) == 0);
+
+                if (is_big_op) {
                     atom = AtomType::Op;
-                } else if (strncmp(cmd, "leq", 3) == 0 || strncmp(cmd, "geq", 3) == 0 ||
-                           strncmp(cmd, "le", 2) == 0 || strncmp(cmd, "ge", 2) == 0 ||
-                           strncmp(cmd, "equiv", 5) == 0 || strncmp(cmd, "sim", 3) == 0 ||
-                           strncmp(cmd, "in", 2) == 0 || strncmp(cmd, "subset", 6) == 0) {
+                    // Create MathOp node with limits flag
+                    TexNode* node = make_math_op(arena, sym_code, true, font);
+
+                    // Use larger size in display mode
+                    bool is_display = (ctx.style == MathStyle::Display ||
+                                       ctx.style == MathStyle::DisplayPrime);
+                    float op_size = is_display ? size * 1.2f : size;
+
+                    // Get metrics
+                    if (symbol_tfm && sym_code < 256 && sym_code >= 0) {
+                        node->width = symbol_tfm->char_width(sym_code) * op_size;
+                        node->height = symbol_tfm->char_height(sym_code) * op_size;
+                        node->depth = symbol_tfm->char_depth(sym_code) * op_size;
+                        node->italic = symbol_tfm->char_italic(sym_code) * op_size;
+                    } else {
+                        node->width = 10.0f * op_size / 10.0f;
+                        node->height = 8.0f * op_size / 10.0f;
+                        node->depth = 2.0f * op_size / 10.0f;
+                    }
+
+                    add_node(node, atom);
+                    log_debug("math_bridge: BigOp \\%.*s -> char %d limits=%s",
+                              (int)cmd_len, cmd, sym_code, is_display ? "above/below" : "side");
+                    continue;
+                }
+
+                // Classify other symbol types
+                if (strncmp(cmd, "leq", 3) == 0 || strncmp(cmd, "geq", 3) == 0 ||
+                    strncmp(cmd, "le", 2) == 0 || strncmp(cmd, "ge", 2) == 0 ||
+                    strncmp(cmd, "equiv", 5) == 0 || strncmp(cmd, "sim", 3) == 0 ||
+                    strncmp(cmd, "in", 2) == 0 || strncmp(cmd, "subset", 6) == 0) {
                     atom = AtomType::Rel;
                 } else if (strncmp(cmd, "pm", 2) == 0 || strncmp(cmd, "mp", 2) == 0 ||
                            strncmp(cmd, "times", 5) == 0 || strncmp(cmd, "cdot", 4) == 0) {
@@ -886,6 +1073,288 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                         add_node(node, atom);
                         log_debug("math_bridge: \\%.*s delimiter code=%d use_cmex=%d", (int)cmd_len, cmd, delim_code, use_cmex);
                     }
+                }
+                continue;
+            }
+
+            // Handle \overline{content}
+            if (cmd_len == 8 && strncmp(cmd, "overline", 8) == 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+                if (content) {
+                    float rule_thickness = ctx.base_size_pt * 0.04f;
+                    float gap = ctx.base_size_pt * 0.15f;
+
+                    // Build VBox: rule on top, then content
+                    TexNode* vbox = make_vbox(arena);
+                    TexNode* rule = make_rule(arena, content->width, rule_thickness, 0);
+                    TexNode* gap_kern = make_kern(arena, gap);
+
+                    vbox->append_child(rule);
+                    vbox->append_child(gap_kern);
+                    vbox->append_child(content);
+
+                    vbox->width = content->width;
+                    vbox->height = content->height + gap + rule_thickness;
+                    vbox->depth = content->depth;
+
+                    add_node(vbox, AtomType::Ord);
+                    log_debug("math_bridge: \\overline");
+                }
+                continue;
+            }
+
+            // Handle \underline{content}
+            if (cmd_len == 9 && strncmp(cmd, "underline", 9) == 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+                if (content) {
+                    float rule_thickness = ctx.base_size_pt * 0.04f;
+                    float gap = ctx.base_size_pt * 0.15f;
+
+                    // Build VBox: content on top, then rule below
+                    TexNode* vbox = make_vbox(arena);
+                    TexNode* rule = make_rule(arena, content->width, rule_thickness, 0);
+                    TexNode* gap_kern = make_kern(arena, gap);
+
+                    vbox->append_child(content);
+                    vbox->append_child(gap_kern);
+                    vbox->append_child(rule);
+
+                    vbox->width = content->width;
+                    vbox->height = content->height;
+                    vbox->depth = content->depth + gap + rule_thickness;
+
+                    add_node(vbox, AtomType::Ord);
+                    log_debug("math_bridge: \\underline");
+                }
+                continue;
+            }
+
+            // Handle \phantom{content} - takes space but invisible
+            if (cmd_len == 7 && strncmp(cmd, "phantom", 7) == 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+                if (content) {
+                    // Create an invisible box with the content's dimensions
+                    TexNode* phantom = make_hbox(arena);
+                    phantom->width = content->width;
+                    phantom->height = content->height;
+                    phantom->depth = content->depth;
+                    // No children = nothing rendered
+
+                    add_node(phantom, AtomType::Ord);
+                    log_debug("math_bridge: \\phantom w=%.1f h=%.1f d=%.1f",
+                              phantom->width, phantom->height, phantom->depth);
+                }
+                continue;
+            }
+
+            // Handle \vphantom{content} - takes height/depth, zero width
+            if (cmd_len == 8 && strncmp(cmd, "vphantom", 8) == 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+                if (content) {
+                    TexNode* phantom = make_hbox(arena);
+                    phantom->width = 0;
+                    phantom->height = content->height;
+                    phantom->depth = content->depth;
+
+                    add_node(phantom, AtomType::Ord);
+                    log_debug("math_bridge: \\vphantom h=%.1f d=%.1f",
+                              phantom->height, phantom->depth);
+                }
+                continue;
+            }
+
+            // Handle \hphantom{content} - takes width, zero height/depth
+            if (cmd_len == 8 && strncmp(cmd, "hphantom", 8) == 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+                if (content) {
+                    TexNode* phantom = make_hbox(arena);
+                    phantom->width = content->width;
+                    phantom->height = 0;
+                    phantom->depth = 0;
+
+                    add_node(phantom, AtomType::Ord);
+                    log_debug("math_bridge: \\hphantom w=%.1f", phantom->width);
+                }
+                continue;
+            }
+
+            // Handle \overbrace{content}^{label}
+            if (cmd_len == 9 && strncmp(cmd, "overbrace", 9) == 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+
+                // Check for optional ^{label}
+                i = skip_ws(str, i, len);
+                TexNode* label = nullptr;
+                if (i < len && str[i] == '^') {
+                    i++;
+                    i = skip_ws(str, i, len);
+                    const char* label_str;
+                    size_t label_len;
+                    i = parse_braced_group(str, i, len, &label_str, &label_len);
+                    MathContext script_ctx = ctx;
+                    script_ctx.style = sub_style(ctx.style);
+                    label = parse_latex_math_internal(label_str, label_len, script_ctx);
+                }
+
+                if (content) {
+                    float brace_height = ctx.base_size_pt * 0.4f;
+                    float gap = ctx.base_size_pt * 0.1f;
+
+                    // Build horizontal brace using characters
+                    // Top part is: left-half, repeater..., right-half
+                    TexNode* brace_box = make_hbox(arena);
+                    brace_box->width = content->width;
+                    brace_box->height = brace_height;
+                    brace_box->depth = 0;
+
+                    // Build VBox: label, brace, content
+                    TexNode* vbox = make_vbox(arena);
+
+                    if (label) {
+                        vbox->append_child(label);
+                        vbox->append_child(make_kern(arena, gap));
+                    }
+                    vbox->append_child(brace_box);
+                    vbox->append_child(make_kern(arena, gap));
+                    vbox->append_child(content);
+
+                    vbox->width = content->width;
+                    float total_h = brace_height + gap + content->height;
+                    if (label) total_h += label->height + label->depth + gap;
+                    vbox->height = total_h;
+                    vbox->depth = content->depth;
+
+                    add_node(vbox, AtomType::Ord);
+                    log_debug("math_bridge: \\overbrace");
+                }
+                continue;
+            }
+
+            // Handle \underbrace{content}_{label}
+            if (cmd_len == 10 && strncmp(cmd, "underbrace", 10) == 0) {
+                i = skip_ws(str, i, len);
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* content = parse_latex_math_internal(content_str, content_len, ctx);
+
+                // Check for optional _{label}
+                i = skip_ws(str, i, len);
+                TexNode* label = nullptr;
+                if (i < len && str[i] == '_') {
+                    i++;
+                    i = skip_ws(str, i, len);
+                    const char* label_str;
+                    size_t label_len;
+                    i = parse_braced_group(str, i, len, &label_str, &label_len);
+                    MathContext script_ctx = ctx;
+                    script_ctx.style = sub_style(ctx.style);
+                    label = parse_latex_math_internal(label_str, label_len, script_ctx);
+                }
+
+                if (content) {
+                    float brace_height = ctx.base_size_pt * 0.4f;
+                    float gap = ctx.base_size_pt * 0.1f;
+
+                    // Build horizontal brace placeholder
+                    TexNode* brace_box = make_hbox(arena);
+                    brace_box->width = content->width;
+                    brace_box->height = brace_height;
+                    brace_box->depth = 0;
+
+                    // Build VBox: content, brace, label
+                    TexNode* vbox = make_vbox(arena);
+                    vbox->append_child(content);
+                    vbox->append_child(make_kern(arena, gap));
+                    vbox->append_child(brace_box);
+
+                    if (label) {
+                        vbox->append_child(make_kern(arena, gap));
+                        vbox->append_child(label);
+                    }
+
+                    vbox->width = content->width;
+                    vbox->height = content->height;
+                    float total_d = content->depth + gap + brace_height;
+                    if (label) total_d += gap + label->height + label->depth;
+                    vbox->depth = total_d;
+
+                    add_node(vbox, AtomType::Ord);
+                    log_debug("math_bridge: \\underbrace");
+                }
+                continue;
+            }
+
+            // Handle \stackrel{top}{bottom}
+            if (cmd_len == 8 && strncmp(cmd, "stackrel", 8) == 0) {
+                i = skip_ws(str, i, len);
+                const char* top_str;
+                size_t top_len;
+                i = parse_braced_group(str, i, len, &top_str, &top_len);
+
+                i = skip_ws(str, i, len);
+                const char* bot_str;
+                size_t bot_len;
+                i = parse_braced_group(str, i, len, &bot_str, &bot_len);
+
+                MathContext script_ctx = ctx;
+                script_ctx.style = sub_style(ctx.style);
+                TexNode* top = parse_latex_math_internal(top_str, top_len, script_ctx);
+                TexNode* bottom = parse_latex_math_internal(bot_str, bot_len, ctx);
+
+                if (top && bottom) {
+                    float gap = ctx.base_size_pt * 0.1f;
+                    float max_width = (top->width > bottom->width) ? top->width : bottom->width;
+
+                    // Build VBox: top centered, bottom centered
+                    TexNode* vbox = make_vbox(arena);
+
+                    // Center top
+                    top->x = (max_width - top->width) / 2.0f;
+                    vbox->append_child(top);
+                    vbox->append_child(make_kern(arena, gap));
+
+                    // Center bottom
+                    bottom->x = (max_width - bottom->width) / 2.0f;
+                    vbox->append_child(bottom);
+
+                    vbox->width = max_width;
+                    vbox->height = top->height + top->depth + gap + bottom->height;
+                    vbox->depth = bottom->depth;
+
+                    add_node(vbox, AtomType::Rel);
+                    log_debug("math_bridge: \\stackrel");
                 }
                 continue;
             }
@@ -1471,12 +1940,135 @@ TexNode* typeset_sqrt_string(const char* content_str, MathContext& ctx) {
 }
 
 // ============================================================================
+// Big Operator Limits Typesetting
+// ============================================================================
+
+// Typeset limits above/below a big operator (display style)
+TexNode* typeset_op_limits(TexNode* op_node, TexNode* subscript, TexNode* superscript,
+                           MathContext& ctx) {
+    Arena* arena = ctx.arena;
+
+    // If not display style, use regular scripts instead
+    if (ctx.style != MathStyle::Display && ctx.style != MathStyle::DisplayPrime) {
+        return typeset_scripts(op_node, subscript, superscript, ctx);
+    }
+
+    // Create VBox to stack: superscript / operator / subscript
+    TexNode* vbox = make_vbox(arena, 0);
+
+    float total_width = op_node->width;
+    float total_height = 0;
+    float total_depth = 0;
+
+    // Centering offsets
+    float sup_offset = 0;
+    float sub_offset = 0;
+    float op_offset = 0;
+
+    // Calculate widths for centering
+    float sup_width = superscript ? superscript->width : 0;
+    float sub_width = subscript ? subscript->width : 0;
+    float max_width = op_node->width;
+    if (sup_width > max_width) max_width = sup_width;
+    if (sub_width > max_width) max_width = sub_width;
+
+    total_width = max_width;
+
+    // Center each element
+    op_offset = (max_width - op_node->width) / 2.0f;
+    if (superscript) sup_offset = (max_width - sup_width) / 2.0f;
+    if (subscript) sub_offset = (max_width - sub_width) / 2.0f;
+
+    // Spacing parameters (TeXBook p. 445)
+    float big_op_spacing1 = ctx.base_size_pt * 0.111f;  // min above/below limits
+    float big_op_spacing3 = ctx.base_size_pt * 0.2f;    // between op and limits
+    float big_op_spacing5 = ctx.base_size_pt * 0.1f;    // extra above/below
+    (void)big_op_spacing1;  // TODO: use for minimum limit gap calculation
+    (void)big_op_spacing5;  // TODO: use for extra padding at top/bottom
+
+    // Build from top to bottom
+    // Superscript at top
+    if (superscript) {
+        TexNode* sup_hbox = make_hbox(arena);
+        sup_hbox->append_child(superscript);
+        sup_hbox->width = sup_width;
+        sup_hbox->height = superscript->height;
+        sup_hbox->depth = superscript->depth;
+        superscript->x = sup_offset;
+        superscript->y = 0;
+
+        vbox->append_child(sup_hbox);
+        total_height += sup_hbox->height + sup_hbox->depth;
+
+        // Add spacing below superscript
+        TexNode* gap = make_kern(arena, big_op_spacing3);
+        vbox->append_child(gap);
+        total_height += big_op_spacing3;
+    }
+
+    // The operator
+    TexNode* op_hbox = make_hbox(arena);
+    op_hbox->append_child(op_node);
+    op_hbox->width = op_node->width;
+    op_hbox->height = op_node->height;
+    op_hbox->depth = op_node->depth;
+    op_node->x = op_offset;
+    op_node->y = 0;
+
+    vbox->append_child(op_hbox);
+    float op_center_height = op_hbox->height;
+    float op_center_depth = op_hbox->depth;
+
+    // Subscript below
+    if (subscript) {
+        // Add spacing above subscript
+        TexNode* gap = make_kern(arena, big_op_spacing3);
+        vbox->append_child(gap);
+
+        TexNode* sub_hbox = make_hbox(arena);
+        sub_hbox->append_child(subscript);
+        sub_hbox->width = sub_width;
+        sub_hbox->height = subscript->height;
+        sub_hbox->depth = subscript->depth;
+        subscript->x = sub_offset;
+        subscript->y = 0;
+
+        vbox->append_child(sub_hbox);
+        total_depth += big_op_spacing3 + sub_hbox->height + sub_hbox->depth;
+    }
+
+    // Set VBox dimensions
+    // Position so operator is centered on math axis
+    float axis = ctx.axis_height;
+    if (superscript) {
+        vbox->height = total_height + op_center_height - axis;
+        vbox->depth = op_center_depth + (subscript ? total_depth : 0) + axis;
+    } else {
+        vbox->height = op_center_height;
+        vbox->depth = op_center_depth + (subscript ? total_depth : 0);
+    }
+    vbox->width = total_width;
+
+    log_debug("math_bridge: op_limits %.2fpt x (%.2f + %.2f)",
+              vbox->width, vbox->height, vbox->depth);
+
+    return vbox;
+}
+
+// ============================================================================
 // Subscript/Superscript Typesetting
 // ============================================================================
 
 TexNode* typeset_scripts(TexNode* nucleus, TexNode* subscript, TexNode* superscript,
                          MathContext& ctx) {
     Arena* arena = ctx.arena;
+
+    // Check if nucleus is a big operator that should use limits
+    if (nucleus && nucleus->node_class == NodeClass::MathOp) {
+        if (nucleus->content.math_op.limits) {
+            return typeset_op_limits(nucleus, subscript, superscript, ctx);
+        }
+    }
 
     // Script parameters (TeXBook p. 445)
     float sup_shift, sub_shift;

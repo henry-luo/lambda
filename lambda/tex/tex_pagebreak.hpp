@@ -121,6 +121,105 @@ struct PageContent {
     TexNode* marks_top;         // Top \mark (from previous page)
     TexNode* marks_bot;         // Bottom \mark (last on page)
     TexNode* inserts;           // Footnotes/floats for this page
+
+    // Deferred floats (couldn't fit on this page)
+    TexNode** deferred_floats;
+    int deferred_float_count;
+};
+
+// ============================================================================
+// Mark State (for tracking marks across pages)
+// ============================================================================
+
+struct MarkState {
+    TexNode* top_mark;          // \topmark - botmark from previous page
+    TexNode* first_mark;        // \firstmark - first mark on current page
+    TexNode* bot_mark;          // \botmark - last mark on current page
+
+    MarkState() : top_mark(nullptr), first_mark(nullptr), bot_mark(nullptr) {}
+
+    // Update marks when processing a new page
+    void advance_page() {
+        top_mark = bot_mark;    // Previous botmark becomes new topmark
+        first_mark = nullptr;
+        bot_mark = nullptr;
+    }
+
+    // Record a mark encountered during page building
+    void record_mark(TexNode* mark) {
+        if (!first_mark) {
+            first_mark = mark;
+        }
+        bot_mark = mark;
+    }
+};
+
+// ============================================================================
+// Insertion Classes (TeXBook Chapter 15)
+// ============================================================================
+
+// Well-known insertion classes
+constexpr int INSERT_CLASS_TOPFLOAT = 253;   // Top floats
+constexpr int INSERT_CLASS_FOOTNOTE = 254;   // Footnotes
+constexpr int INSERT_CLASS_BOTTOMFLOAT = 255; // Bottom floats
+
+// Per-class insertion parameters
+struct InsertionClassParams {
+    int insert_class;           // Class number (0-255)
+    float max_height;           // Maximum height for this class on a page
+    float every_height;         // Height contributed to page per unit insert
+    TexNode* split_top_skip;    // Glue at top of split insert
+    TexNode* float_cost;        // Penalty for floating (defer to next page)
+    bool bottom_of_page;        // True if placed at bottom (footnotes)
+};
+
+// Track accumulated inserts by class during page building
+struct InsertionState {
+    // Accumulated heights per class
+    float class_heights[256];
+    // Accumulated content per class
+    TexNode* class_content[256];
+    TexNode* class_content_tail[256];
+
+    InsertionState() {
+        for (int i = 0; i < 256; ++i) {
+            class_heights[i] = 0;
+            class_content[i] = nullptr;
+            class_content_tail[i] = nullptr;
+        }
+    }
+
+    // Add insert content to a class
+    void add_insert(int insert_class, TexNode* content, float height) {
+        if (insert_class < 0 || insert_class > 255) return;
+        class_heights[insert_class] += height;
+        if (!class_content[insert_class]) {
+            class_content[insert_class] = content;
+            class_content_tail[insert_class] = content;
+        } else {
+            class_content_tail[insert_class]->next_sibling = content;
+            content->prev_sibling = class_content_tail[insert_class];
+            class_content_tail[insert_class] = content;
+        }
+    }
+
+    // Reset for new page
+    void reset() {
+        for (int i = 0; i < 256; ++i) {
+            class_heights[i] = 0;
+            class_content[i] = nullptr;
+            class_content_tail[i] = nullptr;
+        }
+    }
+
+    // Get total height consumed by inserts
+    float total_height() const {
+        float h = 0;
+        for (int i = 0; i < 256; ++i) {
+            h += class_heights[i];
+        }
+        return h;
+    }
 };
 
 // ============================================================================
@@ -249,6 +348,15 @@ void extract_page_marks(
     TexNode* vlist,
     int start_index,
     int end_index
+);
+
+// Extract marks with state tracking across pages
+void extract_page_marks_with_state(
+    PageContent& page,
+    TexNode* vlist,
+    int start_index,
+    int end_index,
+    MarkState& state
 );
 
 // ============================================================================

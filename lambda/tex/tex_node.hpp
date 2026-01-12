@@ -347,6 +347,16 @@ struct TexNode {
             const char* text;
         } mark;
 
+        // Insert node (float/footnote)
+        struct {
+            int insert_class;       // Insertion class (0=footnote, etc.)
+            TexNode* content;       // Content to insert
+            float natural_height;   // Natural height of content
+            float max_height;       // Max contribution to page
+            float split_max;        // Max height before splitting
+            bool floating;          // true = float, false = footnote
+        } insert;
+
         // Error node
         struct {
             const char* message;
@@ -553,6 +563,31 @@ inline TexNode* make_disc(Arena* arena, TexNode* pre, TexNode* post, TexNode* no
     n->content.disc.pre_break = pre;
     n->content.disc.post_break = post;
     n->content.disc.no_break = no;
+    return n;
+}
+
+// ----------------------------------------
+// Insert node (float/footnote)
+// ----------------------------------------
+
+inline TexNode* make_insert(Arena* arena, int insert_class, TexNode* content, bool floating = true) {
+    TexNode* n = alloc_node(arena, NodeClass::Insert);
+    n->content.insert.insert_class = insert_class;
+    n->content.insert.content = content;
+    n->content.insert.natural_height = content ? content->height + content->depth : 0;
+    n->content.insert.max_height = 0;  // 0 = no limit
+    n->content.insert.split_max = 0;   // 0 = no splitting
+    n->content.insert.floating = floating;
+    return n;
+}
+
+// ----------------------------------------
+// Mark node
+// ----------------------------------------
+
+inline TexNode* make_mark(Arena* arena, const char* text) {
+    TexNode* n = alloc_node(arena, NodeClass::Mark);
+    n->content.mark.text = text;
     return n;
 }
 
