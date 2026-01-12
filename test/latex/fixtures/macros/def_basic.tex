@@ -1,0 +1,28 @@
+% def_basic.tex - Test basic \def macros
+\documentclass{article}
+\begin{document}
+
+% Simple macro
+\def\hello{Hello, World!}
+\hello
+
+% Macro with one parameter
+\def\bold#1{\textbf{#1}}
+\bold{This is bold}
+
+% Macro with two parameters
+\def\pair#1#2{(#1, #2)}
+\pair{x}{y}
+
+% Nested macro calls
+\def\inner{INNER}
+\def\outer{\inner}
+\outer
+
+% Macro redefinition
+\def\test{First}
+\test
+\def\test{Second}
+\test
+
+\end{document}

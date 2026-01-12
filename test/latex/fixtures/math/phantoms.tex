@@ -1,0 +1,42 @@
+% phantoms.tex - Test phantom boxes
+\documentclass{article}
+\usepackage{amsmath}
+\begin{document}
+
+% Basic phantom
+\[
+a + \phantom{b} + c
+\]
+
+% Horizontal phantom (width only)
+\[
+\frac{1}{\hphantom{+}2}
+\]
+
+% Vertical phantom (height/depth only)
+\[
+\sqrt{\vphantom{y}x} = \sqrt{y}
+\]
+
+% Phantom for alignment
+\begin{align*}
+a &= b + c \\
+&\phantom{{}={}} + d + e
+\end{align*}
+
+% Smash (zero height/depth)
+\[
+\sqrt{\smash{y}} \quad \sqrt{y}
+\]
+
+% Negative space
+\[
+a \! b \quad a b
+\]
+
+% Comparison: with and without phantom
+\[
+\sqrt{x} + \sqrt{y} \quad \sqrt{x} + \sqrt{\vphantom{x}y}
+\]
+
+\end{document}
