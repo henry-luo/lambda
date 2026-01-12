@@ -182,6 +182,8 @@ static Item render_arrowhead(MarkBuilder& builder, float x, float y, float angle
     return builder.element("polygon")
         .attr("points", points_buf)
         .attr("fill", fill)
+        .attr("stroke", fill)
+        .attr("stroke-width", 1.0)
         .final();
 }
 
