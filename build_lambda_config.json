@@ -2709,7 +2709,10 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "png",
+                            "zlib",
+                            "bzip2"
                         ],
                         "binary": "test_tex_phase5_gtest.exe",
                         "additional_sources": [
@@ -2721,6 +2724,9 @@
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_dvi_out.cpp",
                             "lambda/tex/tex_pdf_out.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_png_out.cpp",
+                            "lambda/tex/tex_font_adapter.cpp",
                             "lambda/tex/dvi_parser.cpp",
                             "lib/arena.c",
                             "lib/mempool.c",
@@ -2735,6 +2741,42 @@
                             "."
                         ],
                         "icon": "📤"
+                    },
+                    {
+                        "source": "test/test_tex_phase6_gtest.cpp",
+                        "name": "TeX Phase 6 SVG/PNG Output Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype",
+                            "png",
+                            "zlib",
+                            "bzip2"
+                        ],
+                        "binary": "test_tex_phase6_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_png_out.cpp",
+                            "lambda/tex/tex_font_adapter.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c",
+                            "lib/arraylist.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🖼️"
                     },
                     {
                         "source": "test/test_tex_hyphen_gtest.cpp",
