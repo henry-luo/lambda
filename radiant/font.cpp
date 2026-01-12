@@ -133,8 +133,27 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
         return NULL;
     }
 
-    // Just take the first match for now - could be enhanced to prefer normal weight/style
-    FontEntry* font = (FontEntry*)matches->data[0];
+    // Prefer Regular/Normal style font over Bold/Italic variants
+    // Iterate through matches to find the best match
+    FontEntry* best_font = nullptr;
+    int best_score = -1;
+    for (int i = 0; i < matches->length; i++) {
+        FontEntry* font = (FontEntry*)matches->data[i];
+        int score = 0;
+        // Prefer non-italic, non-bold fonts
+        if (font->weight == 400) score += 10;  // Regular weight
+        else if (font->weight < 500) score += 5;  // Light to normal weight
+        if (font->style == FONT_STYLE_NORMAL) score += 10;  // Not italic
+        // Avoid TTC files for ThorVG (it doesn't support TrueType Collections)
+        if (font->file_path && !strstr(font->file_path, ".ttc")) score += 5;
+        
+        if (score > best_score) {
+            best_score = score;
+            best_font = font;
+        }
+    }
+    
+    FontEntry* font = best_font ? best_font : (FontEntry*)matches->data[0];
     char* result = mem_strdup(font->file_path, MEM_CAT_FONT);
     arraylist_free(matches);
     return result;
