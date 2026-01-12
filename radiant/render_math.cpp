@@ -214,8 +214,8 @@ void render_math_rule(RenderContext* rdcon, MathBox* box, float x, float y) {
     float rule_y = y - box->height * s + thickness / 2;
 
     // Create a filled rectangle using ThorVG
-    Tvg_Paint* shape = tvg_shape_new();
-    tvg_shape_append_rect(shape, x, rule_y, width, thickness, 0, 0);
+    Tvg_Paint shape = tvg_shape_new();
+    tvg_shape_append_rect(shape, x, rule_y, width, thickness, 0, 0, true);
 
     // Set fill color
     tvg_shape_set_fill_color(shape, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.a);
@@ -244,8 +244,8 @@ void render_math_radical(RenderContext* rdcon, MathBox* box, float x, float y) {
         float rule_x = x;
         float rule_width = radicand->width * s;
 
-        Tvg_Paint* shape = tvg_shape_new();
-        tvg_shape_append_rect(shape, rule_x, y - rule_y, rule_width, rule_thickness, 0, 0);
+        Tvg_Paint shape = tvg_shape_new();
+        tvg_shape_append_rect(shape, rule_x, y - rule_y, rule_width, rule_thickness, 0, 0, true);
         tvg_shape_set_fill_color(shape, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.a);
         tvg_canvas_push(rdcon->canvas, shape);
 

@@ -236,7 +236,7 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
  * @param width Element width (border-box)
  * @param height Element height (border-box)
  */
-inline void apply_transform(Tvg_Paint* paint, TransformProp* transform,
+inline void apply_transform(Tvg_Paint paint, TransformProp* transform,
                            float x, float y, float width, float height) {
     if (!paint || !transform || !transform->functions) return;
 

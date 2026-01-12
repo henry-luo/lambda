@@ -10,6 +10,7 @@
 #include "math_integration.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
+#include "render_svg_inline.hpp"
 
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
@@ -692,6 +693,90 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
 }
 
 /**
+ * Layout inline SVG element with intrinsic sizing from width/height attributes or viewBox
+ */
+void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
+    log_debug("layout inline SVG element");
+    
+    // Get intrinsic size from SVG attributes
+    Element* native_elem = static_cast<DomElement*>(block)->native_element;
+    if (!native_elem) {
+        log_debug("inline SVG has no native element, using default size");
+        block->width = 300;  // HTML default for SVG
+        block->height = 150;
+        return;
+    }
+    
+    SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
+    
+    log_debug("SVG intrinsic: width=%.1f height=%.1f aspect=%.3f has_w=%d has_h=%d",
+              intrinsic.width, intrinsic.height, intrinsic.aspect_ratio,
+              intrinsic.has_intrinsic_width, intrinsic.has_intrinsic_height);
+    
+    // Determine final dimensions considering CSS properties
+    float width = lycon->block.given_width;
+    float height = lycon->block.given_height;
+    
+    if (width >= 0 && height >= 0) {
+        // Both CSS dimensions specified - use them
+        block->width = width;
+        block->height = height;
+    } else if (width >= 0) {
+        // Width specified, calculate height from aspect ratio
+        block->width = width;
+        if (intrinsic.aspect_ratio > 0) {
+            block->height = width / intrinsic.aspect_ratio;
+        } else {
+            block->height = intrinsic.height;
+        }
+    } else if (height >= 0) {
+        // Height specified, calculate width from aspect ratio
+        block->height = height;
+        if (intrinsic.aspect_ratio > 0) {
+            block->width = height * intrinsic.aspect_ratio;
+        } else {
+            block->width = intrinsic.width;
+        }
+    } else {
+        // Neither CSS dimension specified - use intrinsic size
+        // or parent width if intrinsic width is not available
+        if (intrinsic.has_intrinsic_width) {
+            block->width = intrinsic.width;
+        } else if (lycon->block.parent && lycon->block.parent->content_width > 0) {
+            block->width = lycon->block.parent->content_width;
+        } else {
+            block->width = 300;  // HTML default
+        }
+        
+        if (intrinsic.has_intrinsic_height) {
+            block->height = intrinsic.height;
+        } else if (intrinsic.aspect_ratio > 0) {
+            block->height = block->width / intrinsic.aspect_ratio;
+        } else {
+            block->height = 150;  // HTML default
+        }
+    }
+    
+    // Add padding and border
+    float padding_top = block->bound && block->bound->padding.top > 0 ? block->bound->padding.top : 0;
+    float padding_bottom = block->bound && block->bound->padding.bottom > 0 ? block->bound->padding.bottom : 0;
+    float padding_left = block->bound && block->bound->padding.left > 0 ? block->bound->padding.left : 0;
+    float padding_right = block->bound && block->bound->padding.right > 0 ? block->bound->padding.right : 0;
+    float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
+    float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
+    float border_left = block->bound && block->bound->border ? block->bound->border->width.left : 0;
+    float border_right = block->bound && block->bound->border ? block->bound->border->width.right : 0;
+    
+    block->content_width = block->width;
+    block->content_height = block->height;
+    block->width += padding_left + padding_right + border_left + border_right;
+    block->height += padding_top + padding_bottom + border_top + border_bottom;
+    
+    log_debug("SVG layout result: content=%.1fx%.1f, total=%.1fx%.1f",
+              block->content_width, block->content_height, block->width, block->height);
+}
+
+/**
  * Insert pseudo-element into DOM tree at appropriate position
  * ::before is inserted as first child, ::after as last child
  */
@@ -1165,10 +1250,14 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
-    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr, form controls
+    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe, hr, form controls, SVG
         uintptr_t elmt_name = block->tag();
         if (elmt_name == HTM_TAG_IFRAME) {
             layout_iframe(lycon, block, block->display);
+        }
+        else if (elmt_name == HTM_TAG_SVG) {
+            // Inline SVG element: use width/height attributes or viewBox for intrinsic size
+            layout_inline_svg(lycon, block);
         }
         else if (elmt_name == HTM_TAG_HR) {
             // hr element: Use explicit height if specified, otherwise use border height
