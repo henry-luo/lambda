@@ -543,6 +543,75 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             const char* text = source + start;
             size_t len = end - start;
 
+            // Check if parent is inline_math or display_math
+            TSNode parent = ts_node_parent(node);
+            const char* parent_type = ts_node_is_null(parent) ? "" : ts_node_type(parent);
+
+            if (strcmp(parent_type, "inline_math") == 0 ||
+                strcmp(parent_type, "display_math") == 0 ||
+                strcmp(parent_type, "math") == 0) {
+                // Inside a math node - return the raw text as a string so it can be processed
+                log_debug("latex_ts: ERROR inside %s - returning raw text as content", parent_type);
+                return ctx.builder.createStringItem(text, len);
+            }
+
+            // Check if this ERROR looks like inline math ($...$)
+            if (len >= 2 && text[0] == '$' && text[len - 1] == '$') {
+                log_debug("latex_ts: ERROR node contains inline math, recovering as inline_math");
+                MarkBuilder& builder = ctx.builder;
+                ElementBuilder elem_builder = builder.element("inline_math");
+
+                // Strip the $ delimiters
+                const char* math_src = text + 1;
+                size_t math_len = len - 2;
+
+                String* src_str = builder.createString(math_src, math_len);
+                Item src_item = {.item = s2it(src_str)};
+                elem_builder.attr("source", src_item);
+
+                return elem_builder.final();
+            }
+
+            // Check if ERROR contains document body with $...$
+            // Extract all inline math expressions as a sequence
+            if (memmem(text, len, "$", 1) != nullptr) {
+                MarkBuilder& builder = ctx.builder;
+                ElementBuilder seq = builder.element("sequence");
+
+                size_t i = 0;
+                while (i < len) {
+                    // Find next $
+                    while (i < len && text[i] != '$') i++;
+                    if (i >= len) break;
+
+                    size_t math_start = i;
+                    i++;  // Skip opening $
+
+                    // Find closing $
+                    while (i < len && text[i] != '$') i++;
+                    if (i >= len) break;
+
+                    size_t math_end = i + 1;  // Include closing $
+                    i++;  // Skip closing $
+
+                    // Extract the math content (without $ delimiters)
+                    const char* math_src = text + math_start + 1;
+                    size_t math_len = math_end - math_start - 2;
+
+                    if (math_len > 0) {
+                        log_debug("latex_ts: ERROR recovery - found inline math at %zu-%zu", math_start, math_end);
+
+                        ElementBuilder elem = builder.element("inline_math");
+                        String* src_str = builder.createString(math_src, math_len);
+                        Item src_item = {.item = s2it(src_str)};
+                        elem.attr("source", src_item);
+                        seq.child(elem.final());
+                    }
+                }
+
+                return seq.final();
+            }
+
             // Check if this ERROR contains comment-related content
             bool has_comment_content = (memmem(text, len, "\\begin{comment}", 15) != nullptr ||
                                        memmem(text, len, "\\end{comment}", 13) != nullptr);
