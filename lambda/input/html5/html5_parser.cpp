@@ -714,6 +714,14 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
     html5_push_element(parser, elem);
 
     log_debug("html5: inserted element <%s>", token->tag_name->chars);
+    
+    // For SVG/MathML self-closing elements, pop immediately
+    // Per WHATWG spec: In foreign content, self-closing tags should be immediately closed
+    if (token->self_closing && html5_is_in_svg_namespace(parser)) {
+        log_debug("html5: self-closing SVG element <%s>, popping immediately", token->tag_name->chars);
+        html5_pop_element(parser);
+    }
+    
     return elem;
 }
 

@@ -29,10 +29,10 @@ static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, 
 
 // Helper to draw a filled circle using ThorVG
 static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color) {
-    Tvg_Canvas* canvas = rdcon->canvas;
-    Tvg_Paint* shape = tvg_shape_new();
+    Tvg_Canvas canvas = rdcon->canvas;
+    Tvg_Paint shape = tvg_shape_new();
 
-    tvg_shape_append_circle(shape, cx, cy, radius, radius);
+    tvg_shape_append_circle(shape, cx, cy, radius, radius, true);
     tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
 
     tvg_canvas_remove(canvas, NULL);
@@ -43,10 +43,10 @@ static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, 
 
 // Helper to draw a circle outline (ring) using ThorVG
 static void stroke_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color, float stroke_width) {
-    Tvg_Canvas* canvas = rdcon->canvas;
-    Tvg_Paint* shape = tvg_shape_new();
+    Tvg_Canvas canvas = rdcon->canvas;
+    Tvg_Paint shape = tvg_shape_new();
 
-    tvg_shape_append_circle(shape, cx, cy, radius, radius);
+    tvg_shape_append_circle(shape, cx, cy, radius, radius, true);
     tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
     tvg_shape_set_stroke_width(shape, stroke_width);
 
@@ -229,8 +229,8 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 
     // Checkmark if checked - draw using ThorVG stroked path
     if (form->checked) {
-        Tvg_Canvas* canvas = rdcon->canvas;
-        Tvg_Paint* shape = tvg_shape_new();
+        Tvg_Canvas canvas = rdcon->canvas;
+        Tvg_Paint shape = tvg_shape_new();
 
         float inset = 3 * s;
         // Checkmark points: short leg down-left, then long leg up-right
