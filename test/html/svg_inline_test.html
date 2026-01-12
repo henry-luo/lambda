@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Inline SVG Test</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        h1 { margin-bottom: 10px; font-size: 1.3em; }
+        h2 { font-size: 1.1em; }
+        .svg-container { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        svg { display: block; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Inline SVG Rendering Test</h1>
+
+ <div class="svg-container">
+        <h2>Text Elements</h2>
+        <svg width="600" height="300" viewBox="0 0 600 300">
+            <!-- Basic text -->
+            <text x="10" y="30" font-family="Arial" font-size="20" fill="black">
+                Basic SVG Text
+            </text>
+            
+            <!-- Different font sizes -->
+            <text x="10" y="60" font-size="12" fill="navy">Small text (12px)</text>
+            <text x="10" y="85" font-size="18" fill="darkgreen">Medium text (18px)</text>
+            <text x="10" y="115" font-size="24" fill="crimson">Large text (24px)</text>
+            
+            <!-- Text with stroke -->
+            <text x="10" y="150" font-size="28" fill="gold" stroke="orange" stroke-width="1">
+                Stroked Text
+            </text>
+            
+            <!-- Text with opacity -->
+            <text x="10" y="180" font-size="20" fill="purple" opacity="0.5">
+                Semi-transparent Text
+            </text>
+            
+            <!-- Multiple lines -->
+            <text x="10" y="210" font-size="16" fill="steelblue">
+                <tspan x="10" dy="0">First line of text</tspan>
+                <tspan x="10" dy="20">Second line with tspan</tspan>
+                <tspan x="10" dy="20">Third line continues</tspan>
+            </text>
+            
+            <!-- Right column - styled text -->
+            <text x="320" y="30" font-family="Helvetica" font-size="20" font-weight="bold" fill="darkblue">
+                Bold Text
+            </text>
+            
+            <text x="320" y="60" font-family="Arial" font-size="20" font-style="italic" fill="darkgreen">
+                Italic Text
+            </text>
+            
+            <!-- Text anchor variations -->
+            <line x1="450" y1="80" x2="450" y2="140" stroke="red" stroke-width="1" stroke-dasharray="2,2"/>
+            <text x="450" y="100" font-size="16" fill="black" text-anchor="start">Start anchor</text>
+            <text x="450" y="120" font-size="16" fill="black" text-anchor="middle">Middle anchor</text>
+            <text x="450" y="140" font-size="16" fill="black" text-anchor="end">End anchor</text>
+            
+            <!-- Transformed text -->
+            <g transform="translate(320, 180) rotate(-15)">
+                <text x="0" y="0" font-size="18" fill="darkred">Rotated Text</text>
+            </g>
+            
+            <!-- Scaled text -->
+            <g transform="translate(320, 220) scale(1.5, 1)">
+                <text x="0" y="0" font-size="16" fill="teal">Stretched Text</text>
+            </g>
+            
+            <!-- Text with letter-spacing -->
+            <text x="320" y="260" font-size="16" fill="indigo" letter-spacing="3">
+                S p a c e d   T e x t
+            </text>
+        </svg>
+    </div>
+    
+    <div class="svg-container">
+        <h2>Text with Multiple Colors</h2>
+        <svg width="500" height="100" viewBox="0 0 500 100">
+            <text x="10" y="40" font-size="24" font-weight="bold">
+                <tspan fill="red">Red</tspan>
+                <tspan fill="orange"> Orange</tspan>
+                <tspan fill="gold"> Yellow</tspan>
+                <tspan fill="green"> Green</tspan>
+                <tspan fill="blue"> Blue</tspan>
+                <tspan fill="purple"> Purple</tspan>
+            </text>
+            
+            <text x="10" y="80" font-size="18">
+                <tspan fill="black">Mixed </tspan>
+                <tspan fill="crimson" font-weight="bold">bold</tspan>
+                <tspan fill="navy" font-style="italic"> italic</tspan>
+                <tspan fill="darkgreen" font-size="24"> sizes</tspan>
+            </text>
+        </svg>
+    </div>
+
+    <div class="svg-container">
+        <h2>Basic Shapes</h2>
+        <svg width="400" height="200" viewBox="0 0 400 200">
+            <!-- Rectangle -->
+            <rect x="10" y="10" width="80" height="60" fill="steelblue" stroke="navy" stroke-width="2"/>
+            
+            <!-- Rounded rectangle -->
+            <rect x="110" y="10" width="80" height="60" rx="10" ry="10" fill="coral"/>
+            
+            <!-- Circle -->
+            <circle cx="260" cy="40" r="30" fill="forestgreen" stroke="darkgreen" stroke-width="3"/>
+            
+            <!-- Ellipse -->
+            <ellipse cx="350" cy="40" rx="40" ry="25" fill="purple" fill-opacity="0.7"/>
+            
+            <!-- Line -->
+            <line x1="10" y1="100" x2="90" y2="140" stroke="red" stroke-width="3"/>
+            
+            <!-- Polyline -->
+            <polyline points="110,140 130,100 150,130 170,110 190,140" 
+                      fill="none" stroke="orange" stroke-width="2"/>
+            
+            <!-- Polygon -->
+            <polygon points="260,90 290,140 230,140" fill="gold" stroke="goldenrod" stroke-width="2"/>
+        </svg>
+    </div>
+    
+    <div class="svg-container">
+        <h2>Path Elements</h2>
+        <svg width="400" height="150" viewBox="0 0 400 150">
+            <!-- Simple path with lines -->
+            <path d="M 10,75 L 50,10 L 90,75 L 50,140 Z" fill="crimson"/>
+            
+            <!-- Bezier curve -->
+            <path d="M 110,100 C 130,20 170,20 190,100" 
+                  fill="none" stroke="dodgerblue" stroke-width="3"/>
+            
+            <!-- Quadratic curve -->
+            <path d="M 210,100 Q 250,20 290,100" 
+                  fill="none" stroke="limegreen" stroke-width="3"/>
+            
+            <!-- Combined path -->
+            <path d="M 310,10 L 390,10 L 390,90 Q 350,140 310,90 Z" 
+                  fill="mediumpurple" stroke="indigo" stroke-width="2"/>
+        </svg>
+    </div>
+    
+    <div class="svg-container">
+        <h2>Transform Examples</h2>
+        <svg width="400" height="150" viewBox="0 0 400 150">
+            <!-- Original -->
+            <rect x="10" y="50" width="40" height="40" fill="gray"/>
+            <text x="10" y="120">Original</text>
+            
+            <!-- Translated -->
+            <g transform="translate(100, 0)">
+                <rect x="10" y="50" width="40" height="40" fill="blue"/>
+            </g>
+            <text x="80" y="120">Translate</text>
+            
+            <!-- Scaled -->
+            <g transform="translate(180, 50) scale(0.5)">
+                <rect x="0" y="0" width="80" height="80" fill="green"/>
+            </g>
+            <text x="170" y="120">Scale</text>
+            
+            <!-- Rotated -->
+            <g transform="translate(270, 70) rotate(45)">
+                <rect x="-20" y="-20" width="40" height="40" fill="red"/>
+            </g>
+            <text x="260" y="120">Rotate</text>
+        </svg>
+    </div>
+    
+    <div class="svg-container">
+        <h2>Stroke Styles</h2>
+        <svg width="400" height="80" viewBox="0 0 400 80">
+            <!-- Different linecaps -->
+            <line x1="20" y1="20" x2="80" y2="20" stroke="black" stroke-width="10" stroke-linecap="butt"/>
+            <line x1="20" y1="40" x2="80" y2="40" stroke="black" stroke-width="10" stroke-linecap="round"/>
+            <line x1="20" y1="60" x2="80" y2="60" stroke="black" stroke-width="10" stroke-linecap="square"/>
+            
+            <!-- Dashed lines -->
+            <line x1="100" y1="30" x2="200" y2="30" stroke="navy" stroke-width="3" stroke-dasharray="10,5"/>
+            <line x1="100" y1="50" x2="200" y2="50" stroke="maroon" stroke-width="3" stroke-dasharray="5,10,15"/>
+            
+            <!-- Line joins -->
+            <polyline points="230,60 260,20 290,60" fill="none" stroke="teal" stroke-width="8" stroke-linejoin="miter"/>
+            <polyline points="310,60 340,20 370,60" fill="none" stroke="olive" stroke-width="8" stroke-linejoin="round"/>
+        </svg>
+    </div>
+    
+    <div class="svg-container">
+        <h2>Groups</h2>
+        <svg width="300" height="100" viewBox="0 0 300 100">
+            <g fill="steelblue" stroke="navy" stroke-width="2">
+                <circle cx="50" cy="50" r="30"/>
+                <circle cx="120" cy="50" r="25"/>
+                <circle cx="180" cy="50" r="20"/>
+            </g>
+        </svg>
+    </div>
+</body>
+</html>

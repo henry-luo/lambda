@@ -3,6 +3,7 @@
 #include "render_border.hpp"
 #include "render_background.hpp"
 #include "render_filter.hpp"
+#include "render_svg_inline.hpp"
 #include "render_texnode.hpp"
 #include "transform.hpp"
 #include "layout.hpp"
@@ -18,6 +19,9 @@
 #include <chrono>
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
+
+// Forward declaration for inline SVG rendering (defined in render_svg_inline.cpp)
+void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
 
 #define DEBUG_RENDER 0
 
@@ -77,7 +81,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void render_image_content(RenderContext* rdcon, ViewBlock* view);
-void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
@@ -87,7 +91,7 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-colu
  * Helper function to apply transform and push paint to canvas
  * If a transform is active in rdcon, applies it to the paint before pushing
  */
-static void push_with_transform(RenderContext* rdcon, Tvg_Paint* paint) {
+static void push_with_transform(RenderContext* rdcon, Tvg_Paint paint) {
     if (rdcon->has_transform) {
         tvg_paint_set_transform(paint, &rdcon->transform);
     }
@@ -758,9 +762,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float radius = bullet_size / 2.0f;
 
             // Draw filled circle using ThorVG
-            Tvg_Canvas* canvas = rdcon->canvas;
-            Tvg_Paint* shape = tvg_shape_new();
-            tvg_shape_append_circle(shape, cx, cy, radius, radius);
+            Tvg_Canvas canvas = rdcon->canvas;
+            Tvg_Paint shape = tvg_shape_new();
+            tvg_shape_append_circle(shape, cx, cy, radius, radius, true);
             tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
             tvg_canvas_push(canvas, shape);
             tvg_canvas_draw(canvas, false);
@@ -779,9 +783,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float radius = bullet_size / 2.0f;
             float stroke_width = 1.0f;
 
-            Tvg_Canvas* canvas = rdcon->canvas;
-            Tvg_Paint* shape = tvg_shape_new();
-            tvg_shape_append_circle(shape, cx, cy, radius - stroke_width/2, radius - stroke_width/2);
+            Tvg_Canvas canvas = rdcon->canvas;
+            Tvg_Paint shape = tvg_shape_new();
+            tvg_shape_append_circle(shape, cx, cy, radius - stroke_width/2, radius - stroke_width/2, true);
             tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
             tvg_shape_set_stroke_width(shape, stroke_width);
             tvg_canvas_push(canvas, shape);
@@ -799,9 +803,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float sx = x + width - bullet_size - 4.0f;
             float sy = y + baseline_offset - font_size * 0.35f - bullet_size/2;
 
-            Tvg_Canvas* canvas = rdcon->canvas;
-            Tvg_Paint* shape = tvg_shape_new();
-            tvg_shape_append_rect(shape, sx, sy, bullet_size, bullet_size, 0, 0);
+            Tvg_Canvas canvas = rdcon->canvas;
+            Tvg_Paint shape = tvg_shape_new();
+            tvg_shape_append_rect(shape, sx, sy, bullet_size, bullet_size, 0, 0, true);
             tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
             tvg_canvas_push(canvas, shape);
             tvg_canvas_draw(canvas, false);
@@ -842,8 +846,8 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
 
     log_info("[VPATH] Rendering vector path for block at (%.1f, %.1f)", block->x, block->y);
 
-    Tvg_Canvas* canvas = rdcon->canvas;
-    Tvg_Paint* shape = tvg_shape_new();
+    Tvg_Canvas canvas = rdcon->canvas;
+    Tvg_Paint shape = tvg_shape_new();
     if (!shape) {
         log_error("[VPATH] Failed to create ThorVG shape");
         return;
@@ -1047,7 +1051,7 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
         float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f - mc->rule_width / 2.0f;
 
         // Create rule shape
-        Tvg_Paint* rule = tvg_shape_new();
+        Tvg_Paint rule = tvg_shape_new();
 
         // Different stroke patterns for different styles
         if (mc->rule_style == CSS_VALUE_DOTTED) {
@@ -1062,8 +1066,8 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
             // Double: two lines (render first here, second below)
             // For double, we draw two thinner lines
             float thin_width = mc->rule_width / 3.0f;
-            tvg_shape_append_rect(rule, rule_x - thin_width, block_y, thin_width, rule_height, 0, 0);
-            tvg_shape_append_rect(rule, rule_x + thin_width, block_y, thin_width, rule_height, 0, 0);
+            tvg_shape_append_rect(rule, rule_x - thin_width, block_y, thin_width, rule_height, 0, 0, true);
+            tvg_shape_append_rect(rule, rule_x + thin_width, block_y, thin_width, rule_height, 0, 0, true);
             tvg_shape_set_fill_color(rule, mc->rule_color.r, mc->rule_color.g,
                                      mc->rule_color.b, mc->rule_color.a);
             push_with_transform(rdcon, rule);
@@ -1120,7 +1124,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                     log_error("[RENDER] background-image: invalid local URL '%s'", image_url);
                 } else {
                     // Try loading the image
-                    Tvg_Paint* pic = tvg_picture_new();
+                    Tvg_Paint pic = tvg_picture_new();
                     Tvg_Result result = tvg_picture_load(pic, file_path);
 
                     // If loading failed and URL starts with "./", try prepending "res/"
@@ -1148,9 +1152,9 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                         tvg_paint_translate(pic, rect.x, rect.y);
 
                         // Apply clipping
-                        Tvg_Paint* clip_rect = tvg_shape_new();
+                        Tvg_Paint clip_rect = tvg_shape_new();
                         Bound* clip = &rdcon->block.clip;
-                        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+                        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
                         tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
                         tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
 
@@ -1160,7 +1164,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                         tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
                     } else {
                         log_error("[RENDER] background-image: failed to load '%s'", file_path);
-                        tvg_paint_del(pic);
+                        tvg_paint_unref(pic, true);
                     }
                 }
                 url_destroy(abs_url);
@@ -1222,9 +1226,9 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
 }
 
-void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
+void draw_debug_rect(Tvg_Canvas canvas, Rect rect, Bound* clip) {
     tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
-    Tvg_Paint* shape = tvg_shape_new();
+    Tvg_Paint shape = tvg_shape_new();
     tvg_shape_move_to(shape, rect.x, rect.y);
     tvg_shape_line_to(shape, rect.x + rect.width, rect.y);
     tvg_shape_line_to(shape, rect.x + rect.width, rect.y + rect.height);
@@ -1237,8 +1241,8 @@ void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
     tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
 
     // set clipping
-    Tvg_Paint* clip_rect = tvg_shape_new();
-    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+    Tvg_Paint clip_rect = tvg_shape_new();
+    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
     tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
     tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
 
@@ -1482,7 +1486,7 @@ void render_svg(ImageSurface* surface) {
         log_debug("no picture to render");  return;
     }
     // Step 1: Create an offscreen canvas to render the original Picture
-    Tvg_Canvas* canvas = tvg_swcanvas_create();
+    Tvg_Canvas canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
     if (!canvas) return;
 
     uint32_t width = surface->max_render_width;
@@ -1519,15 +1523,15 @@ void render_svg(ImageSurface* surface) {
 }
 
 // load surface pixels to a picture
-Tvg_Paint* load_picture(ImageSurface* surface) {
-    Tvg_Paint* pic = tvg_picture_new();
+Tvg_Paint load_picture(ImageSurface* surface) {
+    Tvg_Paint pic = tvg_picture_new();
     if (!pic) { return NULL; }
 
     // Load the raw pixel data into the new Picture
     if (tvg_picture_load_raw(pic, (uint32_t*)surface->pixels, surface->width, surface->height,
         TVG_COLORSPACE_ABGR8888, false) != TVG_RESULT_SUCCESS) {
         log_debug("Failed to load raw pixel data");
-        tvg_paint_del(pic);
+        tvg_paint_unref(pic, true);
         return NULL;
     }
     return pic;
@@ -1556,14 +1560,14 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         if (!img->pixels) {
             render_svg(img);
         }
-        Tvg_Paint* pic = load_picture(img);
+        Tvg_Paint pic = load_picture(img);
         if (pic) {
             tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
             tvg_picture_set_size(pic, rect.width, rect.height);
             tvg_paint_translate(pic, rect.x, rect.y);
             // clip the svg picture
-            Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
-            tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+            Tvg_Paint clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
+            tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
             tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
             tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
             tvg_canvas_push(rdcon->canvas, pic);
@@ -1718,6 +1722,12 @@ void render_children(RenderContext* rdcon, View* view) {
                 log_debug("[RENDER DISPATCH] calling render_form_control");
                 render_form_control(rdcon, block);
             }
+            else if (block->tag_id == HTM_TAG_SVG) {
+                // Inline SVG element - render via ThorVG
+                log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
+                render_block_view(rdcon, block);  // render background/border first
+                render_inline_svg(rdcon, block);  // then render SVG content
+            }
             else if (block->embed && block->embed->img) {
                 log_debug("[RENDER DISPATCH] calling render_image_view");
                 render_image_view(rdcon, block);
@@ -1813,7 +1823,7 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     float outline_width = 2.0f * s;
 
     // Create outline shape
-    Tvg_Paint* shape = tvg_shape_new();
+    Tvg_Paint shape = tvg_shape_new();
     if (!shape) return;
 
     // Draw dotted rectangle outline
@@ -1822,7 +1832,7 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     float ow = width + outline_offset * 2;
     float oh = height + outline_offset * 2;
 
-    tvg_shape_append_rect(shape, ox, oy, ow, oh, 0, 0);
+    tvg_shape_append_rect(shape, ox, oy, ow, oh, 0, 0, true);
 
     // Focus ring color: typically blue or system accent color
     // Using a standard web focus color: #005FCC (blue)
@@ -1895,9 +1905,9 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         css_x, css_y, x, y, height);
 
     // Draw using ThorVG for proper integration with scene graph
-    Tvg_Paint* shape = tvg_shape_new();
+    Tvg_Paint shape = tvg_shape_new();
     if (shape) {
-        tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0);
+        tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0, true);
         // Red caret color
         tvg_shape_set_fill_color(shape, 0xFF, 0x00, 0x00, 0xFF);
         tvg_canvas_push(rdcon->canvas, shape);
@@ -1981,9 +1991,9 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     if (sel_height <= 0) sel_height = 20 * s;  // default line height if not set (scaled)
 
     // Draw selection highlight using ThorVG
-    Tvg_Paint* shape = tvg_shape_new();
+    Tvg_Paint shape = tvg_shape_new();
     if (shape) {
-        tvg_shape_append_rect(shape, min_x, min_y, sel_width, sel_height, 0, 0);
+        tvg_shape_append_rect(shape, min_x, min_y, sel_width, sel_height, 0, 0, true);
         // Semi-transparent blue selection highlight (typical system selection color)
         tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);  // Blue with 50% alpha
         tvg_canvas_push(rdcon->canvas, shape);
@@ -2025,7 +2035,7 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
 void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
-    rdcon->canvas = tvg_swcanvas_create();
+    rdcon->canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
     Tvg_Result result = tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)uicon->surface->pixels, uicon->surface->width,
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888);
     if (result != TVG_RESULT_SUCCESS) {
