@@ -135,7 +135,8 @@ void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
     tvg_canvas_push(canvas, h_scrollbar);
     tvg_canvas_push(canvas, h_scroll_handle);
 
-    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas);
     tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
     log_debug("finished rendering scroller");
 }
