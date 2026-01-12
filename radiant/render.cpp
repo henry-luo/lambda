@@ -3,7 +3,6 @@
 #include "render_border.hpp"
 #include "render_background.hpp"
 #include "render_filter.hpp"
-#include "render_math.hpp"
 #include "render_texnode.hpp"
 #include "transform.hpp"
 #include "layout.hpp"
@@ -83,7 +82,6 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
-// render_math_view is declared in render_math.hpp
 
 /**
  * Helper function to apply transform and push paint to canvas
@@ -1757,11 +1755,6 @@ void render_children(RenderContext* rdcon, View* view) {
             // List marker (bullet/number) with fixed width and vector graphics
             ViewSpan* marker = (ViewSpan*)view;
             render_marker_view(rdcon, marker);
-        }
-        else if (view->view_type == RDT_VIEW_MATH) {
-            // Math view - renders MathBox trees from DomElement's embed prop
-            DomElement* elem = static_cast<DomElement*>(view);
-            radiant::render_math_from_embed(rdcon, elem);
         }
         else if (view->view_type == RDT_VIEW_TEXNODE) {
             // TexNode view - renders TexNode trees directly (unified TeX pipeline)
