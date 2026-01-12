@@ -38,6 +38,9 @@ typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 
+// Forward declaration for TexNode (unified TeX pipeline)
+namespace tex { struct TexNode; }
+
 // ============================================================================
 // DOM Document
 // ============================================================================
@@ -215,6 +218,11 @@ struct DomElement : DomNode {
     // Stores up to 9 measurement results + 1 final layout result
     radiant::LayoutCache* layout_cache;
 
+    // TexNode tree for RDT_VIEW_TEXNODE rendering (unified TeX pipeline)
+    // When view_type == RDT_VIEW_TEXNODE, this points to the root of the TexNode tree
+    // The TexNode tree IS the view tree - no conversion needed
+    tex::TexNode* tex_root;
+
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
@@ -227,7 +235,7 @@ struct DomElement : DomNode {
         content_width(0), content_height(0),
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
         transform(nullptr), filter(nullptr), multicol(nullptr), pseudo(nullptr),
-        vpath(nullptr), layout_cache(nullptr) {}
+        vpath(nullptr), layout_cache(nullptr), tex_root(nullptr) {}
 };
 
 // Pseudo-class state flags

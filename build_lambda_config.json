@@ -123,6 +123,7 @@
         "radiant/render_background.cpp",
         "radiant/render_filter.cpp",
         "radiant/render_math.cpp",
+        "radiant/render_texnode.cpp",
         "radiant/render_svg.cpp",
         "radiant/render_pdf.cpp",
         "radiant/render_dvi.cpp",
