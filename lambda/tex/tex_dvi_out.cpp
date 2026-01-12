@@ -157,7 +157,7 @@ bool dvi_open(DVIWriter& writer, const char* filename, const DVIParams& params) 
     writer.params = params;
     writer.h = writer.v = 0;
     writer.w = writer.x = writer.y = writer.z = 0;
-    writer.current_font = 0;
+    writer.current_font = UINT32_MAX;  // No font selected yet
     writer.stack_depth = 0;
     writer.page_count = 0;
     writer.max_h = writer.max_v = 0;
@@ -555,6 +555,40 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             break;
         }
 
+        case NodeClass::MathChar: {
+            // Math character - similar to regular Char but uses MathChar font
+            const char* font_name = node->content.math_char.font.name;
+            float font_size = node->content.math_char.font.size_pt;
+            if (font_name) {
+                uint32_t font_num = dvi_define_font(writer, font_name, font_size);
+                dvi_select_font(writer, font_num);
+            }
+
+            dvi_set_char(writer, node->content.math_char.codepoint);
+
+            int32_t width_sp = pt_to_sp(node->width);
+            writer.h += width_sp;
+            if (writer.h > writer.max_h) writer.max_h = writer.h;
+            break;
+        }
+
+        case NodeClass::MathOp: {
+            // Large operator - similar to MathChar
+            const char* font_name = node->content.math_op.font.name;
+            float font_size = node->content.math_op.font.size_pt;
+            if (font_name) {
+                uint32_t font_num = dvi_define_font(writer, font_name, font_size);
+                dvi_select_font(writer, font_num);
+            }
+
+            dvi_set_char(writer, node->content.math_op.codepoint);
+
+            int32_t width_sp = pt_to_sp(node->width);
+            writer.h += width_sp;
+            if (writer.h > writer.max_h) writer.max_h = writer.h;
+            break;
+        }
+
         case NodeClass::Glue: {
             // In DVI, glue becomes fixed space after layout
             int32_t width_sp = pt_to_sp(node->width);
@@ -588,6 +622,31 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
         case NodeClass::VList:
         case NodeClass::VBox: {
             dvi_output_vlist(writer, node, fonts);
+            break;
+        }
+
+        case NodeClass::Scripts: {
+            // Scripts node contains nucleus, subscript, superscript as children
+            // Each child has x,y offsets relative to the scripts node origin
+            // Output each child at its positioned location
+            for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+                // Save position
+                int32_t save_h = writer.h;
+                int32_t save_v = writer.v;
+
+                // Move to child position (y is baseline-relative, positive = up)
+                writer.h = save_h + pt_to_sp(child->x);
+                writer.v = save_v - pt_to_sp(child->y);  // DVI y increases downward
+
+                // Output child
+                dvi_output_node(writer, child, fonts);
+
+                // Restore position
+                writer.h = save_h;
+                writer.v = save_v;
+            }
+            // Advance by total width
+            writer.h += pt_to_sp(node->width);
             break;
         }
 

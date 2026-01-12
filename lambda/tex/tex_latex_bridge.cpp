@@ -444,7 +444,7 @@ static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXC
         MathContext math_ctx = ctx.doc_ctx.math_context();
         math_ctx.style = MathStyle::Text;  // Inline math
 
-        TexNode* math_hbox = typeset_math_string(math_source, strlen(math_source), math_ctx);
+        TexNode* math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
         if (math_hbox) {
             hlist->append_child(math_hbox);
         }
@@ -1098,7 +1098,7 @@ TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx
     MathContext math_ctx = ctx.doc_ctx.math_context();
     math_ctx.style = MathStyle::Display;
 
-    TexNode* math_hbox = typeset_math_string(math_source, strlen(math_source), math_ctx);
+    TexNode* math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
     if (!math_hbox) {
         if (sb) stringbuf_free(sb);
         pool_destroy(pool);

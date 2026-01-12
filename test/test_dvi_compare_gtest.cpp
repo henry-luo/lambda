@@ -353,6 +353,24 @@ protected:
                 << " (" << out_parser.error() << ")";
         }
 
+        // Debug: show glyph counts
+        fprintf(stderr, "[DEBUG] ref_parser: %d pages\n", ref_parser.page_count());
+        fprintf(stderr, "[DEBUG] out_parser: %d pages\n", out_parser.page_count());
+        if (ref_parser.page_count() > 0) {
+            const DVIPage* p = ref_parser.page(0);
+            fprintf(stderr, "[DEBUG] ref page 0: %d glyphs\n", p->glyph_count);
+        }
+        if (out_parser.page_count() > 0) {
+            const DVIPage* p = out_parser.page(0);
+            fprintf(stderr, "[DEBUG] out page 0: %d glyphs\n", p->glyph_count);
+            for (int i = 0; i < p->glyph_count && i < 20; i++) {
+                fprintf(stderr, "[DEBUG]   glyph %d: codepoint=%d '%c'\n",
+                        i, p->glyphs[i].codepoint,
+                        (p->glyphs[i].codepoint >= 32 && p->glyphs[i].codepoint < 127)
+                            ? (char)p->glyphs[i].codepoint : '?');
+            }
+        }
+
         // Normalize both
         NormalizedDVI ref_norm = normalize_dvi(ref_parser, arena);
         NormalizedDVI out_norm = normalize_dvi(out_parser, arena);
@@ -460,8 +478,8 @@ TEST_F(DVICompareTest, SimpleText) {
 // Additional test cases - these may be skipped if reference files don't exist
 // or if the typesetter doesn't yet support all features
 
-TEST_F(DVICompareTest, DISABLED_SimpleMath) {
-    // Math typesetting comparison - disabled until math is fully implemented
+TEST_F(DVICompareTest, SimpleMath) {
+    // Math typesetting comparison
     EXPECT_TRUE(test_latex_file("test_simple_math"));
 }
 
@@ -469,7 +487,7 @@ TEST_F(DVICompareTest, DISABLED_Fraction) {
     EXPECT_TRUE(test_latex_file("test_fraction"));
 }
 
-TEST_F(DVICompareTest, DISABLED_Greek) {
+TEST_F(DVICompareTest, Greek) {
     EXPECT_TRUE(test_latex_file("test_greek"));
 }
 
