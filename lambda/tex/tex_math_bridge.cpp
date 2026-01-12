@@ -287,6 +287,7 @@ static const SymbolDef SYMBOLS[] = {
     // Arrows
     {"leftarrow",    32},
     {"rightarrow",   33},
+    {"to",           33},  // alias for rightarrow
     {"leftrightarrow", 36},
     {"Leftarrow",    40},
     {"Rightarrow",   41},
@@ -688,6 +689,59 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                 continue;
             }
 
+            // Function operators (rendered as roman text): \lim, \sin, \cos, etc.
+            static const char* FUNC_OPS[] = {
+                "lim", "sin", "cos", "tan", "cot", "sec", "csc",
+                "log", "ln", "exp", "det", "max", "min", "sup", "inf",
+                "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+                "ker", "hom", "dim", "deg", "arg", "gcd", "lcm", "mod",
+                nullptr
+            };
+            bool is_func_op = false;
+            for (const char** fp = FUNC_OPS; *fp; fp++) {
+                if (strlen(*fp) == cmd_len && strncmp(*fp, cmd, cmd_len) == 0) {
+                    is_func_op = true;
+                    break;
+                }
+            }
+            if (is_func_op) {
+                // Output each character in roman font
+                FontSpec font = ctx.roman_font;
+                font.size_pt = size;
+                TexNode* first_char = nullptr;
+                TexNode* last_char = nullptr;
+                for (size_t ci = 0; ci < cmd_len; ci++) {
+                    TexNode* ch = make_char_with_metrics(arena, cmd[ci], AtomType::Op,
+                                                          font, roman_tfm, size);
+                    if (!first_char) {
+                        first_char = ch;
+                    } else {
+                        last_char->next_sibling = ch;
+                        ch->prev_sibling = last_char;
+                    }
+                    last_char = ch;
+                }
+                // Create hbox for the function name
+                TexNode* func_box = make_hbox(arena);
+                func_box->first_child = first_char;
+                func_box->last_child = last_char;
+                float tw = 0;
+                float max_h = 0, max_d = 0;
+                for (TexNode* c = first_char; c; c = c->next_sibling) {
+                    c->parent = func_box;
+                    c->x = tw;
+                    tw += c->width;
+                    if (c->height > max_h) max_h = c->height;
+                    if (c->depth > max_d) max_d = c->depth;
+                }
+                func_box->width = tw;
+                func_box->height = max_h;
+                func_box->depth = max_d;
+                add_node(func_box, AtomType::Op);
+                log_debug("math_bridge: FuncOp \\%.*s", (int)cmd_len, cmd);
+                continue;
+            }
+
             // Handle \frac{num}{denom}
             if (cmd_len == 4 && strncmp(cmd, "frac", 4) == 0) {
                 i = skip_ws(str, i, len);
@@ -746,21 +800,45 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
             // Handle \left and \right delimiters (simplified)
             if ((cmd_len == 4 && strncmp(cmd, "left", 4) == 0) ||
                 (cmd_len == 5 && strncmp(cmd, "right", 5) == 0)) {
-                // For now, just parse the delimiter and continue
-                // Full implementation would track balanced pairs
+                // Parse and output the delimiter character
                 i = skip_ws(str, i, len);
                 if (i < len) {
                     char delim = str[i];
+                    int32_t delim_code = -1;
                     if (delim == '(' || delim == ')' || delim == '[' ||
                         delim == ']' || delim == '|' || delim == '.') {
+                        delim_code = delim;
                         i++;
                     } else if (delim == '\\') {
                         // \{ or \}
                         i++;
-                        if (i < len) i++;
+                        if (i < len) {
+                            if (str[i] == '{') delim_code = 'f';  // cmsy left brace
+                            else if (str[i] == '}') delim_code = 'g';  // cmsy right brace
+                            i++;
+                        }
+                    }
+                    // Output the delimiter character
+                    if (delim_code != -1 && delim_code != '.') {  // '.' means invisible delimiter
+                        FontSpec font;
+                        TFMFont* tfm;
+                        if (delim_code == 'f' || delim_code == 'g') {
+                            // Braces use cmsy
+                            font = ctx.symbol_font;
+                            font.size_pt = size;
+                            tfm = symbol_tfm;
+                        } else {
+                            // Parens, brackets use cmr
+                            font = ctx.roman_font;
+                            font.size_pt = size;
+                            tfm = roman_tfm;
+                        }
+                        AtomType atom = (cmd[0] == 'l') ? AtomType::Open : AtomType::Close;
+                        TexNode* node = make_char_with_metrics(arena, delim_code, atom, font, tfm, size);
+                        add_node(node, atom);
+                        log_debug("math_bridge: \\%.*s delimiter %c", (int)cmd_len, cmd, (char)delim_code);
                     }
                 }
-                // TODO: properly handle \left...\right pairs
                 continue;
             }
 
@@ -988,9 +1066,10 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
 
             AtomType atom_type = classify_codepoint(cp);
 
-            // Determine font
+            // Determine font and character code
             FontSpec font;
             TFMFont* tfm;
+            int32_t char_code = cp;
 
             if (cp >= '0' && cp <= '9') {
                 font = ctx.roman_font;
@@ -1000,6 +1079,17 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                 font = ctx.italic_font;
                 font.size_pt = size;
                 tfm = italic_tfm;
+            } else if (cp == '-') {
+                // Minus sign uses cmsy position 0
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                tfm = symbol_tfm;
+                char_code = 0;  // minus in cmsy
+            } else if (cp == '+' || cp == '=') {
+                // Plus and equals use cmr
+                font = ctx.roman_font;
+                font.size_pt = size;
+                tfm = roman_tfm;
             } else if (cp < 128 && (atom_type == AtomType::Bin || atom_type == AtomType::Rel)) {
                 font = ctx.roman_font;
                 font.size_pt = size;
@@ -1010,7 +1100,7 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                 tfm = roman_tfm;
             }
 
-            TexNode* node = make_char_with_metrics(arena, cp, atom_type, font, tfm, size);
+            TexNode* node = make_char_with_metrics(arena, char_code, atom_type, font, tfm, size);
             add_node(node, atom_type);
         }
     }
