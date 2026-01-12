@@ -97,8 +97,6 @@
         "radiant/layout_grid.cpp",
         "radiant/layout_grid_multipass.cpp",
         "radiant/layout_multicol.cpp",
-        "radiant/layout_math.cpp",
-        "radiant/math_integration.cpp",
         "radiant/layout_graph.cpp",
         "radiant/graph_dagre.cpp",
         "radiant/graph_to_svg.cpp",
@@ -122,7 +120,7 @@
         "radiant/render_border.cpp",
         "radiant/render_background.cpp",
         "radiant/render_filter.cpp",
-        "radiant/render_math.cpp",
+        "radiant/render_texnode.cpp",
         "radiant/render_svg.cpp",
         "radiant/render_svg_inline.cpp",
         "radiant/render_pdf.cpp",
@@ -2710,7 +2708,10 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "png",
+                            "zlib",
+                            "bzip2"
                         ],
                         "binary": "test_tex_phase5_gtest.exe",
                         "additional_sources": [
@@ -2722,6 +2723,9 @@
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_dvi_out.cpp",
                             "lambda/tex/tex_pdf_out.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_png_out.cpp",
+                            "lambda/tex/tex_font_adapter.cpp",
                             "lambda/tex/dvi_parser.cpp",
                             "lib/arena.c",
                             "lib/mempool.c",
@@ -2736,6 +2740,42 @@
                             "."
                         ],
                         "icon": "📤"
+                    },
+                    {
+                        "source": "test/test_tex_phase6_gtest.cpp",
+                        "name": "TeX Phase 6 SVG/PNG Output Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype",
+                            "png",
+                            "zlib",
+                            "bzip2"
+                        ],
+                        "binary": "test_tex_phase6_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_png_out.cpp",
+                            "lambda/tex/tex_font_adapter.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c",
+                            "lib/arraylist.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🖼️"
                     },
                     {
                         "source": "test/test_tex_hyphen_gtest.cpp",
@@ -2821,6 +2861,38 @@
                             "."
                         ],
                         "icon": "📝"
+                    },
+                    {
+                        "source": "test/test_dvi_compare_gtest.cpp",
+                        "name": "DVI Compare Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_dvi_compare_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp",
+                            "lambda/tex/tex_latex_bridge.cpp",
+                            "lambda/tex/tex_dvi_out.cpp",
+                            "lambda/tex/dvi_parser.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📊"
                     }
                 ],
                 "type": "tex",

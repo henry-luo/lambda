@@ -1,7 +1,6 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
-#include "math_box.hpp"
 #include "font_face.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
@@ -41,7 +40,6 @@ void render_block_view_pdf(PdfRenderContext* ctx, ViewBlock* view_block);
 void render_inline_view_pdf(PdfRenderContext* ctx, ViewSpan* view_span);
 void render_children_pdf(PdfRenderContext* ctx, View* view);
 void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text);
-void render_math_view_pdf(PdfRenderContext* ctx, radiant::ViewMath* math);
 
 // External function from render_svg.cpp
 extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
@@ -425,7 +423,8 @@ void render_children_pdf(PdfRenderContext* ctx, View* view) {
                 break;
 
             case RDT_VIEW_MATH:
-                render_math_view_pdf(ctx, (radiant::ViewMath*)child);
+                // MathBox rendering removed - use RDT_VIEW_TEXNODE instead
+                log_debug("render_children_pdf: RDT_VIEW_MATH deprecated, skipping");
                 break;
 
             default:
@@ -640,216 +639,6 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
 // ============================================================================
 // Math Rendering Functions for PDF
 // ============================================================================
-
-using namespace radiant;
-
-// Forward declarations for recursive rendering
-static void render_math_box_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y);
-static void render_math_hbox_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y);
-static void render_math_vbox_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y);
-
-// Render a single math glyph to PDF
-static void render_math_glyph_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y) {
-    if (!box || box->content_type != MathBoxContentType::Glyph) return;
-
-    int codepoint = box->content.glyph.codepoint;
-    FT_Face face = box->content.glyph.face;
-
-    if (!face) {
-        log_debug("render_math_glyph_pdf: no face for codepoint %d", codepoint);
-        return;
-    }
-
-    // Get font properties
-    // Calculate font size from face metrics (in pixels)
-    // Handle WOFF fonts where y_ppem=0 by deriving from height
-    float font_size;
-    if (face->size && face->size->metrics.y_ppem > 0) {
-        font_size = face->size->metrics.y_ppem * box->scale;
-    } else if (face->size && face->size->metrics.height > 0) {
-        // Derive from height (height ≈ ppem * 1.2 * 64)
-        font_size = (face->size->metrics.height / 64.0f / 1.2f) * box->scale;
-    } else {
-        font_size = 16.0f * box->scale;
-    }
-
-    // Load glyph to get metrics
-    FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
-    if (glyph_index == 0) {
-        log_debug("render_math_glyph_pdf: glyph not found for codepoint 0x%04X", codepoint);
-        return;
-    }
-
-    if (FT_Load_Glyph(face, glyph_index, FT_LOAD_DEFAULT) != 0) {
-        log_debug("render_math_glyph_pdf: failed to load glyph for codepoint 0x%04X", codepoint);
-        return;
-    }
-
-    FT_GlyphSlot slot = face->glyph;
-    float scale = box->scale;
-
-    // Calculate render position
-    float render_x = x + slot->metrics.horiBearingX * scale / 64.0f;
-    float render_y = y;  // y is on baseline
-
-    // Convert PDF coordinates (origin at bottom-left)
-    float pdf_y = ctx->page_height - render_y;
-
-    // Convert codepoint to UTF-8
-    char utf8_char[8];
-    if (codepoint < 0x80) {
-        utf8_char[0] = (char)codepoint;
-        utf8_char[1] = '\0';
-    } else if (codepoint < 0x800) {
-        utf8_char[0] = (char)(0xC0 | (codepoint >> 6));
-        utf8_char[1] = (char)(0x80 | (codepoint & 0x3F));
-        utf8_char[2] = '\0';
-    } else if (codepoint < 0x10000) {
-        utf8_char[0] = (char)(0xE0 | (codepoint >> 12));
-        utf8_char[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        utf8_char[2] = (char)(0x80 | (codepoint & 0x3F));
-        utf8_char[3] = '\0';
-    } else {
-        utf8_char[0] = (char)(0xF0 | (codepoint >> 18));
-        utf8_char[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-        utf8_char[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        utf8_char[3] = (char)(0x80 | (codepoint & 0x3F));
-        utf8_char[4] = '\0';
-    }
-
-    // Set font and color
-    pdf_set_color(ctx, ctx->color);
-
-    // Try to set font size
-    HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, font_size);
-
-    // Begin text rendering
-    HPDF_Page_BeginText(ctx->current_page);
-    HPDF_Page_TextOut(ctx->current_page, render_x, pdf_y, utf8_char);
-    HPDF_Page_EndText(ctx->current_page);
-}
-
-// Render a horizontal box (sequence of children)
-static void render_math_hbox_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y) {
-    if (!box || box->content_type != MathBoxContentType::HBox) return;
-
-    float current_x = x;
-    for (int i = 0; i < box->content.hbox.count; i++) {
-        MathBox* child = box->content.hbox.children[i];
-        if (!child) continue;
-
-        render_math_box_pdf(ctx, child, current_x, y);
-        current_x += child->width;
-    }
-}
-
-// Render a vertical box (stack of children)
-static void render_math_vbox_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y) {
-    if (!box || box->content_type != MathBoxContentType::VBox) return;
-
-    for (int i = 0; i < box->content.vbox.count; i++) {
-        MathBox* child = box->content.vbox.children[i];
-        if (!child) continue;
-
-        float shift = box->content.vbox.shifts[i];
-        // shift is relative to the vbox baseline
-        // positive shift = child baseline is above vbox baseline
-        render_math_box_pdf(ctx, child, x, y - shift);
-    }
-}
-
-// Render a rule (fraction bar, etc.)
-static void render_math_rule_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y) {
-    if (!box || box->content_type != MathBoxContentType::Rule) return;
-
-    float thickness = box->content.rule.thickness;
-    float width = box->width;
-
-    // The rule is centered on the axis (y position is the baseline)
-    float rule_y = y - box->height + thickness / 2;
-
-    // Use the pdf_render_rect helper to draw the rule
-    pdf_render_rect(ctx, x, rule_y, width, thickness, ctx->color, true);
-}
-
-// Render a radical (square root)
-static void render_math_radical_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y) {
-    if (!box || box->content_type != MathBoxContentType::Radical) return;
-
-    MathBox* radicand = box->content.radical.radicand;
-    MathBox* index = box->content.radical.index;
-    float rule_thickness = box->content.radical.rule_thickness;
-    float rule_y = box->content.radical.rule_y;
-
-    // Render the overline
-    if (radicand) {
-        float rule_x = x;
-        float rule_width = radicand->width;
-
-        pdf_render_rect(ctx, rule_x, y - rule_y, rule_width, rule_thickness, ctx->color, true);
-
-        // Render radicand
-        render_math_box_pdf(ctx, radicand, x, y);
-    }
-
-    // Render index if present
-    if (index) {
-        render_math_box_pdf(ctx, index, x, y);
-    }
-}
-
-// Main dispatcher for MathBox rendering to PDF
-static void render_math_box_pdf(PdfRenderContext* ctx, MathBox* box, float x, float y) {
-    if (!box) return;
-
-    switch (box->content_type) {
-        case MathBoxContentType::Empty:
-            // Nothing to render
-            break;
-
-        case MathBoxContentType::Glyph:
-            render_math_glyph_pdf(ctx, box, x, y);
-            break;
-
-        case MathBoxContentType::HBox:
-            render_math_hbox_pdf(ctx, box, x, y);
-            break;
-
-        case MathBoxContentType::VBox:
-            render_math_vbox_pdf(ctx, box, x, y);
-            break;
-
-        case MathBoxContentType::Kern:
-            // Kerns are just spacing, nothing to render
-            break;
-
-        case MathBoxContentType::Rule:
-            render_math_rule_pdf(ctx, box, x, y);
-            break;
-
-        case MathBoxContentType::Radical:
-            render_math_radical_pdf(ctx, box, x, y);
-            break;
-
-        case MathBoxContentType::Delimiter:
-            // Delimiters are rendered as glyphs
-            render_math_glyph_pdf(ctx, box, x, y);
-            break;
-
-        default:
-            log_debug("render_math_box_pdf: unknown content type %d", (int)box->content_type);
-            break;
-    }
-}
-
-// Entry point for rendering ViewMath to PDF
-void render_math_view_pdf(PdfRenderContext* ctx, ViewMath* view_math) {
-    if (!view_math || !view_math->math_box) return;
-
-    // Calculate absolute position
-    float x = ctx->block.x + view_math->x;
-    float y = ctx->block.y + view_math->y + view_math->baseline_offset;
-
-    // Render the math box tree
-    render_math_box_pdf(ctx, view_math->math_box, x, y);
-}
+// NOTE: MathBox rendering has been removed. Use RDT_VIEW_TEXNODE for math rendering.
+// The old MathBox pipeline (RDT_VIEW_MATH) is deprecated.
+// ============================================================================
