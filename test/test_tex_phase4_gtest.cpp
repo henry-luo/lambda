@@ -54,36 +54,36 @@ TEST_F(MathBridgeTest, StyleSizeFactor) {
     // Display and text styles are full size
     EXPECT_FLOAT_EQ(1.0f, style_size_factor(MathStyle::Display));
     EXPECT_FLOAT_EQ(1.0f, style_size_factor(MathStyle::Text));
-    EXPECT_FLOAT_EQ(1.0f, style_size_factor(MathStyle::DisplayCramped));
-    EXPECT_FLOAT_EQ(1.0f, style_size_factor(MathStyle::TextCramped));
+    EXPECT_FLOAT_EQ(1.0f, style_size_factor(MathStyle::DisplayPrime));
+    EXPECT_FLOAT_EQ(1.0f, style_size_factor(MathStyle::TextPrime));
 
     // Script styles are 70%
     EXPECT_FLOAT_EQ(0.7f, style_size_factor(MathStyle::Script));
-    EXPECT_FLOAT_EQ(0.7f, style_size_factor(MathStyle::ScriptCramped));
+    EXPECT_FLOAT_EQ(0.7f, style_size_factor(MathStyle::ScriptPrime));
 
-    // Scriptscript styles are 50%
-    EXPECT_FLOAT_EQ(0.5f, style_size_factor(MathStyle::Scriptscript));
-    EXPECT_FLOAT_EQ(0.5f, style_size_factor(MathStyle::ScriptscriptCramped));
+    // ScriptScript styles are 50%
+    EXPECT_FLOAT_EQ(0.5f, style_size_factor(MathStyle::ScriptScript));
+    EXPECT_FLOAT_EQ(0.5f, style_size_factor(MathStyle::ScriptScriptPrime));
 }
 
 TEST_F(MathBridgeTest, StyleTransitions) {
     // script_style transitions
-    EXPECT_EQ(MathStyle::Script, script_style(MathStyle::Display));
-    EXPECT_EQ(MathStyle::Script, script_style(MathStyle::Text));
-    EXPECT_EQ(MathStyle::ScriptCramped, script_style(MathStyle::DisplayCramped));
-    EXPECT_EQ(MathStyle::Scriptscript, script_style(MathStyle::Script));
-    EXPECT_EQ(MathStyle::ScriptscriptCramped, script_style(MathStyle::ScriptCramped));
+    EXPECT_EQ(MathStyle::Script, sup_style(MathStyle::Display));
+    EXPECT_EQ(MathStyle::Script, sup_style(MathStyle::Text));
+    EXPECT_EQ(MathStyle::ScriptPrime, sup_style(MathStyle::DisplayPrime));
+    EXPECT_EQ(MathStyle::ScriptScript, sup_style(MathStyle::Script));
+    EXPECT_EQ(MathStyle::ScriptScriptPrime, sup_style(MathStyle::ScriptPrime));
 
     // cramped_style transitions
-    EXPECT_EQ(MathStyle::DisplayCramped, cramped_style(MathStyle::Display));
-    EXPECT_EQ(MathStyle::TextCramped, cramped_style(MathStyle::Text));
-    EXPECT_EQ(MathStyle::ScriptCramped, cramped_style(MathStyle::Script));
+    EXPECT_EQ(MathStyle::DisplayPrime, cramped_style(MathStyle::Display));
+    EXPECT_EQ(MathStyle::TextPrime, cramped_style(MathStyle::Text));
+    EXPECT_EQ(MathStyle::ScriptPrime, cramped_style(MathStyle::Script));
 
     // is_cramped checks
     EXPECT_FALSE(is_cramped(MathStyle::Display));
-    EXPECT_TRUE(is_cramped(MathStyle::DisplayCramped));
+    EXPECT_TRUE(is_cramped(MathStyle::DisplayPrime));
     EXPECT_FALSE(is_cramped(MathStyle::Text));
-    EXPECT_TRUE(is_cramped(MathStyle::TextCramped));
+    EXPECT_TRUE(is_cramped(MathStyle::TextPrime));
 }
 
 // ============================================================================
@@ -582,7 +582,7 @@ TEST_F(MathBridgeTest, ContextFontSize) {
     ctx.style = MathStyle::Script;
     EXPECT_FLOAT_EQ(7.0f, ctx.font_size());  // 70%
 
-    ctx.style = MathStyle::Scriptscript;
+    ctx.style = MathStyle::ScriptScript;
     EXPECT_FLOAT_EQ(5.0f, ctx.font_size());  // 50%
 }
 

@@ -2,6 +2,18 @@
 //
 // Connects the math layout engine with Radiant's view tree
 // and rendering pipeline.
+//
+// ============================================================================
+// MIGRATION NOTE: This file uses the legacy MathBox pipeline which will be
+// replaced by the unified TeX pipeline. See vibe/Latex_Mathlive_Unified.md
+//
+// Future plan:
+// 1. Convert MathLive output to TexNode trees (not MathBox)
+// 2. Use RDT_VIEW_TEXNODE instead of RDT_VIEW_MATH
+// 3. Render via render_texnode.cpp
+//
+// For now, both pipelines coexist during transition.
+// ============================================================================
 
 #include "math_integration.hpp"
 #include "math_box.hpp"
@@ -47,6 +59,9 @@ void math_cleanup() {
 /**
  * Set up math rendering on a DOM element.
  * This stores math data in the element's embed prop and marks it as a math view.
+ *
+ * NOTE: This uses the legacy RDT_VIEW_MATH pipeline. For new code, consider
+ * using RDT_VIEW_TEXNODE with DomElement::tex_root for direct TexNode rendering.
  */
 bool setup_math_element(LayoutContext* lycon, DomElement* elem, Item math_node, bool is_display) {
     if (!elem || math_node.item == ItemNull.item) {
