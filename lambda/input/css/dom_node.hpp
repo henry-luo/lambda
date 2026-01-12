@@ -48,7 +48,7 @@ typedef enum {
     RDT_VIEW_MARKER,  // List marker (bullet/number) - renders with fixed width
     // ViewSpan
     RDT_VIEW_INLINE,
-    RDT_VIEW_MATH,    // Math view (inline or display) - renders MathBox trees
+    RDT_VIEW_MATH,    // Math view (inline or display) - renders MathBox trees (DEPRECATED)
     // ViewBlock
     RDT_VIEW_INLINE_BLOCK,
     RDT_VIEW_BLOCK,
@@ -57,6 +57,8 @@ typedef enum {
     RDT_VIEW_TABLE_ROW_GROUP,
     RDT_VIEW_TABLE_ROW,
     RDT_VIEW_TABLE_CELL,
+    // TexNode rendering (unified TeX pipeline)
+    RDT_VIEW_TEXNODE,  // Direct TexNode tree rendering - TexNode IS the view tree
 } ViewType;
 
 typedef struct DomNode DomNode;
