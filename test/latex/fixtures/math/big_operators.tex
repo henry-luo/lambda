@@ -1,0 +1,59 @@
+% big_operators.tex - Test big operators with limits
+\documentclass{article}
+\usepackage{amsmath}
+\begin{document}
+
+% Sum in display mode (limits above/below)
+\[
+\sum_{i=1}^{n} x_i
+\]
+
+% Sum in inline mode (limits as sub/superscript)
+Inline: $\sum_{i=1}^{n} x_i$
+
+% Product
+\[
+\prod_{k=1}^{n} k = n!
+\]
+
+% Integral (limits usually as scripts)
+\[
+\int_0^1 x^2 \, dx = \frac{1}{3}
+\]
+
+% Double integral
+\[
+\iint_D f(x,y) \, dA
+\]
+
+% Contour integral
+\[
+\oint_C F \cdot dr
+\]
+
+% Union and intersection
+\[
+\bigcup_{i=1}^{n} A_i \quad \bigcap_{j=1}^{m} B_j
+\]
+
+% Limit
+\[
+\lim_{x \to 0} \frac{\sin x}{x} = 1
+\]
+
+% Nested operators
+\[
+\sum_{i=1}^{n} \sum_{j=1}^{m} a_{ij}
+\]
+
+% Operator with nolimits
+\[
+\sum\nolimits_{i=1}^{n} x_i
+\]
+
+% Operator with limits forced
+\[
+\int\limits_0^1 f(x) dx
+\]
+
+\end{document}

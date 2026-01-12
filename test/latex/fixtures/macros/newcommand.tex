@@ -1,0 +1,35 @@
+% newcommand.tex - Test LaTeX \newcommand family
+\documentclass{article}
+\begin{document}
+
+% Basic newcommand
+\newcommand{\test}{Test content}
+\test
+
+% With mandatory argument
+\newcommand{\wrap}[1]{[\textbf{#1}]}
+\wrap{wrapped}
+
+% With optional argument
+\newcommand{\greet}[1][World]{Hello, #1!}
+\greet
+\greet[Reader]
+
+% With multiple arguments and optional
+\newcommand{\full}[3][default]{#1: #2 and #3}
+\full{A}{B}
+\full[custom]{A}{B}
+
+% renewcommand
+\newcommand{\change}{Original}
+\change
+\renewcommand{\change}{Modified}
+\change
+
+% providecommand
+\providecommand{\new}{New definition}
+\new
+\providecommand{\new}{Should not change}
+\new
+
+\end{document}
