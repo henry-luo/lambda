@@ -859,14 +859,24 @@ fi
 # Build zlog (logging library) - REMOVED: No longer a dependency
 # zlog has been removed as a dependency from Lambda
 
-# Build ThorVG (vector graphics library for SVG rendering)
+# Build ThorVG v1.0-pre34 (vector graphics library for SVG rendering, with TTF loader for text support)
 build_thorvg() {
-    echo "Building ThorVG for Windows native..."
+    echo "Building ThorVG v1.0-pre34 for Windows native..."
 
-    # Check if already built
+    # Check if already built and verify no GL symbols
     if [ -f "$DEPS_DIR/lib/libthorvg.a" ]; then
-        echo "ThorVG already built"
-        return 0
+        if [ -f "$DEPS_DIR/include/thorvg.h" ]; then
+            # Verify no GL symbols (which cause conflicts with system OpenGL)
+            if ! nm "$DEPS_DIR/lib/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
+                echo "✅ ThorVG already built and verified"
+                return 0
+            else
+                echo "ThorVG library has GL symbols (conflicts with OpenGL), rebuilding..."
+                rm -f "$DEPS_DIR/lib/libthorvg.a" 2>/dev/null || true
+            fi
+        else
+            echo "ThorVG library found but headers missing, rebuilding..."
+        fi
     fi
 
     # Check for existing ThorVG source
@@ -882,8 +892,8 @@ build_thorvg() {
         mkdir -p "$DEPS_DIR/src"
         cd "$DEPS_DIR/src"
         echo "Cloning ThorVG repository..."
-        # Use v1.0-pre11 to match Mac version for API compatibility
-        if ! git clone --depth 1 --branch v1.0-pre11 https://github.com/thorvg/thorvg.git; then
+        # Use v1.0-pre34 for latest features and TTF loader support
+        if ! git clone --depth 1 --branch v1.0-pre34 https://github.com/thorvg/thorvg.git; then
             echo "Warning: Could not clone ThorVG repository"
             cd - > /dev/null
             return 1
@@ -895,6 +905,11 @@ build_thorvg() {
     if [ -n "$THORVG_SRC" ] && [ -d "$THORVG_SRC" ]; then
         echo "Building ThorVG from: $THORVG_SRC"
         cd "$THORVG_SRC"
+
+        # Ensure we're on the right version
+        echo "Checking out ThorVG v1.0-pre34..."
+        git fetch --tags 2>/dev/null || true
+        git checkout v1.0-pre34 2>/dev/null || true
 
         # Set up environment for Windows compilation
         if [[ "$MSYSTEM" == "CLANG64" ]]; then
@@ -916,26 +931,29 @@ build_thorvg() {
         rm -rf builddir 2>/dev/null || true
 
         # Configure ThorVG with Meson
-        # Build as static library with minimal features for Lambda's needs
-        echo "Configuring ThorVG with Meson..."
+        # CRITICAL: Build with ONLY SW engine (no GL) to avoid OpenGL symbol conflicts
+        # The GL engine includes GLAD which defines GL functions as global variables,
+        # causing bus errors at runtime when system OpenGL tries to use them.
+        echo "Configuring ThorVG with Meson (SW engine only)..."
         if ! meson setup builddir \
             --prefix="$SCRIPT_DIR/$DEPS_DIR" \
-            --buildtype=release \
+            --buildtype=plain \
             --default-library=static \
             -Dengines=sw \
-            -Dloaders=all \
-            -Dsavers=tvg \
+            -Dloaders=svg,ttf \
+            -Dsavers= \
             -Dbindings=capi \
-            -Dtools="" \
-            -Dexamples=false \
-            -Dtests=false; then
+            -Dtools= \
+            -Dtests=false \
+            -Dsimd=true \
+            -Dthreads=true; then
             echo "Error: ThorVG meson configuration failed"
             cd - > /dev/null
             return 1
         fi
 
         # Build ThorVG
-        echo "Building ThorVG (this may take a few minutes)..."
+        echo "Building ThorVG v1.0-pre34 (this may take a few minutes)..."
         if ! ninja -C builddir; then
             echo "Error: ThorVG build failed"
             cd - > /dev/null
@@ -950,7 +968,29 @@ build_thorvg() {
             return 1
         fi
 
-        echo "✅ ThorVG built and installed successfully"
+        # Verify installation
+        if [ -f "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" ] && [ -f "$SCRIPT_DIR/$DEPS_DIR/include/thorvg.h" ]; then
+            # Verify text API is available
+            if nm "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" | grep -q "tvg_text_new"; then
+                # Verify no GL symbols
+                if ! nm "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" | grep -q "glClearColor"; then
+                    echo "✅ ThorVG v1.0-pre34 built and installed successfully"
+                    echo "   - Text API: ✓ Available"
+                    echo "   - GL symbols: ✓ None (no conflicts)"
+                    cd - > /dev/null
+                    return 0
+                else
+                    echo "❌ ThorVG contains GL symbols (should not happen with sw-only build)"
+                    cd - > /dev/null
+                    return 1
+                fi
+            else
+                echo "❌ ThorVG text API not available (C API binding may have failed)"
+                cd - > /dev/null
+                return 1
+            fi
+        fi
+
         cd - > /dev/null
         return 0
     else

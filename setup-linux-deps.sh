@@ -22,7 +22,7 @@ ALL_LIBS=(
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: freetype is included but may need specific version handling
-# Note: ThorVG is built from source (see build_thorvg_v1_0_pre11_for_linux function)
+# Note: ThorVG is built from source (see build_thorvg_v1_0_pre34_for_linux function)
 RADIANT_DEPS=(
     "libglfw3-dev"           # OpenGL window and context management
     "libfreetype6-dev"       # FreeType font rendering library
@@ -513,14 +513,24 @@ cleanup_intermediate_files() {
     echo "Cleanup completed."
 }
 
-# Function to build ThorVG v1.0-pre11 for Linux
-build_thorvg_v1_0_pre11_for_linux() {
-    echo "Building ThorVG v1.0-pre11 for Linux..."
+# Function to build ThorVG v1.0-pre34 for Linux
+build_thorvg_v1_0_pre34_for_linux() {
+    echo "Building ThorVG v1.0-pre34 for Linux..."
 
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ]; then
-        echo "ThorVG v1.0-pre11 already installed in system location"
-        return 0
+    # Check if already installed in system location and verify headers
+    if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ]; then
+        if [ -f "$SYSTEM_PREFIX/include/thorvg.h" ]; then
+            # Verify no GL symbols (which cause conflicts with system OpenGL)
+            if ! nm "$SYSTEM_PREFIX/lib/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
+                echo "✅ ThorVG v1.0-pre34 already installed in system location"
+                return 0
+            else
+                echo "ThorVG library has GL symbols (conflicts with OpenGL), rebuilding..."
+                sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
+            fi
+        else
+            echo "ThorVG library found but headers missing, rebuilding..."
+        fi
     fi
 
     # Create build_temp directory if it doesn't exist
@@ -535,15 +545,21 @@ build_thorvg_v1_0_pre11_for_linux() {
             return 1
         }
         cd - > /dev/null
+    else
+        echo "ThorVG source already downloaded"
+        cd "build_temp/thorvg"
+        # Make sure we're up to date
+        git fetch --tags 2>/dev/null || true
+        cd - > /dev/null
     fi
 
     cd "build_temp/thorvg"
 
-    # Checkout v1.0-pre11 specifically
-    echo "Checking out ThorVG v1.0-pre11..."
+    # Checkout v1.0-pre34 specifically
+    echo "Checking out ThorVG v1.0-pre34..."
     git fetch --tags
-    git checkout v1.0-pre11 || {
-        echo "❌ Failed to checkout ThorVG v1.0-pre11"
+    git checkout v1.0-pre34 || {
+        echo "❌ Failed to checkout ThorVG v1.0-pre34"
         cd - > /dev/null
         return 1
     }
@@ -578,29 +594,62 @@ build_thorvg_v1_0_pre11_for_linux() {
             fi
         fi
 
-        # Create build directory
+        # Clean previous build directory to ensure fresh configuration
+        rm -rf build-linux
         mkdir -p build-linux
 
         echo "Configuring ThorVG with Meson..."
+        # CRITICAL: Build with ONLY SW engine (no GL) to avoid OpenGL symbol conflicts
+        # The GL engine includes GLAD which defines GL functions as global variables,
+        # causing bus errors at runtime when system OpenGL tries to use them.
         if meson setup build-linux \
-            --buildtype=release \
-            --default-library=both \
-            --prefix="$SYSTEM_PREFIX" \
-            -Dengines=sw,gl \
-            -Dloaders=svg,png,jpg \
+            --buildtype=plain \
+            --default-library=static \
+            -Dengines=sw \
+            -Dloaders=svg,ttf \
             -Dsavers= \
             -Dbindings=capi \
             -Dtools= \
             -Dtests=false \
-            -Dexamples=false; then
+            -Dsimd=true \
+            -Dthreads=true; then
 
-            echo "Building ThorVG v1.0-pre11..."
-            if meson compile -C build-linux; then
-                echo "Installing ThorVG v1.0-pre11 to system location (requires sudo)..."
-                if sudo meson install -C build-linux; then
-                    echo "✅ ThorVG v1.0-pre11 built successfully"
-                    cd - > /dev/null
-                    return 0
+            echo "Building ThorVG v1.0-pre34..."
+            if ninja -C build-linux; then
+                echo "Installing ThorVG v1.0-pre34 to $SYSTEM_PREFIX (requires sudo)..."
+                # Copy files manually
+                sudo mkdir -p "$SYSTEM_PREFIX/lib"
+                sudo mkdir -p "$SYSTEM_PREFIX/include"
+                
+                if [ -f "build-linux/src/libthorvg.a" ]; then
+                    sudo cp "build-linux/src/libthorvg.a" "$SYSTEM_PREFIX/lib/"
+                fi
+                
+                if [ -f "inc/thorvg.h" ]; then
+                    sudo cp "inc/thorvg.h" "$SYSTEM_PREFIX/include/"
+                fi
+
+                # Verify installation
+                if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] && [ -f "$SYSTEM_PREFIX/include/thorvg.h" ]; then
+                    # Verify text API is available
+                    if nm "$SYSTEM_PREFIX/lib/libthorvg.a" | grep -q "tvg_text_new"; then
+                        # Verify no GL symbols
+                        if ! nm "$SYSTEM_PREFIX/lib/libthorvg.a" | grep -q "glClearColor"; then
+                            echo "✅ ThorVG v1.0-pre34 built successfully"
+                            echo "   - Text API: ✓ Available"
+                            echo "   - GL symbols: ✓ None (no conflicts)"
+                            cd - > /dev/null
+                            return 0
+                        else
+                            echo "❌ ThorVG contains GL symbols (should not happen with sw-only build)"
+                            cd - > /dev/null
+                            return 1
+                        fi
+                    else
+                        echo "❌ ThorVG text API not available (C API binding may have failed)"
+                        cd - > /dev/null
+                        return 1
+                    fi
                 fi
             fi
         fi
@@ -610,7 +659,7 @@ build_thorvg_v1_0_pre11_for_linux() {
         return 1
     fi
 
-    echo "❌ ThorVG v1.0-pre11 build failed"
+    echo "❌ ThorVG v1.0-pre34 build failed"
     cd - > /dev/null
     return 1
 }
@@ -1026,16 +1075,16 @@ else
 fi
 
 
-# Build ThorVG v1.0-pre11 for Linux (required for Radiant project)
+# Build ThorVG v1.0-pre34 for Linux (required for Radiant project, with TTF loader for SVG text support)
 echo "Setting up ThorVG ..."
 
-# Check if ThorVG v1.0-pre11 is already properly installed
+# Check if ThorVG v1.0-pre34 is already properly installed
 if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ]; then
     # Verify it's the correct version by checking if we can find the repository with the right tag
     if [ -d "build_temp/thorvg" ]; then
         cd "build_temp/thorvg"
-        if git describe --tags 2>/dev/null | grep -q "v1.0-pre11"; then
-            echo "✅ ThorVG v1.0-pre11 already installed and verified"
+        if git describe --tags 2>/dev/null | grep -q "v1.0-pre34"; then
+            echo "✅ ThorVG v1.0-pre34 already installed and verified"
             cd - > /dev/null
         else
             echo "ThorVG found but version mismatch, rebuilding..."
@@ -1048,23 +1097,23 @@ if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg
             sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
             rm -rf "build_temp/thorvg" 2>/dev/null || true
 
-            if ! build_thorvg_v1_0_pre11_for_linux; then
-                echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
+            if ! build_thorvg_v1_0_pre34_for_linux; then
+                echo "❌ ThorVG v1.0-pre34 build failed - required for Radiant project"
                 exit 1
             else
-                echo "✅ ThorVG v1.0-pre11 built successfully"
+                echo "✅ ThorVG v1.0-pre34 built successfully"
             fi
         fi
     else
-        echo "✅ ThorVG v1.0-pre11 already installed in system location"
+        echo "✅ ThorVG v1.0-pre34 already installed in system location"
     fi
 else
     # ThorVG not found, need to build it
-    if ! build_thorvg_v1_0_pre11_for_linux; then
-        echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
+    if ! build_thorvg_v1_0_pre34_for_linux; then
+        echo "❌ ThorVG v1.0-pre34 build failed - required for Radiant project"
         exit 1
     else
-        echo "✅ ThorVG v1.0-pre11 built successfully"
+        echo "✅ ThorVG v1.0-pre34 built successfully"
     fi
 fi
 

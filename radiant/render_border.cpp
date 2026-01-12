@@ -9,7 +9,7 @@
 /**
  * Helper function to apply transform and push paint to canvas
  */
-static void push_with_transform(RenderContext* rdcon, Tvg_Paint* paint) {
+static void push_with_transform(RenderContext* rdcon, Tvg_Paint paint) {
     if (rdcon->has_transform) {
         tvg_paint_set_transform(paint, &rdcon->transform);
     }
@@ -19,8 +19,8 @@ static void push_with_transform(RenderContext* rdcon, Tvg_Paint* paint) {
 /**
  * Create a clip shape for ThorVG based on the render context's clip region
  */
-static Tvg_Paint* create_border_clip_shape(RenderContext* rdcon) {
-    Tvg_Paint* clip_rect = tvg_shape_new();
+static Tvg_Paint create_border_clip_shape(RenderContext* rdcon) {
+    Tvg_Paint clip_rect = tvg_shape_new();
 
     if (rdcon->block.has_clip_radius) {
         // Use rounded clipping
@@ -34,12 +34,12 @@ static Tvg_Paint* create_border_clip_shape(RenderContext* rdcon) {
         if (rdcon->block.clip_radius.bottom_left > 0) r = max(r, rdcon->block.clip_radius.bottom_left);
         if (rdcon->block.clip_radius.bottom_right > 0) r = max(r, rdcon->block.clip_radius.bottom_right);
 
-        tvg_shape_append_rect(clip_rect, clip_x, clip_y, clip_w, clip_h, r, r);
+        tvg_shape_append_rect(clip_rect, clip_x, clip_y, clip_w, clip_h, r, r, true);
     } else {
         tvg_shape_append_rect(clip_rect,
             rdcon->block.clip.left, rdcon->block.clip.top,
             rdcon->block.clip.right - rdcon->block.clip.left,
-            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
+            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0, true);
     }
 
     tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
@@ -202,8 +202,8 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 /**
  * Build rounded rectangle path with Bezier curves for ThorVG
  */
-static Tvg_Paint* build_rounded_border_path(Rect rect, BorderProp* border) {
-    Tvg_Paint* shape = tvg_shape_new();
+static Tvg_Paint build_rounded_border_path(Rect rect, BorderProp* border) {
+    Tvg_Paint shape = tvg_shape_new();
 
     float x = rect.x;
     float y = rect.y;
@@ -281,7 +281,7 @@ static Tvg_Paint* build_rounded_border_path(Rect rect, BorderProp* border) {
 /**
  * Apply dash pattern for dotted/dashed borders
  */
-static void apply_dash_pattern(Tvg_Paint* shape, CssEnum style, float width) {
+static void apply_dash_pattern(Tvg_Paint shape, CssEnum style, float width) {
     if (style == CSS_VALUE_DOTTED) {
         // Dotted: round dots with spacing
         float dash_pattern[] = {width, width * 2};
@@ -300,7 +300,7 @@ static void apply_dash_pattern(Tvg_Paint* shape, CssEnum style, float width) {
  */
 void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->bound->border;
-    Tvg_Canvas* canvas = rdcon->canvas;
+    Tvg_Canvas canvas = rdcon->canvas;
 
     // For uniform borders, we can render as a single shape
     bool uniform_width = (border->width.top == border->width.right &&
@@ -316,7 +316,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (uniform_width && uniform_style && uniform_color && border->width.top > 0 &&
         border->top_style != CSS_VALUE_NONE && border->top_style != CSS_VALUE_HIDDEN) {
         // Render as single stroke
-        Tvg_Paint* shape = build_rounded_border_path(rect, border);
+        Tvg_Paint shape = build_rounded_border_path(rect, border);
 
         tvg_shape_set_stroke_width(shape, border->width.top);
         tvg_shape_set_stroke_color(shape,
@@ -327,7 +327,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         apply_dash_pattern(shape, border->top_style, border->width.top);
 
         // Set clipping (may be rounded if parent has border-radius with overflow:hidden)
-        Tvg_Paint* clip_rect = create_border_clip_shape(rdcon);
+        Tvg_Paint clip_rect = create_border_clip_shape(rdcon);
         tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
 
         tvg_canvas_remove(canvas, NULL);  // clear previous shapes

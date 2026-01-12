@@ -585,12 +585,13 @@ DisplayValue resolve_display_value(void* child) {
             return dom_elem->display;
         }
 
-        // Determine if this is a replaced element (img, video, iframe, etc.)
+        // Determine if this is a replaced element (img, video, iframe, svg, etc.)
         // Replaced elements always have inner display of RDT_DISPLAY_REPLACED
         bool is_replaced = (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
                             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
                             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
-                            tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR);
+                            tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
+                            tag_id == HTM_TAG_SVG);
 
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
