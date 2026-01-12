@@ -9,6 +9,7 @@
  */
 struct MathTestCase {
     int id;
+    int index;  // 0-based index within category for test naming
     std::string latex;
     std::string description;
     std::string source;
@@ -30,6 +31,7 @@ struct MathTestCase {
 
     MathTestCase()
         : id(0)
+        , index(0)
         , has_expected_height(false)
         , expected_height_min(0), expected_height_max(0)
         , has_expected_depth(false)
