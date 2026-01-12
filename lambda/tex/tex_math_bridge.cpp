@@ -19,57 +19,22 @@ namespace tex {
 // Math Style Functions
 // ============================================================================
 
-MathStyle script_style(MathStyle style) {
-    switch (style) {
-        case MathStyle::Display:
-        case MathStyle::Text:
-            return MathStyle::Script;
-        case MathStyle::DisplayCramped:
-        case MathStyle::TextCramped:
-            return MathStyle::ScriptCramped;
-        case MathStyle::Script:
-        case MathStyle::Scriptscript:
-            return MathStyle::Scriptscript;
-        case MathStyle::ScriptCramped:
-        case MathStyle::ScriptscriptCramped:
-            return MathStyle::ScriptscriptCramped;
-        default:
-            return MathStyle::Script;
-    }
-}
-
-MathStyle scriptscript_style(MathStyle style) {
-    if (is_cramped(style)) {
-        return MathStyle::ScriptscriptCramped;
-    }
-    return MathStyle::Scriptscript;
-}
-
-MathStyle cramped_style(MathStyle style) {
-    // Odd styles are cramped versions
-    if ((int)style % 2 == 0) {
-        return (MathStyle)((int)style + 1);
-    }
-    return style;
-}
-
-bool is_cramped(MathStyle style) {
-    return ((int)style % 2) == 1;
-}
+// Note: is_cramped, sup_style, sub_style are inline in tex_font_metrics.hpp
+// We only need style_size_factor here
 
 float style_size_factor(MathStyle style) {
     switch (style) {
         case MathStyle::Display:
-        case MathStyle::DisplayCramped:
+        case MathStyle::DisplayPrime:
         case MathStyle::Text:
-        case MathStyle::TextCramped:
+        case MathStyle::TextPrime:
             return 1.0f;
         case MathStyle::Script:
-        case MathStyle::ScriptCramped:
+        case MathStyle::ScriptPrime:
             return 0.7f;       // Script size
-        case MathStyle::Scriptscript:
-        case MathStyle::ScriptscriptCramped:
-            return 0.5f;       // Scriptscript size
+        case MathStyle::ScriptScript:
+        case MathStyle::ScriptScriptPrime:
+            return 0.5f;       // ScriptScript size
         default:
             return 1.0f;
     }
@@ -173,6 +138,207 @@ float mu_to_pt(float mu, MathContext& ctx) {
 }
 
 // ============================================================================
+// TeX cmmi10 Greek Letter Mapping (TeXBook Appendix F)
+// ============================================================================
+
+struct GreekLetterDef {
+    const char* command;  // LaTeX command without backslash
+    int cmmi_code;        // Character position in cmmi10
+    bool is_upper;        // Uppercase uses cmr10, not cmmi10
+};
+
+static const GreekLetterDef GREEK_LETTERS[] = {
+    // Uppercase Greek (in cmmi10 positions 0-10, but some use cmr10)
+    {"Gamma",   0,  true},
+    {"Delta",   1,  true},
+    {"Theta",   2,  true},
+    {"Lambda",  3,  true},
+    {"Xi",      4,  true},
+    {"Pi",      5,  true},
+    {"Sigma",   6,  true},
+    {"Upsilon", 7,  true},
+    {"Phi",     8,  true},
+    {"Psi",     9,  true},
+    {"Omega",   10, true},
+    // Lowercase Greek (in cmmi10 positions 11-33)
+    {"alpha",    11, false},
+    {"beta",     12, false},
+    {"gamma",    13, false},
+    {"delta",    14, false},
+    {"epsilon",  15, false},
+    {"varepsilon", 34, false},  // different form
+    {"zeta",     16, false},
+    {"eta",      17, false},
+    {"theta",    18, false},
+    {"vartheta", 35, false},
+    {"iota",     19, false},
+    {"kappa",    20, false},
+    {"lambda",   21, false},
+    {"mu",       22, false},
+    {"nu",       23, false},
+    {"xi",       24, false},
+    {"omicron",  'o', false},  // uses italic o
+    {"pi",       25, false},
+    {"varpi",    36, false},
+    {"rho",      26, false},
+    {"varrho",   37, false},
+    {"sigma",    27, false},
+    {"varsigma", 38, false},
+    {"tau",      28, false},
+    {"upsilon",  29, false},
+    {"phi",      30, false},
+    {"varphi",   39, false},
+    {"chi",      31, false},
+    {"psi",      32, false},
+    {"omega",    33, false},
+    {nullptr, 0, false}
+};
+
+// Lookup Greek letter command and return cmmi10 character code
+// Returns -1 if not found
+static int lookup_greek_letter(const char* cmd, size_t len) {
+    for (const GreekLetterDef* g = GREEK_LETTERS; g->command; g++) {
+        if (strlen(g->command) == len && strncmp(g->command, cmd, len) == 0) {
+            return g->cmmi_code;
+        }
+    }
+    return -1;
+}
+
+// ============================================================================
+// cmsy10 Symbol Mapping
+// ============================================================================
+
+struct SymbolDef {
+    const char* command;
+    int cmsy_code;
+};
+
+static const SymbolDef SYMBOLS[] = {
+    // Big operators (cmex10, but we handle them here for now)
+    {"sum",      80},    // Position in cmsy10
+    {"prod",     81},
+    {"int",      82},
+    {"bigcup",   83},
+    {"bigcap",   84},
+    // Relation symbols
+    {"leq",      20},
+    {"le",       20},
+    {"geq",      21},
+    {"ge",       21},
+    {"equiv",    17},
+    {"sim",      24},
+    {"approx",   25},
+    {"subset",   26},
+    {"supset",   27},
+    {"subseteq", 18},
+    {"supseteq", 19},
+    {"in",       50},
+    {"ni",       51},
+    {"notin",    54},
+    {"neq",      54},
+    {"ne",       54},
+    // Binary operators
+    {"pm",       6},
+    {"mp",       7},
+    {"times",    2},
+    {"div",      4},
+    {"cdot",     1},
+    {"cap",      92},
+    {"cup",      91},
+    {"vee",      95},
+    {"wedge",    94},
+    {"setminus", 110},
+    // Arrows
+    {"leftarrow",    32},
+    {"rightarrow",   33},
+    {"to",           33},  // alias for rightarrow
+    {"leftrightarrow", 36},
+    {"Leftarrow",    40},
+    {"Rightarrow",   41},
+    {"Leftrightarrow", 44},
+    // Misc
+    {"infty",    49},
+    {"partial",  64},
+    {"nabla",    114},
+    {"forall",   56},
+    {"exists",   57},
+    {"neg",      58},
+    {"emptyset", 59},
+    {"Re",       60},
+    {"Im",       61},
+    {"top",      62},
+    {"bot",      63},
+    {"angle",    65},
+    {"triangle", 52},
+    {"backslash", 110},
+    {"prime",    48},
+    {nullptr, 0}
+};
+
+static int lookup_symbol(const char* cmd, size_t len) {
+    for (const SymbolDef* s = SYMBOLS; s->command; s++) {
+        if (strlen(s->command) == len && strncmp(s->command, cmd, len) == 0) {
+            return s->cmsy_code;
+        }
+    }
+    return -1;
+}
+
+// ============================================================================
+// LaTeX Math Parser Helpers
+// ============================================================================
+
+// Skip whitespace and return new position
+static size_t skip_ws(const char* str, size_t pos, size_t len) {
+    while (pos < len && (str[pos] == ' ' || str[pos] == '\t' ||
+                         str[pos] == '\n' || str[pos] == '\r')) {
+        pos++;
+    }
+    return pos;
+}
+
+// Parse a command name (letters only) after backslash
+// Returns length of command, or 0 if not a letter command
+static size_t parse_command_name(const char* str, size_t pos, size_t len) {
+    size_t start = pos;
+    while (pos < len && ((str[pos] >= 'a' && str[pos] <= 'z') ||
+                         (str[pos] >= 'A' && str[pos] <= 'Z'))) {
+        pos++;
+    }
+    return pos - start;
+}
+
+// Parse a braced group {content} and return content length
+// pos should point to '{'
+// Returns end position after '}'
+static size_t parse_braced_group(const char* str, size_t pos, size_t len,
+                                  const char** content_start, size_t* content_len) {
+    if (pos >= len || str[pos] != '{') {
+        *content_start = nullptr;
+        *content_len = 0;
+        return pos;
+    }
+
+    size_t start = pos + 1;  // skip '{'
+    int depth = 1;
+    pos++;
+
+    while (pos < len && depth > 0) {
+        if (str[pos] == '{') depth++;
+        else if (str[pos] == '}') depth--;
+        pos++;
+    }
+
+    *content_start = str + start;
+    *content_len = (pos - 1) - start;  // exclude closing '}'
+    return pos;
+}
+
+// Forward declarations
+static TexNode* parse_latex_math_internal(const char* str, size_t len, MathContext& ctx);
+
+// ============================================================================
 // Simple Math String Parser
 // ============================================================================
 
@@ -255,8 +421,14 @@ TexNode* typeset_math_string(const char* math_str, size_t len, MathContext& ctx)
             font = ctx.italic_font;
             font.size_pt = size;
             tfm = italic_tfm;
+        } else if (cp < 128 && (atom_type == AtomType::Bin || atom_type == AtomType::Rel)) {
+            // ASCII operators like +, -, =, <, > use roman font
+            // (cmsy10 has different characters at these positions)
+            font = ctx.roman_font;
+            font.size_pt = size;
+            tfm = roman_tfm;
         } else if (atom_type == AtomType::Bin || atom_type == AtomType::Rel) {
-            // Operators and relations from symbol font
+            // Non-ASCII operators and relations from symbol font
             font = ctx.symbol_font;
             font.size_pt = size;
             tfm = symbol_tfm;
@@ -331,6 +503,807 @@ TexNode* typeset_math_string(const char* math_str, size_t len, MathContext& ctx)
 }
 
 // ============================================================================
+// LaTeX Math Parser
+// ============================================================================
+
+// Create a math char node with proper TFM metrics
+static TexNode* make_char_with_metrics(Arena* arena, int char_code,
+                                        AtomType atom_type, FontSpec& font,
+                                        TFMFont* tfm, float size) {
+    TexNode* node = make_math_char(arena, char_code, atom_type, font);
+
+    float width = 5.0f * size / 10.0f;
+    float height = size * 0.7f;
+    float depth = 0;
+    float italic_corr = 0;
+
+    if (tfm && char_code < 256 && char_code >= 0) {
+        width = tfm->char_width(char_code) * size;
+        height = tfm->char_height(char_code) * size;
+        depth = tfm->char_depth(char_code) * size;
+        italic_corr = tfm->char_italic(char_code) * size;
+    }
+
+    node->width = width;
+    node->height = height;
+    node->depth = depth;
+    node->italic = italic_corr;
+
+    return node;
+}
+
+// Parse LaTeX math and return TexNode tree
+static TexNode* parse_latex_math_internal(const char* str, size_t len, MathContext& ctx) {
+    if (!str || len == 0) {
+        return make_hbox(ctx.arena);
+    }
+
+    Arena* arena = ctx.arena;
+    float size = ctx.font_size();
+
+    TFMFont* roman_tfm = ctx.fonts->get_font("cmr10");
+    TFMFont* italic_tfm = ctx.fonts->get_font("cmmi10");
+    TFMFont* symbol_tfm = ctx.fonts->get_font("cmsy10");
+
+    TexNode* first = nullptr;
+    TexNode* last = nullptr;
+    AtomType prev_type = AtomType::Ord;
+    bool is_first = true;
+
+    auto add_node = [&](TexNode* node, AtomType atom_type) {
+        if (!is_first) {
+            float spacing_mu = get_atom_spacing_mu(prev_type, atom_type, ctx.style);
+            if (spacing_mu > 0) {
+                float spacing_pt = mu_to_pt(spacing_mu, ctx);
+                TexNode* kern = make_kern(arena, spacing_pt);
+                if (last) {
+                    last->next_sibling = kern;
+                    kern->prev_sibling = last;
+                }
+                last = kern;
+            }
+        }
+        is_first = false;
+
+        if (!first) first = node;
+        if (last) {
+            last->next_sibling = node;
+            node->prev_sibling = last;
+        }
+        last = node;
+        prev_type = atom_type;
+    };
+
+    size_t i = 0;
+    while (i < len) {
+        i = skip_ws(str, i, len);
+        if (i >= len) break;
+
+        char c = str[i];
+
+        // Handle backslash commands
+        if (c == '\\') {
+            i++;  // skip backslash
+            if (i >= len) break;
+
+            // Check for single-char commands like \{ or \}
+            if (str[i] == '{' || str[i] == '}' || str[i] == '\\' ||
+                str[i] == '&' || str[i] == '%' || str[i] == '$' ||
+                str[i] == '#' || str[i] == '_') {
+                // Literal character
+                int cp = str[i];
+                FontSpec font = ctx.roman_font;
+                font.size_pt = size;
+                TexNode* node = make_char_with_metrics(arena, cp, AtomType::Ord,
+                                                        font, roman_tfm, size);
+                add_node(node, AtomType::Ord);
+                i++;
+                continue;
+            }
+
+            // Parse command name
+            size_t cmd_len = parse_command_name(str, i, len);
+            if (cmd_len == 0) {
+                // Not a letter command, skip
+                i++;
+                continue;
+            }
+
+            const char* cmd = str + i;
+            i += cmd_len;
+
+            // Try Greek letters first (most common in math)
+            int greek_code = lookup_greek_letter(cmd, cmd_len);
+            if (greek_code >= 0) {
+                // Greek letters use cmmi10 (math italic)
+                FontSpec font = ctx.italic_font;
+                font.size_pt = size;
+                TexNode* node = make_char_with_metrics(arena, greek_code, AtomType::Ord,
+                                                        font, italic_tfm, size);
+                add_node(node, AtomType::Ord);
+                log_debug("math_bridge: Greek \\%.*s -> cmmi10 char %d",
+                          (int)cmd_len, cmd, greek_code);
+                continue;
+            }
+
+            // Try symbols (cmsy10)
+            int sym_code = lookup_symbol(cmd, cmd_len);
+            if (sym_code >= 0) {
+                FontSpec font = ctx.symbol_font;
+                font.size_pt = size;
+                AtomType atom = AtomType::Ord;
+                // Classify symbol type
+                if (strncmp(cmd, "sum", 3) == 0 || strncmp(cmd, "prod", 4) == 0 ||
+                    strncmp(cmd, "int", 3) == 0 || strncmp(cmd, "bigcup", 6) == 0 ||
+                    strncmp(cmd, "bigcap", 6) == 0) {
+                    atom = AtomType::Op;
+                } else if (strncmp(cmd, "leq", 3) == 0 || strncmp(cmd, "geq", 3) == 0 ||
+                           strncmp(cmd, "le", 2) == 0 || strncmp(cmd, "ge", 2) == 0 ||
+                           strncmp(cmd, "equiv", 5) == 0 || strncmp(cmd, "sim", 3) == 0 ||
+                           strncmp(cmd, "in", 2) == 0 || strncmp(cmd, "subset", 6) == 0) {
+                    atom = AtomType::Rel;
+                } else if (strncmp(cmd, "pm", 2) == 0 || strncmp(cmd, "mp", 2) == 0 ||
+                           strncmp(cmd, "times", 5) == 0 || strncmp(cmd, "cdot", 4) == 0) {
+                    atom = AtomType::Bin;
+                }
+                TexNode* node = make_char_with_metrics(arena, sym_code, atom,
+                                                        font, symbol_tfm, size);
+                add_node(node, atom);
+                log_debug("math_bridge: Symbol \\%.*s -> cmsy10 char %d",
+                          (int)cmd_len, cmd, sym_code);
+                continue;
+            }
+
+            // Function operators (rendered as roman text): \lim, \sin, \cos, etc.
+            static const char* FUNC_OPS[] = {
+                "lim", "sin", "cos", "tan", "cot", "sec", "csc",
+                "log", "ln", "exp", "det", "max", "min", "sup", "inf",
+                "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+                "ker", "hom", "dim", "deg", "arg", "gcd", "lcm", "mod",
+                nullptr
+            };
+            bool is_func_op = false;
+            for (const char** fp = FUNC_OPS; *fp; fp++) {
+                if (strlen(*fp) == cmd_len && strncmp(*fp, cmd, cmd_len) == 0) {
+                    is_func_op = true;
+                    break;
+                }
+            }
+            if (is_func_op) {
+                // Output each character in roman font
+                FontSpec font = ctx.roman_font;
+                font.size_pt = size;
+                TexNode* first_char = nullptr;
+                TexNode* last_char = nullptr;
+                for (size_t ci = 0; ci < cmd_len; ci++) {
+                    TexNode* ch = make_char_with_metrics(arena, cmd[ci], AtomType::Op,
+                                                          font, roman_tfm, size);
+                    if (!first_char) {
+                        first_char = ch;
+                    } else {
+                        last_char->next_sibling = ch;
+                        ch->prev_sibling = last_char;
+                    }
+                    last_char = ch;
+                }
+                // Create hbox for the function name
+                TexNode* func_box = make_hbox(arena);
+                func_box->first_child = first_char;
+                func_box->last_child = last_char;
+                float tw = 0;
+                float max_h = 0, max_d = 0;
+                for (TexNode* c = first_char; c; c = c->next_sibling) {
+                    c->parent = func_box;
+                    c->x = tw;
+                    tw += c->width;
+                    if (c->height > max_h) max_h = c->height;
+                    if (c->depth > max_d) max_d = c->depth;
+                }
+                func_box->width = tw;
+                func_box->height = max_h;
+                func_box->depth = max_d;
+                add_node(func_box, AtomType::Op);
+                log_debug("math_bridge: FuncOp \\%.*s", (int)cmd_len, cmd);
+                continue;
+            }
+
+            // Handle \frac{num}{denom}
+            if (cmd_len == 4 && strncmp(cmd, "frac", 4) == 0) {
+                i = skip_ws(str, i, len);
+                const char* num_str;
+                size_t num_len;
+                i = parse_braced_group(str, i, len, &num_str, &num_len);
+
+                i = skip_ws(str, i, len);
+                const char* den_str;
+                size_t den_len;
+                i = parse_braced_group(str, i, len, &den_str, &den_len);
+
+                TexNode* numerator = parse_latex_math_internal(num_str, num_len, ctx);
+                TexNode* denominator = parse_latex_math_internal(den_str, den_len, ctx);
+
+                float rule = ctx.base_size_pt * 0.04f;  // default rule thickness
+                TexNode* frac = typeset_fraction(numerator, denominator, rule, ctx);
+                add_node(frac, AtomType::Inner);
+                log_debug("math_bridge: \\frac");
+                continue;
+            }
+
+            // Handle \sqrt{content} or \sqrt[n]{content}
+            if (cmd_len == 4 && strncmp(cmd, "sqrt", 4) == 0) {
+                i = skip_ws(str, i, len);
+
+                // Check for optional [n] index
+                TexNode* index = nullptr;
+                if (i < len && str[i] == '[') {
+                    i++;  // skip '['
+                    size_t idx_start = i;
+                    while (i < len && str[i] != ']') i++;
+                    size_t idx_len = i - idx_start;
+                    if (i < len) i++;  // skip ']'
+                    MathContext script_ctx = ctx;
+                    script_ctx.style = sub_style(sub_style(ctx.style));
+                    index = parse_latex_math_internal(str + idx_start, idx_len, script_ctx);
+                }
+
+                const char* content_str;
+                size_t content_len;
+                i = parse_braced_group(str, i, len, &content_str, &content_len);
+
+                TexNode* radicand = parse_latex_math_internal(content_str, content_len, ctx);
+                TexNode* sqrt_node;
+                if (index) {
+                    sqrt_node = typeset_root(index, radicand, ctx);
+                } else {
+                    sqrt_node = typeset_sqrt(radicand, ctx);
+                }
+                add_node(sqrt_node, AtomType::Ord);
+                log_debug("math_bridge: \\sqrt");
+                continue;
+            }
+
+            // Handle \left and \right delimiters
+            // Determine if content requires scaled delimiters by checking for \frac, \sum, \int, etc.
+            if ((cmd_len == 4 && strncmp(cmd, "left", 4) == 0) ||
+                (cmd_len == 5 && strncmp(cmd, "right", 5) == 0)) {
+                bool is_left = (cmd[0] == 'l');
+                i = skip_ws(str, i, len);
+                if (i < len) {
+                    char delim = str[i];
+                    int32_t delim_code = -1;
+                    bool use_cmsy = false;
+                    bool use_cmex = false;
+
+                    // Helper lambda to check if a range contains tall content
+                    auto has_tall_content = [&](size_t start, size_t end) -> bool {
+                        for (size_t scan_i = start; scan_i < end; scan_i++) {
+                            if (str[scan_i] == '\\' && scan_i + 1 < end) {
+                                scan_i++;
+                                if (scan_i + 4 <= end && strncmp(&str[scan_i], "frac", 4) == 0) return true;
+                                if (scan_i + 3 <= end && strncmp(&str[scan_i], "sum", 3) == 0) return true;
+                                if (scan_i + 3 <= end && strncmp(&str[scan_i], "int", 3) == 0) return true;
+                                if (scan_i + 4 <= end && strncmp(&str[scan_i], "prod", 4) == 0) return true;
+                            }
+                        }
+                        return false;
+                    };
+
+                    // Determine if content needs scaled delimiters
+                    bool needs_scaling = false;
+                    if (is_left) {
+                        // Find matching \right and check content between
+                        size_t scan_i = i + 1;
+                        while (scan_i < len) {
+                            if (str[scan_i] == '\\' && scan_i + 6 <= len && strncmp(&str[scan_i + 1], "right", 5) == 0) {
+                                needs_scaling = has_tall_content(i + 1, scan_i);
+                                break;
+                            }
+                            scan_i++;
+                        }
+                    } else {
+                        // For \right, scan backwards to find matching \left
+                        // And check content between them
+                        size_t cmd_start = i - cmd_len - 1;  // Position of backslash
+                        // Find the \left that matches this \right
+                        size_t scan_back = cmd_start;
+                        while (scan_back > 0) {
+                            scan_back--;
+                            if (str[scan_back] == '\\' && scan_back + 5 <= cmd_start && strncmp(&str[scan_back + 1], "left", 4) == 0) {
+                                // Found \left, check content between \left delim and \right
+                                size_t left_delim_pos = scan_back + 5;  // Position after "left"
+                                while (left_delim_pos < cmd_start && (str[left_delim_pos] == ' ' || str[left_delim_pos] == '\t')) {
+                                    left_delim_pos++;
+                                }
+                                left_delim_pos++;  // Skip the delimiter char itself
+                                needs_scaling = has_tall_content(left_delim_pos, cmd_start);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (delim == '(' || delim == ')') {
+                        if (needs_scaling) {
+                            // cmex10 parens: 0=left, 1=right (non-printable)
+                            delim_code = is_left ? 0 : 1;
+                            use_cmex = true;
+                        } else {
+                            // Use regular cmr10 parens for simple content
+                            delim_code = delim;  // '(' = 40, ')' = 41
+                        }
+                        i++;
+                    } else if (delim == '[' || delim == ']') {
+                        if (needs_scaling) {
+                            // cmex10 brackets: 104='h'=left, 105='i'=right
+                            delim_code = is_left ? 104 : 105;
+                            use_cmex = true;
+                        } else {
+                            // Use regular cmr10 brackets for simple content
+                            delim_code = delim;  // '[' = 91, ']' = 93
+                        }
+                        i++;
+                    } else if (delim == '|') {
+                        delim_code = 12;  // cmex10 vertical bar
+                        use_cmex = true;
+                        i++;
+                    } else if (delim == '.') {
+                        // Invisible delimiter
+                        i++;
+                        continue;
+                    } else if (delim == '\\') {
+                        // \{ or \}
+                        i++;
+                        if (i < len) {
+                            if (str[i] == '{') {
+                                delim_code = 'f';  // cmsy10 left brace (102)
+                                use_cmsy = true;
+                            } else if (str[i] == '}') {
+                                delim_code = 'g';  // cmsy10 right brace (103)
+                                use_cmsy = true;
+                            }
+                            i++;
+                        }
+                    }
+
+                    // Output the delimiter character
+                    if (delim_code != -1) {
+                        FontSpec font;
+                        TFMFont* tfm;
+                        if (use_cmsy) {
+                            font = ctx.symbol_font;
+                            font.size_pt = size;
+                            tfm = symbol_tfm;
+                        } else if (use_cmex) {
+                            font.name = "cmex10";
+                            font.size_pt = size;
+                            tfm = roman_tfm;  // Fallback metrics
+                        } else {
+                            font = ctx.roman_font;
+                            font.size_pt = size;
+                            tfm = roman_tfm;
+                        }
+                        AtomType atom = is_left ? AtomType::Open : AtomType::Close;
+                        TexNode* node = make_char_with_metrics(arena, delim_code, atom, font, tfm, size);
+                        add_node(node, atom);
+                        log_debug("math_bridge: \\%.*s delimiter code=%d use_cmex=%d", (int)cmd_len, cmd, delim_code, use_cmex);
+                    }
+                }
+                continue;
+            }
+
+            // Handle spacing commands
+            if ((cmd_len == 1 && cmd[0] == ',') ||    // thin space
+                (cmd_len == 1 && cmd[0] == ':') ||    // medium space
+                (cmd_len == 1 && cmd[0] == ';') ||    // thick space
+                (cmd_len == 1 && cmd[0] == '!') ||    // negative thin
+                (cmd_len == 4 && strncmp(cmd, "quad", 4) == 0) ||
+                (cmd_len == 5 && strncmp(cmd, "qquad", 5) == 0)) {
+                float space = 0;
+                if (cmd_len == 1 && cmd[0] == ',') space = ctx.quad / 6.0f;
+                else if (cmd_len == 1 && cmd[0] == ':') space = ctx.quad * 4.0f / 18.0f;
+                else if (cmd_len == 1 && cmd[0] == ';') space = ctx.quad * 5.0f / 18.0f;
+                else if (cmd_len == 1 && cmd[0] == '!') space = -ctx.quad / 6.0f;
+                else if (cmd_len == 4) space = ctx.quad;
+                else if (cmd_len == 5) space = ctx.quad * 2.0f;
+
+                if (space != 0) {
+                    TexNode* kern = make_kern(arena, space);
+                    if (last) {
+                        last->next_sibling = kern;
+                        kern->prev_sibling = last;
+                    }
+                    if (!first) first = kern;
+                    last = kern;
+                }
+                continue;
+            }
+
+            // Handle \begin{env}...\end{env} environments
+            if (cmd_len == 5 && strncmp(cmd, "begin", 5) == 0) {
+                i = skip_ws(str, i, len);
+                if (i < len && str[i] == '{') {
+                    i++;  // Skip '{'
+                    // Parse environment name
+                    size_t env_start = i;
+                    while (i < len && str[i] != '}') i++;
+                    size_t env_len = i - env_start;
+                    if (i < len) i++;  // Skip '}'
+
+                    // Determine environment type
+                    bool is_pmatrix = (env_len == 7 && strncmp(&str[env_start], "pmatrix", 7) == 0);
+                    bool is_bmatrix = (env_len == 7 && strncmp(&str[env_start], "bmatrix", 7) == 0);
+                    bool is_vmatrix = (env_len == 7 && strncmp(&str[env_start], "vmatrix", 7) == 0);
+                    bool is_matrix = is_pmatrix || is_bmatrix || is_vmatrix;
+
+                    if (is_matrix) {
+                        // Find matching \end{env}
+                        size_t content_start = i;
+                        size_t end_pos = i;
+                        while (end_pos < len) {
+                            if (str[end_pos] == '\\' && end_pos + 4 <= len && strncmp(&str[end_pos + 1], "end", 3) == 0) {
+                                break;
+                            }
+                            end_pos++;
+                        }
+                        size_t content_end = end_pos;
+
+                        // Output left delimiter using cmex10 extended delimiters
+                        if (is_pmatrix || is_bmatrix || is_vmatrix) {
+                            FontSpec font;
+                            font.name = "cmex10";
+                            font.size_pt = size;
+                            TFMFont* tfm = roman_tfm;  // Fallback metrics
+                            int32_t left_code = 0;
+                            if (is_pmatrix) left_code = 18;       // cmex10 left paren (scaled)
+                            else if (is_bmatrix) left_code = 2; // cmex10 small left bracket
+                            else if (is_vmatrix) left_code = 12;  // cmex10 vertical bar
+
+                            TexNode* left_node = make_char_with_metrics(arena, left_code, AtomType::Open, font, tfm, size);
+                            add_node(left_node, AtomType::Open);
+                        }
+
+                        // Parse matrix content - rows separated by \\, cells by &
+                        // Just output the cell contents for now
+                        size_t ci = content_start;
+                        while (ci < content_end) {
+                            ci = skip_ws(str, ci, len);
+                            if (ci >= content_end) break;
+
+                            // Skip row separators
+                            if (str[ci] == '\\' && ci + 1 < content_end && str[ci + 1] == '\\') {
+                                ci += 2;
+                                continue;
+                            }
+
+                            // Skip cell separators
+                            if (str[ci] == '&') {
+                                ci++;
+                                continue;
+                            }
+
+                            // Parse cell content (single character for now)
+                            if (isalpha(str[ci])) {
+                                char c = str[ci];
+                                FontSpec font = ctx.italic_font;
+                                font.size_pt = size;
+                                TexNode* node = make_char_with_metrics(arena, c, AtomType::Ord, font, italic_tfm, size);
+                                add_node(node, AtomType::Ord);
+                                ci++;
+                            } else if (isdigit(str[ci])) {
+                                char c = str[ci];
+                                FontSpec font = ctx.roman_font;
+                                font.size_pt = size;
+                                TexNode* node = make_char_with_metrics(arena, c, AtomType::Ord, font, roman_tfm, size);
+                                add_node(node, AtomType::Ord);
+                                ci++;
+                            } else {
+                                ci++;  // Skip unknown chars
+                            }
+                        }
+
+                        // Output right delimiter using cmex10
+                        if (is_pmatrix || is_bmatrix || is_vmatrix) {
+                            FontSpec font;
+                            font.name = "cmex10";
+                            font.size_pt = size;
+                            TFMFont* tfm = roman_tfm;
+                            int32_t right_code = 0;
+                            if (is_pmatrix) right_code = 19;      // cmex10 right paren (scaled)
+                            else if (is_bmatrix) right_code = 3; // cmex10 small right bracket
+                            else if (is_vmatrix) right_code = 12; // cmex10 vertical bar
+
+                            TexNode* right_node = make_char_with_metrics(arena, right_code, AtomType::Close, font, tfm, size);
+                            add_node(right_node, AtomType::Close);
+                        }
+
+                        // Skip past \end{env}
+                        i = end_pos;
+                        if (i < len && str[i] == '\\') {
+                            i++;
+                            if (i + 3 <= len && strncmp(&str[i], "end", 3) == 0) {
+                                i += 3;
+                                i = skip_ws(str, i, len);
+                                if (i < len && str[i] == '{') {
+                                    while (i < len && str[i] != '}') i++;
+                                    if (i < len) i++;  // Skip '}'
+                                }
+                            }
+                        }
+                        log_debug("math_bridge: processed %.*s environment", (int)env_len, &str[env_start]);
+                        continue;
+                    }
+                }
+            }
+
+            // Unknown command - log and skip
+            log_debug("math_bridge: unknown command \\%.*s", (int)cmd_len, cmd);
+            continue;
+        }
+
+        // Handle braced group {content}
+        if (c == '{') {
+            const char* content_str;
+            size_t content_len;
+            i = parse_braced_group(str, i, len, &content_str, &content_len);
+            TexNode* group = parse_latex_math_internal(content_str, content_len, ctx);
+            add_node(group, AtomType::Ord);
+            continue;
+        }
+
+        // Skip closing brace (shouldn't happen if balanced)
+        if (c == '}') {
+            i++;
+            continue;
+        }
+
+        // Handle superscript ^
+        if (c == '^') {
+            i++;
+            i = skip_ws(str, i, len);
+            if (i >= len) break;
+
+            // Get nucleus (previous node)
+            TexNode* nucleus = last;
+            if (!nucleus) {
+                // Create empty nucleus
+                nucleus = make_hbox(arena);
+                nucleus->width = 0;
+                nucleus->height = ctx.x_height;
+                nucleus->depth = 0;
+            } else {
+                // Remove last from list (it becomes the nucleus)
+                if (nucleus->prev_sibling) {
+                    nucleus->prev_sibling->next_sibling = nullptr;
+                    last = nucleus->prev_sibling;
+                } else {
+                    first = nullptr;
+                    last = nullptr;
+                }
+                nucleus->prev_sibling = nullptr;
+                nucleus->next_sibling = nullptr;
+            }
+
+            // Parse superscript
+            TexNode* superscript;
+            if (str[i] == '{') {
+                const char* sup_str;
+                size_t sup_len;
+                i = parse_braced_group(str, i, len, &sup_str, &sup_len);
+                MathContext script_ctx = ctx;
+                script_ctx.style = sup_style(ctx.style);
+                superscript = parse_latex_math_internal(sup_str, sup_len, script_ctx);
+            } else {
+                // Single character
+                char sc = str[i];
+                i++;
+                MathContext script_ctx = ctx;
+                script_ctx.style = sup_style(ctx.style);
+                char tmp[2] = {sc, 0};
+                superscript = parse_latex_math_internal(tmp, 1, script_ctx);
+            }
+
+            // Check for subscript too
+            TexNode* subscript = nullptr;
+            i = skip_ws(str, i, len);
+            if (i < len && str[i] == '_') {
+                i++;
+                i = skip_ws(str, i, len);
+                if (i < len) {
+                    if (str[i] == '{') {
+                        const char* sub_str;
+                        size_t sub_len;
+                        i = parse_braced_group(str, i, len, &sub_str, &sub_len);
+                        MathContext script_ctx = ctx;
+                        script_ctx.style = sup_style(ctx.style);
+                        subscript = parse_latex_math_internal(sub_str, sub_len, script_ctx);
+                    } else {
+                        char sc = str[i];
+                        i++;
+                        MathContext script_ctx = ctx;
+                        script_ctx.style = sup_style(ctx.style);
+                        char tmp[2] = {sc, 0};
+                        subscript = parse_latex_math_internal(tmp, 1, script_ctx);
+                    }
+                }
+            }
+
+            TexNode* scripts = typeset_scripts(nucleus, subscript, superscript, ctx);
+            add_node(scripts, AtomType::Ord);
+            is_first = false;
+            continue;
+        }
+
+        // Handle subscript _
+        if (c == '_') {
+            i++;
+            i = skip_ws(str, i, len);
+            if (i >= len) break;
+
+            // Get nucleus (previous node)
+            TexNode* nucleus = last;
+            if (!nucleus) {
+                nucleus = make_hbox(arena);
+                nucleus->width = 0;
+                nucleus->height = ctx.x_height;
+                nucleus->depth = 0;
+            } else {
+                if (nucleus->prev_sibling) {
+                    nucleus->prev_sibling->next_sibling = nullptr;
+                    last = nucleus->prev_sibling;
+                } else {
+                    first = nullptr;
+                    last = nullptr;
+                }
+                nucleus->prev_sibling = nullptr;
+                nucleus->next_sibling = nullptr;
+            }
+
+            // Parse subscript
+            TexNode* subscript;
+            if (str[i] == '{') {
+                const char* sub_str;
+                size_t sub_len;
+                i = parse_braced_group(str, i, len, &sub_str, &sub_len);
+                MathContext script_ctx = ctx;
+                script_ctx.style = sup_style(ctx.style);
+                subscript = parse_latex_math_internal(sub_str, sub_len, script_ctx);
+            } else {
+                char sc = str[i];
+                i++;
+                MathContext script_ctx = ctx;
+                script_ctx.style = sup_style(ctx.style);
+                char tmp[2] = {sc, 0};
+                subscript = parse_latex_math_internal(tmp, 1, script_ctx);
+            }
+
+            // Check for superscript too
+            TexNode* superscript = nullptr;
+            i = skip_ws(str, i, len);
+            if (i < len && str[i] == '^') {
+                i++;
+                i = skip_ws(str, i, len);
+                if (i < len) {
+                    if (str[i] == '{') {
+                        const char* sup_str;
+                        size_t sup_len;
+                        i = parse_braced_group(str, i, len, &sup_str, &sup_len);
+                        MathContext script_ctx = ctx;
+                        script_ctx.style = sup_style(ctx.style);
+                        superscript = parse_latex_math_internal(sup_str, sup_len, script_ctx);
+                    } else {
+                        char sc = str[i];
+                        i++;
+                        MathContext script_ctx = ctx;
+                        script_ctx.style = sup_style(ctx.style);
+                        char tmp[2] = {sc, 0};
+                        superscript = parse_latex_math_internal(tmp, 1, script_ctx);
+                    }
+                }
+            }
+
+            TexNode* scripts = typeset_scripts(nucleus, subscript, superscript, ctx);
+            add_node(scripts, AtomType::Ord);
+            is_first = false;
+            continue;
+        }
+
+        // Regular character
+        {
+            // Decode UTF-8
+            int32_t cp;
+            int char_len;
+            unsigned char uc = (unsigned char)c;
+            if (uc < 0x80) {
+                cp = uc;
+                char_len = 1;
+            } else if (uc < 0xE0) {
+                cp = ((uc & 0x1F) << 6) | (str[i+1] & 0x3F);
+                char_len = 2;
+            } else if (uc < 0xF0) {
+                cp = ((uc & 0x0F) << 12) | ((str[i+1] & 0x3F) << 6) |
+                     (str[i+2] & 0x3F);
+                char_len = 3;
+            } else {
+                cp = ((uc & 0x07) << 18) | ((str[i+1] & 0x3F) << 12) |
+                     ((str[i+2] & 0x3F) << 6) | (str[i+3] & 0x3F);
+                char_len = 4;
+            }
+            i += char_len;
+
+            AtomType atom_type = classify_codepoint(cp);
+
+            // Determine font and character code
+            FontSpec font;
+            TFMFont* tfm;
+            int32_t char_code = cp;
+
+            if (cp >= '0' && cp <= '9') {
+                font = ctx.roman_font;
+                font.size_pt = size;
+                tfm = roman_tfm;
+            } else if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')) {
+                font = ctx.italic_font;
+                font.size_pt = size;
+                tfm = italic_tfm;
+            } else if (cp == '-') {
+                // Minus sign uses cmsy position 0
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                tfm = symbol_tfm;
+                char_code = 0;  // minus in cmsy
+            } else if (cp == '+' || cp == '=') {
+                // Plus and equals use cmr
+                font = ctx.roman_font;
+                font.size_pt = size;
+                tfm = roman_tfm;
+            } else if (cp < 128 && (atom_type == AtomType::Bin || atom_type == AtomType::Rel)) {
+                font = ctx.roman_font;
+                font.size_pt = size;
+                tfm = roman_tfm;
+            } else {
+                font = ctx.roman_font;
+                font.size_pt = size;
+                tfm = roman_tfm;
+            }
+
+            TexNode* node = make_char_with_metrics(arena, char_code, atom_type, font, tfm, size);
+            add_node(node, atom_type);
+        }
+    }
+
+    // Wrap in HBox
+    TexNode* hbox = make_hbox(arena);
+    if (first) {
+        hbox->first_child = first;
+        hbox->last_child = last;
+        for (TexNode* n = first; n; n = n->next_sibling) {
+            n->parent = hbox;
+        }
+    }
+
+    // Measure
+    float total_width = 0;
+    float max_height = 0;
+    float max_depth = 0;
+    for (TexNode* n = first; n; n = n->next_sibling) {
+        total_width += n->width;
+        if (n->height > max_height) max_height = n->height;
+        if (n->depth > max_depth) max_depth = n->depth;
+    }
+
+    hbox->width = total_width;
+    hbox->height = max_height;
+    hbox->depth = max_depth;
+
+    return hbox;
+}
+
+// Public entry point for LaTeX math parsing
+TexNode* typeset_latex_math(const char* latex_str, size_t len, MathContext& ctx) {
+    log_debug("math_bridge: typeset_latex_math '%.*s'", (int)len, latex_str);
+    return parse_latex_math_internal(latex_str, len, ctx);
+}
+
+// ============================================================================
 // Fraction Typesetting
 // ============================================================================
 
@@ -347,7 +1320,7 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
     float num_shift, denom_shift;
     float num_gap, denom_gap;
 
-    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayCramped) {
+    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
         num_shift = 7.0f * ctx.base_size_pt / 10.0f;    // num1
         denom_shift = 7.0f * ctx.base_size_pt / 10.0f;  // denom1
         num_gap = 3.0f * rule_thickness;
@@ -408,12 +1381,12 @@ TexNode* typeset_fraction_strings(const char* num_str, const char* denom_str,
                                    MathContext& ctx) {
     // Typeset numerator in script style
     MathContext num_ctx = ctx;
-    num_ctx.style = script_style(ctx.style);
+    num_ctx.style = sup_style(ctx.style);
     TexNode* num = typeset_math_string(num_str, strlen(num_str), num_ctx);
 
     // Typeset denominator in script style
     MathContext denom_ctx = ctx;
-    denom_ctx.style = script_style(ctx.style);
+    denom_ctx.style = sup_style(ctx.style);
     TexNode* denom = typeset_math_string(denom_str, strlen(denom_str), denom_ctx);
 
     return typeset_fraction(num, denom, ctx.rule_thickness, ctx);
@@ -430,7 +1403,7 @@ TexNode* typeset_sqrt(TexNode* radicand, MathContext& ctx) {
     float rule = ctx.rule_thickness;
     float phi;  // Clearance above rule
 
-    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayCramped) {
+    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
         phi = rule + (ctx.x_height / 4.0f);
     } else {
         phi = rule + (rule / 4.0f);
@@ -508,7 +1481,7 @@ TexNode* typeset_scripts(TexNode* nucleus, TexNode* subscript, TexNode* superscr
     // Script parameters (TeXBook p. 445)
     float sup_shift, sub_shift;
 
-    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayCramped) {
+    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
         sup_shift = 4.0f * ctx.base_size_pt / 10.0f;  // sup1
         sub_shift = 2.5f * ctx.base_size_pt / 10.0f;  // sub1
     } else if (is_cramped(ctx.style)) {
@@ -1224,7 +2197,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
             Item denom = get_map_item(math_node, "denominator");
 
             MathContext script_ctx = ctx;
-            script_ctx.style = script_style(ctx.style);
+            script_ctx.style = sup_style(ctx.style);
 
             TexNode* num_node = convert_lambda_math(num, script_ctx);
             TexNode* denom_node = convert_lambda_math(denom, script_ctx);
@@ -1240,7 +2213,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
 
             if (degree.item != ItemNull.item) {
                 MathContext ss_ctx = ctx;
-                ss_ctx.style = scriptscript_style(ctx.style);
+                ss_ctx.style = sub_style(sub_style(ctx.style));
                 TexNode* degree_node = convert_lambda_math(degree, ss_ctx);
                 return typeset_root(degree_node, radicand, ctx);
             }
@@ -1256,7 +2229,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
             TexNode* nucleus = convert_lambda_math(base, ctx);
 
             MathContext script_ctx = ctx;
-            script_ctx.style = script_style(ctx.style);
+            script_ctx.style = sup_style(ctx.style);
 
             TexNode* sub_node = (sub.item != ItemNull.item)
                 ? convert_lambda_math(sub, script_ctx) : nullptr;

@@ -17,6 +17,7 @@
 #include "tex_node.hpp"
 #include "tex_tfm.hpp"
 #include "tex_glue.hpp"
+#include "tex_font_metrics.hpp"
 #include "../../lib/arena.h"
 
 #ifdef TEX_WITH_LAMBDA
@@ -25,26 +26,8 @@
 
 namespace tex {
 
-// ============================================================================
-// Math Style (TeXBook Chapter 17)
-// ============================================================================
-
-enum class MathStyle : uint8_t {
-    Display = 0,            // \displaystyle - full size, limits above/below
-    DisplayCramped = 1,     // Display with reduced superscripts
-    Text = 2,               // \textstyle - inline, limits to the side
-    TextCramped = 3,
-    Script = 4,             // \scriptstyle - subscript/superscript
-    ScriptCramped = 5,
-    Scriptscript = 6,       // \scriptscriptstyle - sub-subscripts
-    ScriptscriptCramped = 7
-};
-
-// Style transitions
-MathStyle script_style(MathStyle style);
-MathStyle scriptscript_style(MathStyle style);
-MathStyle cramped_style(MathStyle style);
-bool is_cramped(MathStyle style);
+// MathStyle and related functions are defined in tex_font_metrics.hpp
+// Use is_cramped(), sup_style(), sub_style() from there
 
 // Size factors for each style (relative to base size)
 float style_size_factor(MathStyle style);
@@ -56,6 +39,9 @@ float style_size_factor(MathStyle style);
 struct MathContext {
     Arena* arena;
     TFMFontManager* fonts;
+
+    // Optional unified font provider (for dual TFM/FreeType support)
+    FontProvider* font_provider;
 
     // Current style
     MathStyle style;
@@ -81,6 +67,7 @@ struct MathContext {
         MathContext ctx = {};
         ctx.arena = arena;
         ctx.fonts = fonts;
+        ctx.font_provider = nullptr;  // Set separately if dual font support needed
         ctx.style = MathStyle::Text;
         ctx.base_size_pt = size_pt;
 
@@ -111,6 +98,38 @@ struct MathContext {
     float font_size() const {
         return base_size_pt * style_size_factor(style);
     }
+
+    // Create with FontProvider for dual font support
+    static MathContext create_with_provider(Arena* arena, FontProvider* provider, float size_pt) {
+        MathContext ctx = {};
+        ctx.arena = arena;
+        ctx.fonts = nullptr;  // Not used when provider is set
+        ctx.font_provider = provider;
+        ctx.style = MathStyle::Text;
+        ctx.base_size_pt = size_pt;
+
+        // Set up font specs
+        ctx.roman_font = FontSpec("cmr10", size_pt, nullptr, 0);
+        ctx.italic_font = FontSpec("cmmi10", size_pt, nullptr, 0);
+        ctx.symbol_font = FontSpec("cmsy10", size_pt, nullptr, 0);
+        ctx.extension_font = FontSpec("cmex10", size_pt, nullptr, 0);
+
+        // Initialize from FontProvider
+        const FontMetrics* text_font = provider->get_math_text_font(size_pt, false);
+        if (text_font) {
+            ctx.x_height = text_font->params.text.x_height;
+            ctx.quad = text_font->params.text.quad;
+        } else {
+            ctx.x_height = 4.31f * size_pt / 10.0f;
+            ctx.quad = size_pt;
+        }
+
+        ctx.axis_height = ctx.x_height * 0.5f;
+        ctx.rule_thickness = 0.4f * size_pt / 10.0f;
+        ctx.current_tfm = nullptr;  // Not used with provider
+
+        return ctx;
+    }
 };
 
 // ============================================================================
@@ -131,6 +150,23 @@ AtomType classify_codepoint(int32_t cp);
 // Returns an HBox containing the typeset math
 TexNode* typeset_math_string(
     const char* math_str,
+    size_t len,
+    MathContext& ctx
+);
+
+// ============================================================================
+// LaTeX Math Parser
+// ============================================================================
+
+// Parse and typeset LaTeX math notation including:
+// - Greek letters (\alpha, \beta, etc.)
+// - Fractions (\frac{num}{denom})
+// - Square roots (\sqrt{x}, \sqrt[n]{x})
+// - Subscripts/superscripts (x^2, x_i, x_i^n)
+// - Symbols (\sum, \int, \times, etc.)
+// Returns an HBox containing the typeset math
+TexNode* typeset_latex_math(
+    const char* latex_str,
     size_t len,
     MathContext& ctx
 );
