@@ -2548,14 +2548,25 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "rpmalloc"
+                            "rpmalloc",
+                            "freetype"
                         ],
                         "binary": "test_math_layout.exe",
                         "additional_sources": [
-                            "test/math/math_fixture_loader.cpp"
+                            "test/math/math_fixture_loader.cpp",
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_dvi_out.cpp",
+                            "lambda/tex/dvi_parser.cpp"
                         ],
                         "includes": [
-                            "test/math"
+                            "test/math",
+                            "."
                         ],
                         "icon": "📐"
                     }
