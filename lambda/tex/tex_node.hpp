@@ -6,9 +6,14 @@
 //
 // Design principles:
 // - Single node type with discriminated union for content
-// - Dimensions populated during layout phase
-// - Positions populated during output phase
+// - Dimensions in CSS pixels (for Radiant integration)
+// - Positions populated during layout phase
 // - Arena-allocated, no ownership semantics
+// - TexNode IS the view tree (no separate conversion)
+//
+// Coordinate System:
+// - All dimensions use CSS pixels (96 dpi reference)
+// - DVI output converts to scaled points internally
 //
 // Reference: TeXBook Chapters 12-15, Appendix G
 
@@ -24,6 +29,32 @@
 #include <new>
 
 namespace tex {
+
+// ============================================================================
+// CSS Pixel Coordinate System
+// ============================================================================
+//
+// All TexNode dimensions use CSS pixels (96 dpi reference).
+// This simplifies integration with Radiant's CSS layout engine.
+//
+// Conversion factors (defined in tex_glue.hpp):
+// - 1 inch = 96 CSS pixels = 72.27 TeX points = 72 PostScript points
+// - 1 TeX point = 96/72.27 ≈ 1.3283 CSS pixels
+// - 1 CSS pixel = 72.27/96 ≈ 0.7528 TeX points
+// - 1 scaled point (sp) = 1/65536 TeX points
+//
+// For DVI output, convert CSS px → scaled points:
+//   sp = px * (72.27/96) * 65536
+//
+// Note: pt_to_px(), px_to_pt() are defined in tex_glue.hpp
+
+// Additional constants for scaled points (DVI output)
+constexpr float SCALED_POINTS_PER_POINT = 65536.0f;
+constexpr float PX_TO_SP = PX_TO_PT * SCALED_POINTS_PER_POINT;  // ~49315.3
+
+// Scaled point conversion functions (for DVI output)
+inline int32_t px_to_sp(float px) { return static_cast<int32_t>(px * PX_TO_SP); }
+inline float sp_to_px(int32_t sp) { return static_cast<float>(sp) / PX_TO_SP; }
 
 // ============================================================================
 // Node Classification
@@ -168,19 +199,20 @@ struct TexNode {
     static constexpr uint8_t FLAG_DIRTY = 0x08;     // Needs re-layout
 
     // ========================================
-    // Dimensions (populated during layout)
+    // Dimensions (in CSS pixels, populated during layout)
     // ========================================
-    float width;            // Horizontal extent
-    float height;           // Distance above baseline (positive)
-    float depth;            // Distance below baseline (positive)
-    float italic;           // Italic correction
-    float shift;            // Vertical shift (for raised/lowered boxes)
+    float width;            // Horizontal extent (CSS px)
+    float height;           // Distance above baseline, positive (CSS px)
+    float depth;            // Distance below baseline, positive (CSS px)
+    float italic;           // Italic correction (CSS px)
+    float shift;            // Vertical shift for raised/lowered boxes (CSS px)
 
     // ========================================
-    // Position (populated during output)
+    // Position relative to parent (CSS pixels)
+    // For rendering: absolute position = parent position + (x, y)
     // ========================================
-    float x;                // Horizontal position
-    float y;                // Vertical position (baseline-relative)
+    float x;                // Horizontal offset from parent (CSS px)
+    float y;                // Vertical offset, baseline-relative (CSS px)
 
     // ========================================
     // Tree structure

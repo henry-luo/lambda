@@ -444,7 +444,7 @@ static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXC
         MathContext math_ctx = ctx.doc_ctx.math_context();
         math_ctx.style = MathStyle::Text;  // Inline math
 
-        TexNode* math_hbox = typeset_math_string(math_source, strlen(math_source), math_ctx);
+        TexNode* math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
         if (math_hbox) {
             hlist->append_child(math_hbox);
         }
@@ -525,6 +525,20 @@ static TexNode* convert_inline_item(const ItemReader& item, LaTeXContext& ctx, P
     } else if (item.isElement()) {
         ElementReader elem = item.asElement();
         const char* tag = elem.tagName();
+
+        // Skip preamble-only commands
+        if (tag && (tag_eq(tag, "documentclass") || tag_eq(tag, "pagestyle") ||
+                    tag_eq(tag, "usepackage") || tag_eq(tag, "title") ||
+                    tag_eq(tag, "author") || tag_eq(tag, "date") ||
+                    tag_eq(tag, "newcommand") || tag_eq(tag, "renewcommand") ||
+                    tag_eq(tag, "setlength") || tag_eq(tag, "setcounter") ||
+                    tag_eq(tag, "newenvironment") || tag_eq(tag, "renewenvironment") ||
+                    tag_eq(tag, "newtheorem") || tag_eq(tag, "DeclareMathOperator") ||
+                    tag_eq(tag, "bibliographystyle") || tag_eq(tag, "makeatletter") ||
+                    tag_eq(tag, "makeatother") || tag_eq(tag, "input") ||
+                    tag_eq(tag, "include") || tag_eq(tag, "includeonly"))) {
+            return nullptr;
+        }
 
         if (!tag) {
             // Process children directly
@@ -1084,7 +1098,7 @@ TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx
     MathContext math_ctx = ctx.doc_ctx.math_context();
     math_ctx.style = MathStyle::Display;
 
-    TexNode* math_hbox = typeset_math_string(math_source, strlen(math_source), math_ctx);
+    TexNode* math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
     if (!math_hbox) {
         if (sb) stringbuf_free(sb);
         pool_destroy(pool);
@@ -1121,6 +1135,20 @@ TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx
 TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
     const char* tag = elem.tagName();
     if (!tag) return nullptr;
+
+    // Skip preamble-only commands - these should not produce output
+    if (tag_eq(tag, "documentclass") || tag_eq(tag, "pagestyle") ||
+        tag_eq(tag, "usepackage") || tag_eq(tag, "title") ||
+        tag_eq(tag, "author") || tag_eq(tag, "date") ||
+        tag_eq(tag, "newcommand") || tag_eq(tag, "renewcommand") ||
+        tag_eq(tag, "setlength") || tag_eq(tag, "setcounter") ||
+        tag_eq(tag, "newenvironment") || tag_eq(tag, "renewenvironment") ||
+        tag_eq(tag, "newtheorem") || tag_eq(tag, "DeclareMathOperator") ||
+        tag_eq(tag, "bibliographystyle") || tag_eq(tag, "makeatletter") ||
+        tag_eq(tag, "makeatother") || tag_eq(tag, "input") ||
+        tag_eq(tag, "include") || tag_eq(tag, "includeonly")) {
+        return nullptr;
+    }
 
     // Section commands
     if (is_section_command(tag)) {
@@ -1215,9 +1243,14 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
         return end_vlist(vctx);
     }
 
+    // Skip preamble content - only document body should be typeset
+    if (tag_eq(tag, "preamble")) {
+        return nullptr;
+    }
+
     // Generic container (div, span, etc.)
     if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") ||
-        tag_eq(tag, "preamble") || tag_eq(tag, "body")) {
+        tag_eq(tag, "body")) {
         VListContext vctx(ctx.doc_ctx.arena, ctx.doc_ctx.fonts);
         init_vlist_context(vctx, ctx.doc_ctx.text_width);
         begin_vlist(vctx);
