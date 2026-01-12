@@ -171,15 +171,28 @@ TEST_F(TexMacroTest, ExpandWithTwoParams) {
 // ============================================================================
 
 TEST_F(TexMacroTest, NestedMacroExpansion) {
-    // Note: nested macro expansion can cause infinite recursion if not carefully implemented
-    // Skip this test for now as it requires recursion depth limits
-    GTEST_SKIP() << "Nested macro expansion requires recursion depth limits";
+    // \outer expands to \inner, \inner expands to "content"
+    processor->define("inner", 5, "", 0, "content", 7);
+    processor->define("outer", 5, "", 0, "\\inner", 6);
+
+    const char* input = "\\outer";
+    size_t out_len;
+    char* result = processor->expand(input, strlen(input), &out_len);
+
+    EXPECT_STREQ(result, "content");
+    EXPECT_EQ(out_len, 7u);
 }
 
 TEST_F(TexMacroTest, MultipleExpansions) {
-    // Note: Multiple expansions can trigger recursion issues
-    // Skip this test for now
-    GTEST_SKIP() << "Multiple expansions require recursion depth limits";
+    // Define a macro and expand it multiple times in sequence
+    processor->define("x", 1, "", 0, "X", 1);
+
+    const char* input = "\\x\\x\\x";
+    size_t out_len;
+    char* result = processor->expand(input, strlen(input), &out_len);
+
+    EXPECT_STREQ(result, "XXX");
+    EXPECT_EQ(out_len, 3u);
 }
 
 // ============================================================================
@@ -367,8 +380,23 @@ TEST_F(TexMacroTest, DelimitedParameter) {
 // ============================================================================
 
 TEST_F(TexMacroTest, ExpansionLimit) {
-    // Skip - expansion limit test requires implementation support
-    GTEST_SKIP() << "Expansion limit requires implementation support";
+    // Set a low expansion limit
+    processor->set_expansion_limit(5);
+
+    // Define macros that would expand infinitely without limit
+    // \a -> \b, \b -> \a (mutual recursion)
+    processor->define("a", 1, "", 0, "A\\b", 3);
+    processor->define("b", 1, "", 0, "B\\a", 3);
+
+    const char* input = "\\a";
+    size_t out_len;
+    char* result = processor->expand(input, strlen(input), &out_len);
+
+    // Should stop expanding at depth limit, not crash
+    EXPECT_NE(result, nullptr);
+    EXPECT_GT(out_len, 0u);
+    // Result should contain some A's and B's but stop at limit
+    EXPECT_TRUE(strstr(result, "A") != nullptr);
 }
 
 // ============================================================================
@@ -472,8 +500,18 @@ TEST_F(TexMacroTest, SpecialCharInReplacement) {
 }
 
 TEST_F(TexMacroTest, MacroInMacroArg) {
-    // Skip - nested expansion can cause stack overflow
-    GTEST_SKIP() << "Nested macro expansion requires recursion protection";
+    // Define \inner -> "I"
+    processor->define("inner", 5, "", 0, "I", 1);
+    // Define \wrap{#1} -> "[#1]"
+    processor->define("wrap", 4, "#1", 2, "[#1]", 4);
+
+    // \wrap{\inner} should expand to "[I]"
+    const char* input = "\\wrap{\\inner}";
+    size_t out_len;
+    char* result = processor->expand(input, strlen(input), &out_len);
+
+    EXPECT_STREQ(result, "[I]");
+    EXPECT_EQ(out_len, 3u);
 }
 
 TEST_F(TexMacroTest, UndefinedMacroPassthrough) {

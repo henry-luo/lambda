@@ -115,6 +115,9 @@ public:
     size_t expand_one(const char* input, size_t pos, size_t len,
                       char** out_result, size_t* out_result_len);
 
+    // Get current expansion depth
+    int get_expansion_depth() const { return expansion_depth; }
+
     // ========================================================================
     // Control
     // ========================================================================
@@ -148,6 +151,7 @@ private:
     size_t match_argument(const char* input, size_t pos, size_t len,
                           const MacroParam* param,
                           const char** arg, size_t* arg_len);
+    char* expand_recursive(const char* input, size_t len, size_t* out_len);
 };
 
 // ============================================================================
