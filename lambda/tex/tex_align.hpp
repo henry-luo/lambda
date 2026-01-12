@@ -33,7 +33,7 @@ struct AlignColumn {
     AlignColumn()
         : u_template(nullptr), u_len(0)
         , v_template(nullptr), v_len(0)
-        , tabskip(Glue::zero())
+        , tabskip(Glue())
         , is_span(false) {}
 };
 
@@ -49,7 +49,7 @@ struct AlignTemplate {
 
     AlignTemplate()
         : columns(nullptr), column_count(0)
-        , initial_tabskip(Glue::zero())
+        , initial_tabskip(Glue())
         , is_valign(false) {}
 };
 

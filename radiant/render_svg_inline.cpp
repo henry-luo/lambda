@@ -1136,21 +1136,21 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
         return nullptr;
     }
     
-    // Try using the full font path as the name first
-    Tvg_Result result = tvg_text_set_font(text, font_path);
+    log_debug("[SVG] successfully loaded font file: %s", font_path);
+    
+    // In ThorVG v1.0-pre34, tvg_text_set_font() expects a font name that matches
+    // how the font was registered. Since fonts are complex to query by name,
+    // we use nullptr which tells ThorVG to use "any loaded font".
+    // This works because we just loaded a font above.
+    Tvg_Result result = tvg_text_set_font(text, nullptr);
     if (result != TVG_RESULT_SUCCESS) {
-        // If that fails, try nullptr which uses any loaded font
-        log_debug("[SVG] failed to set font with path, trying nullptr (result=%d)", result);
-        result = tvg_text_set_font(text, nullptr);
-        if (result != TVG_RESULT_SUCCESS) {
-            log_debug("[SVG] failed to set font with nullptr (result=%d)", result);
-            tvg_paint_unref(text, true);
-            free(font_path);
-            return nullptr;
-        }
+        log_debug("[SVG] failed to set font (nullptr gave result=%d)", result);
+        tvg_paint_unref(text, true);
+        free(font_path);
+        return nullptr;
     }
     
-    log_debug("[SVG] successfully loaded and set font: %s", font_path);
+    log_debug("[SVG] successfully set font using loaded font");
     
     // set font size (separate call in v1.0-pre34)
     result = tvg_text_set_size(text, font_size);
