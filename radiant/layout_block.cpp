@@ -7,7 +7,6 @@
 #include "layout_positioned.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_cache.hpp"
-#include "math_integration.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
 
@@ -49,34 +48,9 @@ typedef struct CounterContext CounterContext;
 int counter_format(CounterContext* ctx, const char* name, uint32_t style,
                   char* buffer, size_t buffer_size);
 
-// Forward declarations for math parsing
-extern "C" void parse_math(Input* input, const char* math_string, const char* flavor);
-
 // ============================================================================
 // Math Element Detection and Layout Support
 // ============================================================================
-
-/**
- * Recursively collect text content from a DOM element and its children.
- * Used to extract LaTeX math source from <div class="math display"> elements.
- */
-static void collect_text_content_block(DomNode* node, StrBuf* sb) {
-    if (!node) return;
-
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (text->text && text->length > 0) {
-            strbuf_append_str_n(sb, text->text, text->length);
-        }
-    } else if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        DomNode* child = elem->first_child;
-        while (child) {
-            collect_text_content_block(child, sb);
-            child = child->next_sibling;
-        }
-    }
-}
 
 /**
  * Check if an element is a display math element (has class "math display").
@@ -90,79 +64,23 @@ static bool is_display_math_element(DomElement* elem) {
 }
 
 /**
- * Layout a display math element by extracting its LaTeX content, parsing it,
- * and creating a ViewMath with the typeset formula.
+ * Layout a display math element.
+ *
+ * NOTE: The legacy MathLive pipeline has been removed. Math elements using
+ * the old MathBox-based approach should migrate to RDT_VIEW_TEXNODE.
+ * For now, this function is a stub that logs a warning.
+ *
+ * To enable math rendering, use the unified TeX pipeline:
+ *   1. Parse LaTeX with tex::typeset_latex_math()
+ *   2. Set elem->view_type = RDT_VIEW_TEXNODE
+ *   3. Set elem->tex_root = tex_node
  */
 static void layout_display_math_block(LayoutContext* lycon, DomElement* elem) {
-    log_debug("layout_display_math_block: processing display math element");
-
-    // First try to get LaTeX source from data-latex attribute (preferred)
-    const char* latex_source = dom_element_get_attribute(elem, "data-latex");
-
-    StrBuf* sb = nullptr;
-    if (!latex_source || !*latex_source) {
-        // Fallback: collect text content from the element
-        sb = strbuf_new();
-        collect_text_content_block(elem, sb);
-
-        if (sb->length == 0) {
-            log_debug("layout_display_math_block: no text content in math element");
-            strbuf_free(sb);
-            return;
-        }
-        latex_source = sb->str;
-    }
-
-    log_debug("layout_display_math_block: LaTeX source: '%s'", latex_source);
-
-    // parse the math content - use the document's input if available
-    Input* input = lycon->doc ? lycon->doc->input : nullptr;
-    if (!input) {
-        input = InputManager::create_input(nullptr);
-    }
-
-    // parse LaTeX math
-    parse_math(input, latex_source, "latex");
-
-    // get the parsed math node tree from input's root
-    Item math_node = input->root;
-    if (math_node.item == ItemNull.item) {
-        log_debug("layout_display_math_block: failed to parse math content");
-        if (sb) strbuf_free(sb);
-        return;
-    }
-
-    // Set up math on the DOM element (stores in elem->embed and marks as math view)
-    if (!radiant::setup_math_element(lycon, elem, math_node, true /* is_display */)) {
-        log_debug("layout_display_math_block: failed to set up math element");
-        if (sb) strbuf_free(sb);
-        return;
-    }
-
-    // Position display math: center on its own line
-    float available_width = lycon->block.content_width;
-    float x_offset = (available_width - elem->width) / 2;
-    if (x_offset < 0) x_offset = 0;
-
-    // Start new line if needed
-    if (lycon->line.advance_x > lycon->line.effective_left) {
-        line_break(lycon);
-    }
-
-    elem->x = x_offset;
-    elem->y = lycon->block.advance_y;
-
-    // Advance past the math element
-    lycon->block.advance_y += elem->height;
-
-    // Add some vertical margin
-    float margin = elem->height * 0.3f;
-    lycon->block.advance_y += margin;
-
-    log_debug("layout_display_math_block: set up math view %.1fx%.1f at (%.1f, %.1f)",
-              elem->width, elem->height, elem->x, elem->y);
-
-    if (sb) strbuf_free(sb);
+    log_debug("layout_display_math_block: MathLive pipeline removed - use RDT_VIEW_TEXNODE instead");
+    // TODO: Implement using unified TeX pipeline
+    // For now, skip math rendering
+    (void)lycon;
+    (void)elem;
 }
 
 // ============================================================================
