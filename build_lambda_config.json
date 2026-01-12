@@ -2905,6 +2905,125 @@
                             "."
                         ],
                         "icon": "📊"
+                    },
+                    {
+                        "source": "test/test_tex_pagebreak_gtest.cpp",
+                        "name": "TeX Page Breaking Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_pagebreak_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_pagebreak.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_tex_math_extended_gtest.cpp",
+                        "name": "TeX Math Extended Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_math_extended_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_linebreak.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "∑"
+                    },
+                    {
+                        "source": "test/test_tex_align_gtest.cpp",
+                        "name": "TeX Alignment Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype"
+                        ],
+                        "binary": "test_tex_align_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_align.cpp",
+                            "lambda/tex/tex_linebreak.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📐"
+                    },
+                    {
+                        "source": "test/test_tex_macro_gtest.cpp",
+                        "name": "TeX Macro Processor Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_macro_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_macro.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔧"
+                    },
+                    {
+                        "source": "test/test_tex_conditional_gtest.cpp",
+                        "name": "TeX Conditional Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_conditional_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_macro.cpp",
+                            "lambda/tex/tex_conditional.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "❓"
                     }
                 ],
                 "type": "tex",

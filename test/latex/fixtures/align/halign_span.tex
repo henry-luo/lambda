@@ -1,0 +1,29 @@
+% halign_span.tex - Test \span and \omit in \halign
+\documentclass{article}
+\begin{document}
+
+% Using \span to merge columns
+\halign{#\hfil&#\hfil&#\hfil\cr
+  A & B & C \cr
+  \omit\span\span\hfil Spanning all three columns \hfil \cr
+  1 & 2 & 3 \cr
+}
+
+\bigskip
+
+% Using \omit to skip template
+\halign{\hfil#\hfil&\hfil#\hfil\cr
+  Centered & Centered \cr
+  \omit Left & \omit Left \cr
+}
+
+\bigskip
+
+% Mixed span
+\halign{#\hfil&#\hfil&#\hfil&#\hfil\cr
+  A & B & C & D \cr
+  \span\span AB && \span\span CD \cr
+  1 & 2 & 3 & 4 \cr
+}
+
+\end{document}

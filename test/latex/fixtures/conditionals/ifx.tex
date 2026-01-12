@@ -1,0 +1,30 @@
+% ifx.tex - Test \ifx conditionals
+\documentclass{article}
+\begin{document}
+
+% Same macro definitions
+\def\a{test}
+\def\b{test}
+\ifx\a\b Same meaning\else Different\fi
+
+% Different macro definitions
+\def\c{one}
+\def\d{two}
+\ifx\c\d Same\else Different meanings\fi
+
+% Both undefined
+\ifx\undefined\alsoundefined Both undefined\else One defined\fi
+
+% Comparing tokens
+\ifx AA Same char\fi
+\ifx AB Different chars\fi
+
+% \let makes same meaning
+\def\original{content}
+\let\copy=\original
+\ifx\original\copy Let copy matches\fi
+
+% Relax comparison
+\ifx\relax\relax Relax equals relax\fi
+
+\end{document}
