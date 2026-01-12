@@ -1,0 +1,19 @@
+% valign_basic.tex - Test basic \valign
+\documentclass{article}
+\begin{document}
+
+% Simple vertical alignment
+\valign{#\cr#\cr#\cr
+  A & B & C \cr
+  D & E & F \cr
+}
+
+\bigskip
+
+% Vertical alignment with different heights
+\valign{\hfil#\hfil\cr\hfil#\hfil\cr\hfil#\hfil\cr
+  Short & Medium text & Much longer entry \cr
+  X & Y & Z \cr
+}
+
+\end{document}
