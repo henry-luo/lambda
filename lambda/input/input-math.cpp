@@ -12,7 +12,7 @@
 // Currently only supports ASCII math; LaTeX/Typst parsing is stubbed
 // TODO: Reimplement LaTeX math parsing using TexNode pipeline
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
-    log_debug("parse_math called with: '%s', flavor: '%s'", 
+    log_debug("parse_math called with: '%s', flavor: '%s'",
               math_string, flavor_str ? flavor_str : "null");
 
     if (!math_string || !*math_string) {
