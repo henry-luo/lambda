@@ -12,6 +12,23 @@
 
 namespace tex {
 
+// Hash entry for storing macro definitions by name
+struct MacroHashEntry {
+    const char* name;
+    MacroDef* def;
+};
+
+static uint64_t macro_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const MacroHashEntry* entry = (const MacroHashEntry*)item;
+    return hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
+}
+
+static int macro_entry_compare(const void* a, const void* b, void* udata) {
+    const MacroHashEntry* ea = (const MacroHashEntry*)a;
+    const MacroHashEntry* eb = (const MacroHashEntry*)b;
+    return strcmp(ea->name, eb->name);
+}
+
 // ============================================================================
 // MacroProcessor Implementation
 // ============================================================================
@@ -23,15 +40,17 @@ MacroProcessor::MacroProcessor(Arena* arena)
     , expansion_depth(0)
     , expansion_limit(1000)
 {
-    macros = hashmap_create();
+    macros = hashmap_new(sizeof(MacroHashEntry), 32, 0, 0,
+                         macro_entry_hash, macro_entry_compare,
+                         nullptr, nullptr);
 }
 
 MacroProcessor::~MacroProcessor() {
     if (macros) {
-        hashmap_destroy(macros);
+        hashmap_free(macros);
     }
     if (saved_macros) {
-        hashmap_destroy(saved_macros);
+        hashmap_free(saved_macros);
     }
 }
 
@@ -118,7 +137,8 @@ bool MacroProcessor::define(const char* name, size_t name_len,
     def->replacement_len = repl_len;
 
     // Store in hash map
-    hashmap_put(macros, name_copy, def);
+    MacroHashEntry entry = {name_copy, def};
+    hashmap_set(macros, &entry);
 
     log_debug("macro: defined \\%s with %d params", name_copy, def->param_count);
     return true;
@@ -127,7 +147,8 @@ bool MacroProcessor::define(const char* name, size_t name_len,
 bool MacroProcessor::define_full(const MacroDef& def) {
     MacroDef* copy = (MacroDef*)arena_alloc(arena, sizeof(MacroDef));
     *copy = def;
-    hashmap_put(macros, (char*)def.name, copy);
+    MacroHashEntry entry = {def.name, copy};
+    hashmap_set(macros, &entry);
     return true;
 }
 
@@ -181,7 +202,8 @@ bool MacroProcessor::newcommand(const char* name, size_t name_len,
     def->replacement = def_copy;
     def->replacement_len = def_len;
 
-    hashmap_put(macros, name_copy, def);
+    MacroHashEntry entry = {name_copy, def};
+    hashmap_set(macros, &entry);
     log_debug("macro: \\newcommand{\\%s}[%d] defined", name_copy, nargs);
     return true;
 }
@@ -194,7 +216,8 @@ bool MacroProcessor::renewcommand(const char* name, size_t name_len,
     char* name_copy = (char*)arena_alloc(arena, name_len + 1);
     memcpy(name_copy, name, name_len);
     name_copy[name_len] = '\0';
-    hashmap_remove(macros, name_copy);
+    MacroHashEntry entry = {name_copy, nullptr};
+    hashmap_delete(macros, &entry);
 
     // Define new
     return newcommand(name, name_len, nargs, default_arg, default_len, definition, def_len);
@@ -219,14 +242,17 @@ bool MacroProcessor::is_defined(const char* name, size_t len) const {
     char* name_copy = (char*)alloca(len + 1);
     memcpy(name_copy, name, len);
     name_copy[len] = '\0';
-    return hashmap_get(macros, name_copy) != nullptr;
+    MacroHashEntry entry = {name_copy, nullptr};
+    return hashmap_get(macros, &entry) != nullptr;
 }
 
 const MacroDef* MacroProcessor::get_macro(const char* name, size_t len) const {
     char* name_copy = (char*)alloca(len + 1);
     memcpy(name_copy, name, len);
     name_copy[len] = '\0';
-    return (const MacroDef*)hashmap_get(macros, name_copy);
+    MacroHashEntry entry = {name_copy, nullptr};
+    const MacroHashEntry* found = (const MacroHashEntry*)hashmap_get(macros, &entry);
+    return found ? found->def : nullptr;
 }
 
 // ============================================================================
@@ -445,8 +471,7 @@ size_t MacroProcessor::expand_one(const char* input, size_t pos, size_t len,
 
 char* MacroProcessor::expand(const char* input, size_t len, size_t* out_len) {
     // Use a string buffer for growing result
-    Strbuf result;
-    strbuf_init(&result);
+    StrBuf* result = strbuf_new();
 
     size_t pos = 0;
     expansion_depth = 0;
@@ -463,31 +488,31 @@ char* MacroProcessor::expand(const char* input, size_t len, size_t* out_len) {
                 if (expansion_depth < expansion_limit) {
                     size_t re_expanded_len;
                     char* re_expanded = expand(expanded, expanded_len, &re_expanded_len);
-                    strbuf_append_n(&result, re_expanded, re_expanded_len);
+                    strbuf_append_str_n(result, re_expanded, re_expanded_len);
                 } else {
                     log_error("macro: expansion depth limit reached");
-                    strbuf_append_n(&result, expanded, expanded_len);
+                    strbuf_append_str_n(result, expanded, expanded_len);
                 }
                 expansion_depth--;
                 pos += consumed;
             } else {
                 // Not a macro, copy literally
-                strbuf_append_char(&result, input[pos]);
+                strbuf_append_char(result, input[pos]);
                 pos++;
             }
         } else {
-            strbuf_append_char(&result, input[pos]);
+            strbuf_append_char(result, input[pos]);
             pos++;
         }
     }
 
     // Copy result to arena
-    size_t result_len = strbuf_len(&result);
+    size_t result_len = result->length;
     char* output = (char*)arena_alloc(arena, result_len + 1);
-    memcpy(output, result.chars, result_len);
+    memcpy(output, result->str, result_len);
     output[result_len] = '\0';
 
-    strbuf_free(&result);
+    strbuf_free(result);
 
     *out_len = result_len;
     return output;
