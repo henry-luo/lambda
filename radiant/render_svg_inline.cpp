@@ -1046,18 +1046,40 @@ static char* resolve_svg_font_path(const char* font_family) {
     
     // try platform font lookup
     char* path = find_font_path_fallback(font_family);
+    
+    // check if path is a TTC file - ThorVG TTF loader doesn't support TTC (TrueType Collection)
+    if (path && strstr(path, ".ttc")) {
+        log_debug("[SVG] skipping TTC file (not supported by ThorVG TTF loader): %s", path);
+        free(path);
+        path = nullptr;
+    }
+    
     if (path) return path;
     
-    // try common fallbacks
+    // try common fallbacks - prefer simple TTF files that ThorVG can load
+    // avoid fonts that are typically in TTC format
     static const char* fallbacks[] = {
-        "Arial", "Helvetica", "sans-serif", 
-        "DejaVu Sans", "Liberation Sans", "Noto Sans",
+        "SFNS",              // /System/Library/Fonts/SFNS.ttf (macOS)
+        "Geneva",            // /System/Library/Fonts/Geneva.ttf (macOS)
+        "Arial Unicode MS",  // /System/Library/Fonts/Supplemental/Arial Unicode.ttf
+        "DejaVu Sans",       // Linux
+        "Liberation Sans",   // Linux
+        "Noto Sans",         // Linux
         nullptr
     };
     
     for (int i = 0; fallbacks[i]; i++) {
         if (strcmp(fallbacks[i], font_family) != 0) {
             path = find_font_path_fallback(fallbacks[i]);
+            
+            // skip TTC files
+            if (path && strstr(path, ".ttc")) {
+                log_debug("[SVG] skipping TTC file (not supported): %s", path);
+                free(path);
+                path = nullptr;
+                continue;
+            }
+            
             if (path) {
                 log_debug("[SVG] font fallback: %s -> %s", font_family, fallbacks[i]);
                 return path;
@@ -1114,15 +1136,21 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
         return nullptr;
     }
     
-    // in v1.0-pre34, tvg_text_set_font() takes the font NAME (not the full path)
-    // we use the font_path as the name since that's what we loaded with
+    // Try using the full font path as the name first
     Tvg_Result result = tvg_text_set_font(text, font_path);
     if (result != TVG_RESULT_SUCCESS) {
-        log_debug("[SVG] failed to set font: %s (result=%d)", font_path, result);
-        tvg_paint_unref(text, true);
-        free(font_path);
-        return nullptr;
+        // If that fails, try nullptr which uses any loaded font
+        log_debug("[SVG] failed to set font with path, trying nullptr (result=%d)", result);
+        result = tvg_text_set_font(text, nullptr);
+        if (result != TVG_RESULT_SUCCESS) {
+            log_debug("[SVG] failed to set font with nullptr (result=%d)", result);
+            tvg_paint_unref(text, true);
+            free(font_path);
+            return nullptr;
+        }
     }
+    
+    log_debug("[SVG] successfully loaded and set font: %s", font_path);
     
     // set font size (separate call in v1.0-pre34)
     result = tvg_text_set_size(text, font_size);
@@ -1146,8 +1174,12 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
     const char* fill = get_svg_attr(elem, "fill");
     if (!fill) fill = "black";  // SVG default
     
+    log_debug("[SVG TEXT DEBUG] fill attribute='%s'", fill ? fill : "NULL");
+    
     if (strcmp(fill, "none") != 0) {
         Color fc = parse_svg_color(fill);
+        
+        log_debug("[SVG TEXT DEBUG] parsed fill color: r=%d g=%d b=%d a=%d", fc.r, fc.g, fc.b, fc.a);
         
         // apply fill-opacity
         const char* fill_opacity = get_svg_attr(elem, "fill-opacity");
@@ -1167,6 +1199,8 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
         result = tvg_text_set_color(text, fc.r, fc.g, fc.b);
         if (result != TVG_RESULT_SUCCESS) {
             log_debug("[SVG] failed to set text color (result=%d)", result);
+        } else {
+            log_debug("[SVG TEXT DEBUG] text color set successfully to rgb(%d,%d,%d)", fc.r, fc.g, fc.b);
         }
         
         // apply opacity via paint opacity if needed
@@ -1181,8 +1215,11 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
     // apply transform if present
     apply_svg_transform(ctx, text, elem);
     
-    log_debug("[SVG] <text> rendered: '%s' at (%.1f, %.1f) font=%s size=%.1f",
-              text_content, x, y, font_family ? font_family : "default", font_size);
+    log_debug("[SVG] <text> rendered: '%s' at (%.1f, %.1f) font=%s size=%.1f color=rgb(%d,%d,%d)",
+              text_content, x, y, font_family ? font_family : "default", font_size,
+              strcmp(fill, "none") != 0 ? parse_svg_color(fill).r : 0,
+              strcmp(fill, "none") != 0 ? parse_svg_color(fill).g : 0,
+              strcmp(fill, "none") != 0 ? parse_svg_color(fill).b : 0);
     
     free(font_path);
     return text;

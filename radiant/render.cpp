@@ -1513,7 +1513,9 @@ void render_svg(ImageSurface* surface) {
     tvg_picture_set_size(surface->pic, width, height);
     tvg_canvas_push(canvas, surface->pic);
     tvg_canvas_update(canvas);
-    tvg_canvas_draw(canvas, true);
+    // CRITICAL: Pass false to preserve transparent background we set with memset
+    // Passing true would clear the buffer to black (ThorVG's default clear color)
+    tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
 
     // Step 4: Clean up canvas
@@ -1658,7 +1660,16 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 log_debug("render_init default font: %s, html version: %d", default_font->family, doc->view_tree->html_version);
                 setup_font(rdcon->ui_context, &rdcon->font, default_font);
 
-                render_block_view(rdcon, (ViewBlock*)root_view);
+                ViewBlock* root_block = (ViewBlock*)root_view;
+                
+                // Check if root element is SVG - if so, render directly without background
+                if (root_block->tag_id == HTM_TAG_SVG) {
+                    log_debug("render embedded SVG document (no background)");
+                    render_inline_svg(rdcon, root_block);
+                } else {
+                    // Regular HTML document - render with background
+                    render_block_view(rdcon, root_block);
+                }
 
                 rdcon->font = pa_font;
                 rdcon->color = pa_color;
@@ -1723,10 +1734,10 @@ void render_children(RenderContext* rdcon, View* view) {
                 render_form_control(rdcon, block);
             }
             else if (block->tag_id == HTM_TAG_SVG) {
-                // Inline SVG element - render via ThorVG
+                // Inline SVG element - render via ThorVG  
                 log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
-                render_block_view(rdcon, block);  // render background/border first
-                render_inline_svg(rdcon, block);  // then render SVG content
+                // Skip render_block_view to avoid painting background behind SVG
+                render_inline_svg(rdcon, block);  // render SVG content with transparent background
             }
             else if (block->embed && block->embed->img) {
                 log_debug("[RENDER DISPATCH] calling render_image_view");
