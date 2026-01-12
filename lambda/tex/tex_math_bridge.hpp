@@ -226,6 +226,29 @@ TexNode* typeset_scripts(
     MathContext& ctx
 );
 
+// Typeset limits above/below a big operator (display style)
+TexNode* typeset_op_limits(
+    TexNode* op_node,
+    TexNode* subscript,      // nullptr if none (lower limit)
+    TexNode* superscript,    // nullptr if none (upper limit)
+    MathContext& ctx
+);
+
+// ============================================================================
+// Extensible Delimiter Support
+// ============================================================================
+
+// Build an extensible delimiter to match target height
+// Uses TFM extensible recipes (top/mid/bot/rep pieces)
+TexNode* build_extensible_delimiter(
+    Arena* arena,
+    int base_char,           // Base character code
+    float target_height,     // Desired height
+    FontSpec& font,
+    TFMFont* tfm,
+    float size
+);
+
 // ============================================================================
 // Delimiter Support
 // ============================================================================
