@@ -1497,8 +1497,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     // render immediately to buffer (same pattern as SVG images)
     tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
     tvg_canvas_push(rdcon->canvas, svg_scene);
-    tvg_canvas_draw(rdcon->canvas, false);   // draw to buffer
-    tvg_canvas_sync(rdcon->canvas);          // sync
+    tvg_canvas_reset_and_draw(rdcon, false);
     tvg_canvas_remove(rdcon->canvas, NULL);  // clear shapes after rendering
     
     log_debug("[SVG] render_inline_svg: rendered to buffer");

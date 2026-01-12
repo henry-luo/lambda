@@ -49,6 +49,24 @@ void log_render_stats() {
         g_render_setup_font_count, g_render_setup_font_time);
 }
 
+/**
+ * Reset canvas target and draw shapes to buffer.
+ * This resets ThorVG's dirty region tracking to prevent black backgrounds
+ * when rendering multiple shapes to the same frame buffer.
+ * 
+ * ThorVG's smart rendering tracks "dirty regions" and clears them before
+ * each draw. When we render multiple shapes to the same buffer within one
+ * frame, this causes previously drawn content to be cleared to black.
+ * Resetting the target sets fulldraw=true, which bypasses dirty region clearing.
+ */
+void tvg_canvas_reset_and_draw(RenderContext* rdcon, bool clear) {
+    ImageSurface* surface = rdcon->ui_context->surface;
+    tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)surface->pixels, surface->width,
+        surface->width, surface->height, TVG_COLORSPACE_ABGR8888);
+    tvg_canvas_draw(rdcon->canvas, clear);
+    tvg_canvas_sync(rdcon->canvas);
+}
+
 // Forward declaration for border-collapse support
 struct CollapsedBorder {
     float width;
@@ -767,8 +785,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             tvg_shape_append_circle(shape, cx, cy, radius, radius, true);
             tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
             tvg_canvas_push(canvas, shape);
-            tvg_canvas_draw(canvas, false);
-            tvg_canvas_sync(canvas);
+            tvg_canvas_reset_and_draw(rdcon, false);
             tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
             log_debug("[MARKER RENDER] Drew disc at (%.1f, %.1f) r=%.1f", cx, cy, radius);
             break;
@@ -789,8 +806,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
             tvg_shape_set_stroke_width(shape, stroke_width);
             tvg_canvas_push(canvas, shape);
-            tvg_canvas_draw(canvas, false);
-            tvg_canvas_sync(canvas);
+            tvg_canvas_reset_and_draw(rdcon, false);
             tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
             log_debug("[MARKER RENDER] Drew circle outline at (%.1f, %.1f) r=%.1f", cx, cy, radius);
             break;
@@ -808,8 +824,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             tvg_shape_append_rect(shape, sx, sy, bullet_size, bullet_size, 0, 0, true);
             tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
             tvg_canvas_push(canvas, shape);
-            tvg_canvas_draw(canvas, false);
-            tvg_canvas_sync(canvas);
+            tvg_canvas_reset_and_draw(rdcon, false);
             tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
             log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
             break;
@@ -917,8 +932,7 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
     // Push to canvas and render
     tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
     tvg_canvas_push(canvas, shape);
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
+    tvg_canvas_reset_and_draw(rdcon, false);
     tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
 
     log_info("[VPATH] Rendered vector path successfully");
@@ -1159,8 +1173,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                         tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
 
                         tvg_canvas_push(rdcon->canvas, pic);
-                        tvg_canvas_draw(rdcon->canvas, false);
-                        tvg_canvas_sync(rdcon->canvas);
+                        tvg_canvas_reset_and_draw(rdcon, false);
                         tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
                     } else {
                         log_error("[RENDER] background-image: failed to load '%s'", file_path);
@@ -1247,8 +1260,7 @@ void draw_debug_rect(Tvg_Canvas canvas, Rect rect, Bound* clip) {
     tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
 
     tvg_canvas_push(canvas, shape);
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
+    tvg_canvas_reset_and_draw(rdcon, false);
     tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
 }
 
@@ -1455,8 +1467,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // Filters are applied to the rendered pixel data in the element's region
     if (block->filter && block->filter->functions) {
         // Sync canvas to ensure all content is rendered to the surface
-        tvg_canvas_draw(rdcon->canvas, false);
-        tvg_canvas_sync(rdcon->canvas);
+        tvg_canvas_reset_and_draw(rdcon, false);
         tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
 
         // Calculate the element's bounding rect
@@ -1573,8 +1584,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
             tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
             tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
             tvg_canvas_push(rdcon->canvas, pic);
-            tvg_canvas_draw(rdcon->canvas, false);
-            tvg_canvas_sync(rdcon->canvas);
+            tvg_canvas_reset_and_draw(rdcon, false);
             tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
         } else {
             log_debug("failed to load svg picture");
@@ -1855,7 +1865,8 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
 
     tvg_canvas_push(rdcon->canvas, shape);
-    tvg_canvas_draw(rdcon->canvas, false);  // Draw immediately to buffer
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
     log_debug("[FOCUS] Rendered focus outline at (%.0f,%.0f) size %.0fx%.0f", ox, oy, ow, oh);
 }
 
@@ -1922,7 +1933,8 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
         // Red caret color
         tvg_shape_set_fill_color(shape, 0xFF, 0x00, 0x00, 0xFF);
         tvg_canvas_push(rdcon->canvas, shape);
-        tvg_canvas_draw(rdcon->canvas, false);  // Draw immediately to buffer
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
         log_debug("[CARET] ThorVG: Drew caret at (%.0f,%.0f) size %.0fx%.0f", x, y, caret_width, height);
     }
 
@@ -2008,7 +2020,8 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
         // Semi-transparent blue selection highlight (typical system selection color)
         tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);  // Blue with 50% alpha
         tvg_canvas_push(rdcon->canvas, shape);
-        tvg_canvas_draw(rdcon->canvas, false);  // Draw immediately to buffer
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
     }
 
     log_debug("[SELECTION] Rendered selection at (%.0f,%.0f) size %.0fx%.0f", min_x, min_y, sel_width, sel_height);
