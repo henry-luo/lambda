@@ -182,8 +182,9 @@ float parse_svg_length(const char* value, float default_value) {
 // SVG Color Parsing
 // ============================================================================
 
-// named color lookup table (subset of SVG named colors)
+// named color lookup table - extended SVG/CSS named colors
 static const struct { const char* name; uint32_t rgb; } svg_named_colors[] = {
+    // Basic colors
     {"black", 0x000000}, {"white", 0xFFFFFF}, {"red", 0xFF0000},
     {"green", 0x008000}, {"blue", 0x0000FF}, {"yellow", 0xFFFF00},
     {"cyan", 0x00FFFF}, {"magenta", 0xFF00FF}, {"gray", 0x808080},
@@ -193,10 +194,57 @@ static const struct { const char* name; uint32_t rgb; } svg_named_colors[] = {
     {"purple", 0x800080}, {"orange", 0xFFA500}, {"pink", 0xFFC0CB},
     {"brown", 0xA52A2A}, {"coral", 0xFF7F50}, {"gold", 0xFFD700},
     {"indigo", 0x4B0082}, {"ivory", 0xFFFFF0}, {"khaki", 0xF0E68C},
-    {"lavender", 0xE6E6FA}, {"lightblue", 0xADD8E6}, {"lightgray", 0xD3D3D3},
-    {"lightgreen", 0x90EE90}, {"lightyellow", 0xFFFFE0}, {"darkblue", 0x00008B},
-    {"darkgreen", 0x006400}, {"darkred", 0x8B0000}, {"darkgray", 0xA9A9A9},
-    {"transparent", 0x00000000},
+    {"lavender", 0xE6E6FA}, {"transparent", 0x00000000},
+    // Reds
+    {"crimson", 0xDC143C}, {"darkred", 0x8B0000}, {"firebrick", 0xB22222},
+    {"indianred", 0xCD5C5C}, {"lightcoral", 0xF08080}, {"salmon", 0xFA8072},
+    {"darksalmon", 0xE9967A}, {"lightsalmon", 0xFFA07A}, {"orangered", 0xFF4500},
+    {"tomato", 0xFF6347},
+    // Oranges & Yellows
+    {"darkorange", 0xFF8C00}, {"peachpuff", 0xFFDAB9}, {"moccasin", 0xFFE4B5},
+    {"palegoldenrod", 0xEEE8AA}, {"lightyellow", 0xFFFFE0}, {"lemonchiffon", 0xFFFACD},
+    // Greens
+    {"limegreen", 0x32CD32}, {"lightgreen", 0x90EE90}, {"palegreen", 0x98FB98},
+    {"darkgreen", 0x006400}, {"forestgreen", 0x228B22}, {"seagreen", 0x2E8B57},
+    {"mediumseagreen", 0x3CB371}, {"springgreen", 0x00FF7F}, {"mediumspringgreen", 0x00FA9A},
+    {"darkseagreen", 0x8FBC8F}, {"mediumaquamarine", 0x66CDAA}, {"yellowgreen", 0x9ACD32},
+    {"olivedrab", 0x6B8E23}, {"darkolivegreen", 0x556B2F}, {"greenyellow", 0xADFF2F},
+    {"chartreuse", 0x7FFF00}, {"lawngreen", 0x7CFC00},
+    // Blues
+    {"lightblue", 0xADD8E6}, {"powderblue", 0xB0E0E6}, {"lightskyblue", 0x87CEFA},
+    {"skyblue", 0x87CEEB}, {"deepskyblue", 0x00BFFF}, {"dodgerblue", 0x1E90FF},
+    {"cornflowerblue", 0x6495ED}, {"steelblue", 0x4682B4}, {"royalblue", 0x4169E1},
+    {"mediumblue", 0x0000CD}, {"darkblue", 0x00008B}, {"midnightblue", 0x191970},
+    {"cadetblue", 0x5F9EA0}, {"lightsteelblue", 0xB0C4DE}, {"slateblue", 0x6A5ACD},
+    {"mediumslateblue", 0x7B68EE}, {"darkslateblue", 0x483D8B},
+    // Purples
+    {"mediumpurple", 0x9370DB}, {"blueviolet", 0x8A2BE2}, {"darkviolet", 0x9400D3},
+    {"darkorchid", 0x9932CC}, {"mediumorchid", 0xBA55D3}, {"orchid", 0xDA70D6},
+    {"plum", 0xDDA0DD}, {"violet", 0xEE82EE}, {"thistle", 0xD8BFD8},
+    {"darkmagenta", 0x8B008B}, {"mediumvioletred", 0xC71585}, {"deeppink", 0xFF1493},
+    {"hotpink", 0xFF69B4}, {"lightpink", 0xFFB6C1}, {"palevioletred", 0xDB7093},
+    // Cyans & Teals
+    {"lightcyan", 0xE0FFFF}, {"paleturquoise", 0xAFEEEE}, {"aquamarine", 0x7FFFD4},
+    {"turquoise", 0x40E0D0}, {"mediumturquoise", 0x48D1CC}, {"darkturquoise", 0x00CED1},
+    {"darkcyan", 0x008B8B},
+    // Browns & Tans
+    {"tan", 0xD2B48C}, {"burlywood", 0xDEB887}, {"wheat", 0xF5DEB3},
+    {"sandybrown", 0xF4A460}, {"goldenrod", 0xDAA520}, {"darkgoldenrod", 0xB8860B},
+    {"peru", 0xCD853F}, {"chocolate", 0xD2691E}, {"sienna", 0xA0522D},
+    {"saddlebrown", 0x8B4513}, {"rosybrown", 0xBC8F8F},
+    // Grays
+    {"lightgray", 0xD3D3D3}, {"lightgrey", 0xD3D3D3}, {"darkgray", 0xA9A9A9},
+    {"darkgrey", 0xA9A9A9}, {"dimgray", 0x696969}, {"dimgrey", 0x696969},
+    {"lightslategray", 0x778899}, {"slategray", 0x708090}, {"darkslategray", 0x2F4F4F},
+    {"gainsboro", 0xDCDCDC},
+    // Whites
+    {"snow", 0xFFFAFA}, {"honeydew", 0xF0FFF0}, {"mintcream", 0xF5FFFA},
+    {"azure", 0xF0FFFF}, {"aliceblue", 0xF0F8FF}, {"ghostwhite", 0xF8F8FF},
+    {"whitesmoke", 0xF5F5F5}, {"seashell", 0xFFF5EE}, {"beige", 0xF5F5DC},
+    {"oldlace", 0xFDF5E6}, {"floralwhite", 0xFFFAF0}, {"linen", 0xFAF0E6},
+    {"lavenderblush", 0xFFF0F5}, {"mistyrose", 0xFFE4E1}, {"papayawhip", 0xFFEFD5},
+    {"blanchedalmond", 0xFFEBCD}, {"bisque", 0xFFE4C4}, {"antiquewhite", 0xFAEBD7},
+    {"cornsilk", 0xFFF8DC}, {"navajowhite", 0xFFDEAD},
     {nullptr, 0}
 };
 
@@ -475,50 +523,72 @@ bool is_inline_svg_element(DomElement* elem) {
 static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem) {
     if (!shape || !elem) return;
     
-    // get fill attribute (default is black per SVG spec)
+    // get fill attribute - inherit from context if not specified
     const char* fill = get_svg_attr(elem, "fill");
-    if (!fill) fill = "black";
     
-    bool has_fill = strcmp(fill, "none") != 0;
+    // determine effective fill (element attribute → inherited from context → default black)
+    Color fc;
+    bool has_fill = true;
     
-    if (has_fill) {
-        if (strncmp(fill, "url(#", 5) == 0) {
+    if (fill) {
+        // element has explicit fill attribute
+        if (strcmp(fill, "none") == 0) {
+            has_fill = false;
+        } else if (strncmp(fill, "url(#", 5) == 0) {
             // gradient reference - TODO: implement gradient lookup
             log_debug("[SVG] gradient fill not yet implemented: %s", fill);
-            // fallback to solid black
-            tvg_shape_set_fill_color(shape, 0, 0, 0, 255);
+            fc = ctx->fill_color;  // fallback to inherited
         } else {
-            // solid color fill
-            Color fc = parse_svg_color(fill);
-            
-            // apply fill-opacity if present
-            const char* fill_opacity = get_svg_attr(elem, "fill-opacity");
-            if (fill_opacity) {
-                float opacity = strtof(fill_opacity, nullptr);
-                fc.a = (uint8_t)(fc.a * opacity);
-            }
-            
-            // apply general opacity
-            const char* opacity = get_svg_attr(elem, "opacity");
-            if (opacity) {
-                float op = strtof(opacity, nullptr);
-                fc.a = (uint8_t)(fc.a * op);
-            }
-            
-            tvg_shape_set_fill_color(shape, fc.r, fc.g, fc.b, fc.a);
+            fc = parse_svg_color(fill);
         }
+    } else if (!ctx->fill_none) {
+        // no fill attribute, inherit from context
+        fc = ctx->fill_color;
+    } else {
+        // context has fill_none set
+        has_fill = false;
     }
     
-    // get stroke
-    const char* stroke = get_svg_attr(elem, "stroke");
-    if (stroke && strcmp(stroke, "none") != 0) {
-        // stroke width
-        const char* stroke_width_str = get_svg_attr(elem, "stroke-width");
-        float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f) : 1.0f;
-        tvg_shape_set_stroke_width(shape, stroke_width);
+    if (has_fill) {
+        // apply fill-opacity if present
+        const char* fill_opacity = get_svg_attr(elem, "fill-opacity");
+        if (fill_opacity) {
+            float opacity = strtof(fill_opacity, nullptr);
+            fc.a = (uint8_t)(fc.a * opacity);
+        }
         
-        // stroke color
-        Color sc = parse_svg_color(stroke);
+        // apply general opacity
+        const char* opacity = get_svg_attr(elem, "opacity");
+        if (opacity) {
+            float op = strtof(opacity, nullptr);
+            fc.a = (uint8_t)(fc.a * op);
+        }
+        
+        tvg_shape_set_fill_color(shape, fc.r, fc.g, fc.b, fc.a);
+    }
+    
+    // get stroke - inherit from context if not specified
+    const char* stroke = get_svg_attr(elem, "stroke");
+    bool has_stroke = false;
+    Color sc;
+    
+    if (stroke) {
+        // element has explicit stroke attribute
+        if (strcmp(stroke, "none") != 0) {
+            has_stroke = true;
+            sc = parse_svg_color(stroke);
+        }
+    } else if (!ctx->stroke_none) {
+        // no stroke attribute, inherit from context
+        has_stroke = true;
+        sc = ctx->stroke_color;
+    }
+    
+    if (has_stroke) {
+        // stroke width - inherit from context if not specified
+        const char* stroke_width_str = get_svg_attr(elem, "stroke-width");
+        float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f) : ctx->stroke_width;
+        tvg_shape_set_stroke_width(shape, stroke_width);
         
         // apply stroke-opacity
         const char* stroke_opacity = get_svg_attr(elem, "stroke-opacity");
@@ -1291,7 +1361,52 @@ static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem) {
 // ============================================================================
 
 static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
-    return render_svg_children_as_scene(ctx, elem);
+    if (!elem) return nullptr;
+    
+    // save current inherited state
+    Color saved_fill = ctx->fill_color;
+    Color saved_stroke = ctx->stroke_color;
+    float saved_stroke_width = ctx->stroke_width;
+    bool saved_fill_none = ctx->fill_none;
+    bool saved_stroke_none = ctx->stroke_none;
+    
+    // update inherited state from group attributes
+    const char* fill = get_svg_attr(elem, "fill");
+    if (fill) {
+        if (strcmp(fill, "none") == 0) {
+            ctx->fill_none = true;
+        } else if (strncmp(fill, "url(#", 5) != 0) {
+            ctx->fill_color = parse_svg_color(fill);
+            ctx->fill_none = false;
+        }
+    }
+    
+    const char* stroke = get_svg_attr(elem, "stroke");
+    if (stroke) {
+        if (strcmp(stroke, "none") == 0) {
+            ctx->stroke_none = true;
+        } else {
+            ctx->stroke_color = parse_svg_color(stroke);
+            ctx->stroke_none = false;
+        }
+    }
+    
+    const char* stroke_width = get_svg_attr(elem, "stroke-width");
+    if (stroke_width) {
+        ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
+    }
+    
+    // render children with updated inherited state
+    Tvg_Paint scene = render_svg_children_as_scene(ctx, elem);
+    
+    // restore inherited state
+    ctx->fill_color = saved_fill;
+    ctx->stroke_color = saved_stroke;
+    ctx->stroke_width = saved_stroke_width;
+    ctx->fill_none = saved_fill_none;
+    ctx->stroke_none = saved_stroke_none;
+    
+    return scene;
 }
 
 static Tvg_Paint render_svg_children_as_scene(SvgRenderContext* ctx, Element* elem) {
