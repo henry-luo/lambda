@@ -760,6 +760,14 @@ TexNode** build_lines_from_breaks(
             line->append_child(item);
         }
 
+        // For the last line, add parfillskip (infinite stretch) so normal glue
+        // doesn't stretch. This matches TeX's behavior of ragged-right last lines.
+        bool is_last_line = (l == result.line_count - 1);
+        if (is_last_line) {
+            TexNode* parfillskip = make_glue(arena, Glue::fil(0), "parfillskip");
+            line->append_child(parfillskip);
+        }
+
         // Set line dimensions
         HListDimensions dim = measure_hlist(line);
         line->height = dim.height;

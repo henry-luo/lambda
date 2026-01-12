@@ -56,6 +56,22 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
 // Math parsing functions (from input-math.cpp)
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
+void cleanup_math_parser();  // Call at program exit to free resources
+
+#ifdef __cplusplus
+} // extern "C"
+
+// Forward declaration for TexNode (full definition in tex/tex_node.hpp)
+namespace tex { struct TexNode; }
+struct Arena;
+
+// C++ API for LaTeX math parsing - returns TexNode tree
+// These wrap the TeX pipeline's typeset_latex_math() function
+tex::TexNode* parse_latex_math_to_texnode(const char* math_string, size_t len, float font_size_pt = 10.0f);
+tex::TexNode* parse_latex_math_with_arena(const char* math_string, size_t len, float font_size_pt, Arena* arena);
+
+extern "C" {
+#endif
 
 // ASCII Math parsing functions (from input-math-ascii.cpp)
 Item input_ascii_math(Input* input, const char* ascii_math);

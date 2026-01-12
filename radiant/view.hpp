@@ -978,16 +978,13 @@ typedef struct GridProp {
     bool is_dense_packing;       // grid-auto-flow: dense
 } GridProp;
 
-// Forward declare MathBox for EmbedProp
-namespace radiant { struct MathBox; }
-
 typedef struct EmbedProp {
     ImageSurface* img;  // image surface
     DomDocument* doc;   // iframe document
     FlexProp* flex;
     GridProp* grid;
-    // Math layout data
-    radiant::MathBox* math_box;  // math box tree for math elements
+    // Math layout data (legacy - will be removed when migrating to RDT_VIEW_TEXNODE)
+    void* math_box;              // legacy: was MathBox* - deprecated
     Item math_node;              // source Lambda math node
     bool math_is_display;        // display vs inline math
     float math_baseline_offset;  // baseline offset for alignment
