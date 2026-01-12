@@ -11,8 +11,8 @@ GraphLayoutOptions* create_default_layout_options() {
     GraphLayoutOptions* opts = (GraphLayoutOptions*)calloc(1, sizeof(GraphLayoutOptions));
     opts->algorithm = "dagre";
     opts->direction = "TB";
-    opts->node_sep = 50.0f;
-    opts->rank_sep = 50.0f;
+    opts->node_sep = 60.0f;
+    opts->rank_sep = 80.0f;
     opts->edge_sep = 10.0f;
     opts->use_splines = false;
     opts->max_iterations = 100;

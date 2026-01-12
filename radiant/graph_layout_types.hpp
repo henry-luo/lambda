@@ -106,6 +106,7 @@ typedef struct LayoutEdge {
     LayoutNode* to_node;
     
     bool directed;
+    bool is_back_edge;      // true if this edge creates a cycle (points backwards)
     
     // Layout computed values
     ArrayList* path_points;  // Array of Point2D

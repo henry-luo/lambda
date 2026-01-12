@@ -1416,6 +1416,7 @@ int main(int argc, char *argv[]) {
             
             const char* temp_svg = "/tmp/lambda_graph_view.svg";
             write_text_file(temp_svg, svg_str->chars);
+            write_text_file("/tmp/lambda_graph_debug.svg", svg_str->chars);  // debug copy
             free_graph_layout(layout);
             
             // View the temp SVG file
