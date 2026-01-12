@@ -1,0 +1,45 @@
+% test_floats.tex - Test float placement in page breaking
+\documentclass{article}
+\begin{document}
+
+% Basic text to fill page
+\section{Introduction}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+% Top float
+\begin{figure}[t]
+\centering
+\rule{3cm}{2cm}
+\caption{Top float}
+\end{figure}
+
+More text after the float specification.
+Ut enim ad minim veniam, quis nostrud exercitation.
+
+% Bottom float
+\begin{figure}[b]
+\centering
+\rule{3cm}{2cm}
+\caption{Bottom float}
+\end{figure}
+
+% Here float
+\begin{figure}[h]
+\centering
+\rule{3cm}{2cm}
+\caption{Here float}
+\end{figure}
+
+% Text to push to next page
+\newpage
+
+% Float on new page
+\begin{figure}[p]
+\centering
+\rule{8cm}{10cm}
+\caption{Page float}
+\end{figure}
+
+\end{document}

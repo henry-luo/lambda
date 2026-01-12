@@ -1,0 +1,29 @@
+% test_footnotes.tex - Test footnote placement in page breaking
+\documentclass{article}
+\begin{document}
+
+\section{Text with Footnotes}
+
+This is the main text\footnote{First footnote.} which contains
+several footnotes\footnote{Second footnote with more content.}
+distributed throughout the document.
+
+More text here to fill some space on the page.
+
+Another paragraph\footnote{Third footnote.} with additional content
+and yet another footnote\footnote{Fourth footnote that spans
+multiple lines to test longer footnote handling.}.
+
+\section{Second Section}
+
+Text continues\footnote{Fifth footnote.} with more content.
+
+% Fill page to test footnote splitting
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.
+
+More text\footnote{Sixth footnote near page break.} to test
+what happens when footnotes need to be deferred to next page.
+
+\end{document}
