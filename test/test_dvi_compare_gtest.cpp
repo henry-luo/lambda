@@ -483,7 +483,7 @@ TEST_F(DVICompareTest, SimpleMath) {
     EXPECT_TRUE(test_latex_file("test_simple_math"));
 }
 
-TEST_F(DVICompareTest, DISABLED_Fraction) {
+TEST_F(DVICompareTest, Fraction) {
     EXPECT_TRUE(test_latex_file("test_fraction"));
 }
 
@@ -491,19 +491,20 @@ TEST_F(DVICompareTest, Greek) {
     EXPECT_TRUE(test_latex_file("test_greek"));
 }
 
-TEST_F(DVICompareTest, DISABLED_Sqrt) {
+TEST_F(DVICompareTest, Sqrt) {
     EXPECT_TRUE(test_latex_file("test_sqrt"));
 }
 
-TEST_F(DVICompareTest, DISABLED_SubscriptSuperscript) {
+TEST_F(DVICompareTest, SubscriptSuperscript) {
     EXPECT_TRUE(test_latex_file("test_subscript_superscript"));
 }
 
 TEST_F(DVICompareTest, DISABLED_Delimiters) {
+    // Requires cmex10 font support for \left...\right sizing
     EXPECT_TRUE(test_latex_file("test_delimiters"));
 }
 
-TEST_F(DVICompareTest, DISABLED_SumIntegral) {
+TEST_F(DVICompareTest, SumIntegral) {
     EXPECT_TRUE(test_latex_file("test_sum_integral"));
 }
 
@@ -511,7 +512,7 @@ TEST_F(DVICompareTest, DISABLED_Matrix) {
     EXPECT_TRUE(test_latex_file("test_matrix"));
 }
 
-TEST_F(DVICompareTest, DISABLED_ComplexFormula) {
+TEST_F(DVICompareTest, ComplexFormula) {
     EXPECT_TRUE(test_latex_file("test_complex_formula"));
 }
 

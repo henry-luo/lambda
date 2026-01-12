@@ -650,6 +650,57 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             break;
         }
 
+        case NodeClass::Radical: {
+            // Radical node: output sqrt sign + radicand + optional degree
+            // The radical sign is character 112 ('p') in cmsy10
+            int32_t save_h = writer.h;
+            int32_t save_v = writer.v;
+
+            // First output the degree (root index) if present
+            TexNode* degree = node->content.radical.degree;
+            if (degree) {
+                int32_t deg_h = save_h + pt_to_sp(degree->x);
+                int32_t deg_v = save_v - pt_to_sp(degree->y);
+
+                writer.h = deg_h;
+                writer.v = deg_v;
+                dvi_output_node(writer, degree, fonts);
+
+                // Restore position
+                writer.h = save_h;
+                writer.v = save_v;
+            }
+
+            // Output the radical sign from cmsy font
+            // Use cmsy10 at appropriate size
+            float size = node->height * 10.0f;  // Approximate size
+            if (size < 5.0f) size = 10.0f;  // Default to 10pt
+
+            uint32_t font_num = dvi_define_font(writer, "cmsy10", size);
+            dvi_select_font(writer, font_num);
+
+            // Output radical sign character (p = 112 in cmsy)
+            dvi_set_char(writer, 112);
+
+            // Advance by radical sign width (approximate)
+            writer.h += pt_to_sp(8.0f * size / 10.0f);
+
+            // Output radicand at its position
+            TexNode* radicand = node->content.radical.radicand;
+            if (radicand) {
+                int32_t rad_h = save_h + pt_to_sp(radicand->x);
+                int32_t rad_v = writer.v - pt_to_sp(radicand->y);
+
+                writer.h = rad_h;
+                writer.v = rad_v;
+                dvi_output_node(writer, radicand, fonts);
+            }
+
+            // Advance by total width
+            writer.h = save_h + pt_to_sp(node->width);
+            break;
+        }
+
         case NodeClass::Penalty:
             // Penalties are invisible
             break;
