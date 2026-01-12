@@ -1,0 +1,31 @@
+% halign_basic.tex - Test basic \halign
+\documentclass{article}
+\begin{document}
+
+% Simple 2-column alignment
+\halign{#\hfil&#\hfil\cr
+  Left & Right \cr
+  A & B \cr
+  Longer & Short \cr
+}
+
+\bigskip
+
+% 3-column alignment
+\halign{#\hfil&#\hfil&#\hfil\cr
+  One & Two & Three \cr
+  1 & 2 & 3 \cr
+}
+
+\bigskip
+
+% With rules
+\halign{\vrule#&\hfil#\hfil&\vrule#&\hfil#\hfil&\vrule#\cr
+  \noalign{\hrule}
+  & Left && Right & \cr
+  \noalign{\hrule}
+  & A && B & \cr
+  \noalign{\hrule}
+}
+
+\end{document}

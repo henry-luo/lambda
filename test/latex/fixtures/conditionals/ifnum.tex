@@ -1,0 +1,32 @@
+% ifnum.tex - Test \ifnum conditionals
+\documentclass{article}
+\begin{document}
+
+% Basic comparisons
+\ifnum 5<10 Less\else Greater or equal\fi
+
+\ifnum 10>5 Greater\else Less or equal\fi
+
+\ifnum 5=5 Equal\else Not equal\fi
+
+% With counters
+\newcounter{test}
+\setcounter{test}{3}
+\ifnum\value{test}=3 Counter is 3\fi
+
+% Nested ifnum
+\ifnum 1<2
+  First true
+  \ifnum 3<4
+    Both true
+  \fi
+\fi
+
+% Negative numbers
+\ifnum -5<0 Negative\else Non-negative\fi
+
+% Edge cases
+\ifnum 0=0 Zero equals zero\fi
+\ifnum 999999<1000000 Large numbers work\fi
+
+\end{document}
