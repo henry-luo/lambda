@@ -473,8 +473,7 @@ size_t ConditionalProcessor::evaluate_conditional(const char* input, size_t pos,
 // ============================================================================
 
 char* ConditionalProcessor::process(const char* input, size_t len, size_t* out_len) {
-    Strbuf result;
-    strbuf_init(&result);
+    StrBuf* result = strbuf_new();
 
     size_t pos = 0;
     while (pos < len) {
@@ -500,7 +499,7 @@ char* ConditionalProcessor::process(const char* input, size_t len, size_t* out_l
                 // Recursively process true branch
                 size_t branch_len;
                 char* branch = process(input + pos, true_end - pos, &branch_len);
-                strbuf_append_n(&result, branch, branch_len);
+                strbuf_append_str_n(result, branch, branch_len);
 
                 // Skip to after \fi
                 if (found_else) {
@@ -517,7 +516,7 @@ char* ConditionalProcessor::process(const char* input, size_t len, size_t* out_l
                     size_t false_end = fi_pos - 3;  // subtract \fi length
                     size_t branch_len;
                     char* branch = process(input + else_or_fi_pos, false_end - else_or_fi_pos, &branch_len);
-                    strbuf_append_n(&result, branch, branch_len);
+                    strbuf_append_str_n(result, branch, branch_len);
 
                     pos = fi_pos;
                 } else {
@@ -526,18 +525,18 @@ char* ConditionalProcessor::process(const char* input, size_t len, size_t* out_l
                 }
             }
         } else {
-            strbuf_append_char(&result, input[pos]);
+            strbuf_append_char(result, input[pos]);
             pos++;
         }
     }
 
     // Copy result to arena
-    size_t result_len = strbuf_len(&result);
+    size_t result_len = result->length;
     char* output = (char*)arena_alloc(arena, result_len + 1);
-    memcpy(output, result.chars, result_len);
+    memcpy(output, result->str, result_len);
     output[result_len] = '\0';
 
-    strbuf_free(&result);
+    strbuf_free(result);
 
     *out_len = result_len;
     return output;
