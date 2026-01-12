@@ -289,8 +289,9 @@
         },
         {
             "name": "ThorVG",
-            "include": "/usr/local/include",
-            "lib": "/usr/local/lib/libthorvg.a",
+            "description": "ThorVG vector graphics library (built from source)",
+            "include": "mac-deps/thorvg/inc",
+            "lib": "mac-deps/thorvg/build-mac/src/libthorvg.a",
             "link": "static",
             "version": "v1.0-pre34"
         },
