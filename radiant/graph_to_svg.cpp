@@ -40,7 +40,9 @@ static const char* get_node_attribute(Element* graph, const char* node_id,
         
         ItemReader id_reader = child_reader.get_attr("id");
         if (!id_reader.isString()) continue;
-        if (strcmp(id_reader.cstring(), node_id) != 0) continue;
+        
+        const char* this_id = id_reader.cstring();
+        if (strcmp(this_id, node_id) != 0) continue;
         
         // found the node, get attribute
         ItemReader attr_reader = child_reader.get_attr(attr_name);
@@ -152,6 +154,37 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
     }
 }
 
+// Helper: render arrowhead as a polygon at the end of an edge
+// ThorVG doesn't support SVG markers, so we draw arrows manually
+static Item render_arrowhead(MarkBuilder& builder, float x, float y, float angle,
+                              const char* fill, float size) {
+    // Arrow points: tip at (x,y), pointing in direction of angle
+    // We create a triangle pointing in the direction of the edge
+    float cos_a = cosf(angle);
+    float sin_a = sinf(angle);
+    
+    // Arrow base is behind the tip
+    float base_x = x - size * cos_a;
+    float base_y = y - size * sin_a;
+    
+    // Arrow wings perpendicular to direction
+    float wing_size = size * 0.5f;
+    float wing1_x = base_x - wing_size * sin_a;
+    float wing1_y = base_y + wing_size * cos_a;
+    float wing2_x = base_x + wing_size * sin_a;
+    float wing2_y = base_y - wing_size * cos_a;
+    
+    // Format points string using stack buffer
+    char points_buf[128];
+    snprintf(points_buf, sizeof(points_buf), "%.1f,%.1f %.1f,%.1f %.1f,%.1f",
+             x, y, wing1_x, wing1_y, wing2_x, wing2_y);
+    
+    return builder.element("polygon")
+        .attr("points", points_buf)
+        .attr("fill", fill)
+        .final();
+}
+
 // Helper: render edge path
 static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path, 
                              const char* stroke, float stroke_width) {
@@ -188,13 +221,29 @@ static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path,
     path_builder.attr("stroke-width", (double)stroke_width);
     path_builder.attr("fill", "none");
     
-    // add arrow marker if directed
-    if (path->directed) {
-        path_builder.attr("marker-end", "url(#arrowhead)");
+    Item path_item = path_builder.final();
+    stringbuf_free(sb);
+    
+    // If directed, add arrowhead as separate polygon (ThorVG doesn't support markers)
+    if (path->directed && path->points->length >= 2) {
+        // Get last two points to calculate arrow direction
+        Point2D* prev = (Point2D*)path->points->data[path->points->length - 2];
+        Point2D* last = (Point2D*)path->points->data[path->points->length - 1];
+        
+        float dx = last->x - prev->x;
+        float dy = last->y - prev->y;
+        float angle = atan2f(dy, dx);
+        
+        Item arrow_item = render_arrowhead(builder, last->x, last->y, angle, stroke, 10.0f);
+        
+        // Return group containing path and arrowhead
+        return builder.element("g")
+            .child(path_item)
+            .child(arrow_item)
+            .final();
     }
     
-    stringbuf_free(sb);
-    return path_builder.final();
+    return path_item;
 }
 
 // Helper: create arrow marker definition
