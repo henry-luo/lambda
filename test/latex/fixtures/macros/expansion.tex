@@ -1,0 +1,34 @@
+% expansion.tex - Test macro expansion behavior
+\documentclass{article}
+\begin{document}
+
+% Recursive expansion
+\def\a{\b}
+\def\b{\c}
+\def\c{Final}
+\a
+
+% Grouped definitions
+\def\test{outer}
+{\def\test{inner}\test}
+\test
+
+% \edef (expanded definition)
+\def\x{X}
+\edef\y{\x Y}
+\def\x{Z}
+\y  % Should be "X Y" not "Z Y"
+
+% \let (token alias)
+\def\original{Content}
+\let\alias=\original
+\alias
+\def\original{Changed}
+\alias  % Should still show original
+
+% \futurelet
+\def\test#1{[#1]}
+\futurelet\next\test A
+\meaning\next
+
+\end{document}

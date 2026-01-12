@@ -1,0 +1,25 @@
+% def_params.tex - Test \def with various parameter patterns
+\documentclass{article}
+\begin{document}
+
+% Nine parameters (maximum)
+\def\many#1#2#3#4#5#6#7#8#9{#1#2#3#4#5#6#7#8#9}
+\many{a}{b}{c}{d}{e}{f}{g}{h}{i}
+
+% Delimited parameter
+\def\upto#1.{[#1]}
+\upto hello.
+
+% Multiple delimited parameters
+\def\between#1and#2end{from #1 to #2}
+\between start and finish end
+
+% Parameter in replacement
+\def\double#1{#1#1}
+\double{X}
+
+% Hash in replacement (## -> #)
+\def\hashtest{##1}
+\hashtest
+
+\end{document}

@@ -1,0 +1,37 @@
+% test_marks.tex - Test \mark handling for headers/footers
+\documentclass{article}
+\begin{document}
+
+\mark{Chapter 1}
+
+\section{First Section}
+
+Content for the first section.
+\mark{Section 1.1}
+
+More content here.
+
+\subsection{Subsection}
+\mark{Section 1.1.1}
+
+Text in subsection.
+
+\newpage
+\mark{Chapter 2}
+
+\section{Second Section}
+\mark{Section 2.1}
+
+Content on second page.
+
+% Test marks across page breaks
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+\mark{Middle of page}
+Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+\newpage
+\mark{Chapter 3}
+
+Final content with marks.
+
+\end{document}

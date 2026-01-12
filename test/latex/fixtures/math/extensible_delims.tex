@@ -1,0 +1,49 @@
+% extensible_delims.tex - Test extensible delimiters
+\documentclass{article}
+\usepackage{amsmath}
+\begin{document}
+
+% Basic extensible parentheses
+\[
+\left( \frac{a}{b} \right)
+\]
+
+% Tall fraction requiring larger delimiters
+\[
+\left( \frac{\frac{a}{b}}{\frac{c}{d}} \right)
+\]
+
+% Various delimiter types
+\[
+\left[ \begin{array}{c} a \\ b \\ c \end{array} \right]
+\]
+
+\[
+\left\{ \frac{x^2}{y^2} \right\}
+\]
+
+\[
+\left| \sum_{i=1}^{n} x_i \right|
+\]
+
+% Mismatched delimiters (valid)
+\[
+\left( x \right]
+\]
+
+% Very tall content
+\[
+\left( \frac{\frac{\frac{a}{b}}{c}}{d} \right)
+\]
+
+% Double vertical bars
+\[
+\left\| \vec{v} \right\|
+\]
+
+% Floor and ceiling
+\[
+\left\lfloor x \right\rfloor \quad \left\lceil y \right\rceil
+\]
+
+\end{document}
