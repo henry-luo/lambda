@@ -34,3 +34,13 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state);
 void render_caret(RenderContext* rdcon, RadiantState* state);
 void render_selection(RenderContext* rdcon, RadiantState* state);
 void render_ui_overlays(RenderContext* rdcon, RadiantState* state);
+
+/**
+ * Reset canvas target and draw shapes to buffer.
+ * This resets ThorVG's dirty region tracking to prevent black backgrounds
+ * when rendering multiple shapes to the same frame buffer.
+ * 
+ * @param rdcon The render context containing the canvas and surface
+ * @param clear Whether to clear the buffer before drawing (usually false)
+ */
+void tvg_canvas_reset_and_draw(RenderContext* rdcon, bool clear = false);
