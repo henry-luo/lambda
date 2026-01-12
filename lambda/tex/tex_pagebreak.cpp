@@ -468,6 +468,9 @@ PageContent* build_pages(
         arena, result.page_count * sizeof(PageContent)
     );
 
+    // Initialize mark state for tracking across pages
+    MarkState mark_state;
+
     int start_index = 0;
 
     for (int p = 0; p < result.page_count; ++p) {
@@ -481,9 +484,21 @@ PageContent* build_pages(
         pages[p].marks_top = nullptr;
         pages[p].marks_bot = nullptr;
         pages[p].inserts = nullptr;
+        pages[p].deferred_floats = nullptr;
+        pages[p].deferred_float_count = 0;
 
-        // Extract marks
-        extract_page_marks(pages[p], vlist, start_index, end_index);
+        // Extract marks with state tracking
+        extract_page_marks_with_state(pages[p], vlist, start_index, end_index, mark_state);
+
+        // Collect and place floats
+        int insert_count = 0;
+        TexNode** inserts = collect_inserts(vlist, start_index, end_index, &insert_count, arena);
+        if (insert_count > 0) {
+            place_floats(pages[p], inserts, insert_count, params, arena);
+        }
+
+        // Advance mark state for next page
+        mark_state.advance_page();
 
         start_index = end_index + 1;
     }
@@ -560,12 +575,141 @@ void place_floats(
     const PageBreakParams& params,
     Arena* arena
 ) {
-    // Simplified float placement: just add at bottom
-    // A full implementation would consider top vs bottom placement
+    if (float_count == 0) return;
+
+    // Calculate available space for floats
+    float max_top_height = params.page_height * params.top_fraction;
+    float max_bottom_height = params.page_height * params.bottom_fraction;
+    float min_text_height = params.page_height * params.text_fraction;
+
+    // Current usage
+    float top_used = 0;
+    float bottom_used = 0;
+
+    // Separate floats into top and bottom placement
+    TexNode* top_floats_head = nullptr;
+    TexNode* top_floats_tail = nullptr;
+    TexNode* bottom_floats_head = nullptr;
+    TexNode* bottom_floats_tail = nullptr;
 
     for (int i = 0; i < float_count; ++i) {
-        page.vlist->append_child(floats[i]);
+        TexNode* f = floats[i];
+        if (!f || f->node_class != NodeClass::Insert) continue;
+
+        float fh = f->content.insert.natural_height;
+
+        // Try top placement first
+        if (top_used + fh <= max_top_height) {
+            // Clone for top placement
+            TexNode* clone = f->content.insert.content;
+            if (clone) {
+                if (!top_floats_head) {
+                    top_floats_head = top_floats_tail = clone;
+                } else {
+                    top_floats_tail->next_sibling = clone;
+                    clone->prev_sibling = top_floats_tail;
+                    top_floats_tail = clone;
+                }
+                top_used += fh;
+            }
+        }
+        // Try bottom placement
+        else if (bottom_used + fh <= max_bottom_height) {
+            TexNode* clone = f->content.insert.content;
+            if (clone) {
+                if (!bottom_floats_head) {
+                    bottom_floats_head = bottom_floats_tail = clone;
+                } else {
+                    bottom_floats_tail->next_sibling = clone;
+                    clone->prev_sibling = bottom_floats_tail;
+                    bottom_floats_tail = clone;
+                }
+                bottom_used += fh;
+            }
+        }
+        // Float doesn't fit - will be deferred to next page
+        else {
+            log_debug("pagebreak: deferring float of height %.1f", fh);
+        }
     }
+
+    // Add floats to page
+    if (top_floats_head) {
+        // Insert top floats after topskip
+        add_page_inserts(page.vlist, top_floats_head, nullptr, params, arena);
+    }
+    if (bottom_floats_head) {
+        // Add bottom floats at end
+        add_page_inserts(page.vlist, nullptr, bottom_floats_head, params, arena);
+    }
+}
+
+// ============================================================================
+// Insertion Class Processing
+// ============================================================================
+
+// Process all inserts and organize by class
+void collect_inserts_by_class(
+    TexNode* vlist,
+    int start_index,
+    int end_index,
+    InsertionState& state
+) {
+    int index = 0;
+    for (TexNode* c = vlist->first_child; c; c = c->next_sibling) {
+        if (index >= start_index && index <= end_index) {
+            if (c->node_class == NodeClass::Insert) {
+                int cls = c->content.insert.insert_class;
+                float h = c->content.insert.natural_height;
+                TexNode* content = c->content.insert.content;
+                state.add_insert(cls, content, h);
+            }
+        }
+        index++;
+    }
+}
+
+// Place all insertions on a page by class
+void place_insertions_by_class(
+    PageContent& page,
+    InsertionState& state,
+    const PageBreakParams& params,
+    Arena* arena
+) {
+    // Build footnote vbox (class 254) - goes at bottom
+    TexNode* footnote_content = state.class_content[INSERT_CLASS_FOOTNOTE];
+    if (footnote_content) {
+        // Create footnote separator rule
+        TexNode* sep_rule = make_rule(arena, params.page_height * 0.3f, 0.4f, 0);
+        TexNode* sep_skip = make_kern(arena, 3.0f);
+
+        // Build footnote box
+        TexNode* footnote_vbox = make_vbox(arena);
+        footnote_vbox->append_child(sep_rule);
+        footnote_vbox->append_child(sep_skip);
+
+        // Add footnote content
+        for (TexNode* fn = footnote_content; fn; fn = fn->next_sibling) {
+            footnote_vbox->append_child(fn);
+        }
+
+        // Calculate dimensions
+        float fn_height = sep_rule->height + sep_skip->height;
+        for (TexNode* fn = footnote_content; fn; fn = fn->next_sibling) {
+            fn_height += fn->height + fn->depth;
+        }
+        footnote_vbox->height = fn_height;
+
+        // Add to bottom of page
+        page.vlist->append_child(footnote_vbox);
+        page.height += fn_height;
+    }
+
+    // Top floats (class 253) - already handled by place_floats
+    // Bottom floats (class 255) - already handled by place_floats
+
+    // Clear state for next page
+    state.reset();
 }
 
 // ============================================================================
@@ -594,6 +738,37 @@ void extract_page_marks(
         }
         index++;
     }
+}
+
+// Extract marks with state tracking across pages
+void extract_page_marks_with_state(
+    PageContent& page,
+    TexNode* vlist,
+    int start_index,
+    int end_index,
+    MarkState& state
+) {
+    // topmark comes from previous page's botmark
+    page.marks_top = state.top_mark;
+    page.marks_first = nullptr;
+    page.marks_bot = nullptr;
+
+    int index = 0;
+    for (TexNode* c = vlist->first_child; c; c = c->next_sibling) {
+        if (index >= start_index && index <= end_index) {
+            if (c->node_class == NodeClass::Mark) {
+                state.record_mark(c);
+                if (!page.marks_first) {
+                    page.marks_first = c;
+                }
+                page.marks_bot = c;
+            }
+        }
+        index++;
+    }
+
+    // Update state for next page
+    // Note: state.advance_page() should be called BEFORE processing next page
 }
 
 // ============================================================================
