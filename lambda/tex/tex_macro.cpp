@@ -469,12 +469,23 @@ size_t MacroProcessor::expand_one(const char* input, size_t pos, size_t len,
     return after_args - pos;
 }
 
-char* MacroProcessor::expand(const char* input, size_t len, size_t* out_len) {
+// Internal recursive expansion helper that preserves depth
+char* MacroProcessor::expand_recursive(const char* input, size_t len, size_t* out_len) {
+    // Check depth limit at entry
+    if (expansion_depth >= expansion_limit) {
+        log_error("macro: expansion depth limit (%d) reached", expansion_limit);
+        // Return copy of input without further expansion
+        char* output = (char*)arena_alloc(arena, len + 1);
+        memcpy(output, input, len);
+        output[len] = '\0';
+        *out_len = len;
+        return output;
+    }
+
     // Use a string buffer for growing result
     StrBuf* result = strbuf_new();
 
     size_t pos = 0;
-    expansion_depth = 0;
 
     while (pos < len) {
         if (input[pos] == '\\') {
@@ -485,14 +496,9 @@ char* MacroProcessor::expand(const char* input, size_t len, size_t* out_len) {
             if (consumed > 0) {
                 // Recursively expand the result
                 expansion_depth++;
-                if (expansion_depth < expansion_limit) {
-                    size_t re_expanded_len;
-                    char* re_expanded = expand(expanded, expanded_len, &re_expanded_len);
-                    strbuf_append_str_n(result, re_expanded, re_expanded_len);
-                } else {
-                    log_error("macro: expansion depth limit reached");
-                    strbuf_append_str_n(result, expanded, expanded_len);
-                }
+                size_t re_expanded_len;
+                char* re_expanded = expand_recursive(expanded, expanded_len, &re_expanded_len);
+                strbuf_append_str_n(result, re_expanded, re_expanded_len);
                 expansion_depth--;
                 pos += consumed;
             } else {
@@ -516,6 +522,12 @@ char* MacroProcessor::expand(const char* input, size_t len, size_t* out_len) {
 
     *out_len = result_len;
     return output;
+}
+
+char* MacroProcessor::expand(const char* input, size_t len, size_t* out_len) {
+    // Reset depth for top-level calls
+    expansion_depth = 0;
+    return expand_recursive(input, len, out_len);
 }
 
 // ============================================================================
