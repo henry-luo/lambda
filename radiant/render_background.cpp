@@ -82,6 +82,10 @@ static Tvg_Paint create_clip_shape(RenderContext* rdcon) {
     }
 
     tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
+    log_debug("[CLIP SHAPE] clip_rect created: clip=%.0f,%.0f to %.0f,%.0f has_radius=%d", 
+              rdcon->block.clip.left, rdcon->block.clip.top, 
+              rdcon->block.clip.right, rdcon->block.clip.bottom,
+              rdcon->block.has_clip_radius);
     return clip_rect;
 }
 
@@ -205,9 +209,8 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
 
         tvg_canvas_remove(canvas, NULL);  // clear previous shapes
         push_with_transform(rdcon, shape);
-        tvg_canvas_draw(canvas, false);
-        tvg_canvas_sync(canvas);
-        tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
     } else {
         // Simple rectangular fill
         ImageSurface* surface = rdcon->ui_context->surface;
@@ -326,9 +329,8 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
 
     tvg_canvas_remove(canvas, NULL);  // clear previous shapes
     push_with_transform(rdcon, shape);
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
-    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
 }
 
 /**
@@ -455,9 +457,8 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
 
     tvg_canvas_remove(canvas, NULL);
     push_with_transform(rdcon, shape);
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
-    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
 }
 
 /**
@@ -790,9 +791,8 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     // Draw all shadows
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
-    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering to prevent redraws
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
 
     log_debug("[BOX-SHADOW] Rendered %d outer shadow(s)", shadow_count);
 }

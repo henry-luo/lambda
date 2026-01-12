@@ -332,8 +332,8 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         tvg_canvas_remove(canvas, NULL);  // clear previous shapes
         push_with_transform(rdcon, shape);
-        tvg_canvas_draw(canvas, false);
-        tvg_canvas_sync(canvas);
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
     } else {
         // Render each side separately for non-uniform borders
         // TODO: Implement per-side rendering with proper corner handling
