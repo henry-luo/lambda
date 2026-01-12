@@ -1260,7 +1260,8 @@ void draw_debug_rect(Tvg_Canvas canvas, Rect rect, Bound* clip) {
     tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
 
     tvg_canvas_push(canvas, shape);
-    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas);
     tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
 }
 
