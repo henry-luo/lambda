@@ -139,8 +139,8 @@ int ui_context_init(UiContext* uicon, bool headless) {
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->fallback_fonts = fallback_fonts;
 
-    // init ThorVG engine
-    tvg_engine_init(TVG_ENGINE_SW, 1);
+    // init ThorVG engine (v1.0-pre34: no engine type param, just thread count)
+    tvg_engine_init(1);
     // load default font for tvg to render text later
     char* font_path = load_font_path(uicon->font_db, "Times New Roman");
     if (!font_path) {
@@ -194,7 +194,7 @@ void ui_context_cleanup(UiContext* uicon) {
 
     log_debug("cleaning up media resources");
     image_cache_cleanup(uicon);  // cleanup image cache
-    tvg_engine_term(TVG_ENGINE_SW);
+    tvg_engine_term();
     image_surface_destroy(uicon->surface);
     if (uicon->mouse_state.sys_cursor) {
         glfwDestroyCursor(uicon->mouse_state.sys_cursor);
