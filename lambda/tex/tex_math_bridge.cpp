@@ -797,46 +797,129 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                 continue;
             }
 
-            // Handle \left and \right delimiters (simplified)
+            // Handle \left and \right delimiters
+            // Determine if content requires scaled delimiters by checking for \frac, \sum, \int, etc.
             if ((cmd_len == 4 && strncmp(cmd, "left", 4) == 0) ||
                 (cmd_len == 5 && strncmp(cmd, "right", 5) == 0)) {
-                // Parse and output the delimiter character
+                bool is_left = (cmd[0] == 'l');
                 i = skip_ws(str, i, len);
                 if (i < len) {
                     char delim = str[i];
                     int32_t delim_code = -1;
-                    if (delim == '(' || delim == ')' || delim == '[' ||
-                        delim == ']' || delim == '|' || delim == '.') {
-                        delim_code = delim;
+                    bool use_cmsy = false;
+                    bool use_cmex = false;
+
+                    // Helper lambda to check if a range contains tall content
+                    auto has_tall_content = [&](size_t start, size_t end) -> bool {
+                        for (size_t scan_i = start; scan_i < end; scan_i++) {
+                            if (str[scan_i] == '\\' && scan_i + 1 < end) {
+                                scan_i++;
+                                if (scan_i + 4 <= end && strncmp(&str[scan_i], "frac", 4) == 0) return true;
+                                if (scan_i + 3 <= end && strncmp(&str[scan_i], "sum", 3) == 0) return true;
+                                if (scan_i + 3 <= end && strncmp(&str[scan_i], "int", 3) == 0) return true;
+                                if (scan_i + 4 <= end && strncmp(&str[scan_i], "prod", 4) == 0) return true;
+                            }
+                        }
+                        return false;
+                    };
+
+                    // Determine if content needs scaled delimiters
+                    bool needs_scaling = false;
+                    if (is_left) {
+                        // Find matching \right and check content between
+                        size_t scan_i = i + 1;
+                        while (scan_i < len) {
+                            if (str[scan_i] == '\\' && scan_i + 6 <= len && strncmp(&str[scan_i + 1], "right", 5) == 0) {
+                                needs_scaling = has_tall_content(i + 1, scan_i);
+                                break;
+                            }
+                            scan_i++;
+                        }
+                    } else {
+                        // For \right, scan backwards to find matching \left
+                        // And check content between them
+                        size_t cmd_start = i - cmd_len - 1;  // Position of backslash
+                        // Find the \left that matches this \right
+                        size_t scan_back = cmd_start;
+                        while (scan_back > 0) {
+                            scan_back--;
+                            if (str[scan_back] == '\\' && scan_back + 5 <= cmd_start && strncmp(&str[scan_back + 1], "left", 4) == 0) {
+                                // Found \left, check content between \left delim and \right
+                                size_t left_delim_pos = scan_back + 5;  // Position after "left"
+                                while (left_delim_pos < cmd_start && (str[left_delim_pos] == ' ' || str[left_delim_pos] == '\t')) {
+                                    left_delim_pos++;
+                                }
+                                left_delim_pos++;  // Skip the delimiter char itself
+                                needs_scaling = has_tall_content(left_delim_pos, cmd_start);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (delim == '(' || delim == ')') {
+                        if (needs_scaling) {
+                            // cmex10 parens: 0=left, 1=right (non-printable)
+                            delim_code = is_left ? 0 : 1;
+                            use_cmex = true;
+                        } else {
+                            // Use regular cmr10 parens for simple content
+                            delim_code = delim;  // '(' = 40, ')' = 41
+                        }
                         i++;
+                    } else if (delim == '[' || delim == ']') {
+                        if (needs_scaling) {
+                            // cmex10 brackets: 104='h'=left, 105='i'=right
+                            delim_code = is_left ? 104 : 105;
+                            use_cmex = true;
+                        } else {
+                            // Use regular cmr10 brackets for simple content
+                            delim_code = delim;  // '[' = 91, ']' = 93
+                        }
+                        i++;
+                    } else if (delim == '|') {
+                        delim_code = 12;  // cmex10 vertical bar
+                        use_cmex = true;
+                        i++;
+                    } else if (delim == '.') {
+                        // Invisible delimiter
+                        i++;
+                        continue;
                     } else if (delim == '\\') {
                         // \{ or \}
                         i++;
                         if (i < len) {
-                            if (str[i] == '{') delim_code = 'f';  // cmsy left brace
-                            else if (str[i] == '}') delim_code = 'g';  // cmsy right brace
+                            if (str[i] == '{') {
+                                delim_code = 'f';  // cmsy10 left brace (102)
+                                use_cmsy = true;
+                            } else if (str[i] == '}') {
+                                delim_code = 'g';  // cmsy10 right brace (103)
+                                use_cmsy = true;
+                            }
                             i++;
                         }
                     }
+
                     // Output the delimiter character
-                    if (delim_code != -1 && delim_code != '.') {  // '.' means invisible delimiter
+                    if (delim_code != -1) {
                         FontSpec font;
                         TFMFont* tfm;
-                        if (delim_code == 'f' || delim_code == 'g') {
-                            // Braces use cmsy
+                        if (use_cmsy) {
                             font = ctx.symbol_font;
                             font.size_pt = size;
                             tfm = symbol_tfm;
+                        } else if (use_cmex) {
+                            font.name = "cmex10";
+                            font.size_pt = size;
+                            tfm = roman_tfm;  // Fallback metrics
                         } else {
-                            // Parens, brackets use cmr
                             font = ctx.roman_font;
                             font.size_pt = size;
                             tfm = roman_tfm;
                         }
-                        AtomType atom = (cmd[0] == 'l') ? AtomType::Open : AtomType::Close;
+                        AtomType atom = is_left ? AtomType::Open : AtomType::Close;
                         TexNode* node = make_char_with_metrics(arena, delim_code, atom, font, tfm, size);
                         add_node(node, atom);
-                        log_debug("math_bridge: \\%.*s delimiter %c", (int)cmd_len, cmd, (char)delim_code);
+                        log_debug("math_bridge: \\%.*s delimiter code=%d use_cmex=%d", (int)cmd_len, cmd, delim_code, use_cmex);
                     }
                 }
                 continue;
@@ -867,6 +950,123 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                     last = kern;
                 }
                 continue;
+            }
+
+            // Handle \begin{env}...\end{env} environments
+            if (cmd_len == 5 && strncmp(cmd, "begin", 5) == 0) {
+                i = skip_ws(str, i, len);
+                if (i < len && str[i] == '{') {
+                    i++;  // Skip '{'
+                    // Parse environment name
+                    size_t env_start = i;
+                    while (i < len && str[i] != '}') i++;
+                    size_t env_len = i - env_start;
+                    if (i < len) i++;  // Skip '}'
+
+                    // Determine environment type
+                    bool is_pmatrix = (env_len == 7 && strncmp(&str[env_start], "pmatrix", 7) == 0);
+                    bool is_bmatrix = (env_len == 7 && strncmp(&str[env_start], "bmatrix", 7) == 0);
+                    bool is_vmatrix = (env_len == 7 && strncmp(&str[env_start], "vmatrix", 7) == 0);
+                    bool is_matrix = is_pmatrix || is_bmatrix || is_vmatrix;
+
+                    if (is_matrix) {
+                        // Find matching \end{env}
+                        size_t content_start = i;
+                        size_t end_pos = i;
+                        while (end_pos < len) {
+                            if (str[end_pos] == '\\' && end_pos + 4 <= len && strncmp(&str[end_pos + 1], "end", 3) == 0) {
+                                break;
+                            }
+                            end_pos++;
+                        }
+                        size_t content_end = end_pos;
+
+                        // Output left delimiter using cmex10 extended delimiters
+                        if (is_pmatrix || is_bmatrix || is_vmatrix) {
+                            FontSpec font;
+                            font.name = "cmex10";
+                            font.size_pt = size;
+                            TFMFont* tfm = roman_tfm;  // Fallback metrics
+                            int32_t left_code = 0;
+                            if (is_pmatrix) left_code = 18;       // cmex10 left paren (scaled)
+                            else if (is_bmatrix) left_code = 2; // cmex10 small left bracket
+                            else if (is_vmatrix) left_code = 12;  // cmex10 vertical bar
+
+                            TexNode* left_node = make_char_with_metrics(arena, left_code, AtomType::Open, font, tfm, size);
+                            add_node(left_node, AtomType::Open);
+                        }
+
+                        // Parse matrix content - rows separated by \\, cells by &
+                        // Just output the cell contents for now
+                        size_t ci = content_start;
+                        while (ci < content_end) {
+                            ci = skip_ws(str, ci, len);
+                            if (ci >= content_end) break;
+
+                            // Skip row separators
+                            if (str[ci] == '\\' && ci + 1 < content_end && str[ci + 1] == '\\') {
+                                ci += 2;
+                                continue;
+                            }
+
+                            // Skip cell separators
+                            if (str[ci] == '&') {
+                                ci++;
+                                continue;
+                            }
+
+                            // Parse cell content (single character for now)
+                            if (isalpha(str[ci])) {
+                                char c = str[ci];
+                                FontSpec font = ctx.italic_font;
+                                font.size_pt = size;
+                                TexNode* node = make_char_with_metrics(arena, c, AtomType::Ord, font, italic_tfm, size);
+                                add_node(node, AtomType::Ord);
+                                ci++;
+                            } else if (isdigit(str[ci])) {
+                                char c = str[ci];
+                                FontSpec font = ctx.roman_font;
+                                font.size_pt = size;
+                                TexNode* node = make_char_with_metrics(arena, c, AtomType::Ord, font, roman_tfm, size);
+                                add_node(node, AtomType::Ord);
+                                ci++;
+                            } else {
+                                ci++;  // Skip unknown chars
+                            }
+                        }
+
+                        // Output right delimiter using cmex10
+                        if (is_pmatrix || is_bmatrix || is_vmatrix) {
+                            FontSpec font;
+                            font.name = "cmex10";
+                            font.size_pt = size;
+                            TFMFont* tfm = roman_tfm;
+                            int32_t right_code = 0;
+                            if (is_pmatrix) right_code = 19;      // cmex10 right paren (scaled)
+                            else if (is_bmatrix) right_code = 3; // cmex10 small right bracket
+                            else if (is_vmatrix) right_code = 12; // cmex10 vertical bar
+
+                            TexNode* right_node = make_char_with_metrics(arena, right_code, AtomType::Close, font, tfm, size);
+                            add_node(right_node, AtomType::Close);
+                        }
+
+                        // Skip past \end{env}
+                        i = end_pos;
+                        if (i < len && str[i] == '\\') {
+                            i++;
+                            if (i + 3 <= len && strncmp(&str[i], "end", 3) == 0) {
+                                i += 3;
+                                i = skip_ws(str, i, len);
+                                if (i < len && str[i] == '{') {
+                                    while (i < len && str[i] != '}') i++;
+                                    if (i < len) i++;  // Skip '}'
+                                }
+                            }
+                        }
+                        log_debug("math_bridge: processed %.*s environment", (int)env_len, &str[env_start]);
+                        continue;
+                    }
+                }
             }
 
             // Unknown command - log and skip
