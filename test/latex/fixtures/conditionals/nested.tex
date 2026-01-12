@@ -1,0 +1,63 @@
+% nested.tex - Test nested conditionals
+\documentclass{article}
+\begin{document}
+
+% Simple nesting
+\iftrue
+  Outer true
+  \iftrue
+    Inner true
+  \fi
+\fi
+
+% Nesting with else
+\iftrue
+  \iffalse
+    False branch
+  \else
+    True branch
+  \fi
+\fi
+
+% Deep nesting
+\iftrue
+  Level 1
+  \iftrue
+    Level 2
+    \iftrue
+      Level 3
+      \iftrue
+        Level 4
+      \fi
+    \fi
+  \fi
+\fi
+
+% Mixed conditional types
+\ifnum 1<2
+  \ifodd 3
+    Odd inside num
+  \fi
+\fi
+
+% Nesting in false branch (skipped)
+\iffalse
+  \iftrue
+    This should be skipped
+  \fi
+\fi
+
+% Complex nesting
+\newcounter{x}
+\setcounter{x}{1}
+\ifnum\value{x}=1
+  \ifcase\value{x}
+    Zero
+  \or
+    One (correct)
+  \or
+    Two
+  \fi
+\fi
+
+\end{document}

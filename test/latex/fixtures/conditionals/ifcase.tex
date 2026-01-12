@@ -1,0 +1,31 @@
+% ifcase.tex - Test \ifcase multi-way branch
+\documentclass{article}
+\begin{document}
+
+% Basic ifcase
+\newcounter{n}
+
+\setcounter{n}{0}
+\ifcase\value{n} Zero\or One\or Two\else Other\fi
+
+\setcounter{n}{1}
+\ifcase\value{n} Zero\or One\or Two\else Other\fi
+
+\setcounter{n}{2}
+\ifcase\value{n} Zero\or One\or Two\else Other\fi
+
+\setcounter{n}{5}
+\ifcase\value{n} Zero\or One\or Two\else Other\fi
+
+% Days of week
+\newcommand{\dayname}[1]{%
+  \ifcase#1 Sunday\or Monday\or Tuesday\or Wednesday%
+  \or Thursday\or Friday\or Saturday\fi}
+
+\dayname{0} \dayname{3} \dayname{6}
+
+% Empty cases
+\setcounter{n}{1}
+\ifcase\value{n}\or One\or\or Three\fi
+
+\end{document}

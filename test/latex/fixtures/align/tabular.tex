@@ -1,0 +1,47 @@
+% tabular.tex - Test LaTeX tabular (uses halign internally)
+\documentclass{article}
+\begin{document}
+
+% Basic tabular
+\begin{tabular}{lcr}
+Left & Center & Right \\
+A & B & C \\
+1 & 2 & 3 \\
+\end{tabular}
+
+\bigskip
+
+% With lines
+\begin{tabular}{|l|c|r|}
+\hline
+Left & Center & Right \\
+\hline
+A & B & C \\
+1 & 2 & 3 \\
+\hline
+\end{tabular}
+
+\bigskip
+
+% Multi-column
+\begin{tabular}{|l|c|r|}
+\hline
+\multicolumn{3}{|c|}{Header spanning all} \\
+\hline
+A & B & C \\
+\multicolumn{2}{|c|}{Span 2} & X \\
+\hline
+\end{tabular}
+
+\bigskip
+
+% Fixed width columns
+\begin{tabular}{|p{3cm}|p{3cm}|}
+\hline
+This is a paragraph that will wrap. & Another paragraph column. \\
+\hline
+Short & Short \\
+\hline
+\end{tabular}
+
+\end{document}

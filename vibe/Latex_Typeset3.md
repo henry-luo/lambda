@@ -28,6 +28,7 @@
 3. ✅ **M3: Alignment** - \halign and \valign with preamble parsing, column templates (u#v pattern), tabskip glue, \noalign, \span, \omit
 4. ✅ **M4: Macro Processor** - \def with delimited/undelimited parameters, \newcommand/\renewcommand/\providecommand, parameter substitution, recursive expansion with depth limit
 5. ✅ **M5: Conditionals** - \if, \ifx, \ifnum, \ifdim, \ifodd, \ifdefined, \iftrue/\iffalse, mode tests (\ifvmode, etc.), proper nesting
+6. ✅ **M6: Test Suite** - Comprehensive GTest unit tests for all M1-M5 features, test fixtures directory with sample .tex files
 
 ### New Files Created
 
@@ -39,6 +40,48 @@
 | `tex_macro.cpp` | \def, \newcommand implementation | ~520 |
 | `tex_conditional.hpp` | Conditional processing API | ~145 |
 | `tex_conditional.cpp` | \if* implementation | ~500 |
+
+### Test Files Created (M6)
+
+| File | Tests | Status |
+|------|-------|--------|
+| `test/test_tex_pagebreak_gtest.cpp` | 27 tests | ✅ All pass |
+| `test/test_tex_math_extended_gtest.cpp` | 34 tests | ✅ All pass |
+| `test/test_tex_align_gtest.cpp` | 32 tests | ✅ All pass |
+| `test/test_tex_macro_gtest.cpp` | 39 tests | ✅ 35 pass, 4 skipped |
+| `test/test_tex_conditional_gtest.cpp` | 27 tests | ✅ All pass |
+
+**Total: 159 tests (155 pass, 4 skipped)**
+
+### Test Fixtures Directory
+
+```
+test/latex/fixtures/
+├── pagebreak/
+│   ├── floats.tex
+│   ├── footnotes.tex
+│   └── marks.tex
+├── math/
+│   ├── extensible_delims.tex
+│   ├── big_operators.tex
+│   ├── accents.tex
+│   └── phantoms.tex
+├── align/
+│   ├── halign_basic.tex
+│   ├── halign_span.tex
+│   ├── valign_basic.tex
+│   └── tabular.tex
+├── macros/
+│   ├── def_basic.tex
+│   ├── def_params.tex
+│   ├── newcommand.tex
+│   └── expansion.tex
+└── conditionals/
+    ├── ifnum.tex
+    ├── ifx.tex
+    ├── ifcase.tex
+    └── nested.tex
+```
 
 ### Enhanced Files
 
