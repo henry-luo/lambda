@@ -136,6 +136,23 @@ TexNode* typeset_math_string(
 );
 
 // ============================================================================
+// LaTeX Math Parser
+// ============================================================================
+
+// Parse and typeset LaTeX math notation including:
+// - Greek letters (\alpha, \beta, etc.)
+// - Fractions (\frac{num}{denom})
+// - Square roots (\sqrt{x}, \sqrt[n]{x})
+// - Subscripts/superscripts (x^2, x_i, x_i^n)
+// - Symbols (\sum, \int, \times, etc.)
+// Returns an HBox containing the typeset math
+TexNode* typeset_latex_math(
+    const char* latex_str,
+    size_t len,
+    MathContext& ctx
+);
+
+// ============================================================================
 // Fraction Support
 // ============================================================================
 
