@@ -65,6 +65,13 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
         cd - > /dev/null
     fi
 
+    # Clean ThorVG build files
+    if [ -d "mac-deps/thorvg" ]; then
+        cd mac-deps/thorvg
+        rm -rf build-mac 2>/dev/null || true
+        cd - > /dev/null
+    fi
+
     echo "Cleanup completed."
     exit 0
 fi
@@ -367,27 +374,27 @@ build_rpmalloc_for_mac() {
 build_thorvg_v1_0_pre34_for_mac() {
     echo "Building ThorVG v1.0-pre34 for Mac..."
 
-    # Check if already installed in system location and verify headers
-    if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ]; then
-        if [ -f "$SYSTEM_PREFIX/include/thorvg.h" ]; then
+    # Check if already built in mac-deps and verify headers
+    if [ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ]; then
+        if [ -f "mac-deps/thorvg/inc/thorvg.h" ]; then
             # Verify no GL symbols (which cause conflicts with system OpenGL)
-            if ! nm "$SYSTEM_PREFIX/lib/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
-                echo "✅ ThorVG v1.0-pre34 already installed in system location"
+            if ! nm "mac-deps/thorvg/build-mac/src/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
+                echo "✅ ThorVG v1.0-pre34 already built in mac-deps"
                 return 0
             else
                 echo "ThorVG library has GL symbols (conflicts with OpenGL), rebuilding..."
-                sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg.a" 2>/dev/null || true
+                rm -rf "mac-deps/thorvg" 2>/dev/null || true
             fi
         else
             echo "ThorVG library found but headers missing, rebuilding..."
         fi
     fi
 
-    # Create build_temp directory if it doesn't exist
-    mkdir -p build_temp
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
 
-    if [ ! -d "build_temp/thorvg" ]; then
-        cd build_temp
+    if [ ! -d "mac-deps/thorvg" ]; then
+        cd mac-deps
         echo "Cloning ThorVG repository..."
         git clone https://github.com/thorvg/thorvg.git || {
             echo "Warning: Could not clone ThorVG repository"
@@ -397,13 +404,13 @@ build_thorvg_v1_0_pre34_for_mac() {
         cd - > /dev/null
     else
         echo "ThorVG source already downloaded"
-        cd "build_temp/thorvg"
+        cd "mac-deps/thorvg"
         # Make sure we're up to date
         git fetch --tags 2>/dev/null || true
         cd - > /dev/null
     fi
 
-    cd "build_temp/thorvg"
+    cd "mac-deps/thorvg"
 
     # Checkout v1.0-pre34 specifically
     echo "Checking out ThorVG v1.0-pre34..."
@@ -465,28 +472,19 @@ build_thorvg_v1_0_pre34_for_mac() {
 
             echo "Building ThorVG v1.0-pre34..."
             if ninja -C build-mac; then
-                echo "Installing ThorVG v1.0-pre34 to $SYSTEM_PREFIX (requires sudo)..."
-                # Copy files manually to /usr/local instead of using meson install
-                sudo mkdir -p "$SYSTEM_PREFIX/lib"
-                sudo mkdir -p "$SYSTEM_PREFIX/include"
-                
-                if [ -f "build-mac/src/libthorvg.a" ]; then
-                    sudo cp "build-mac/src/libthorvg.a" "$SYSTEM_PREFIX/lib/"
-                fi
-                
-                if [ -f "inc/thorvg.h" ]; then
-                    sudo cp "inc/thorvg.h" "$SYSTEM_PREFIX/include/"
-                fi
+                echo "ThorVG v1.0-pre34 built in mac-deps/thorvg/build-mac/"
+                # No installation needed - library stays in mac-deps directory
 
-                # Verify installation
-                if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] && [ -f "$SYSTEM_PREFIX/include/thorvg.h" ]; then
+                # Verify build
+                if [ -f "build-mac/src/libthorvg.a" ] && [ -f "inc/thorvg.h" ]; then
                     # Verify text API is available
-                    if nm "$SYSTEM_PREFIX/lib/libthorvg.a" | grep -q "tvg_text_new"; then
+                    if nm "build-mac/src/libthorvg.a" | grep -q "tvg_text_new"; then
                         # Verify no GL symbols
-                        if ! nm "$SYSTEM_PREFIX/lib/libthorvg.a" | grep -q "glClearColor"; then
+                        if ! nm "build-mac/src/libthorvg.a" | grep -q "glClearColor"; then
                             echo "✅ ThorVG v1.0-pre34 built successfully"
                             echo "   - Text API: ✓ Available"
                             echo "   - GL symbols: ✓ None (no conflicts)"
+                            echo "   - Location: mac-deps/thorvg/build-mac/src/libthorvg.a"
                             cd - > /dev/null
                             return 0
                         else
@@ -996,24 +994,20 @@ fi
 # Build ThorVG v1.0-pre34 for Mac (with TTF loader for SVG text support)
 echo "Setting up ThorVG ..."
 
-# Check if ThorVG v1.0-pre34 is already properly installed
-if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
+# Check if ThorVG v1.0-pre34 is already properly built in mac-deps
+if [ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ]; then
     # Verify it's the correct version by checking if we can find the repository with the right tag
-    if [ -d "build_temp/thorvg" ]; then
-        cd "build_temp/thorvg"
+    if [ -d "mac-deps/thorvg" ]; then
+        cd "mac-deps/thorvg"
         if git describe --tags 2>/dev/null | grep -q "v1.0-pre34"; then
-            echo "✅ ThorVG v1.0-pre34 already installed and verified"
+            echo "✅ ThorVG v1.0-pre34 already built and verified in mac-deps"
             cd - > /dev/null
         else
             echo "ThorVG found but version mismatch, rebuilding..."
             cd - > /dev/null
             # Force rebuild to ensure we have the correct version
-            echo "Removing existing ThorVG installation to ensure correct version..."
-            sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
-            sudo rm -f "$SYSTEM_PREFIX/include/thorvg"* 2>/dev/null || true
-            sudo rm -rf "$SYSTEM_PREFIX/include/thorvg" 2>/dev/null || true
-            sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
-            rm -rf "build_temp/thorvg" 2>/dev/null || true
+            echo "Removing existing ThorVG build to ensure correct version..."
+            rm -rf "mac-deps/thorvg" 2>/dev/null || true
 
             if ! build_thorvg_v1_0_pre34_for_mac; then
                 echo "❌ ThorVG v1.0-pre34 build failed - required for Radiant project"
@@ -1023,7 +1017,7 @@ if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg
             fi
         fi
     else
-        echo "✅ ThorVG v1.0-pre34 already installed in system location"
+        echo "✅ ThorVG v1.0-pre34 already built in mac-deps"
     fi
 else
     # ThorVG not found, need to build it
@@ -1267,7 +1261,7 @@ fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- rpmalloc: $([ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- ThorVG: $([ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
