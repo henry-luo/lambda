@@ -19,57 +19,22 @@ namespace tex {
 // Math Style Functions
 // ============================================================================
 
-MathStyle script_style(MathStyle style) {
-    switch (style) {
-        case MathStyle::Display:
-        case MathStyle::Text:
-            return MathStyle::Script;
-        case MathStyle::DisplayCramped:
-        case MathStyle::TextCramped:
-            return MathStyle::ScriptCramped;
-        case MathStyle::Script:
-        case MathStyle::Scriptscript:
-            return MathStyle::Scriptscript;
-        case MathStyle::ScriptCramped:
-        case MathStyle::ScriptscriptCramped:
-            return MathStyle::ScriptscriptCramped;
-        default:
-            return MathStyle::Script;
-    }
-}
-
-MathStyle scriptscript_style(MathStyle style) {
-    if (is_cramped(style)) {
-        return MathStyle::ScriptscriptCramped;
-    }
-    return MathStyle::Scriptscript;
-}
-
-MathStyle cramped_style(MathStyle style) {
-    // Odd styles are cramped versions
-    if ((int)style % 2 == 0) {
-        return (MathStyle)((int)style + 1);
-    }
-    return style;
-}
-
-bool is_cramped(MathStyle style) {
-    return ((int)style % 2) == 1;
-}
+// Note: is_cramped, sup_style, sub_style are inline in tex_font_metrics.hpp
+// We only need style_size_factor here
 
 float style_size_factor(MathStyle style) {
     switch (style) {
         case MathStyle::Display:
-        case MathStyle::DisplayCramped:
+        case MathStyle::DisplayPrime:
         case MathStyle::Text:
-        case MathStyle::TextCramped:
+        case MathStyle::TextPrime:
             return 1.0f;
         case MathStyle::Script:
-        case MathStyle::ScriptCramped:
+        case MathStyle::ScriptPrime:
             return 0.7f;       // Script size
-        case MathStyle::Scriptscript:
-        case MathStyle::ScriptscriptCramped:
-            return 0.5f;       // Scriptscript size
+        case MathStyle::ScriptScript:
+        case MathStyle::ScriptScriptPrime:
+            return 0.5f;       // ScriptScript size
         default:
             return 1.0f;
     }
@@ -777,7 +742,7 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                     size_t idx_len = i - idx_start;
                     if (i < len) i++;  // skip ']'
                     MathContext script_ctx = ctx;
-                    script_ctx.style = scriptscript_style(ctx.style);
+                    script_ctx.style = sub_style(sub_style(ctx.style));
                     index = parse_latex_math_internal(str + idx_start, idx_len, script_ctx);
                 }
 
@@ -1124,14 +1089,14 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                 size_t sup_len;
                 i = parse_braced_group(str, i, len, &sup_str, &sup_len);
                 MathContext script_ctx = ctx;
-                script_ctx.style = script_style(ctx.style);
+                script_ctx.style = sup_style(ctx.style);
                 superscript = parse_latex_math_internal(sup_str, sup_len, script_ctx);
             } else {
                 // Single character
                 char sc = str[i];
                 i++;
                 MathContext script_ctx = ctx;
-                script_ctx.style = script_style(ctx.style);
+                script_ctx.style = sup_style(ctx.style);
                 char tmp[2] = {sc, 0};
                 superscript = parse_latex_math_internal(tmp, 1, script_ctx);
             }
@@ -1148,13 +1113,13 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                         size_t sub_len;
                         i = parse_braced_group(str, i, len, &sub_str, &sub_len);
                         MathContext script_ctx = ctx;
-                        script_ctx.style = script_style(ctx.style);
+                        script_ctx.style = sup_style(ctx.style);
                         subscript = parse_latex_math_internal(sub_str, sub_len, script_ctx);
                     } else {
                         char sc = str[i];
                         i++;
                         MathContext script_ctx = ctx;
-                        script_ctx.style = script_style(ctx.style);
+                        script_ctx.style = sup_style(ctx.style);
                         char tmp[2] = {sc, 0};
                         subscript = parse_latex_math_internal(tmp, 1, script_ctx);
                     }
@@ -1199,13 +1164,13 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                 size_t sub_len;
                 i = parse_braced_group(str, i, len, &sub_str, &sub_len);
                 MathContext script_ctx = ctx;
-                script_ctx.style = script_style(ctx.style);
+                script_ctx.style = sup_style(ctx.style);
                 subscript = parse_latex_math_internal(sub_str, sub_len, script_ctx);
             } else {
                 char sc = str[i];
                 i++;
                 MathContext script_ctx = ctx;
-                script_ctx.style = script_style(ctx.style);
+                script_ctx.style = sup_style(ctx.style);
                 char tmp[2] = {sc, 0};
                 subscript = parse_latex_math_internal(tmp, 1, script_ctx);
             }
@@ -1222,13 +1187,13 @@ static TexNode* parse_latex_math_internal(const char* str, size_t len, MathConte
                         size_t sup_len;
                         i = parse_braced_group(str, i, len, &sup_str, &sup_len);
                         MathContext script_ctx = ctx;
-                        script_ctx.style = script_style(ctx.style);
+                        script_ctx.style = sup_style(ctx.style);
                         superscript = parse_latex_math_internal(sup_str, sup_len, script_ctx);
                     } else {
                         char sc = str[i];
                         i++;
                         MathContext script_ctx = ctx;
-                        script_ctx.style = script_style(ctx.style);
+                        script_ctx.style = sup_style(ctx.style);
                         char tmp[2] = {sc, 0};
                         superscript = parse_latex_math_internal(tmp, 1, script_ctx);
                     }
@@ -1355,7 +1320,7 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
     float num_shift, denom_shift;
     float num_gap, denom_gap;
 
-    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayCramped) {
+    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
         num_shift = 7.0f * ctx.base_size_pt / 10.0f;    // num1
         denom_shift = 7.0f * ctx.base_size_pt / 10.0f;  // denom1
         num_gap = 3.0f * rule_thickness;
@@ -1416,12 +1381,12 @@ TexNode* typeset_fraction_strings(const char* num_str, const char* denom_str,
                                    MathContext& ctx) {
     // Typeset numerator in script style
     MathContext num_ctx = ctx;
-    num_ctx.style = script_style(ctx.style);
+    num_ctx.style = sup_style(ctx.style);
     TexNode* num = typeset_math_string(num_str, strlen(num_str), num_ctx);
 
     // Typeset denominator in script style
     MathContext denom_ctx = ctx;
-    denom_ctx.style = script_style(ctx.style);
+    denom_ctx.style = sup_style(ctx.style);
     TexNode* denom = typeset_math_string(denom_str, strlen(denom_str), denom_ctx);
 
     return typeset_fraction(num, denom, ctx.rule_thickness, ctx);
@@ -1438,7 +1403,7 @@ TexNode* typeset_sqrt(TexNode* radicand, MathContext& ctx) {
     float rule = ctx.rule_thickness;
     float phi;  // Clearance above rule
 
-    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayCramped) {
+    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
         phi = rule + (ctx.x_height / 4.0f);
     } else {
         phi = rule + (rule / 4.0f);
@@ -1516,7 +1481,7 @@ TexNode* typeset_scripts(TexNode* nucleus, TexNode* subscript, TexNode* superscr
     // Script parameters (TeXBook p. 445)
     float sup_shift, sub_shift;
 
-    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayCramped) {
+    if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
         sup_shift = 4.0f * ctx.base_size_pt / 10.0f;  // sup1
         sub_shift = 2.5f * ctx.base_size_pt / 10.0f;  // sub1
     } else if (is_cramped(ctx.style)) {
@@ -2232,7 +2197,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
             Item denom = get_map_item(math_node, "denominator");
 
             MathContext script_ctx = ctx;
-            script_ctx.style = script_style(ctx.style);
+            script_ctx.style = sup_style(ctx.style);
 
             TexNode* num_node = convert_lambda_math(num, script_ctx);
             TexNode* denom_node = convert_lambda_math(denom, script_ctx);
@@ -2248,7 +2213,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
 
             if (degree.item != ItemNull.item) {
                 MathContext ss_ctx = ctx;
-                ss_ctx.style = scriptscript_style(ctx.style);
+                ss_ctx.style = sub_style(sub_style(ctx.style));
                 TexNode* degree_node = convert_lambda_math(degree, ss_ctx);
                 return typeset_root(degree_node, radicand, ctx);
             }
@@ -2264,7 +2229,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
             TexNode* nucleus = convert_lambda_math(base, ctx);
 
             MathContext script_ctx = ctx;
-            script_ctx.style = script_style(ctx.style);
+            script_ctx.style = sup_style(ctx.style);
 
             TexNode* sub_node = (sub.item != ItemNull.item)
                 ? convert_lambda_math(sub, script_ctx) : nullptr;

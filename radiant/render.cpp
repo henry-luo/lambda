@@ -4,6 +4,7 @@
 #include "render_background.hpp"
 #include "render_filter.hpp"
 #include "render_math.hpp"
+#include "render_texnode.hpp"
 #include "transform.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
@@ -205,32 +206,32 @@ extern CssEnum get_white_space_value(DomNode* node);
  *   -1 if view_a comes before view_b
  *    0 if view_a equals view_b
  *    1 if view_a comes after view_b
- * 
+ *
  * Algorithm: Walk up to find common ancestor, then compare sibling order.
  */
 static int compare_view_order(View* view_a, View* view_b) {
     if (view_a == view_b) return 0;
     if (!view_a) return -1;
     if (!view_b) return 1;
-    
+
     // Build ancestor chains for both views
     View* chain_a[64];  // max depth 64
     View* chain_b[64];
     int depth_a = 0, depth_b = 0;
-    
+
     for (View* v = view_a; v && depth_a < 64; v = v->parent) {
         chain_a[depth_a++] = v;
     }
     for (View* v = view_b; v && depth_b < 64; v = v->parent) {
         chain_b[depth_b++] = v;
     }
-    
+
     // Find common ancestor by walking up from root
     int i = depth_a - 1, j = depth_b - 1;
     while (i >= 0 && j >= 0 && chain_a[i] == chain_b[j]) {
         i--; j--;
     }
-    
+
     // Now chain_a[i+1] == chain_b[j+1] is the common ancestor
     // Compare chain_a[i] and chain_b[j] (children of common ancestor)
     if (i < 0) {
@@ -241,11 +242,11 @@ static int compare_view_order(View* view_a, View* view_b) {
         // view_b is ancestor of view_a, so view_b comes first
         return 1;
     }
-    
+
     // Compare sibling order: which comes first among children of common ancestor?
     View* child_a = chain_a[i];
     View* child_b = chain_b[j];
-    
+
     // Walk through siblings to find which comes first
     for (View* sib = child_a; sib; sib = (View*)sib->next_sibling) {
         if (sib == child_b) {
@@ -258,26 +259,26 @@ static int compare_view_order(View* view_a, View* view_b) {
 /**
  * Check if a text view is within a cross-view selection and determine
  * which portion of the text should be selected.
- * 
+ *
  * Returns:
  *   0: not in selection
  *   1: fully selected (all text)
  *   2: partially selected (check *start_offset and *end_offset)
  */
-static int get_selection_range_for_view(SelectionState* sel, View* text_view, 
+static int get_selection_range_for_view(SelectionState* sel, View* text_view,
     int text_length, int* start_offset, int* end_offset) {
-    
+
     if (!sel || sel->is_collapsed) return 0;
-    
+
     View* anchor_view = sel->anchor_view;
     View* focus_view = sel->focus_view;
-    
+
     // Single-view selection (legacy)
     if (!anchor_view || !focus_view) {
         anchor_view = sel->view;
         focus_view = sel->view;
     }
-    
+
     // Same view for anchor and focus
     if (anchor_view == focus_view) {
         if (text_view != anchor_view) return 0;
@@ -286,39 +287,39 @@ static int get_selection_range_for_view(SelectionState* sel, View* text_view,
         *end_offset = sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset;
         return 2;  // partially selected
     }
-    
+
     // Cross-view selection: determine order
     int anchor_vs_focus = compare_view_order(anchor_view, focus_view);
     View* first_view = (anchor_vs_focus <= 0) ? anchor_view : focus_view;
     View* last_view = (anchor_vs_focus <= 0) ? focus_view : anchor_view;
     int first_offset = (anchor_vs_focus <= 0) ? sel->anchor_offset : sel->focus_offset;
     int last_offset = (anchor_vs_focus <= 0) ? sel->focus_offset : sel->anchor_offset;
-    
+
     // Check if text_view is the first view
     if (text_view == first_view) {
         *start_offset = first_offset;
         *end_offset = text_length;  // select to end
         return 2;
     }
-    
+
     // Check if text_view is the last view
     if (text_view == last_view) {
         *start_offset = 0;
         *end_offset = last_offset;
         return 2;
     }
-    
+
     // Check if text_view is between first and last
     int view_vs_first = compare_view_order(text_view, first_view);
     int view_vs_last = compare_view_order(text_view, last_view);
-    
+
     if (view_vs_first > 0 && view_vs_last < 0) {
         // text_view is between first and last - fully selected
         *start_offset = 0;
         *end_offset = text_length;
         return 1;
     }
-    
+
     return 0;  // not in selection
 }
 
@@ -328,29 +329,29 @@ static int get_selection_range_for_view(SelectionState* sel, View* text_view,
  */
 static bool is_view_in_selection(SelectionState* sel, View* view) {
     if (!sel || sel->is_collapsed || !view) return false;
-    
+
     View* anchor_view = sel->anchor_view;
     View* focus_view = sel->focus_view;
-    
+
     // Single-view selection (legacy) - images won't be text views
     if (!anchor_view || !focus_view) {
         return false;
     }
-    
+
     // Same view for anchor and focus - no cross-view selection
     if (anchor_view == focus_view) {
         return false;
     }
-    
+
     // Cross-view selection: determine order
     int anchor_vs_focus = compare_view_order(anchor_view, focus_view);
     View* first_view = (anchor_vs_focus <= 0) ? anchor_view : focus_view;
     View* last_view = (anchor_vs_focus <= 0) ? focus_view : anchor_view;
-    
+
     // Check if view is between first and last (inclusive of first and last)
     int view_vs_first = compare_view_order(view, first_view);
     int view_vs_last = compare_view_order(view, last_view);
-    
+
     // View is selected if it's >= first and <= last in document order
     return (view_vs_first >= 0 && view_vs_last <= 0);
 }
@@ -371,21 +372,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         log_debug("no text rect for text view");
         return;
     }
-    
+
     // Check if this text view has a selection (supports cross-view selection)
     SelectionState* sel = rdcon->selection;
     int sel_start = 0, sel_end = 0;
-    
+
     // Calculate total text length for cross-view selection check
     int total_text_length = 0;
     if (str) {
         total_text_length = strlen((const char*)str);
     }
-    
+
     // Use the new cross-view aware selection check
     int selection_type = get_selection_range_for_view(sel, (View*)text_view, total_text_length, &sel_start, &sel_end);
     bool has_selection = selection_type > 0;
-    
+
     if (has_selection) {
         log_debug("[SELECTION] Text view %p has selection (type=%d): start=%d, end=%d, anchor_view=%p, focus_view=%p",
             text_view, selection_type, sel_start, sel_end,
@@ -517,41 +518,41 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         bool has_space = false;  uint32_t codepoint;
         bool is_word_start = true;  // Track word boundaries for capitalize
         int char_index = text_rect->start_index;  // Track character offset for selection
-        
+
         // Selection background color - standard blue for text selection
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue (like browser selection)
-        
+
         // Debug: log inline selection position info
         if (has_selection) {
             log_debug("[SEL-INLINE] text_rect: x=%.1f y=%.1f, rdcon->block: x=%.1f y=%.1f, final pos: x=%.1f y=%.1f, font_size=%.1f, y_ppem=%d",
                 text_rect->x, text_rect->y, rdcon->block.x, rdcon->block.y, x, y,
                 rdcon->font.style->font_size, rdcon->font.ft_face->size->metrics.y_ppem);
         }
-        
+
         // Track cumulative position for debugging
         float debug_start_x = x;
-        
+
         while (p < end) {
             // Check if current character is in selection range
             bool is_selected = has_selection && char_index >= sel_start && char_index < sel_end;
-            
+
             // Debug first selected character
             if (is_selected && char_index == sel_start) {
                 log_debug("[SEL-INLINE] First selected char at index=%d, x=%.1f y=%.1f, advance_so_far=%.1f (expected overlay start_x=%.1f * scale=%.1f = %.1f)",
                     char_index, x, y, x - debug_start_x, rdcon->selection->start_x, s, rdcon->selection->start_x * s);
             }
-            
+
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
                 if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
-                    
+
                     // Draw selection background for selected space
                     if (is_selected) {
                         Rect sel_rect = {x, y, space_width, text_rect->height * s};
                         fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip);
                     }
-                    
+
                     // Render space by advancing x position
                     // All spaces are rendered (not just non-trailing) because layout has
                     // already determined correct positioning including inter-element whitespace
@@ -603,7 +604,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else {
                     // draw the glyph to the image buffer
                     float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
-                    
+
                     // Debug: log per-character advance for first 15 chars when selection active
                     if (has_selection && char_index <= 15) {
                         log_debug("[SEL-ADVANCE] char_index=%d codepoint=U+%04X '%c' x=%.1f advance=%.1f (26.2=%.1f raw)",
@@ -1578,7 +1579,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
         blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
     }
-    
+
     // Render blue selection overlay if image is within a cross-view selection
     if (rdcon->selection && is_view_in_selection(rdcon->selection, (View*)view)) {
         // Semi-transparent blue overlay (same color as text selection)
@@ -1762,6 +1763,11 @@ void render_children(RenderContext* rdcon, View* view) {
             DomElement* elem = static_cast<DomElement*>(view);
             radiant::render_math_from_embed(rdcon, elem);
         }
+        else if (view->view_type == RDT_VIEW_TEXNODE) {
+            // TexNode view - renders TexNode trees directly (unified TeX pipeline)
+            DomElement* elem = static_cast<DomElement*>(view);
+            radiant::render_texnode_element(rdcon, elem);
+        }
         else {
             log_debug("unknown view in rendering: %d", view->view_type);
         }
@@ -1892,7 +1898,7 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     float height = caret->height * s;
     float caret_width = 3.0f * s;  // 3 CSS pixels wide
 
-    log_debug("[CARET] Before render: CSS pos (%.1f,%.1f), physical pos (%.1f,%.1f) height=%.1f", 
+    log_debug("[CARET] Before render: CSS pos (%.1f,%.1f), physical pos (%.1f,%.1f) height=%.1f",
         css_x, css_y, x, y, height);
 
     // Draw using ThorVG for proper integration with scene graph
@@ -1928,10 +1934,10 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
         log_debug("[SELECTION] No selection view");
         return;
     }
-    
+
     View* view = sel->view;
     float s = rdcon->scale;
-    
+
     // For single-line selection, draw a single rectangle
     // Multi-line selection would require multiple rectangles per line
 
@@ -1943,7 +1949,7 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     float end_y = sel->end_y;
     log_debug("[SELECTION] Before parent walk: start=(%.1f,%.1f), view=%p, view_type=%d",
         start_x, start_y, (void*)view, view->view_type);
-    
+
     // Walk up from the text view's parent to get absolute coordinates
     // (same as caret rendering - coordinates are relative to parent block)
     View* parent = view->parent;
@@ -2004,18 +2010,18 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
         log_debug("[UI_OVERLAY] No state");
         return;
     }
-    
+
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
-    
+
     // Selection is now rendered inline in render_text_view, so we don't need overlay
     // render_selection(rdcon, state);
-    
+
     // Render open dropdown popup (above content)
     if (state->open_dropdown) {
         ViewBlock* select = (ViewBlock*)state->open_dropdown;
         render_select_dropdown(rdcon, select, state);
     }
-    
+
     // Caret rendered on top of content
     render_caret(rdcon, state);
 
@@ -2040,7 +2046,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     // Initialize HiDPI scale factor for converting CSS logical pixels to physical surface pixels
     rdcon->scale = uicon->pixel_ratio > 0 ? uicon->pixel_ratio : 1.0f;
     log_debug("render_init: scale factor = %.2f (pixel_ratio)", rdcon->scale);
-    
+
     // Initialize selection state from document state
     if (uicon->document && uicon->document->state && uicon->document->state->selection) {
         rdcon->selection = uicon->document->state->selection;
@@ -2150,7 +2156,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
         log_info("[RENDER] calling render_ui_overlays, state=%p", (void*)uicon->document->state);
         render_ui_overlays(&rdcon, uicon->document->state);
     } else {
-        log_info("[RENDER] no state for overlays: doc=%p, state=%p", 
+        log_info("[RENDER] no state for overlays: doc=%p, state=%p",
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
 
