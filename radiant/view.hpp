@@ -10,6 +10,11 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 
+// On macOS, explicitly include OpenGL headers before GLFW
+#ifdef __APPLE__
+#include <OpenGL/gl.h>
+#endif
+
 #include <GLFW/glfw3.h>
 
 // Windows OpenGL headers may not define these constants (they're from OpenGL 1.2+)
@@ -346,7 +351,7 @@ typedef struct ImageSurface {
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
-    Tvg_Paint* pic;       // ThorVG picture pointer for SVG image (opaque handle)
+    Tvg_Paint pic;        // ThorVG picture for SVG image (Tvg_Paint is already a pointer type in v1.0-pre34)
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
 } ImageSurface;
@@ -1217,6 +1222,7 @@ extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontPro
 extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
+extern Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface);
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height, float pixel_ratio = 1.0f);
