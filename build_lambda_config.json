@@ -122,6 +122,7 @@
         "radiant/render_filter.cpp",
         "radiant/render_texnode.cpp",
         "radiant/render_svg.cpp",
+        "radiant/render_svg_inline.cpp",
         "radiant/render_pdf.cpp",
         "radiant/render_dvi.cpp",
         "radiant/render_img.cpp",
@@ -291,7 +292,7 @@
             "include": "/usr/local/include",
             "lib": "/usr/local/lib/libthorvg.a",
             "link": "static",
-            "version": "v1.0-pre11"
+            "version": "v1.0-pre34"
         },
         {
             "name": "glfw",
@@ -707,7 +708,7 @@
                     "include": "win-native-deps/include",
                     "lib": "win-native-deps/lib/libthorvg.a",
                     "link": "static",
-                    "version": "v1.0-pre11"
+                    "version": "v1.0-pre34"
                 },
                 {
                     "name": "glfw",
@@ -962,7 +963,7 @@
                     "include": "/usr/local/include",
                     "lib": "/usr/local/lib/aarch64-linux-gnu/libthorvg.a",
                     "link": "static",
-                    "version": "v1.0-pre11"
+                    "version": "v1.0-pre34"
                 },
                 {
                     "name": "glfw",
@@ -1033,6 +1034,7 @@
         },
         "macos": {
             "includes": [
+                "/usr/local/include",
                 "/opt/homebrew/opt/freetype/include/freetype2",
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/libpng16"

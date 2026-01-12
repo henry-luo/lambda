@@ -11,7 +11,7 @@ typedef struct {
     BlockBlot block;
     ListBlot list;
     Color color;
-    Tvg_Canvas* canvas;  // ThorVG canvas pointer (opaque handle)
+    Tvg_Canvas canvas;  // ThorVG canvas (Tvg_Canvas is already a pointer type in v1.0-pre34)
 
     UiContext* ui_context;
 

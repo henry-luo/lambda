@@ -23,7 +23,7 @@ void scroll_config_init(int pixel_ratio) {
 }
 
 
-void tvg_shape_get_bounds(Tvg_Paint* shape, int* x, int* y, int* width, int* height) {
+void tvg_shape_get_bounds(Tvg_Paint shape, int* x, int* y, int* width, int* height) {
     Tvg_Matrix m;
     tvg_paint_get_transform(shape, &m);
     Tvg_Point p[4];
@@ -32,7 +32,7 @@ void tvg_shape_get_bounds(Tvg_Paint* shape, int* x, int* y, int* width, int* hei
     *width = p[2].x - p[0].x;  *height = p[2].y - p[0].y;
 }
 
-float tvg_shape_get_w(Tvg_Paint* shape) {
+float tvg_shape_get_w(Tvg_Paint shape) {
     Tvg_Matrix m;
     tvg_paint_get_transform(shape, &m);
     Tvg_Point p[4];
@@ -40,7 +40,7 @@ float tvg_shape_get_w(Tvg_Paint* shape) {
     return p[2].x - p[0].x;
 }
 
-float tvg_shape_get_h(Tvg_Paint* shape) {
+float tvg_shape_get_h(Tvg_Paint shape) {
     Tvg_Matrix m;
     tvg_paint_get_transform(shape, &m);
     Tvg_Point p[4];
@@ -52,7 +52,7 @@ void ScrollPane::reset() {
     memset(this, 0, sizeof(ScrollPane));
 }
 
-void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip) {
     log_info("SCROLLPANE: content size: %.1f x %.1f, view bounds: %.1f x %.1f",
         content_width, content_height, block_bound->width, block_bound->height);
@@ -64,20 +64,20 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
 
     tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
     // clip shape
-    Tvg_Paint* clip_rect = tvg_shape_new();
-    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+    Tvg_Paint clip_rect = tvg_shape_new();
+    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
     tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
 
     // vertical scrollbar
-    Tvg_Paint* v_scrollbar = tvg_shape_new();
+    Tvg_Paint v_scrollbar = tvg_shape_new();
     tvg_shape_append_rect(v_scrollbar, view_x + view_width - sc.SCROLLBAR_SIZE,
-        view_y, sc.SCROLLBAR_SIZE, view_height, 0, 0);
+        view_y, sc.SCROLLBAR_SIZE, view_height, 0, 0, true);
     log_debug("v_scrollbar rect: x %f, y %f, wd %f, hg %f",
         view_x + view_width - sc.SCROLLBAR_SIZE, view_y, sc.SCROLLBAR_SIZE, view_height);
     tvg_shape_set_fill_color(v_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
     tvg_paint_set_mask_method(v_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
 
-    Tvg_Paint* v_scroll_handle = tvg_shape_new();
+    Tvg_Paint v_scroll_handle = tvg_shape_new();
     if (content_height > 0) {
         tvg_shape_set_fill_color(v_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
         // NOTE: Do NOT recalculate v_max_scroll here!
@@ -94,22 +94,22 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         sp->v_handle_y = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - sp->v_handle_height);
         float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
         tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + sp->v_handle_y,
-            sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS);
+            sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
         log_debug("v_scroll_handle rect: x %f, y %f, wd %f, hg %f",
             v_scroll_x, view_y + sp->v_handle_y, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height);
         tvg_paint_set_mask_method(v_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
     }
 
     // horizontal scrollbar
-    Tvg_Paint* h_scrollbar = tvg_shape_new();
+    Tvg_Paint h_scrollbar = tvg_shape_new();
     tvg_shape_append_rect(h_scrollbar, view_x,
-        view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE, 0, 0);
+        view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE, 0, 0, true);
     log_debug("h_scrollbar rect: %f, %f, %f, %f",
         view_x, view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE);
     tvg_shape_set_fill_color(h_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
     tvg_paint_set_mask_method(h_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
 
-    Tvg_Paint* h_scroll_handle = tvg_shape_new();
+    Tvg_Paint h_scroll_handle = tvg_shape_new();
     if (content_width > 0) {
         tvg_shape_set_fill_color(h_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
         // NOTE: Do NOT recalculate h_max_scroll here! Same reason as v_max_scroll above.
@@ -125,7 +125,7 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         sp->h_handle_x = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - sp->h_handle_width);
         int h_scroll_y = view_y + view_height - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
         tvg_shape_append_rect(h_scroll_handle, view_x + sp->h_handle_x, h_scroll_y,
-            sp->h_handle_width, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS);
+            sp->h_handle_width, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
         tvg_paint_set_mask_method(h_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
     }
 

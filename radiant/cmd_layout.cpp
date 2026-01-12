@@ -1808,12 +1808,12 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    // Load SVG using ThorVG
-    Tvg_Paint* pic = tvg_picture_new();
+    // Load SVG using ThorVG (v1.0-pre34: Tvg_Paint is already a pointer type)
+    Tvg_Paint pic = tvg_picture_new();
     Tvg_Result ret = tvg_picture_load(pic, svg_filepath);
     if (ret != TVG_RESULT_SUCCESS) {
         log_error("Failed to load SVG: %s (error: %d)", svg_filepath, ret);
-        tvg_paint_del(pic);
+        tvg_paint_unref(pic, true);
         pool_destroy(view_pool);
         return nullptr;
     }
@@ -1835,7 +1835,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
     if (!view_tree) {
         log_error("Failed to allocate view tree for SVG");
-        tvg_paint_del(pic);
+        tvg_paint_unref(pic, true);
         pool_destroy(view_pool);
         return nullptr;
     }
@@ -1846,7 +1846,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
     if (!root_view) {
         log_error("Failed to allocate root view for SVG");
-        tvg_paint_del(pic);
+        tvg_paint_unref(pic, true);
         pool_destroy(view_pool);
         return nullptr;
     }
