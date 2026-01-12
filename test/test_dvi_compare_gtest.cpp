@@ -499,8 +499,7 @@ TEST_F(DVICompareTest, SubscriptSuperscript) {
     EXPECT_TRUE(test_latex_file("test_subscript_superscript"));
 }
 
-TEST_F(DVICompareTest, DISABLED_Delimiters) {
-    // Requires cmex10 font support for \left...\right sizing
+TEST_F(DVICompareTest, Delimiters) {
     EXPECT_TRUE(test_latex_file("test_delimiters"));
 }
 
@@ -508,7 +507,7 @@ TEST_F(DVICompareTest, SumIntegral) {
     EXPECT_TRUE(test_latex_file("test_sum_integral"));
 }
 
-TEST_F(DVICompareTest, DISABLED_Matrix) {
+TEST_F(DVICompareTest, Matrix) {
     EXPECT_TRUE(test_latex_file("test_matrix"));
 }
 
