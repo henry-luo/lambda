@@ -2251,7 +2251,6 @@ class PremakeGenerator:
         # Add external library linkoptions for test-specific libraries
         if libraries:
             external_static_libs = []
-            tree_sitter_libs = []  # Track tree-sitter libraries separately
             late_static_libs = []  # Static libs that need to come after lambda-lib (link order)
             for lib_name in libraries:
                 if lib_name in self.external_libraries:
@@ -2266,9 +2265,9 @@ class PremakeGenerator:
                         if not lib_path.startswith('/'):
                             lib_path = f"../../{lib_path}"
 
-                        # Special handling for tree-sitter libraries - add them to links instead of linkoptions
-                        if lib_name in ['tree-sitter', 'tree-sitter-lambda']:
-                            tree_sitter_libs.append(lib_path)
+                        # Special handling for tree-sitter libraries - add them to external_static_libs (linkoptions)
+                        if lib_name in ['tree-sitter', 'tree-sitter-lambda', 'tree-sitter-latex-math']:
+                            external_static_libs.append(lib_path)
                         # On Linux/Windows, static libs need to come AFTER lambda-lib in link order
                         # because lambda-lib has unresolved symbols that these libs provide
                         elif (self.use_linux_config or self.use_windows_config) and lib_name in ['rpmalloc', 'utf8proc']:
@@ -2276,21 +2275,8 @@ class PremakeGenerator:
                         else:
                             external_static_libs.append(lib_path)
 
-            # Add tree-sitter libraries to links (they need to come after libraries that depend on them)
-            if tree_sitter_libs:
-                # Re-open the links block to add tree-sitter libraries
-                self.premake_content[-2] = '    '  # Remove the closing brace line
-                self.premake_content.pop()  # Remove the empty line
-
-                # Add tree-sitter libraries to links
-                for lib_path in tree_sitter_libs:
-                    self.premake_content.append(f'        "{lib_path}",')
-
-                # Close the links block again
-                self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
+            # Note: tree-sitter libraries are now handled via external_static_libs (linkoptions)
+            # No longer adding them to links block which causes incorrect -l flags
 
             # Add late static libraries to links block (must come after lambda-lib on Linux)
             if late_static_libs:
