@@ -1,0 +1,50 @@
+% test_complex_analysis.tex - Complex analysis formulas
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Complex number
+$$z = x + iy = r e^{i\theta} = r(\cos\theta + i\sin\theta)$$
+
+% Modulus and argument
+$$|z| = \sqrt{x^2 + y^2}, \quad \arg(z) = \arctan\frac{y}{x}$$
+
+% Cauchy-Riemann equations
+$$\frac{\partial u}{\partial x} = \frac{\partial v}{\partial y}, \quad \frac{\partial u}{\partial y} = -\frac{\partial v}{\partial x}$$
+
+% Contour integral
+$$\oint_C f(z) \, dz$$
+
+% Cauchy's integral formula
+$$f(a) = \frac{1}{2\pi i} \oint_C \frac{f(z)}{z - a} \, dz$$
+
+% Higher derivatives
+$$f^{(n)}(a) = \frac{n!}{2\pi i} \oint_C \frac{f(z)}{(z-a)^{n+1}} \, dz$$
+
+% Laurent series
+$$f(z) = \sum_{n=-\infty}^{\infty} a_n (z - z_0)^n$$
+
+% Coefficients
+$$a_n = \frac{1}{2\pi i} \oint_C \frac{f(z)}{(z-z_0)^{n+1}} \, dz$$
+
+% Residue theorem
+$$\oint_C f(z) \, dz = 2\pi i \sum_{k} \text{Res}(f, z_k)$$
+
+% Residue at simple pole
+$$\text{Res}(f, z_0) = \lim_{z \to z_0} (z - z_0) f(z)$$
+
+% Residue at pole of order $n$
+$$\text{Res}(f, z_0) = \frac{1}{(n-1)!} \lim_{z \to z_0} \frac{d^{n-1}}{dz^{n-1}} [(z-z_0)^n f(z)]$$
+
+% Maximum modulus principle
+$$|f(z)| \leq M \text{ on } \partial D \implies |f(z)| \leq M \text{ in } D$$
+
+% Argument principle
+$$\frac{1}{2\pi i} \oint_C \frac{f'(z)}{f(z)} \, dz = N - P$$
+
+% Rouché's theorem
+$$|f(z) - g(z)| < |f(z)| \text{ on } C \implies Z_f = Z_g$$
+
+\end{document}

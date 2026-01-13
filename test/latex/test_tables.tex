@@ -1,0 +1,85 @@
+% test_tables.tex - Various table constructs
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{booktabs}
+\pagestyle{empty}
+\begin{document}
+
+% Simple tabular
+\begin{tabular}{|c|c|c|}
+\hline
+$x$ & $x^2$ & $x^3$ \\
+\hline
+1 & 1 & 1 \\
+2 & 4 & 8 \\
+3 & 9 & 27 \\
+4 & 16 & 64 \\
+\hline
+\end{tabular}
+
+\vspace{1cm}
+
+% Tabular with math
+\begin{tabular}{l|ccccc}
+$n$ & 1 & 2 & 3 & 4 & 5 \\
+\hline
+$n!$ & 1 & 2 & 6 & 24 & 120 \\
+$2^n$ & 2 & 4 & 8 & 16 & 32 \\
+$n^2$ & 1 & 4 & 9 & 16 & 25 \\
+\end{tabular}
+
+\vspace{1cm}
+
+% Truth table
+\begin{tabular}{cc|cccc}
+$p$ & $q$ & $p \land q$ & $p \lor q$ & $p \Rightarrow q$ & $p \Leftrightarrow q$ \\
+\hline
+T & T & T & T & T & T \\
+T & F & F & T & F & F \\
+F & T & F & T & T & F \\
+F & F & F & F & T & T \\
+\end{tabular}
+
+\vspace{1cm}
+
+% Array in math mode (matrix-like)
+$$\begin{array}{c|cccc}
+\cdot & 1 & a & a^2 & a^3 \\
+\hline
+1 & 1 & a & a^2 & a^3 \\
+a & a & a^2 & a^3 & 1 \\
+a^2 & a^2 & a^3 & 1 & a \\
+a^3 & a^3 & 1 & a & a^2 \\
+\end{array}$$
+
+\vspace{1cm}
+
+% Integration table
+\begin{tabular}{l|l}
+$f(x)$ & $\int f(x) \, dx$ \\
+\hline
+$x^n$ & $\frac{x^{n+1}}{n+1} + C$ \\
+$e^x$ & $e^x + C$ \\
+$\frac{1}{x}$ & $\ln|x| + C$ \\
+$\sin x$ & $-\cos x + C$ \\
+$\cos x$ & $\sin x + C$ \\
+$\sec^2 x$ & $\tan x + C$ \\
+\end{tabular}
+
+\vspace{1cm}
+
+% Derivative table
+\begin{tabular}{|l|l|l|}
+\hline
+Function & Derivative & Domain \\
+\hline
+$x^n$ & $nx^{n-1}$ & $\mathbb{R}$ \\
+$e^x$ & $e^x$ & $\mathbb{R}$ \\
+$\ln x$ & $\frac{1}{x}$ & $(0, \infty)$ \\
+$\sin x$ & $\cos x$ & $\mathbb{R}$ \\
+$\arcsin x$ & $\frac{1}{\sqrt{1-x^2}}$ & $(-1, 1)$ \\
+\hline
+\end{tabular}
+
+\end{document}

@@ -1,0 +1,56 @@
+% test_linear_algebra.tex - Linear algebra notation
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Matrix operations
+$$A = \begin{pmatrix}
+a_{11} & a_{12} & \cdots & a_{1n} \\
+a_{21} & a_{22} & \cdots & a_{2n} \\
+\vdots & \vdots & \ddots & \vdots \\
+a_{m1} & a_{m2} & \cdots & a_{mn}
+\end{pmatrix}$$
+
+% Determinant
+$$\det(A) = \begin{vmatrix}
+a & b \\
+c & d
+\end{vmatrix} = ad - bc$$
+
+% Matrix multiplication
+$$(AB)_{ij} = \sum_{k=1}^{n} a_{ik} b_{kj}$$
+
+% Eigenvalue equation
+$$A\vec{v} = \lambda\vec{v}$$
+
+% Characteristic polynomial
+$$\det(A - \lambda I) = 0$$
+
+% Trace and determinant
+$$\text{tr}(A) = \sum_{i=1}^{n} a_{ii}, \quad \det(A) = \prod_{i=1}^{n} \lambda_i$$
+
+% Inverse matrix
+$$A^{-1} = \frac{1}{\det(A)} \text{adj}(A)$$
+
+% Orthogonal matrix
+$$Q^T Q = Q Q^T = I$$
+
+% Singular Value Decomposition
+$$A = U \Sigma V^T$$
+
+% Norm
+$$\|x\|_2 = \sqrt{\sum_{i=1}^{n} |x_i|^2}$$
+
+% Inner product
+$$\langle x, y \rangle = \sum_{i=1}^{n} x_i \overline{y_i}$$
+
+% Block matrix
+$$M = \left[\begin{array}{c|c}
+A & B \\
+\hline
+C & D
+\end{array}\right]$$
+
+\end{document}

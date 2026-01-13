@@ -1,0 +1,37 @@
+% test_calculus.tex - Calculus formulas and notation
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Limits
+$$\lim_{x \to 0} \frac{\sin x}{x} = 1$$
+
+$$\lim_{n \to \infty} \left(1 + \frac{1}{n}\right)^n = e$$
+
+% Derivatives
+$$\frac{d}{dx}\left[x^n\right] = nx^{n-1}$$
+
+$$\frac{\partial f}{\partial x} = \lim_{h \to 0} \frac{f(x+h, y) - f(x, y)}{h}$$
+
+% Chain rule
+$$\frac{dy}{dx} = \frac{dy}{du} \cdot \frac{du}{dx}$$
+
+% Integrals
+$$\int_a^b f(x)\,dx = F(b) - F(a)$$
+
+$$\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}$$
+
+$$\oint_C \vec{F} \cdot d\vec{r} = \iint_S (\nabla \times \vec{F}) \cdot d\vec{S}$$
+
+% Multiple integrals
+$$\iiint_V f(x,y,z)\,dV = \int_a^b \int_c^d \int_e^f f(x,y,z)\,dz\,dy\,dx$$
+
+% Taylor series
+$$e^x = \sum_{n=0}^{\infty} \frac{x^n}{n!} = 1 + x + \frac{x^2}{2!} + \frac{x^3}{3!} + \cdots$$
+
+% Fourier series
+$$f(x) = \frac{a_0}{2} + \sum_{n=1}^{\infty} \left(a_n \cos\frac{n\pi x}{L} + b_n \sin\frac{n\pi x}{L}\right)$$
+
+\end{document}

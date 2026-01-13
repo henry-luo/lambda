@@ -1,0 +1,57 @@
+% test_abstract_algebra.tex - Abstract algebra structures
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Group axioms
+\textbf{Group} $(G, \cdot)$: Closure, Associativity, Identity, Inverse
+
+% Group homomorphism
+$$\phi: G \to H, \quad \phi(ab) = \phi(a)\phi(b)$$
+
+% Kernel and image
+$$\ker(\phi) = \{g \in G : \phi(g) = e_H\}$$
+$$\text{im}(\phi) = \{\phi(g) : g \in G\}$$
+
+% First isomorphism theorem
+$$G / \ker(\phi) \cong \text{im}(\phi)$$
+
+% Lagrange's theorem
+$$|G| = |H| \cdot [G:H]$$
+
+% Cyclic group
+$$\mathbb{Z}_n = \langle a \rangle = \{e, a, a^2, \ldots, a^{n-1}\}$$
+
+% Direct product
+$$G \times H = \{(g, h) : g \in G, h \in H\}$$
+
+% Ring axioms
+$$(R, +, \cdot): \text{ Abelian group under } +, \text{ monoid under } \cdot, \text{ distributive}$$
+
+% Ideal
+$$I \triangleleft R: \quad rI \subseteq I, Ir \subseteq I \text{ for all } r \in R$$
+
+% Quotient ring
+$$R/I = \{r + I : r \in R\}$$
+
+% Field of fractions
+$$\text{Frac}(R) = \left\{\frac{a}{b} : a, b \in R, b \neq 0\right\}$$
+
+% Vector space axioms
+$$V \text{ over } F: \text{ addition, scalar multiplication, distributivity}$$
+
+% Dimension
+$$\dim(V) = |B|, \quad B \text{ a basis}$$
+
+% Linear map
+$$T: V \to W, \quad T(\alpha v + \beta w) = \alpha T(v) + \beta T(w)$$
+
+% Rank-nullity
+$$\dim(V) = \dim(\ker T) + \dim(\text{im } T)$$
+
+% Module
+$$M \text{ over } R: \text{ generalization of vector space}$$
+
+\end{document}

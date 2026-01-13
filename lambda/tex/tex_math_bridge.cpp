@@ -1948,9 +1948,83 @@ TexNode* typeset_op_limits(TexNode* op_node, TexNode* subscript, TexNode* supers
                            MathContext& ctx) {
     Arena* arena = ctx.arena;
 
-    // If not display style, use regular scripts instead
+    // If not display style, use regular scripts instead (but skip the MathOp check)
+    // Note: We directly build scripts here instead of calling typeset_scripts
+    // to avoid infinite recursion
     if (ctx.style != MathStyle::Display && ctx.style != MathStyle::DisplayPrime) {
-        return typeset_scripts(op_node, subscript, superscript, ctx);
+        // Build inline scripts for non-display style
+        // Script parameters (TeXBook p. 445)
+        float sup_shift, sub_shift;
+        if (is_cramped(ctx.style)) {
+            sup_shift = 3.5f * ctx.base_size_pt / 10.0f;  // sup3
+            sub_shift = 2.0f * ctx.base_size_pt / 10.0f;  // sub2
+        } else {
+            sup_shift = 3.8f * ctx.base_size_pt / 10.0f;  // sup2
+            sub_shift = 2.0f * ctx.base_size_pt / 10.0f;  // sub2
+        }
+
+        // Create scripts node
+        TexNode* scripts = alloc_node(arena, NodeClass::Scripts);
+        scripts->content.scripts.nucleus = op_node;
+        scripts->content.scripts.subscript = subscript;
+        scripts->content.scripts.superscript = superscript;
+
+        // Start with nucleus dimensions
+        float total_width = op_node->width;
+        float total_height = op_node->height;
+        float total_depth = op_node->depth;
+
+        // Add italic correction to script position
+        float italic_corr = op_node->italic;
+
+        // Position superscript
+        if (superscript) {
+            superscript->x = total_width + italic_corr;
+            superscript->y = sup_shift;
+            superscript->parent = scripts;
+
+            total_width = superscript->x + superscript->width;
+            if (superscript->y + superscript->height > total_height) {
+                total_height = superscript->y + superscript->height;
+            }
+        }
+
+        // Position subscript
+        if (subscript) {
+            subscript->x = op_node->width;  // No italic correction for subscript
+            subscript->y = -sub_shift;
+            subscript->parent = scripts;
+
+            if (subscript->x + subscript->width > total_width) {
+                total_width = subscript->x + subscript->width;
+            }
+            if (-subscript->y + subscript->depth > total_depth) {
+                total_depth = -subscript->y + subscript->depth;
+            }
+        }
+
+        // Set dimensions
+        scripts->width = total_width;
+        scripts->height = total_height;
+        scripts->depth = total_depth;
+
+        // Link children
+        op_node->parent = scripts;
+        scripts->first_child = op_node;
+        scripts->last_child = op_node;
+
+        if (superscript) {
+            op_node->next_sibling = superscript;
+            superscript->prev_sibling = op_node;
+            scripts->last_child = superscript;
+        }
+        if (subscript) {
+            scripts->last_child->next_sibling = subscript;
+            subscript->prev_sibling = scripts->last_child;
+            scripts->last_child = subscript;
+        }
+
+        return scripts;
     }
 
     // Create VBox to stack: superscript / operator / subscript
