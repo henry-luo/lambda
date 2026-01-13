@@ -2637,22 +2637,24 @@ class PremakeGenerator:
         # Add files from source directories explicitly
         all_source_files = source_files[:]
 
-        # Get platform-specific exclusions and additions
-        exclude_files = []
-        additional_files = []
+        # Get global exclusions and additions first
+        exclude_files = self.config.get('exclude_source_files', []).copy()
+        additional_files = self.config.get('additional_source_files', []).copy()
+        
+        # Then add platform-specific exclusions and additions
         platforms_config = self.config.get('platforms', {})
         if self.use_windows_config:
             windows_config = platforms_config.get('windows', {})
-            exclude_files = windows_config.get('exclude_source_files', [])
-            additional_files = windows_config.get('additional_source_files', [])
+            exclude_files.extend(windows_config.get('exclude_source_files', []))
+            additional_files.extend(windows_config.get('additional_source_files', []))
         elif self.use_linux_config:
             linux_config = platforms_config.get('linux', {})
-            exclude_files = linux_config.get('exclude_source_files', [])
-            additional_files = linux_config.get('additional_source_files', [])
+            exclude_files.extend(linux_config.get('exclude_source_files', []))
+            additional_files.extend(linux_config.get('additional_source_files', []))
         elif self.use_macos_config:
             macos_config = platforms_config.get('macos', {})
-            exclude_files = macos_config.get('exclude_source_files', [])
-            additional_files = macos_config.get('additional_source_files', [])
+            exclude_files.extend(macos_config.get('exclude_source_files', []))
+            additional_files.extend(macos_config.get('additional_source_files', []))
 
         for source_dir in source_dirs:
             import glob
