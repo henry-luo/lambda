@@ -2553,7 +2553,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
                         ],
                         "binary": "test_math_layout.exe",
                         "additional_sources": [
@@ -2565,6 +2567,7 @@
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
                             "lambda/tex/tex_dvi_out.cpp",
                             "lambda/tex/dvi_parser.cpp"
                         ],
@@ -2687,11 +2690,16 @@
                     {
                         "source": "test/test_tex_phase4_gtest.cpp",
                         "name": "TeX Phase 4 Math Integration Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
                         "libraries": [
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
                         ],
                         "binary": "test_tex_phase4_gtest.exe",
                         "additional_sources": [
@@ -2702,6 +2710,7 @@
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/log.c",
@@ -2826,7 +2835,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
                         ],
                         "binary": "test_tex_lambda_bridge_gtest.exe",
                         "additional_sources": [
@@ -2837,6 +2848,7 @@
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
                             "lambda/tex/tex_hyphen.cpp",
                             "lambda/tex/tex_lambda_bridge.cpp"
                         ],
@@ -2855,7 +2867,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
                         ],
                         "binary": "test_tex_latex_bridge_gtest.exe",
                         "additional_sources": [
@@ -2866,6 +2880,7 @@
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
                             "lambda/tex/tex_hyphen.cpp",
                             "lambda/tex/tex_lambda_bridge.cpp",
                             "lambda/tex/tex_latex_bridge.cpp"
@@ -2885,7 +2900,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
                         ],
                         "binary": "test_latex_dvi_compare_gtest.exe",
                         "additional_sources": [
@@ -2896,6 +2913,7 @@
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
                             "lambda/tex/tex_hyphen.cpp",
                             "lambda/tex/tex_lambda_bridge.cpp",
                             "lambda/tex/tex_latex_bridge.cpp",
@@ -2943,7 +2961,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype"
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
                         ],
                         "binary": "test_tex_math_extended_gtest.exe",
                         "additional_sources": [
@@ -2952,6 +2972,7 @@
                             "lambda/tex/tex_hlist.cpp",
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
                             "lambda/tex/tex_linebreak.cpp"
                         ],
                         "includes": [
