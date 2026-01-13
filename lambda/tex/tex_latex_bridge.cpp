@@ -201,8 +201,8 @@ int get_section_level(const char* cmd) {
     if (tag_eq(cmd, "section")) return 1;
     if (tag_eq(cmd, "subsection")) return 2;
     if (tag_eq(cmd, "subsubsection")) return 3;
-    // Note: \paragraph{} and \subparagraph{} are handled differently since
-    // tree-sitter-latex uses "paragraph" for text content elements
+    if (tag_eq(cmd, "paragraph")) return 4;
+    if (tag_eq(cmd, "subparagraph")) return 5;
     return -1;
 }
 
