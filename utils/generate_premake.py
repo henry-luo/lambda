@@ -2623,26 +2623,36 @@ class PremakeGenerator:
         # Add files from source directories explicitly
         all_source_files = source_files[:]
 
-        # Get platform-specific exclusions and additions
-        exclude_files = []
-        additional_files = []
+        # Get global exclusions and additions first
+        exclude_files = self.config.get('exclude_source_files', []).copy()
+        additional_files = self.config.get('additional_source_files', []).copy()
+        
+        # Then add platform-specific exclusions and additions
         platforms_config = self.config.get('platforms', {})
         if self.use_windows_config:
             windows_config = platforms_config.get('windows', {})
-            exclude_files = windows_config.get('exclude_source_files', [])
-            additional_files = windows_config.get('additional_source_files', [])
+            exclude_files.extend(windows_config.get('exclude_source_files', []))
+            additional_files.extend(windows_config.get('additional_source_files', []))
+        elif self.use_linux_config:
+            linux_config = platforms_config.get('linux', {})
+            exclude_files.extend(linux_config.get('exclude_source_files', []))
+            additional_files.extend(linux_config.get('additional_source_files', []))
+        elif self.use_macos_config:
+            macos_config = platforms_config.get('macos', {})
+            exclude_files.extend(macos_config.get('exclude_source_files', []))
+            additional_files.extend(macos_config.get('additional_source_files', []))
 
         for source_dir in source_dirs:
             import glob
-            c_pattern = f"{source_dir}/**/*.c"
-            cpp_pattern = f"{source_dir}/**/*.cpp"
+            c_pattern = f"{source_dir}/*.c"
+            cpp_pattern = f"{source_dir}/*.cpp"
 
-            # Find all C files
-            c_files = glob.glob(c_pattern, recursive=True)
+            # Find all C files (one level only, non-recursive)
+            c_files = glob.glob(c_pattern, recursive=False)
             all_source_files.extend(c_files)
 
-            # Find all C++ files
-            cpp_files = glob.glob(cpp_pattern, recursive=True)
+            # Find all C++ files (one level only, non-recursive)
+            cpp_files = glob.glob(cpp_pattern, recursive=False)
             all_source_files.extend(cpp_files)
 
         # Remove excluded files

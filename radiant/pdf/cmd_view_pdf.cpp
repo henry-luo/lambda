@@ -10,6 +10,7 @@
 #include "../../lambda/input/input.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
+#include "../../lib/memtrack.h"
 
 // External functions
 void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length); // From input-pdf.cpp
