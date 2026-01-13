@@ -1,0 +1,55 @@
+% test_differential_equations.tex - ODEs and PDEs
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% First order ODE
+$$\frac{dy}{dx} + P(x)y = Q(x)$$
+
+% Solution by integrating factor
+$$\mu(x) = e^{\int P(x)\,dx}$$
+
+$$y = \frac{1}{\mu(x)} \int \mu(x) Q(x) \, dx$$
+
+% Second order linear
+$$y'' + p(x)y' + q(x)y = r(x)$$
+
+% Characteristic equation
+$$ar^2 + br + c = 0$$
+
+% Solutions for constant coefficients
+$$y = \begin{cases}
+C_1 e^{r_1 x} + C_2 e^{r_2 x} & \text{distinct real} \\
+(C_1 + C_2 x) e^{rx} & \text{repeated} \\
+e^{\alpha x}(C_1 \cos\beta x + C_2 \sin\beta x) & \text{complex}
+\end{cases}$$
+
+% Laplace transform
+$$\mathcal{L}\{f(t)\} = F(s) = \int_0^{\infty} e^{-st} f(t) \, dt$$
+
+% Transform properties
+$$\mathcal{L}\{f'\} = sF(s) - f(0)$$
+$$\mathcal{L}\{f''\} = s^2 F(s) - sf(0) - f'(0)$$
+
+% Heat equation
+$$\frac{\partial u}{\partial t} = \alpha^2 \frac{\partial^2 u}{\partial x^2}$$
+
+% Wave equation
+$$\frac{\partial^2 u}{\partial t^2} = c^2 \frac{\partial^2 u}{\partial x^2}$$
+
+% Laplace equation
+$$\nabla^2 u = \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} = 0$$
+
+% General Laplacian
+$$\nabla^2 u = \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} + \frac{\partial^2 u}{\partial z^2}$$
+
+% Separation of variables
+$$u(x,t) = X(x)T(t)$$
+$$\frac{X''}{X} = \frac{T'}{kT} = -\lambda$$
+
+% Green's function
+$$Lu = f \implies u(x) = \int G(x,\xi) f(\xi) \, d\xi$$
+
+\end{document}

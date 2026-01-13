@@ -1,0 +1,48 @@
+% test_number_theory.tex - Number theory formulas
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Euler's identity
+$$e^{i\pi} + 1 = 0$$
+
+% Euler's formula
+$$e^{ix} = \cos x + i\sin x$$
+
+% Prime counting function
+$$\pi(x) \sim \frac{x}{\ln x}$$
+
+% Riemann zeta function
+$$\zeta(s) = \sum_{n=1}^{\infty} \frac{1}{n^s} = \prod_{p \text{ prime}} \frac{1}{1-p^{-s}}$$
+
+% Functional equation
+$$\zeta(s) = 2^s \pi^{s-1} \sin\left(\frac{\pi s}{2}\right) \Gamma(1-s) \zeta(1-s)$$
+
+% Fermat's little theorem
+$$a^{p-1} \equiv 1 \pmod{p}$$
+
+% Euler's totient
+$$\phi(n) = n \prod_{p|n} \left(1 - \frac{1}{p}\right)$$
+
+% Quadratic reciprocity
+$$\left(\frac{p}{q}\right)\left(\frac{q}{p}\right) = (-1)^{\frac{p-1}{2}\cdot\frac{q-1}{2}}$$
+
+% Binomial coefficient
+$$\binom{n}{k} = \frac{n!}{k!(n-k)!}$$
+
+% Stirling's approximation
+$$n! \sim \sqrt{2\pi n}\left(\frac{n}{e}\right)^n$$
+
+% Mobius function
+$$\mu(n) = \begin{cases}
+1 & \text{if } n = 1 \\
+(-1)^k & \text{if } n = p_1 p_2 \cdots p_k \\
+0 & \text{if } p^2 | n
+\end{cases}$$
+
+% Mobius inversion
+$$g(n) = \sum_{d|n} f(d) \implies f(n) = \sum_{d|n} \mu\left(\frac{n}{d}\right) g(d)$$
+
+\end{document}

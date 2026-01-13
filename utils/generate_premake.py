@@ -2083,9 +2083,12 @@ class PremakeGenerator:
             ])
         else:
             # macOS paths (default)
+            # IMPORTANT: /opt/homebrew/include must come before /usr/local/include
+            # to ensure Homebrew's gtest headers are found before any system-wide
+            # gtest installation that may have incompatible declarations
             all_includes.extend([
-                "/usr/local/include",
                 "/opt/homebrew/include",
+                "/usr/local/include",
             ])
 
         # Remove duplicates while preserving order
@@ -2195,10 +2198,11 @@ class PremakeGenerator:
                     self.premake_content.append('        "git2",')
                     test_frameworks_added.append('criterion')
                 elif lib == 'gtest':
-                    self.premake_content.append('        "gtest",')
+                    # Don't add to links - let static library handling in linkoptions handle it
+                    # This avoids duplicate linking (-lgtest + /path/libgtest.a)
                     test_frameworks_added.append('gtest')
                 elif lib == 'gtest_main':
-                    self.premake_content.append('        "gtest_main",')
+                    # Don't add to links - let static library handling in linkoptions handle it
                     test_frameworks_added.append('gtest')
                 else:
                     # Handle other libraries
@@ -2486,6 +2490,10 @@ class PremakeGenerator:
             # Only add default C99 standard if no std flag was specified
             if not has_std_flag:
                 build_opts.append('-std=c99')
+
+        # Note: Previously had a workaround for gtest string_view PrintStringTo issue
+        # This was fixed by ensuring /opt/homebrew/include comes before /usr/local/include
+        # in build_lambda_config.json, so the correct gtest headers are found first
 
         self.premake_content.extend([
             '    buildoptions {',

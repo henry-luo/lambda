@@ -1,0 +1,56 @@
+% test_set_theory.tex - Set theory and logic notation
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Set notation
+$$A \cup B = \{x : x \in A \text{ or } x \in B\}$$
+
+$$A \cap B = \{x : x \in A \text{ and } x \in B\}$$
+
+$$A \setminus B = \{x : x \in A \text{ and } x \notin B\}$$
+
+% Complement
+$$\overline{A} = A^c = \{x : x \notin A\}$$
+
+% De Morgan's laws
+$$\overline{A \cup B} = \overline{A} \cap \overline{B}$$
+$$\overline{A \cap B} = \overline{A} \cup \overline{B}$$
+
+% Cartesian product
+$$A \times B = \{(a, b) : a \in A, b \in B\}$$
+
+% Power set
+$$\mathcal{P}(A) = \{S : S \subseteq A\}$$
+
+% Cardinality
+$$|A \cup B| = |A| + |B| - |A \cap B|$$
+
+$$|\mathcal{P}(A)| = 2^{|A|}$$
+
+% Set builder with conditions
+$$\{x \in \mathbb{R} : x^2 < 1\} = (-1, 1)$$
+
+% Infinite sets
+$$|\mathbb{N}| = |\mathbb{Z}| = |\mathbb{Q}| = \aleph_0$$
+
+$$|\mathbb{R}| = 2^{\aleph_0} = \mathfrak{c}$$
+
+% Quantifiers
+$$\forall x \in A, \exists y \in B : P(x, y)$$
+
+$$\exists! x : P(x) \quad \text{(there exists exactly one)}$$
+
+% Logical connectives
+$$p \land q, \quad p \lor q, \quad p \Rightarrow q, \quad p \Leftrightarrow q, \quad \neg p$$
+
+% Functions
+$$f: A \to B, \quad f^{-1}: B \to A$$
+
+$$\text{im}(f) = \{f(x) : x \in A\}$$
+
+$$\ker(f) = \{x \in A : f(x) = 0\}$$
+
+\end{document}

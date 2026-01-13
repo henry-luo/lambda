@@ -1,0 +1,86 @@
+% test_alignment_advanced.tex - Advanced alignment structures
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Multi-line aligned equations
+\begin{align}
+(a+b)^2 &= a^2 + 2ab + b^2 \\
+(a-b)^2 &= a^2 - 2ab + b^2 \\
+(a+b)(a-b) &= a^2 - b^2
+\end{align}
+
+% Aligned with annotations
+\begin{align}
+\nabla \cdot \vec{E} &= \frac{\rho}{\epsilon_0} & \text{Gauss's law} \\
+\nabla \cdot \vec{B} &= 0 & \text{No magnetic monopoles} \\
+\nabla \times \vec{E} &= -\frac{\partial \vec{B}}{\partial t} & \text{Faraday's law} \\
+\nabla \times \vec{B} &= \mu_0 \vec{J} + \mu_0 \epsilon_0 \frac{\partial \vec{E}}{\partial t} & \text{Ampère's law}
+\end{align}
+
+% Gather (centered equations)
+\begin{gather}
+a + b = c \\
+x^2 + y^2 = z^2 \\
+\alpha \beta = \gamma
+\end{gather}
+
+% Multline (long equations)
+\begin{multline}
+\int_0^1 \int_0^1 \int_0^1 f(x,y,z) \, dx \, dy \, dz \\
+= \lim_{n \to \infty} \frac{1}{n^3} \sum_{i=1}^{n} \sum_{j=1}^{n} \sum_{k=1}^{n} f\left(\frac{i}{n}, \frac{j}{n}, \frac{k}{n}\right)
+\end{multline}
+
+% Split inside equation
+\begin{equation}
+\begin{split}
+(a+b+c)^3 &= a^3 + b^3 + c^3 \\
+&\quad + 3(a^2b + a^2c + b^2a + b^2c + c^2a + c^2b) \\
+&\quad + 6abc
+\end{split}
+\end{equation}
+
+% Cases
+$$|x| = \begin{cases}
+x & \text{if } x \geq 0 \\
+-x & \text{if } x < 0
+\end{cases}$$
+
+% Aligned inside equation
+$$\left.\begin{aligned}
+x &= r\cos\theta \\
+y &= r\sin\theta
+\end{aligned}\right\} \implies x^2 + y^2 = r^2$$
+
+% Subequations
+\begin{subequations}
+\begin{align}
+f(x) &= ax + b \\
+g(x) &= cx^2 + dx + e
+\end{align}
+\end{subequations}
+
+% Array alignment
+$$\begin{array}{rcl}
+\text{LHS} & = & \text{RHS} \\
+a + b & = & c \\
+x \cdot y & = & z
+\end{array}$$
+
+% Matrix with alignment
+$$A = \left(\begin{array}{ccc|c}
+1 & 0 & 0 & a \\
+0 & 1 & 0 & b \\
+0 & 0 & 1 & c
+\end{array}\right)$$
+
+% Intertext
+\begin{align}
+a &= b + c \\
+\intertext{Adding $d$ to both sides:}
+a + d &= b + c + d
+\end{align}
+
+\end{document}
