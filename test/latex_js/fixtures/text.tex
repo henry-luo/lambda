@@ -1,0 +1,141 @@
+** simple text in paragraphs
+.
+This is just some simple text.
+
+This is just some simple text.
+
+This is just some simple text.
+.
+<div class="body">
+<p>This is just some simple text.</p>
+<p>This is just some simple text.</p>
+<p>This is just some simple text.</p>
+</div>
+.
+
+
+** paragraphs and newlines
+.
+first line\\second line\newline third line\par and then a new paragraph as well
+.
+<div class="body">
+<p>ﬁrst line<br>second line<br>third line</p>
+<p>and then a new paragraph as well</p>
+</div>
+.
+
+
+** paragraphs and indentation
+.
+\noindent
+
+\noindent
+
+This is a new paragraph.
+
+\noindent
+This is a new paragraph.
+.
+<div class="body">
+<p>This is a new paragraph.</p>
+<p class="noindent">This is a new paragraph.</p>
+</div>
+.
+
+
+** UTF-8 text, punctuation, TeX symbols
+.
+A para\-graph with “quotes,” German »quotes«, umlauts (äöüÄÖÜ), ß, thin spaces 80\,000. Numbers?! Money \$10, \$5, and 5€.
+
+.:;,?!'´`()[]-/*@+=
+
+H\^otel, na\"\i ve, \'el\`eve, sm\o rrebr\o d, !´Se\~norita!, Sch\"onbrunner Schlo\ss{} Stra\ss e
+.
+<div class="body">
+<p>A para­graph with “quotes,” German »quotes«, umlauts (äöüÄÖÜ), ß, thin spaces 80 000. Numbers?! Money $10, $5, and 5€.</p>
+<p>.:;,?!’´‘()[]‐/*@+=</p>
+<p>Hôtel, naı̈ve, élève, smørrebrød, ¡Señorita!, Schönbrunner Schloß​ Straße</p>
+</div>
+.
+
+
+** special characters
+.
+\# \$ \$ \^{} \& \_ \{ \} \~{} \textbackslash{} \% shelf\-ful
+.
+<div class="body">
+<p># $ $ ^​ &amp; _ { } ~​ \​ % shelf­ful</p>
+</div>
+.
+
+
+** dashes, dots (no math)
+.
+daughter-in-law, pages 13--67, yes---or no?
+.
+<div class="body">
+<p>daughter‐in‐law, pages 13–67, yes—or no?</p>
+</div>
+.
+
+
+** ligatures, and ligature prevention
+.
+ff ffi ffl fi fl << >> !´ ?´
+
+Not shelfful but shelf\mbox{}ful, or better, shelf\/ful.
+.
+<div class="body">
+<p>ﬀ ﬃ ﬄ ﬁ ﬂ « » ¡ ¿</p>
+<p>Not shelﬀul but shelf<span class="hbox"><span></span></span>ful, or better, shelf‌ful.</p>
+</div>
+.
+
+
+s** verbatim text
+.
+This is some \verb|verbatim| text.
+
+\verb/Any{thing/ is possible in there.
+
+And starred \verb*-is possible, too-. Nice, eh?
+.
+<div class="body">
+<p>This is some <code class="tt">verbatim</code> text.</p>
+<p><code class="tt">Any{thing</code> is possible in there.</p>
+<p>And starred <code class="tt">is␣possible,␣too</code>. Nice, eh?</p>
+</div>
+.
+
+
+** TeX and LaTeX logos
+.
+\TeX \LaTeX
+.
+<div class="body">
+<p>
+<span class="tex">T<span class="e">e</span>X</span>
+<span class="latex">L<span class="a">a</span>T<span class="e">e</span>X</span>
+</p>
+</div>
+.
+
+
+s** alignment
+.
+This is a horrible test.
+\centering
+In this paragraph we change the alignment to centering.
+{\raggedright But it actually becomes raggedright,
+
+even with a group, and only after the par will it be centered.}
+Until the group ends.
+
+And we are now still centered.
+.
+<div class="body">
+<p class="raggedright">This is a horrible test. In this paragraph we change the alignment to centering. But it actually becomes raggedright,</p>
+<p class="centering">even with a group, and only after the par will it be centered.​ Until the group ends.</p>
+<p class="centering">And we are now still centered.</p>
+</div>
+.
