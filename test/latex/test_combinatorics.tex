@@ -1,0 +1,50 @@
+% test_combinatorics.tex - Combinatorics and discrete math
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Permutations
+$$P(n, k) = \frac{n!}{(n-k)!}$$
+
+% Combinations
+$$C(n, k) = \binom{n}{k} = \frac{n!}{k!(n-k)!}$$
+
+% Pascal's identity
+$$\binom{n}{k} = \binom{n-1}{k-1} + \binom{n-1}{k}$$
+
+% Binomial theorem
+$$(x + y)^n = \sum_{k=0}^{n} \binom{n}{k} x^k y^{n-k}$$
+
+% Multinomial theorem
+$$(x_1 + x_2 + \cdots + x_m)^n = \sum_{k_1+k_2+\cdots+k_m=n} \binom{n}{k_1, k_2, \ldots, k_m} \prod_{i=1}^{m} x_i^{k_i}$$
+
+% Multinomial coefficient
+$$\binom{n}{k_1, k_2, \ldots, k_m} = \frac{n!}{k_1! k_2! \cdots k_m!}$$
+
+% Catalan numbers
+$$C_n = \frac{1}{n+1}\binom{2n}{n} = \frac{(2n)!}{(n+1)!n!}$$
+
+% Recurrence
+$$C_{n+1} = \sum_{i=0}^{n} C_i C_{n-i}$$
+
+% Fibonacci recurrence
+$$F_n = F_{n-1} + F_{n-2}, \quad F_0 = 0, F_1 = 1$$
+
+% Binet's formula
+$$F_n = \frac{\phi^n - \psi^n}{\sqrt{5}}, \quad \phi = \frac{1+\sqrt{5}}{2}$$
+
+% Derangements
+$$D_n = n! \sum_{k=0}^{n} \frac{(-1)^k}{k!}$$
+
+% Inclusion-exclusion
+$$\left|\bigcup_{i=1}^{n} A_i\right| = \sum_{i} |A_i| - \sum_{i<j} |A_i \cap A_j| + \cdots + (-1)^{n+1} |A_1 \cap \cdots \cap A_n|$$
+
+% Generating functions
+$$F(x) = \sum_{n=0}^{\infty} a_n x^n$$
+
+% Exponential generating function
+$$\hat{F}(x) = \sum_{n=0}^{\infty} a_n \frac{x^n}{n!}$$
+
+\end{document}

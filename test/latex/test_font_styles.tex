@@ -1,0 +1,66 @@
+% test_font_styles.tex - Various font styles in math mode
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\pagestyle{empty}
+\begin{document}
+
+% Normal math italic
+$$abcdefghijklmnopqrstuvwxyz$$
+$$ABCDEFGHIJKLMNOPQRSTUVWXYZ$$
+
+% Roman (upright)
+$$\mathrm{abcdefghijklmnopqrstuvwxyz}$$
+$$\mathrm{ABCDEFGHIJKLMNOPQRSTUVWXYZ}$$
+
+% Bold
+$$\mathbf{abcdefghijklmnopqrstuvwxyz}$$
+$$\mathbf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}$$
+
+% Sans-serif
+$$\mathsf{abcdefghijklmnopqrstuvwxyz}$$
+$$\mathsf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}$$
+
+% Typewriter
+$$\mathtt{abcdefghijklmnopqrstuvwxyz}$$
+$$\mathtt{ABCDEFGHIJKLMNOPQRSTUVWXYZ}$$
+
+% Calligraphic
+$$\mathcal{ABCDEFGHIJKLMNOPQRSTUVWXYZ}$$
+
+% Blackboard bold
+$$\mathbb{ABCDEFGHIJKLMNOPQRSTUVWXYZ}$$
+
+% Fraktur
+$$\mathfrak{abcdefghijklmnopqrstuvwxyz}$$
+$$\mathfrak{ABCDEFGHIJKLMNOPQRSTUVWXYZ}$$
+
+% Script (from mathrsfs or similar)
+% Using available script-like fonts
+$$\mathcal{L}, \mathcal{H}, \mathcal{F}$$
+
+% Mixed styles in formulas
+$$\mathbb{R}^n \to \mathbb{C}^m$$
+
+$$\mathcal{L}\{f(t)\} = F(s)$$
+
+$$\mathfrak{g} \text{ is a Lie algebra}$$
+
+$$\mathrm{d}x \quad \mathrm{e}^x \quad \mathrm{i}\theta$$
+
+% Common conventions
+$$\sin x, \cos x, \tan x, \log x, \ln x, \exp x$$
+
+$$\det A, \dim V, \ker T, \mathrm{im}\, T$$
+
+$$\max\{a, b\}, \min\{a, b\}, \sup S, \inf S$$
+
+$$\lim_{n \to \infty} a_n, \limsup a_n, \liminf a_n$$
+
+$$\gcd(a, b), \lcm(a, b)$$
+
+% Numbers in different styles
+$$123456789 \quad \mathbf{123456789} \quad \mathrm{123456789}$$
+
+\end{document}

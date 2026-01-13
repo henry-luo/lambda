@@ -1,0 +1,74 @@
+% test_edge_cases.tex - Edge cases and unusual constructs
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Empty groups
+$$a{}b = ab$$
+
+% Empty subscript/superscript
+$$x^{} \quad x_{}$$
+
+% Multiple scripts
+$$x_1^2 \quad x^2_1 \quad {}_1^2X_3^4$$
+
+% Prime notation
+$$f' \quad f'' \quad f''' \quad f^{(n)}$$
+
+% Mixed primes and superscripts
+$$f'^2 \quad f''^{-1}$$
+
+% Dots variations
+$$a_1, a_2, \ldots, a_n \quad b_1 + b_2 + \cdots + b_n$$
+
+$$\begin{pmatrix}
+1 & 0 & \cdots & 0 \\
+0 & 1 & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+0 & 0 & \cdots & 1
+\end{pmatrix}$$
+
+% Spacing commands
+$$a\,b\;c\quad d\qquad e$$
+
+$$\int\!\!\!\int f\,dx\,dy$$
+
+% Negative spacing
+$$A\!B$$
+
+% Text in math
+$$x = 1 \text{ if and only if } y = 2$$
+
+% Operator limits positioning
+$$\sum\limits_{i=1}^n x_i \quad \sum\nolimits_{i=1}^n x_i$$
+
+% Big vs normal operators
+$$\int vs \textstyle\int$$
+
+% Stretchable delimiters
+$$\left( \frac{a}{b} \right) \quad \bigl( \frac{a}{b} \bigr) \quad \Bigl( \frac{a}{b} \Bigr)$$
+
+% Phantom usage
+$$\sqrt{\vphantom{b}a} + \sqrt{b}$$
+
+% Smash usage
+$$\sqrt{\smash[b]{y}} + \sqrt{d}$$
+
+% Boxed formula
+$$\boxed{E = mc^2}$$
+
+% Stackrel
+$$A \stackrel{f}{\longrightarrow} B \stackrel{g}{\longrightarrow} C$$
+
+% Underset/Overset
+$$\underset{x \to 0}{\lim} \quad \overset{\text{def}}{=}$$
+
+% Side-by-side equations
+$a = b$ and $c = d$
+
+% Inline vs display
+Inline: $\frac{a}{b}$ vs Display: $$\frac{a}{b}$$
+
+\end{document}

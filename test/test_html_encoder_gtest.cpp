@@ -12,7 +12,7 @@ TEST(HtmlEncoder, BasicEscaping) {
 }
 
 TEST(HtmlEncoder, MultipleCharacters) {
-    EXPECT_EQ(HtmlEncoder::escape("A&B<C>D\"E"), 
+    EXPECT_EQ(HtmlEncoder::escape("A&B<C>D\"E"),
               "A&amp;B&lt;C&gt;D&quot;E");
 }
 
