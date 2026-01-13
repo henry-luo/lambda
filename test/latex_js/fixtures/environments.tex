@@ -1,0 +1,374 @@
+** nested horizontal environments
+.
+This \begin{empty}is a \begin{empty}line\end{empty} of\end{empty} text.
+.
+<div class="body">
+<p>This is a line​ of​ text.</p>
+</div>
+.
+
+
+
+** itemize environment
+.
+a paragraph of text
+
+\begin{itemize}
+    \item first item
+
+        with a new paragraph
+    \item second item
+\end{itemize}
+%
+
+more text
+
+\begin{itemize}
+    \item first item
+    \item second item
+
+\end{itemize}
+this belongs to paragraph with itemize
+.
+<div class="body">
+<p>a paragraph of text</p>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>ﬁrst item</p><p>with a new paragraph</p></li>
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>second item</p></li>
+</ul>
+<p>more text</p>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>ﬁrst item</p></li>
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>second item</p></li>
+</ul>
+<p class="continue">this belongs to paragraph with itemize</p>
+</div>
+.
+
+
+** empty and consecutive itemize environments
+.
+\begin{itemize}
+
+\end{itemize}
+\begin{itemize}
+    \item text that doesn't continue
+\end{itemize}
+\begin{itemize}
+\end{itemize}
+.
+<div class="body">
+<ul class="list"></ul>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>text that doesn’t continue</p></li>
+</ul>
+<ul class="list"></ul>
+</div>
+.
+
+
+s** nested itemize environments
+.
+text before
+\begin{itemize}
+    \item first item
+        \begin{itemize}
+            \item first nested item
+        \end{itemize}
+\end{itemize}
+text after
+.
+<div class="body">
+<p>text before</p>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>ﬁrst item</p>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap"><span class="rm bf up">–</span></span></span><p>ﬁrst nested item</p></li>
+</ul>
+</li>
+</ul>
+<p class="continue">text after</p>
+</div>
+.
+
+
+s** nested itemize environments (II)
+.
+text before
+\begin{itemize}
+    \item first item
+        \begin{itemize}
+            \item first nested item
+        \end{itemize}
+    \item second item
+\end{itemize}
+text after
+.
+<div class="body">
+<p>text before</p>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">•</span></span>
+<p>ﬁrst item</p>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap"><span class="rm bf up">–</span></span></span><p>ﬁrst nested item</p></li>
+</ul>
+</li>
+<li><span class="itemlabel"><span class="hbox llap">•</span></span>
+<p>second item</p>
+</li>
+</ul>
+<p class="continue">text after</p>
+</div>
+.
+
+
+s** single itemize environment, custom labels
+.
+\begin{itemize}
+    \item[\textendash] first item
+    \item[] second item
+    \item third item
+\end{itemize}
+.
+<div class="body">
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">–</span></span><p>ﬁrst item</p></li>
+<li><span class="itemlabel"><span class="hbox llap"></span></span><p>second item</p></li>
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>third item</p></li>
+</ul>
+</div>
+.
+
+
+
+s** enumerate environment
+.
+a paragraph of text
+
+\begin{enumerate}
+    \item[\itshape label] first item
+
+        with a new paragraph
+    \item second item
+\end{enumerate}
+this belongs to paragraph with enumerate
+.
+<div class="body">
+<p>a paragraph of text</p>
+<ol class="list">
+<li>
+<span class="itemlabel"><span class="hbox llap"><span><span class="it">label</span></span></span></span>
+<p>ﬁrst item</p><p>with a new paragraph</p>
+</li>
+<li>
+<span class="itemlabel"><span class="hbox llap"><span id="item-1">1.</span></span></span>
+<p>second item</p>
+</li>
+</ol>
+<p class="continue">this belongs to paragraph with enumerate</p>
+</div>
+.
+
+
+s** description environment
+.
+a paragraph of text
+
+\begin{description}
+    \item[term 1] first item
+
+        with a new paragraph
+    \item[term 2] second item
+\end{description}
+this belongs to paragraph with description
+.
+<div class="body">
+<p>a paragraph of text</p>
+<dl class="list">
+<dt>term 1</dt>
+<dd><p>ﬁrst item</p><p>with a new paragraph</p></dd>
+<dt>term 2</dt>
+<dd><p>second item</p></dd>
+</dl>
+<p class="continue">this belongs to paragraph with description</p>
+</div>
+.
+
+s** quote, quotation, verse
+.
+\noindent quote:
+\begin{quote}
+    Here are some quote\\
+    lines of text
+
+    as well as a paragraph with special chars [].
+\end{quote}
+quotation:
+\begin{quotation}
+    Here are some quotation\\
+    lines of text
+
+    as well as a paragraph.
+\end{quotation}
+verse:
+\begin{verse}
+    Here are some verse lines of text lines of text lines of text lines of text lines of text \\
+    lines of text lines of text lines of text lines of text lines of text lines of text
+
+    as well as a paragraph with trailing newline.\\
+\end{verse}
+And now we continue without indentation.
+.
+<div class="body">
+<p class="noindent">quote:</p>
+<div class="list quote">
+<p>Here are some quote<br>lines of text</p>
+<p>as well as a paragraph with special chars [].</p>
+</div>
+<p class="continue">quotation:</p>
+<div class="list quotation">
+<p>Here are some quotation<br>lines of text</p>
+<p>as well as a paragraph.</p>
+</div>
+<p class="continue">verse:</p>
+<div class="list verse">
+<p>Here are some verse lines of text lines of text lines of text lines of text lines of text<br>
+lines of text lines of text lines of text lines of text lines of text lines of text</p>
+<p>as well as a paragraph with trailing newline.<br></p>
+</div>
+<p class="continue">And now we continue without indentation.</p>
+</div>
+.
+
+
+s** font environments
+.
+normal text \begin{small}
+    small text
+    \begin{bfseries}
+        bold text
+    \end{bfseries}
+\end{small}
+  three spaces!
+.
+<div class="body">
+<p>
+normal text <span class="small">​ </span><span class="small">small text </span>
+<span class="bf">​ </span><span class="bf">bold text </span><span class="bf">​ </span>
+<span class="small">​ </span>
+three spaces!
+</p>
+</div>
+.
+
+
+s** alignment
+.
+text
+\begin{center}
+    Here are some centered\\
+    lines of text
+
+    as well as a paragraph.
+\end{center}
+Afterwards, we continue as usual.
+\begin{flushleft}
+    The same is true\\
+    for a flushleft environment.
+\end{flushleft}
+Afterwards, we continue as usual.
+\begin{flushright}
+    The same is true\\
+    for a flushright environment.
+\end{flushright}
+
+Yes, this is the last line.
+.
+<div class="body">
+<p>text</p>
+<div class="list center">
+<p>Here are some centered<br>lines of text</p>
+<p>as well as a paragraph.</p>
+</div>
+<p class="continue">Afterwards, we continue as usual.</p>
+<div class="list flushleft">
+<p>The same is true<br>for a ﬂushleft environment.</p>
+</div>
+<p class="continue">Afterwards, we continue as usual.</p>
+<div class="list flushright">
+<p>The same is true<br>for a ﬂushright environment.</p>
+</div>
+<p>Yes, this is the last line.</p>
+</div>
+.
+
+
+s** alignment of lists
+.
+\begin{center}
+    Center environment should not center the list.
+    \begin{itemize}
+        \item first item
+        \item second item
+    \end{itemize}
+\end{center}
+But centering command should:
+\begin{itemize}
+    \centering
+    \item[\textendash] first item
+    \item[] second item
+    \item third item
+\end{itemize}
+Afterwards, we continue as usual.
+.
+<div class="body">
+<div class="list center">
+<p>Center environment should not center the list.</p>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>ﬁrst item</p></li>
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>second item</p></li>
+</ul>
+</div>
+<p class="continue">But centering command should:</p>
+<ul class="list centering">
+<li class="centering"><span class="itemlabel"><span class="hbox llap">–</span></span><p class="centering">ﬁrst item</p></li>
+<li class="centering"><span class="itemlabel"><span class="hbox llap"></span></span><p class="centering">second item</p></li>
+<li class="centering"><span class="itemlabel"><span class="hbox llap">•</span></span><p class="centering">third item</p></li>
+</ul>
+<p class="continue">Afterwards, we continue as usual.</p>
+</div>
+.
+
+
+!** abstract and fonts
+.
+\begin{abstract}
+\itshape
+The title must not be italic.
+\end{abstract}
+.
+<div class="body">
+<div class="list center"><span class="bf small">Abstract</span></div>
+<div class="list quotation"><p><span class="it small">The title must not be italic.</span></p></div>
+</div>
+.
+
+
+** comment environment
+.
+text
+\begin{comment}
+    This is a comment.
+    \end{comment
+    still more comment.
+\end{comment}
+more text, but now with%
+\begin{comment}
+    This is a comment.
+\end{comment}
+out space.
+.
+<div class="body">
+<p>text more text, but now without space.</p>
+</div>
+.
