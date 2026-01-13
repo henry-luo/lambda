@@ -7,6 +7,7 @@
     "source_dirs": [
         "lib",
         "lib/serve",
+        "lambda",
         "lambda/input",
         "lambda/input/css",
         "lambda/input/html5",
@@ -19,30 +20,9 @@
         "radiant/webdriver"
     ],
     "source_files": [
-        "lambda/parse.c",
-        "lambda/lambda-data.cpp",
-        "lambda/lambda-data-runtime.cpp",
-        "lambda/runner.cpp",
-        "lambda/transpile.cpp",
-        "lambda/transpile-mir.cpp",
-        "lambda/build_ast.cpp",
-        "lambda/name_pool.cpp",
-        "lambda/shape_pool.cpp",
-        "lambda/shape_builder.cpp",
-        "lambda/mir.c",
-        "lambda/pack.cpp",
-        "lambda/print.cpp",
-        "lambda/lambda-eval.cpp",
-        "lambda/lambda-eval-num.cpp",
-        "lambda/lambda-proc.cpp",
-        "lambda/utf_string.cpp",
-        "lambda/lambda-mem.cpp",
-        "lambda/mark_builder.cpp",
-        "lambda/mark_editor.cpp",
-        "lambda/mark_reader.cpp",
-        "lambda/math_symbols.cpp",
-        "lambda/main-repl.cpp",
-        "lambda/main.cpp"
+    ],
+    "exclude_source_files": [
+        "lambda/schema_builder.cpp"
     ],
     "includes": [
         ".",
