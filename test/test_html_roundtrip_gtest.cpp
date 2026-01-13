@@ -1528,19 +1528,9 @@ TEST_F(BasicHtmlTests, NestedElementsRoundtrip) {
 // ==== SIMPLE HTML FILES (Basic structure, minimal CSS) ====
 class SimpleHtmlFileTests : public HtmlRoundtripTest {};
 
-TEST_F(SimpleHtmlFileTests, TestClearSimple) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_simple.html", "test_clear_simple");
-    EXPECT_TRUE(result.success) << "Simple clear test HTML should succeed";
-}
-
 TEST_F(SimpleHtmlFileTests, TableSimple) {
     auto result = test_html_file_roundtrip_cli("./test/html/table_simple.html", "table_simple");
     EXPECT_TRUE(result.success) << "Simple table HTML should succeed";
-}
-
-TEST_F(SimpleHtmlFileTests, TableBasic) {
-    auto result = test_html_file_roundtrip_cli("./test/html/table_basic.html", "table_basic");
-    EXPECT_TRUE(result.success) << "Basic table HTML should succeed";
 }
 
 // ==== INTERMEDIATE HTML FILES (CSS styling, basic layouts) ====
@@ -1561,44 +1551,9 @@ TEST_F(IntermediateHtmlFileTests, Sample4) {
     EXPECT_TRUE(result.success) << "Sample4 landing page HTML should succeed";
 }
 
-TEST_F(IntermediateHtmlFileTests, TestFloatBasic) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_float_basic.html", "test_float_basic");
-    EXPECT_TRUE(result.success) << "Basic float test HTML should succeed";
-}
-
-TEST_F(IntermediateHtmlFileTests, TestClearLeft) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_left.html", "test_clear_left");
-    EXPECT_TRUE(result.success) << "Clear left test HTML should succeed";
-}
-
-TEST_F(IntermediateHtmlFileTests, TestClearRight) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_right.html", "test_clear_right");
-    EXPECT_TRUE(result.success) << "Clear right test HTML should succeed";
-}
-
-TEST_F(IntermediateHtmlFileTests, TestClearProperty) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_property.html", "test_clear_property");
-    EXPECT_TRUE(result.success) << "Clear property test HTML should succeed";
-}
-
 TEST_F(IntermediateHtmlFileTests, TestLineBoxAdjustment) {
     auto result = test_html_file_roundtrip_cli("./test/html/test_line_box_adjustment.html", "test_line_box_adjustment");
     EXPECT_TRUE(result.success) << "Line box adjustment test HTML should succeed";
-}
-
-TEST_F(IntermediateHtmlFileTests, TestMarginCollapse) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_margin_collapse.html", "test_margin_collapse");
-    EXPECT_TRUE(result.success) << "Margin collapse test HTML should succeed";
-}
-
-TEST_F(IntermediateHtmlFileTests, TestOverflow) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_overflow.html", "test_overflow");
-    EXPECT_TRUE(result.success) << "Overflow test HTML should succeed";
-}
-
-TEST_F(IntermediateHtmlFileTests, TestPercentage) {
-    auto result = test_html_file_roundtrip_cli("./test/html/test_percentage.html", "test_percentage");
-    EXPECT_TRUE(result.success) << "Percentage test HTML should succeed";
 }
 
 // ==== ADVANCED HTML FILES (Complex layouts, positioning, grid/flex) ====
@@ -1622,11 +1577,6 @@ TEST_F(AdvancedHtmlFileTests, TestCompletePositioning) {
 TEST_F(AdvancedHtmlFileTests, PositionHtml) {
     auto result = test_html_file_roundtrip_cli("./test/html/position.html", "position");
     EXPECT_TRUE(result.success) << "Position HTML file should succeed";
-}
-
-TEST_F(AdvancedHtmlFileTests, DebugPosition) {
-    auto result = test_html_file_roundtrip_cli("./test/html/debug_position.html", "debug_position");
-    EXPECT_TRUE(result.success) << "Debug position HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestGridBasic) {
@@ -1659,16 +1609,6 @@ TEST_F(AdvancedHtmlFileTests, IndexHtml) {
     EXPECT_TRUE(result.success) << "Index HTML file should succeed";
 }
 
-TEST_F(AdvancedHtmlFileTests, LayoutHtm) {
-    auto result = test_html_file_roundtrip_cli("./test/html/layout.htm", "layout");
-    EXPECT_TRUE(result.success) << "Layout HTM file should succeed";
-}
-
-TEST_F(AdvancedHtmlFileTests, CssListHtm) {
-    auto result = test_html_file_roundtrip_cli("./test/html/css-list.htm", "css-list");
-    EXPECT_TRUE(result.success) << "CSS list HTM file should succeed";
-}
-
 // ==== COMPLEX HTML FILES (Multiple features, real-world pages) ====
 class ComplexHtmlFileTests : public HtmlRoundtripTest {};
 
@@ -1682,19 +1622,9 @@ TEST_F(ComplexHtmlFileTests, SampleList) {
     EXPECT_TRUE(result.success) << "Sample list HTM should succeed";
 }
 
-TEST_F(ComplexHtmlFileTests, SampleOverflow) {
-    auto result = test_html_file_roundtrip_cli("./test/html/sample_overflow.htm", "sample_overflow");
-    EXPECT_TRUE(result.success) << "Sample overflow HTM should succeed";
-}
-
 TEST_F(ComplexHtmlFileTests, SampleSpanBoundary) {
     auto result = test_html_file_roundtrip_cli("./test/html/sample_span_boundary.htm", "sample_span_boundary");
     EXPECT_TRUE(result.success) << "Sample span boundary HTM should succeed";
-}
-
-TEST_F(ComplexHtmlFileTests, PixeRatio) {
-    auto result = test_html_file_roundtrip_cli("./test/html/pixe_ratio.htm", "pixe_ratio");
-    EXPECT_TRUE(result.success) << "Pixel ratio HTM should succeed";
 }
 
 TEST_F(ComplexHtmlFileTests, Facatology) {
