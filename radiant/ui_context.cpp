@@ -141,13 +141,20 @@ int ui_context_init(UiContext* uicon, bool headless) {
 
     // init ThorVG engine (v1.0-pre34: no engine type param, just thread count)
     tvg_engine_init(1);
-    // load default font for tvg to render text later
-    char* font_path = load_font_path(uicon->font_db, "Times New Roman");
-    if (!font_path) {
-        font_path = load_font_path(uicon->font_db, "Times");  // Fallback to Times if Times New Roman not found
-    }
-    if (font_path) {
-        tvg_font_load(font_path);  mem_free(font_path);
+    // load default fonts for ThorVG to render text later
+    // ThorVG needs fonts pre-loaded before they can be used in SVG text elements
+    const char* tvg_fonts[] = {
+        "Times New Roman", "Times",  // default serif
+        "Arial",                      // common sans-serif used in graph SVG
+        "Helvetica",                  // fallback sans-serif
+        nullptr
+    };
+    for (int i = 0; tvg_fonts[i]; i++) {
+        char* font_path = load_font_path(uicon->font_db, tvg_fonts[i]);
+        if (font_path) {
+            tvg_font_load(font_path);
+            mem_free(font_path);
+        }
     }
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
