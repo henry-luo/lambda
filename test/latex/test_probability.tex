@@ -1,0 +1,50 @@
+% test_probability.tex - Probability and statistics formulas
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Bayes' theorem
+$$P(A|B) = \frac{P(B|A) \cdot P(A)}{P(B)}$$
+
+% Law of total probability
+$$P(A) = \sum_{i=1}^{n} P(A|B_i) P(B_i)$$
+
+% Expected value
+$$E[X] = \sum_{i} x_i P(X = x_i) = \int_{-\infty}^{\infty} x f(x) \, dx$$
+
+% Variance
+$$\text{Var}(X) = E[(X - \mu)^2] = E[X^2] - (E[X])^2$$
+
+% Normal distribution
+$$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{(x-\mu)^2}{2\sigma^2}}$$
+
+% Standard normal
+$$\Phi(z) = \frac{1}{\sqrt{2\pi}} \int_{-\infty}^{z} e^{-\frac{t^2}{2}} \, dt$$
+
+% Poisson distribution
+$$P(X = k) = \frac{\lambda^k e^{-\lambda}}{k!}$$
+
+% Binomial distribution
+$$P(X = k) = \binom{n}{k} p^k (1-p)^{n-k}$$
+
+% Moment generating function
+$$M_X(t) = E[e^{tX}] = \sum_{n=0}^{\infty} \frac{E[X^n]}{n!} t^n$$
+
+% Characteristic function
+$$\varphi_X(t) = E[e^{itX}]$$
+
+% Central limit theorem
+$$\frac{\bar{X}_n - \mu}{\sigma/\sqrt{n}} \xrightarrow{d} N(0,1)$$
+
+% Chi-squared distribution
+$$\chi^2_k = \sum_{i=1}^{k} Z_i^2, \quad Z_i \sim N(0,1)$$
+
+% Covariance
+$$\text{Cov}(X, Y) = E[(X - \mu_X)(Y - \mu_Y)] = E[XY] - E[X]E[Y]$$
+
+% Correlation coefficient
+$$\rho_{X,Y} = \frac{\text{Cov}(X,Y)}{\sigma_X \sigma_Y}$$
+
+\end{document}

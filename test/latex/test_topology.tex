@@ -1,0 +1,56 @@
+% test_topology.tex - Topology concepts
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Topological space
+$$(X, \tau): \quad \emptyset, X \in \tau, \text{ closed under } \cup, \cap$$
+
+% Open ball
+$$B_r(x) = \{y \in X : d(x, y) < r\}$$
+
+% Closure
+$$\overline{A} = A \cup \partial A = \bigcap \{F : F \supseteq A, F \text{ closed}\}$$
+
+% Interior
+$$\text{int}(A) = A^\circ = \bigcup \{U : U \subseteq A, U \text{ open}\}$$
+
+% Boundary
+$$\partial A = \overline{A} \setminus \text{int}(A)$$
+
+% Continuity
+$$f: X \to Y \text{ continuous} \iff f^{-1}(V) \text{ open for all open } V$$
+
+% Homeomorphism
+$$f: X \to Y \text{ homeomorphism} \iff f \text{ bijective, continuous, } f^{-1} \text{ continuous}$$
+
+% Compactness
+$$X \text{ compact} \iff \text{every open cover has a finite subcover}$$
+
+% Heine-Borel
+$$K \subset \mathbb{R}^n \text{ compact} \iff K \text{ closed and bounded}$$
+
+% Connectedness
+$$X \text{ connected} \iff X \neq A \cup B, A \cap B = \emptyset, A, B \text{ open nonempty}$$
+
+% Path connectedness
+$$\forall x, y \in X, \exists \gamma: [0,1] \to X, \gamma(0) = x, \gamma(1) = y$$
+
+% Hausdorff space
+$$\forall x \neq y, \exists U, V \text{ open}: x \in U, y \in V, U \cap V = \emptyset$$
+
+% Fundamental group
+$$\pi_1(X, x_0) = \{[\gamma] : \gamma(0) = \gamma(1) = x_0\}$$
+
+% Covering space
+$$p: \tilde{X} \to X \text{ local homeomorphism, evenly covered}$$
+
+% Euler characteristic
+$$\chi = V - E + F$$
+
+% For surfaces
+$$\chi = 2 - 2g \quad (g = \text{genus})$$
+
+\end{document}

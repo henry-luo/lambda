@@ -516,6 +516,90 @@ TEST_F(DVICompareTest, ComplexFormula) {
 }
 
 // ============================================================================
+// Sophisticated Math Tests
+// ============================================================================
+
+TEST_F(DVICompareTest, Calculus) {
+    EXPECT_TRUE(test_latex_file("test_calculus"));
+}
+
+TEST_F(DVICompareTest, LinearAlgebra) {
+    EXPECT_TRUE(test_latex_file("test_linear_algebra"));
+}
+
+TEST_F(DVICompareTest, Physics) {
+    EXPECT_TRUE(test_latex_file("test_physics"));
+}
+
+TEST_F(DVICompareTest, NumberTheory) {
+    EXPECT_TRUE(test_latex_file("test_number_theory"));
+}
+
+TEST_F(DVICompareTest, Probability) {
+    EXPECT_TRUE(test_latex_file("test_probability"));
+}
+
+TEST_F(DVICompareTest, SetTheory) {
+    EXPECT_TRUE(test_latex_file("test_set_theory"));
+}
+
+TEST_F(DVICompareTest, Combinatorics) {
+    EXPECT_TRUE(test_latex_file("test_combinatorics"));
+}
+
+TEST_F(DVICompareTest, AbstractAlgebra) {
+    EXPECT_TRUE(test_latex_file("test_abstract_algebra"));
+}
+
+TEST_F(DVICompareTest, DifferentialEquations) {
+    EXPECT_TRUE(test_latex_file("test_differential_equations"));
+}
+
+TEST_F(DVICompareTest, ComplexAnalysis) {
+    EXPECT_TRUE(test_latex_file("test_complex_analysis"));
+}
+
+TEST_F(DVICompareTest, Topology) {
+    EXPECT_TRUE(test_latex_file("test_topology"));
+}
+
+// ============================================================================
+// Structure and Syntax Tests
+// ============================================================================
+
+TEST_F(DVICompareTest, NestedStructures) {
+    EXPECT_TRUE(test_latex_file("test_nested_structures"));
+}
+
+TEST_F(DVICompareTest, EdgeCases) {
+    EXPECT_TRUE(test_latex_file("test_edge_cases"));
+}
+
+TEST_F(DVICompareTest, AllGreek) {
+    EXPECT_TRUE(test_latex_file("test_all_greek"));
+}
+
+TEST_F(DVICompareTest, AllOperators) {
+    EXPECT_TRUE(test_latex_file("test_all_operators"));
+}
+
+TEST_F(DVICompareTest, AlignmentAdvanced) {
+    EXPECT_TRUE(test_latex_file("test_alignment_advanced"));
+}
+
+TEST_F(DVICompareTest, Chemistry) {
+    EXPECT_TRUE(test_latex_file("test_chemistry"));
+}
+
+TEST_F(DVICompareTest, FontStyles) {
+    EXPECT_TRUE(test_latex_file("test_font_styles"));
+}
+
+TEST_F(DVICompareTest, Tables) {
+    EXPECT_TRUE(test_latex_file("test_tables"));
+}
+
+// ============================================================================
 // Self-Consistency Tests
 // ============================================================================
 

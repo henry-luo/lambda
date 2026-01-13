@@ -1,0 +1,114 @@
+% test_document_structure.tex - Full document with sections and environments
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}{Definition}
+
+\title{Mathematical Analysis}
+\author{Test Author}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document tests various LaTeX structural elements including theorems,
+definitions, proofs, and mathematical environments.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+
+Let us consider the foundations of calculus.
+
+\section{Limits and Continuity}
+
+\begin{definition}
+A function $f: \mathbb{R} \to \mathbb{R}$ is \emph{continuous} at $x = a$ if
+$$\lim_{x \to a} f(x) = f(a)$$
+\end{definition}
+
+\begin{theorem}[Intermediate Value Theorem]
+If $f$ is continuous on $[a,b]$ and $y$ is between $f(a)$ and $f(b)$,
+then there exists $c \in (a,b)$ such that $f(c) = y$.
+\end{theorem}
+
+\begin{proof}
+Consider the set $S = \{x \in [a,b] : f(x) \leq y\}$. Since $f(a) \leq y$,
+we have $a \in S$, so $S \neq \emptyset$. Also $S$ is bounded above by $b$.
+
+Let $c = \sup S$. We claim $f(c) = y$.
+
+Suppose $f(c) < y$. By continuity, there exists $\delta > 0$ such that
+$f(x) < y$ for all $x \in (c - \delta, c + \delta)$. This contradicts
+$c = \sup S$.
+
+Similarly, $f(c) > y$ leads to a contradiction. Therefore $f(c) = y$.
+\end{proof}
+
+\section{Differentiation}
+
+\begin{definition}
+The \emph{derivative} of $f$ at $x$ is
+$$f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}$$
+when this limit exists.
+\end{definition}
+
+\begin{theorem}[Chain Rule]
+If $g$ is differentiable at $x$ and $f$ is differentiable at $g(x)$, then
+$$(f \circ g)'(x) = f'(g(x)) \cdot g'(x)$$
+\end{theorem}
+
+\begin{lemma}
+If $f$ is differentiable at $x$, then $f$ is continuous at $x$.
+\end{lemma}
+
+\begin{corollary}
+A function with a discontinuity at $x$ cannot be differentiable at $x$.
+\end{corollary}
+
+\section{Integration}
+
+\begin{theorem}[Fundamental Theorem of Calculus]
+Let $f$ be continuous on $[a,b]$ and let
+$$F(x) = \int_a^x f(t) \, dt$$
+Then:
+\begin{enumerate}
+\item $F$ is continuous on $[a,b]$
+\item $F$ is differentiable on $(a,b)$ with $F'(x) = f(x)$
+\item If $G$ is any antiderivative of $f$, then
+$$\int_a^b f(x) \, dx = G(b) - G(a)$$
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+(Part 2) Fix $x \in (a,b)$ and consider
+\begin{align*}
+\frac{F(x+h) - F(x)}{h} &= \frac{1}{h} \left( \int_a^{x+h} f(t) \, dt - \int_a^x f(t) \, dt \right) \\
+&= \frac{1}{h} \int_x^{x+h} f(t) \, dt
+\end{align*}
+By the Mean Value Theorem for integrals, there exists $c_h$ between $x$ and $x+h$ such that
+$$\frac{1}{h} \int_x^{x+h} f(t) \, dt = f(c_h)$$
+As $h \to 0$, we have $c_h \to x$, so by continuity $f(c_h) \to f(x)$.
+\end{proof}
+
+\appendix
+
+\section{Notation}
+
+\begin{itemize}
+\item $\mathbb{N}$ -- Natural numbers
+\item $\mathbb{Z}$ -- Integers
+\item $\mathbb{Q}$ -- Rational numbers
+\item $\mathbb{R}$ -- Real numbers
+\item $\mathbb{C}$ -- Complex numbers
+\end{itemize}
+
+\end{document}

@@ -266,17 +266,19 @@ module.exports = grammar({
     // ========================================================================
 
     math: $ => choice(
+      $.display_math,  // Try display_math first (longer match)
       $.inline_math,
-      $.display_math,
     ),
 
     inline_math: $ => choice(
-      seq('$', repeat($._math_content), '$'),
+      seq(token(prec(-1, '$')), repeat($._math_content), '$'),
       seq('\\(', repeat($._math_content), '\\)'),
     ),
 
+    // Display math: use token(prec(1, '$$')) to ensure $$ is tokenized as a single lexeme
+    // before $ can be matched individually by inline_math
     display_math: $ => choice(
-      seq('$$', repeat($._math_content), '$$'),
+      seq(token(prec(1, '$$')), repeat($._math_content), token(prec(1, '$$'))),
       seq('\\[', repeat($._math_content), '\\]'),
     ),
 

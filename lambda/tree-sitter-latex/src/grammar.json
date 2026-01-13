@@ -594,11 +594,11 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "inline_math"
+          "name": "display_math"
         },
         {
           "type": "SYMBOL",
-          "name": "display_math"
+          "name": "inline_math"
         }
       ]
     },
@@ -609,8 +609,15 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "$"
+              "type": "TOKEN",
+              "content": {
+                "type": "PREC",
+                "value": -1,
+                "content": {
+                  "type": "STRING",
+                  "value": "$"
+                }
+              }
             },
             {
               "type": "REPEAT",
@@ -654,8 +661,15 @@
           "type": "SEQ",
           "members": [
             {
-              "type": "STRING",
-              "value": "$$"
+              "type": "TOKEN",
+              "content": {
+                "type": "PREC",
+                "value": 1,
+                "content": {
+                  "type": "STRING",
+                  "value": "$$"
+                }
+              }
             },
             {
               "type": "REPEAT",
@@ -665,8 +679,15 @@
               }
             },
             {
-              "type": "STRING",
-              "value": "$$"
+              "type": "TOKEN",
+              "content": {
+                "type": "PREC",
+                "value": 1,
+                "content": {
+                  "type": "STRING",
+                  "value": "$$"
+                }
+              }
             }
           ]
         },

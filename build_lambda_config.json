@@ -1035,10 +1035,10 @@
         },
         "macos": {
             "includes": [
-                "/usr/local/include",
-                "/opt/homebrew/opt/freetype/include/freetype2",
                 "/opt/homebrew/include",
-                "/opt/homebrew/include/libpng16"
+                "/opt/homebrew/opt/freetype/include/freetype2",
+                "/opt/homebrew/include/libpng16",
+                "/usr/local/include"
             ],
             "libraries": [
                 {
@@ -2875,7 +2875,7 @@
                         "icon": "📝"
                     },
                     {
-                        "source": "test/test_dvi_compare_gtest.cpp",
+                        "source": "test/test_latex_dvi_compare_gtest.cpp",
                         "name": "DVI Compare Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -2886,7 +2886,7 @@
                             "rpmalloc",
                             "freetype"
                         ],
-                        "binary": "test_dvi_compare_gtest.exe",
+                        "binary": "test_latex_dvi_compare_gtest.exe",
                         "additional_sources": [
                             "lambda/tex/tex_node.cpp",
                             "lambda/tex/tex_tfm.cpp",

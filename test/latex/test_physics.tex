@@ -1,0 +1,49 @@
+% test_physics.tex - Physics equations and notation
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\pagestyle{empty}
+\begin{document}
+
+% Maxwell's equations
+\begin{align}
+\nabla \cdot \vec{E} &= \frac{\rho}{\epsilon_0} \\
+\nabla \cdot \vec{B} &= 0 \\
+\nabla \times \vec{E} &= -\frac{\partial \vec{B}}{\partial t} \\
+\nabla \times \vec{B} &= \mu_0 \vec{J} + \mu_0 \epsilon_0 \frac{\partial \vec{E}}{\partial t}
+\end{align}
+
+% Schrödinger equation
+$$i\hbar \frac{\partial}{\partial t}\Psi = \hat{H}\Psi$$
+
+% Time-independent form
+$$\hat{H}\psi = E\psi$$
+
+% Hamiltonian
+$$\hat{H} = -\frac{\hbar^2}{2m}\nabla^2 + V(r)$$
+
+% Einstein's field equations
+$$R_{\mu\nu} - \frac{1}{2}Rg_{\mu\nu} + \Lambda g_{\mu\nu} = \frac{8\pi G}{c^4}T_{\mu\nu}$$
+
+% Special relativity
+$$E^2 = (pc)^2 + (m_0 c^2)^2$$
+
+% Lorentz transformation
+$$\gamma = \frac{1}{\sqrt{1 - \frac{v^2}{c^2}}}$$
+
+% Dirac equation
+$$\left(i\gamma^\mu \partial_\mu - m\right)\psi = 0$$
+
+% Wave function normalization
+$$\int_{-\infty}^{\infty} |\Psi(x,t)|^2 \, dx = 1$$
+
+% Heisenberg uncertainty
+$$\Delta x \cdot \Delta p \geq \frac{\hbar}{2}$$
+
+% Lagrangian
+$$\mathcal{L} = T - V = \frac{1}{2}m\dot{x}^2 - V(x)$$
+
+% Euler-Lagrange equation
+$$\frac{d}{dt}\left(\frac{\partial \mathcal{L}}{\partial \dot{q}}\right) - \frac{\partial \mathcal{L}}{\partial q} = 0$$
+
+\end{document}
