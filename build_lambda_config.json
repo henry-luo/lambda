@@ -153,7 +153,8 @@
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
-        "mac-deps/rpmalloc-install/include"
+        "mac-deps/rpmalloc-install/include",
+        "mac-deps/thorvg/src/bindings/capi"
     ],
     "libraries": [
         {
