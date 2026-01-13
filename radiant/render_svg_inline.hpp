@@ -44,6 +44,10 @@ struct SvgRenderContext {
     Element* svg_root;           // root <svg> element
     Pool* pool;                  // memory pool
     
+    // pixel ratio for text sizing - text font sizes need to be divided by this
+    // because the entire SVG scene is scaled by pixel_ratio after building
+    float pixel_ratio;
+    
     // viewBox transform state
     float viewbox_x, viewbox_y;
     float viewbox_width, viewbox_height;
@@ -94,9 +98,10 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
  * @param viewport_width Target rendering width (CSS pixels)
  * @param viewport_height Target rendering height (CSS pixels)
  * @param pool Memory pool for allocations
+ * @param pixel_ratio Device pixel ratio (for text size adjustment)
  * @return ThorVG scene containing all SVG content (caller must manage lifecycle)
  */
-Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool);
+Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 
 /**
  * Render inline SVG element in document context

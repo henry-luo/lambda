@@ -1057,61 +1057,18 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
 // ============================================================================
 
 /**
- * Get text content from an SVG element
- * Text can be either direct string children or within <tspan> elements
- */
-static const char* get_svg_text_content(Element* elem, Pool* pool) {
-    if (!elem || elem->length == 0) return nullptr;
-    
-    // use a string buffer to accumulate text from children
-    StrBuf* sb = strbuf_new_cap(256);
-    
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
-        TypeId type = get_type_id(child);
-        
-        if (type == LMD_TYPE_STRING) {
-            // direct text node
-            String* str = (String*)child.item;
-            if (str && str->chars) {
-                strbuf_append_str_n(sb, str->chars, str->len);
-            }
-        } else if (type == LMD_TYPE_ELEMENT) {
-            // could be <tspan> - recursively get its text
-            Element* child_elem = child.element;
-            const char* tag = nullptr;
-            if (child_elem && child_elem->type) {
-                TypeElmt* child_type = (TypeElmt*)child_elem->type;
-                tag = child_type->name.str;
-            }
-            if (tag && strcmp(tag, "tspan") == 0) {
-                const char* tspan_text = get_svg_text_content(child_elem, pool);
-                if (tspan_text) {
-                    strbuf_append_str(sb, tspan_text);
-                }
-            }
-        }
-    }
-    
-    if (sb->length == 0) {
-        strbuf_free(sb);
-        return nullptr;
-    }
-    
-    // allocate result - duplicate string before freeing buffer
-    char* result = strdup(sb->str);
-    strbuf_free(sb);
-    return result;
-}
-
-/**
  * Resolve font path from font-family name
  * Uses platform-specific font lookup
+ * out_font_name: returns the actual font name used (may be different due to fallback)
  */
-static char* resolve_svg_font_path(const char* font_family) {
+static char* resolve_svg_font_path(const char* font_family, const char** out_font_name) {
+    // default font name
+    const char* used_font_name = font_family;
+    
     if (!font_family || !*font_family) {
         // default to a common sans-serif font
         font_family = "Arial";
+        used_font_name = "Arial";
     }
     
     // try platform font lookup
@@ -1124,12 +1081,16 @@ static char* resolve_svg_font_path(const char* font_family) {
         path = nullptr;
     }
     
-    if (path) return path;
+    if (path) {
+        if (out_font_name) *out_font_name = used_font_name;
+        return path;
+    }
     
     // try common fallbacks - prefer simple TTF files that ThorVG can load
     // avoid fonts that are typically in TTC format
     static const char* fallbacks[] = {
-        "SFNS",              // /System/Library/Fonts/SFNS.ttf (macOS)
+        "Arial",             // /System/Library/Fonts/Supplemental/Arial.ttf
+        "SFNS",              // /System/Library/Fonts/SFNS.ttf (macOS) - font name is "SF NS"
         "Geneva",            // /System/Library/Fonts/Geneva.ttf (macOS)
         "Arial Unicode MS",  // /System/Library/Fonts/Supplemental/Arial Unicode.ttf
         "DejaVu Sans",       // Linux
@@ -1152,147 +1113,318 @@ static char* resolve_svg_font_path(const char* font_family) {
             
             if (path) {
                 log_debug("[SVG] font fallback: %s -> %s", font_family, fallbacks[i]);
+                used_font_name = fallbacks[i];
+                if (out_font_name) *out_font_name = used_font_name;
                 return path;
             }
         }
     }
     
     log_debug("[SVG] no font found for: %s", font_family);
+    if (out_font_name) *out_font_name = nullptr;
     return nullptr;
 }
 
 /**
- * Render SVG <text> element using ThorVG's C API (v1.0-pre34)
- * Requires ThorVG built with TTF loader support (-Dloaders=ttf)
+ * Check if a string is only whitespace
  */
-static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
-    if (!elem) return nullptr;
-    
-    // get text content
-    const char* text_content = get_svg_text_content(elem, ctx->pool);
-    if (!text_content || !*text_content) {
-        log_debug("[SVG] <text> element has no content");
-        return nullptr;
+static bool is_whitespace_only(const char* str, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (!isspace((unsigned char)str[i])) return false;
     }
+    return true;
+}
+
+/**
+ * Trim leading and trailing whitespace from a string
+ * Returns a newly allocated trimmed string, or nullptr if result is empty
+ */
+static char* trim_whitespace(const char* str, size_t len) {
+    if (!str || len == 0) return nullptr;
     
-    // parse position attributes
-    float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
-    float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
+    // skip leading whitespace
+    size_t start = 0;
+    while (start < len && isspace((unsigned char)str[start])) start++;
     
-    // parse font attributes
-    const char* font_family = get_svg_attr(elem, "font-family");
-    float font_size = parse_svg_length(get_svg_attr(elem, "font-size"), 16);
+    // skip trailing whitespace
+    size_t end = len;
+    while (end > start && isspace((unsigned char)str[end - 1])) end--;
     
-    // resolve font path using platform font lookup
-    char* font_path = resolve_svg_font_path(font_family);
-    if (!font_path) {
-        log_debug("[SVG] <text> no font available, skipping: %s", text_content);
-        return nullptr;
+    if (end <= start) return nullptr;  // all whitespace
+    
+    size_t trimmed_len = end - start;
+    char* result = (char*)malloc(trimmed_len + 1);
+    if (!result) return nullptr;
+    
+    memcpy(result, str + start, trimmed_len);
+    result[trimmed_len] = '\0';
+    return result;
+}
+
+/**
+ * Get direct text content from an SVG element (non-recursive, single string node only)
+ * Used for getting text content from a tspan without recursing into children
+ * Returns trimmed content, skipping whitespace-only nodes
+ */
+static const char* get_direct_text_content(Element* elem) {
+    if (!elem || elem->length == 0) return nullptr;
+    
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        TypeId type = get_type_id(child);
+        
+        if (type == LMD_TYPE_STRING) {
+            String* str = (String*)child.item;
+            if (str && str->chars && str->len > 0) {
+                // skip whitespace-only nodes
+                if (is_whitespace_only(str->chars, str->len)) continue;
+                return trim_whitespace(str->chars, str->len);
+            }
+        }
     }
+    return nullptr;
+}
+
+/**
+ * Create a single ThorVG text object with specified properties
+ * Note: font_size is in CSS pixels, but ThorVG uses points internally.
+ * We convert: points = pixels * 72/96 = pixels * 0.75
+ */
+static Tvg_Paint create_text_segment(const char* text, float x, float y,
+                                     const char* font_path, const char* font_name,
+                                     float font_size_px, Color fill_color) {
+    if (!text || !*text || !font_path) return nullptr;
     
-    // create ThorVG text object (Tvg_Paint is already a pointer type)
-    Tvg_Paint text = tvg_text_new();
-    if (!text) {
-        free(font_path);
-        return nullptr;
-    }
+    // convert CSS pixels to points for ThorVG
+    // 1 CSS pixel = 1/96 inch, 1 point = 1/72 inch
+    // points = pixels * 72 / 96 = pixels * 0.75
+    float font_size_pt = font_size_px * 0.75f;
     
-    // load font file into ThorVG (it caches internally, safe to call multiple times)
+    Tvg_Paint tvg_text = tvg_text_new();
+    if (!tvg_text) return nullptr;
+    
+    // load font (ThorVG caches it)
     Tvg_Result load_result = tvg_font_load(font_path);
     if (load_result != TVG_RESULT_SUCCESS) {
         log_debug("[SVG] failed to load font file: %s (result=%d)", font_path, load_result);
-        tvg_paint_unref(text, true);
-        free(font_path);
+        tvg_paint_unref(tvg_text, true);
         return nullptr;
     }
     
-    log_debug("[SVG] successfully loaded font file: %s", font_path);
+    log_debug("[SVG TEXT] loaded font file: %s, setting font name: '%s'", font_path, font_name ? font_name : "null");
     
-    // In ThorVG v1.0-pre34, tvg_text_set_font() expects a font name that matches
-    // how the font was registered. Since fonts are complex to query by name,
-    // we use nullptr which tells ThorVG to use "any loaded font".
-    // This works because we just loaded a font above.
-    Tvg_Result result = tvg_text_set_font(text, nullptr);
+    // set font by name - ThorVG matches the font name from the loaded font file
+    // common font names: "Arial", "Helvetica", "SF NS", "Geneva", etc.
+    Tvg_Result result = tvg_text_set_font(tvg_text, font_name);
     if (result != TVG_RESULT_SUCCESS) {
-        log_debug("[SVG] failed to set font (nullptr gave result=%d)", result);
-        tvg_paint_unref(text, true);
-        free(font_path);
-        return nullptr;
-    }
-    
-    log_debug("[SVG] successfully set font using loaded font");
-    
-    // set font size (separate call in v1.0-pre34)
-    result = tvg_text_set_size(text, font_size);
-    if (result != TVG_RESULT_SUCCESS) {
-        log_debug("[SVG] failed to set font size: %.1f (result=%d)", font_size, result);
-        tvg_paint_unref(text, true);
-        free(font_path);
-        return nullptr;
-    }
-    
-    // set the text content
-    result = tvg_text_set_text(text, text_content);
-    if (result != TVG_RESULT_SUCCESS) {
-        log_debug("[SVG] failed to set text content (result=%d)", result);
-        tvg_paint_unref(text, true);
-        free(font_path);
-        return nullptr;
-    }
-    
-    // apply fill color (text uses fill, not stroke by default)
-    const char* fill = get_svg_attr(elem, "fill");
-    if (!fill) fill = "black";  // SVG default
-    
-    log_debug("[SVG TEXT DEBUG] fill attribute='%s'", fill ? fill : "NULL");
-    
-    if (strcmp(fill, "none") != 0) {
-        Color fc = parse_svg_color(fill);
-        
-        log_debug("[SVG TEXT DEBUG] parsed fill color: r=%d g=%d b=%d a=%d", fc.r, fc.g, fc.b, fc.a);
-        
-        // apply fill-opacity
-        const char* fill_opacity = get_svg_attr(elem, "fill-opacity");
-        if (fill_opacity) {
-            float opacity = strtof(fill_opacity, nullptr);
-            fc.a = (uint8_t)(fc.a * opacity);
-        }
-        
-        // apply general opacity
-        const char* opacity = get_svg_attr(elem, "opacity");
-        if (opacity) {
-            float op = strtof(opacity, nullptr);
-            fc.a = (uint8_t)(fc.a * op);
-        }
-        
-        // set text color using v1.0-pre34 C API
-        result = tvg_text_set_color(text, fc.r, fc.g, fc.b);
+        // if font name fails, try nullptr as fallback
+        log_debug("[SVG TEXT] font name '%s' not found (result=%d), trying nullptr fallback", font_name ? font_name : "null", result);
+        result = tvg_text_set_font(tvg_text, nullptr);
         if (result != TVG_RESULT_SUCCESS) {
-            log_debug("[SVG] failed to set text color (result=%d)", result);
-        } else {
-            log_debug("[SVG TEXT DEBUG] text color set successfully to rgb(%d,%d,%d)", fc.r, fc.g, fc.b);
+            log_debug("[SVG] failed to set font (result=%d)", result);
+            tvg_paint_unref(tvg_text, true);
+            return nullptr;
         }
-        
-        // apply opacity via paint opacity if needed
-        if (fc.a < 255) {
-            tvg_paint_set_opacity(text, fc.a);
+    } else {
+        log_debug("[SVG TEXT] successfully set font name: '%s'", font_name);
+    }
+    
+    result = tvg_text_set_size(tvg_text, font_size_pt);
+    if (result != TVG_RESULT_SUCCESS) {
+        tvg_paint_unref(tvg_text, true);
+        return nullptr;
+    }
+    
+    result = tvg_text_set_text(tvg_text, text);
+    if (result != TVG_RESULT_SUCCESS) {
+        tvg_paint_unref(tvg_text, true);
+        return nullptr;
+    }
+    
+    // set fill color
+    if (fill_color.a > 0) {
+        tvg_text_set_color(tvg_text, fill_color.r, fill_color.g, fill_color.b);
+        if (fill_color.a < 255) {
+            tvg_paint_set_opacity(tvg_text, fill_color.a);
         }
     }
     
     // position the text
-    tvg_paint_translate(text, x, y);
+    tvg_paint_translate(tvg_text, x, y);
     
-    // apply transform if present
-    apply_svg_transform(ctx, text, elem);
+    log_debug("[SVG] text segment: '%s' at (%.1f, %.1f) size=%.1fpx (%.1fpt) color=rgb(%d,%d,%d)",
+              text, x, y, font_size_px, font_size_pt, fill_color.r, fill_color.g, fill_color.b);
     
-    log_debug("[SVG] <text> rendered: '%s' at (%.1f, %.1f) font=%s size=%.1f color=rgb(%d,%d,%d)",
-              text_content, x, y, font_family ? font_family : "default", font_size,
-              strcmp(fill, "none") != 0 ? parse_svg_color(fill).r : 0,
-              strcmp(fill, "none") != 0 ? parse_svg_color(fill).g : 0,
-              strcmp(fill, "none") != 0 ? parse_svg_color(fill).b : 0);
+    return tvg_text;
+}
+
+/**
+ * Estimate text width for horizontal positioning of tspans
+ * This is approximate - proper metrics would require ThorVG API or font metrics
+ */
+static float estimate_text_width(const char* text, float font_size) {
+    if (!text) return 0;
+    // rough estimate: average character width is about 0.5-0.6 of font size
+    size_t len = strlen(text);
+    return len * font_size * 0.55f;
+}
+
+/**
+ * Render SVG <text> element with proper tspan support
+ * Each tspan gets its own color and position
+ */
+static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
+    if (!elem) return nullptr;
+    
+    // parse parent text attributes
+    float base_x = parse_svg_length(get_svg_attr(elem, "x"), 0);
+    float base_y = parse_svg_length(get_svg_attr(elem, "y"), 0);
+    
+    const char* font_family = get_svg_attr(elem, "font-family");
+    float font_size = parse_svg_length(get_svg_attr(elem, "font-size"), 16);
+    
+    // get default fill from parent
+    const char* parent_fill = get_svg_attr(elem, "fill");
+    if (!parent_fill) parent_fill = "black";
+    Color default_fill = parse_svg_color(parent_fill);
+    
+    // resolve font path and name
+    const char* font_name = nullptr;
+    char* font_path = resolve_svg_font_path(font_family, &font_name);
+    if (!font_path) {
+        log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
+        return nullptr;
+    }
+    
+    // count children to see if we need a scene
+    int text_segments = 0;
+    bool has_tspan = false;
+    
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        TypeId type = get_type_id(child);
+        if (type == LMD_TYPE_STRING) {
+            text_segments++;
+        } else if (type == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (child_elem && child_elem->type) {
+                TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                if (child_type->name.str && strcmp(child_type->name.str, "tspan") == 0) {
+                    text_segments++;
+                    has_tspan = true;
+                }
+            }
+        }
+    }
+    
+    if (text_segments == 0) {
+        free(font_path);
+        return nullptr;
+    }
+    
+    // if single text with no tspan, use simple rendering
+    if (text_segments == 1 && !has_tspan) {
+        const char* text_content = get_direct_text_content(elem);
+        if (text_content) {
+            Tvg_Paint text = create_text_segment(text_content, base_x, base_y,
+                                                  font_path, font_name, font_size, default_fill);
+            free((void*)text_content);
+            free(font_path);
+            if (text) {
+                apply_svg_transform(ctx, text, elem);
+            }
+            return text;
+        }
+    }
+    
+    // multiple segments - create a scene
+    Tvg_Paint scene = tvg_scene_new();
+    if (!scene) {
+        free(font_path);
+        return nullptr;
+    }
+    
+    float cur_x = base_x;
+    float cur_y = base_y;
+    
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        TypeId type = get_type_id(child);
+        
+        if (type == LMD_TYPE_STRING) {
+            // direct text node - skip whitespace-only
+            String* str = (String*)child.item;
+            if (str && str->chars && str->len > 0) {
+                if (is_whitespace_only(str->chars, str->len)) continue;
+                char* text_copy = trim_whitespace(str->chars, str->len);
+                if (text_copy) {
+                    Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
+                                                              font_path, font_name, font_size, default_fill);
+                    if (text_obj) {
+                        tvg_scene_push(scene, text_obj);
+                        cur_x += estimate_text_width(text_copy, font_size);
+                    }
+                    free(text_copy);
+                }
+            }
+        } else if (type == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (!child_elem || !child_elem->type) continue;
+            
+            TypeElmt* child_type = (TypeElmt*)child_elem->type;
+            const char* tag = child_type->name.str;
+            
+            if (tag && strcmp(tag, "tspan") == 0) {
+                // get tspan-specific attributes
+                const char* tspan_x = get_svg_attr(child_elem, "x");
+                const char* tspan_y = get_svg_attr(child_elem, "y");
+                const char* tspan_dx = get_svg_attr(child_elem, "dx");
+                const char* tspan_dy = get_svg_attr(child_elem, "dy");
+                
+                // update position
+                if (tspan_x) cur_x = parse_svg_length(tspan_x, cur_x);
+                if (tspan_y) cur_y = parse_svg_length(tspan_y, cur_y);
+                if (tspan_dx) cur_x += parse_svg_length(tspan_dx, 0);
+                if (tspan_dy) cur_y += parse_svg_length(tspan_dy, 0);
+                
+                // get tspan fill color (inherit from parent if not specified)
+                const char* tspan_fill = get_svg_attr(child_elem, "fill");
+                Color fill = tspan_fill ? parse_svg_color(tspan_fill) : default_fill;
+                
+                // check for fill="none"
+                if (tspan_fill && strcmp(tspan_fill, "none") == 0) {
+                    fill.a = 0;
+                }
+                
+                // get tspan font-size (inherit from parent if not specified)
+                const char* tspan_font_size_str = get_svg_attr(child_elem, "font-size");
+                float tspan_font_size = tspan_font_size_str ? 
+                    parse_svg_length(tspan_font_size_str, font_size) : font_size;
+                
+                // get text content
+                const char* text_content = get_direct_text_content(child_elem);
+                if (text_content && *text_content) {
+                    Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
+                                                              font_path, font_name, tspan_font_size, fill);
+                    if (text_obj) {
+                        tvg_scene_push(scene, text_obj);
+                        cur_x += estimate_text_width(text_content, tspan_font_size);
+                    }
+                    free((void*)text_content);
+                }
+            }
+        }
+    }
+    
+    // apply parent transform to the scene
+    apply_svg_transform(ctx, scene, elem);
     
     free(font_path);
-    return text;
+    
+    log_debug("[SVG] <text> rendered with %d segments at base (%.1f, %.1f)", 
+              text_segments, base_x, base_y);
+    
+    return scene;
 }
 
 // ============================================================================
@@ -1504,15 +1636,16 @@ static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
 // Build SVG Scene
 // ============================================================================
 
-Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool) {
+Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio) {
     if (!svg_element) return nullptr;
     
-    log_debug("[SVG] build_svg_scene: viewport %.0fx%.0f", viewport_width, viewport_height);
+    log_debug("[SVG] build_svg_scene: viewport %.0fx%.0f pixel_ratio=%.2f", viewport_width, viewport_height, pixel_ratio);
     
     // initialize render context
     SvgRenderContext ctx = {};
     ctx.svg_root = svg_element;
     ctx.pool = pool;
+    ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;  // ensure valid pixel ratio
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
     ctx.stroke_width = 1.0f;
@@ -1586,12 +1719,14 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     Element* svg_elem = dom_elem->native_element;
     float scale = rdcon->scale;
     
-    log_debug("[SVG] render_inline_svg: view pos=(%.0f,%.0f) size=(%.0f,%.0f)",
-              view->x, view->y, view->width, view->height);
+    log_debug("[SVG] render_inline_svg: view pos=(%.0f,%.0f) size=(%.0f,%.0f) pixel_ratio=%.2f",
+              view->x, view->y, view->width, view->height, scale);
     
     // build ThorVG scene from SVG element tree
+    // pass pixel_ratio so text sizes can be adjusted (divided by pixel_ratio)
+    // since the entire scene will be scaled by pixel_ratio after building
     Tvg_Paint svg_scene = build_svg_scene(svg_elem, view->width, view->height, 
-                                            rdcon->ui_context->document->pool);
+                                            rdcon->ui_context->document->pool, scale);
     if (!svg_scene) {
         log_debug("[SVG] render_inline_svg: failed to build scene");
         return;

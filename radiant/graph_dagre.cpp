@@ -6,10 +6,87 @@
 #include <float.h>
 
 // ============================================================================
-// Phase 1: Rank Assignment (Longest Path Algorithm)
+// Phase 0: Cycle Detection and Back Edge Identification
 // ============================================================================
 
-// compute longest path from roots using DFS
+// DFS states for cycle detection
+#define DFS_WHITE 0  // not visited
+#define DFS_GRAY  1  // currently being visited (on stack)
+#define DFS_BLACK 2  // finished
+
+// Detect back edges and mark them (edges from descendant to ancestor in DFS tree)
+static void detect_back_edges_dfs(LayoutNode* node, LayoutGraph* graph, 
+                                  int* dfs_state, int* node_indices) {
+    int node_idx = -1;
+    for (int i = 0; i < graph->nodes->length; i++) {
+        if ((LayoutNode*)graph->nodes->data[i] == node) {
+            node_idx = i;
+            break;
+        }
+    }
+    
+    if (node_idx < 0 || dfs_state[node_idx] != DFS_WHITE) {
+        return;
+    }
+    
+    dfs_state[node_idx] = DFS_GRAY;
+    
+    // visit all successors
+    for (int i = 0; i < node->out_edges->length; i++) {
+        LayoutEdge* edge = (LayoutEdge*)node->out_edges->data[i];
+        LayoutNode* to_node = edge->to_node;
+        
+        int to_idx = -1;
+        for (int j = 0; j < graph->nodes->length; j++) {
+            if ((LayoutNode*)graph->nodes->data[j] == to_node) {
+                to_idx = j;
+                break;
+            }
+        }
+        
+        if (to_idx >= 0) {
+            if (dfs_state[to_idx] == DFS_GRAY) {
+                // back edge found - mark it for reversal during ranking
+                edge->is_back_edge = true;
+                log_debug("dagre: detected back edge %s -> %s", 
+                         edge->from_id, edge->to_id);
+            } else if (dfs_state[to_idx] == DFS_WHITE) {
+                detect_back_edges_dfs(to_node, graph, dfs_state, node_indices);
+            }
+        }
+    }
+    
+    dfs_state[node_idx] = DFS_BLACK;
+}
+
+static void detect_and_mark_back_edges(LayoutGraph* graph) {
+    int n = graph->nodes->length;
+    int* dfs_state = (int*)calloc(n, sizeof(int));
+    int* node_indices = (int*)calloc(n, sizeof(int));
+    
+    // initialize all edges as non-back edges
+    for (int i = 0; i < graph->edges->length; i++) {
+        LayoutEdge* edge = (LayoutEdge*)graph->edges->data[i];
+        edge->is_back_edge = false;
+    }
+    
+    // run DFS from each unvisited node
+    for (int i = 0; i < n; i++) {
+        if (dfs_state[i] == DFS_WHITE) {
+            LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
+            detect_back_edges_dfs(node, graph, dfs_state, node_indices);
+        }
+    }
+    
+    free(dfs_state);
+    free(node_indices);
+}
+
+// ============================================================================
+// Phase 1: Rank Assignment (Longest Path Algorithm - ignoring back edges)
+// ============================================================================
+
+// compute longest path from roots using DFS, ignoring back edges
 static void compute_rank_dfs(LayoutNode* node, LayoutGraph* graph, int* visited_flags) {
     // find node index
     int node_idx = -1;
@@ -27,9 +104,15 @@ static void compute_rank_dfs(LayoutNode* node, LayoutGraph* graph, int* visited_
     
     int max_predecessor_rank = -1;
     
-    // visit all predecessors first
+    // visit all predecessors first (ignoring back edges)
     for (int i = 0; i < node->in_edges->length; i++) {
         LayoutEdge* edge = (LayoutEdge*)node->in_edges->data[i];
+        
+        // skip back edges - they point "backwards" in the graph
+        if (edge->is_back_edge) {
+            continue;
+        }
+        
         compute_rank_dfs(edge->from_node, graph, visited_flags);
         
         int pred_rank = edge->from_node->rank;
@@ -45,6 +128,9 @@ static void compute_rank_dfs(LayoutNode* node, LayoutGraph* graph, int* visited_
 void dagre_assign_ranks(LayoutGraph* graph) {
     log_debug("dagre: assigning ranks (longest path algorithm)");
     
+    // first, detect and mark back edges
+    detect_and_mark_back_edges(graph);
+    
     int* visited_flags = (int*)calloc(graph->nodes->length, sizeof(int));
     
     // initialize all ranks to 0
@@ -53,19 +139,28 @@ void dagre_assign_ranks(LayoutGraph* graph) {
         node->rank = 0;
     }
     
-    // find root nodes (no incoming edges) and start DFS
+    // find root nodes (no non-back incoming edges) and start DFS
     for (int i = 0; i < graph->nodes->length; i++) {
         LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
-        if (node->in_edges->length == 0) {
+        
+        // count non-back incoming edges
+        int non_back_in_edges = 0;
+        for (int j = 0; j < node->in_edges->length; j++) {
+            LayoutEdge* edge = (LayoutEdge*)node->in_edges->data[j];
+            if (!edge->is_back_edge) {
+                non_back_in_edges++;
+            }
+        }
+        
+        if (non_back_in_edges == 0) {
             compute_rank_dfs(node, graph, visited_flags);
         }
     }
     
-    // handle nodes not reachable from roots (disconnected components or cycles)
+    // handle nodes not reachable from roots (disconnected components)
     for (int i = 0; i < graph->nodes->length; i++) {
         LayoutNode* node = (LayoutNode*)graph->nodes->data[i];
         if (!visited_flags[i]) {
-            // assign rank based on longest path from any predecessor
             compute_rank_dfs(node, graph, visited_flags);
         }
     }
@@ -376,23 +471,60 @@ void dagre_assign_coordinates(LayoutGraph* graph, GraphLayoutOptions* opts) {
 }
 
 // ============================================================================
-// Phase 5: Edge Routing (Straight Lines)
+// Phase 5: Edge Routing (Straight Lines with boundary clipping)
 // ============================================================================
 
+// Helper: compute intersection point of line from center to target with node boundary
+static void clip_to_node_boundary(float cx, float cy, float tx, float ty,
+                                   float half_w, float half_h, float* out_x, float* out_y) {
+    float dx = tx - cx;
+    float dy = ty - cy;
+    
+    if (fabsf(dx) < 0.001f && fabsf(dy) < 0.001f) {
+        *out_x = cx;
+        *out_y = cy;
+        return;
+    }
+    
+    // Calculate intersection with rectangle boundary
+    // Try top/bottom edges first (for primarily vertical connections)
+    float t_y = (dy > 0) ? half_h / dy : (dy < 0) ? -half_h / dy : 1e10f;
+    float t_x = (dx > 0) ? half_w / dx : (dx < 0) ? -half_w / dx : 1e10f;
+    
+    float t = fminf(fabsf(t_x), fabsf(t_y));
+    
+    *out_x = cx + dx * t;
+    *out_y = cy + dy * t;
+}
+
 void dagre_route_edges(LayoutGraph* graph, bool use_splines) {
-    log_debug("dagre: routing edges (straight lines)");
+    log_debug("dagre: routing edges (straight lines with boundary clipping)");
     
     for (int i = 0; i < graph->edges->length; i++) {
         LayoutEdge* edge = (LayoutEdge*)graph->edges->data[i];
         
-        // simple straight line from source to target
+        LayoutNode* from = edge->from_node;
+        LayoutNode* to = edge->to_node;
+        
+        // Clip edge start to source node boundary
+        float start_x, start_y;
+        clip_to_node_boundary(from->x, from->y, to->x, to->y,
+                              from->width / 2.0f, from->height / 2.0f,
+                              &start_x, &start_y);
+        
+        // Clip edge end to target node boundary
+        float end_x, end_y;
+        clip_to_node_boundary(to->x, to->y, from->x, from->y,
+                              to->width / 2.0f, to->height / 2.0f,
+                              &end_x, &end_y);
+        
         Point2D* start = (Point2D*)calloc(1, sizeof(Point2D));
-        start->x = edge->from_node->x;
-        start->y = edge->from_node->y;
+        start->x = start_x;
+        start->y = start_y;
         
         Point2D* end = (Point2D*)calloc(1, sizeof(Point2D));
-        end->x = edge->to_node->x;
-        end->y = edge->to_node->y;
+        end->x = end_x;
+        end->y = end_y;
         
         arraylist_append(edge->path_points, start);
         arraylist_append(edge->path_points, end);
