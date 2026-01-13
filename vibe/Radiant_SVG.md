@@ -928,5 +928,5 @@ Add to `test/layout/`:
 - [WHATWG HTML5 Parsing - SVG](https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inforeign)
 - [SVG 2 Specification](https://www.w3.org/TR/SVG2/)
 - [SVG Path Specification](https://www.w3.org/TR/SVG/paths.html)
-- [ThorVG C API](https://www.thorvg.org/apis) (via `/opt/homebrew/include/thorvg_capi.h`)
+- [ThorVG C API](https://www.thorvg.org/apis) (via `./mac-deps/thorvg/inc/thorvg.h`)
 - [Existing ThorVG usage in Radiant](../radiant/render_border.cpp)
