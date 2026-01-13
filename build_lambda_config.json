@@ -22,7 +22,8 @@
     "source_files": [
     ],
     "exclude_source_files": [
-        "lambda/schema_builder.cpp"
+        "lambda/schema_builder.cpp",
+        "radiant/radiant.cpp"
     ],
     "includes": [
         ".",
@@ -720,8 +721,7 @@
             "output": "lambda.exe",
             "compiler": "gcc",
             "exclude_source_files": [
-                "lib/clock_compat.c",
-                "radiant/radiant.cpp"
+                "lib/clock_compat.c"
             ],
             "includes": [
                 "/usr/include/freetype2",
