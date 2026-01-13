@@ -385,12 +385,13 @@ TexNode* MathTypesetter::make_char_node(int32_t cp, AtomType atom, FontSpec& fon
 
     TexNode* node = make_math_char(arena, cp, atom, font);
 
-    // Get metrics from TFM
+    // Get metrics from TFM - widths are pre-scaled by design_size, so divide by it
     if (tfm && cp >= 0 && cp < 256) {
-        node->width = tfm->char_width(cp) * size;
-        node->height = tfm->char_height(cp) * size;
-        node->depth = tfm->char_depth(cp) * size;
-        node->italic = tfm->char_italic(cp) * size;
+        float scale = size / tfm->design_size;
+        node->width = tfm->char_width(cp) * scale;
+        node->height = tfm->char_height(cp) * scale;
+        node->depth = tfm->char_depth(cp) * scale;
+        node->italic = tfm->char_italic(cp) * scale;
     } else {
         // Fallback metrics
         node->width = 5.0f * size / 10.0f;
