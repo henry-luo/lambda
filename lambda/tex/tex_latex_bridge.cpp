@@ -9,6 +9,7 @@
 #include "tex_vlist.hpp"
 #include "tex_pagebreak.hpp"
 #include "tex_math_bridge.hpp"
+#include "tex_math_ts.hpp"
 #include "tex_hyphen.hpp"
 #include "../../lib/log.h"
 #include "../../lib/stringbuf.h"
@@ -427,7 +428,6 @@ static void append_monospace(TexNode* hlist, const ElementReader& elem, LaTeXCon
 // Convert inline math
 static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXContext& ctx, Pool* pool) {
     // Check if this is actually display math wrapped in a 'math' element
-    // Look for display_math child
     bool is_display = false;
     auto check_iter = elem.children();
     ItemReader check_child;
@@ -442,41 +442,51 @@ static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXC
         }
     }
 
-    // Get math source from 'source' attribute or text content
-    const char* math_source = latex_get_attr(elem, "source");
+    MathContext math_ctx = ctx.doc_ctx.math_context();
+    math_ctx.style = is_display ? MathStyle::Display : MathStyle::Text;
+    TexNode* math_hbox = nullptr;
 
-    Pool* local_pool = pool ? pool : pool_create();
-    StringBuf* sb = nullptr;
-
-    if (!math_source) {
-        sb = stringbuf_new(local_pool);
-        elem.textContent(sb);
-        if (sb->length > 0 && sb->str) {
-            math_source = sb->str->chars;
-        }
+    // First, try to use pre-parsed AST if available (from input-latex-ts.cpp)
+    ItemReader ast_attr = elem.get_attr("ast");
+    if (!ast_attr.isNull() && ast_attr.isElement()) {
+        log_debug("latex_bridge: using pre-parsed math AST for inline math");
+        fprintf(stderr, "[DEBUG] append_inline_math: using pre-parsed AST\n");
+        math_hbox = typeset_math_from_ast(ast_attr, math_ctx);
     }
 
-    if (math_source && strlen(math_source) > 0) {
-        MathContext math_ctx = ctx.doc_ctx.math_context();
-        // Use Display style for display math, Text style for inline
-        math_ctx.style = is_display ? MathStyle::Display : MathStyle::Text;
+    // Fallback to source string if no AST or AST typesetting failed
+    if (!math_hbox) {
+        const char* math_source = latex_get_attr(elem, "source");
 
-        fprintf(stderr, "[DEBUG] append_inline_math: source='%.30s', is_display=%d\n",
-                math_source, is_display);
+        Pool* local_pool = pool ? pool : pool_create();
+        StringBuf* sb = nullptr;
 
-        TexNode* math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
-        if (math_hbox) {
-            fprintf(stderr, "[DEBUG] append_inline_math: math_hbox created\n");
-            hlist->append_child(math_hbox);
+        if (!math_source) {
+            sb = stringbuf_new(local_pool);
+            elem.textContent(sb);
+            if (sb->length > 0 && sb->str) {
+                math_source = sb->str->chars;
+            }
+        }
+
+        if (math_source && strlen(math_source) > 0) {
+            fprintf(stderr, "[DEBUG] append_inline_math: source='%.30s', is_display=%d\n",
+                    math_source, is_display);
+            math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
         } else {
-            fprintf(stderr, "[DEBUG] append_inline_math: typeset_latex_math returned NULL\n");
+            fprintf(stderr, "[DEBUG] append_inline_math: no math_source\n");
         }
-    } else {
-        fprintf(stderr, "[DEBUG] append_inline_math: no math_source\n");
+
+        if (sb) stringbuf_free(sb);
+        if (!pool) pool_destroy(local_pool);
     }
 
-    if (sb) stringbuf_free(sb);
-    if (!pool) pool_destroy(local_pool);
+    if (math_hbox) {
+        fprintf(stderr, "[DEBUG] append_inline_math: math_hbox created\n");
+        hlist->append_child(math_hbox);
+    } else {
+        fprintf(stderr, "[DEBUG] append_inline_math: typeset_latex_math returned NULL\n");
+    }
 }
 
 // Convert spacing command
@@ -1114,34 +1124,41 @@ TexNode* convert_latex_verbatim(const ElementReader& elem, LaTeXContext& ctx) {
 // ============================================================================
 
 TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx) {
-    // Get math source from 'source' attribute or text content
-    const char* math_source = latex_get_attr(elem, "source");
-
-    Pool* pool = pool_create();
-    StringBuf* sb = nullptr;
-
-    if (!math_source) {
-        sb = stringbuf_new(pool);
-        elem.textContent(sb);
-        if (sb->length > 0 && sb->str) {
-            math_source = sb->str->chars;
-        }
-    }
-
-    if (!math_source || strlen(math_source) == 0) {
-        if (sb) stringbuf_free(sb);
-        pool_destroy(pool);
-        return nullptr;
-    }
-
-    // Typeset display math
     MathContext math_ctx = ctx.doc_ctx.math_context();
     math_ctx.style = MathStyle::Display;
+    TexNode* math_hbox = nullptr;
 
-    TexNode* math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
+    // First, try to use pre-parsed AST if available (from input-latex-ts.cpp)
+    ItemReader ast_attr = elem.get_attr("ast");
+    if (!ast_attr.isNull() && ast_attr.isElement()) {
+        log_debug("latex_bridge: using pre-parsed math AST for display math");
+        math_hbox = typeset_math_from_ast(ast_attr, math_ctx);
+    }
+
+    // Fallback to source string if no AST or AST typesetting failed
     if (!math_hbox) {
+        const char* math_source = latex_get_attr(elem, "source");
+
+        Pool* pool = pool_create();
+        StringBuf* sb = nullptr;
+
+        if (!math_source) {
+            sb = stringbuf_new(pool);
+            elem.textContent(sb);
+            if (sb->length > 0 && sb->str) {
+                math_source = sb->str->chars;
+            }
+        }
+
+        if (math_source && strlen(math_source) > 0) {
+            math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
+        }
+
         if (sb) stringbuf_free(sb);
         pool_destroy(pool);
+    }
+
+    if (!math_hbox) {
         return nullptr;
     }
 
@@ -1161,9 +1178,6 @@ TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx
 
     // Space below
     add_vspace(vctx, Glue::flexible(12.0f, 3.0f, 2.0f));
-
-    if (sb) stringbuf_free(sb);
-    pool_destroy(pool);
 
     return end_vlist(vctx);
 }

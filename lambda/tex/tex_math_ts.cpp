@@ -2,9 +2,13 @@
 //
 // Implementation of the tree-sitter based math parser that produces
 // TexNode trees with proper TFM metrics for TeX typesetting.
+//
+// Also includes MathASTTypesetter for converting pre-parsed Mark AST
+// to TexNode trees (avoiding re-parsing when AST is available).
 
 #include "tex_math_ts.hpp"
 #include "tex_hlist.hpp"
+#include "../mark_reader.hpp"
 #include "../../lib/log.h"
 #include <tree_sitter/api.h>
 #include <cstring>
@@ -1394,12 +1398,716 @@ TexNode* MathTypesetter::build_space_command(TSNode node) {
 }
 
 // ============================================================================
+// MathASTTypesetter - Convert pre-parsed Mark AST to TexNode
+// ============================================================================
+
+/**
+ * Typesets math from pre-parsed Mark AST (produced by input-latex-ts.cpp).
+ * This avoids re-parsing when the math AST is already available.
+ */
+class MathASTTypesetter {
+public:
+    MathASTTypesetter(MathContext& c) : ctx(c) {
+        roman_tfm = ctx.fonts ? ctx.fonts->get_font("cmr10") : nullptr;
+        italic_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi10") : nullptr;
+        symbol_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy10") : nullptr;
+        extension_tfm = ctx.fonts ? ctx.fonts->get_font("cmex10") : nullptr;
+    }
+
+    TexNode* typeset(const ItemReader& ast_root) {
+        log_debug("tex_math_ast: typesetting from pre-parsed AST");
+        return build_node(ast_root);
+    }
+
+private:
+    MathContext& ctx;
+    TFMFont* roman_tfm;
+    TFMFont* italic_tfm;
+    TFMFont* symbol_tfm;
+    TFMFont* extension_tfm;
+
+    float current_size() const { return ctx.font_size(); }
+
+    // Node builders
+    TexNode* build_node(const ItemReader& item) {
+        if (item.isNull()) return nullptr;
+
+        if (item.isString()) {
+            return build_string_item(item);
+        }
+        if (item.isSymbol()) {
+            return nullptr;  // row_sep/col_sep handled at environment level
+        }
+        if (item.isElement()) {
+            return build_element(item.asElement());
+        }
+        return nullptr;
+    }
+
+    TexNode* build_element(const ElementReader& elem) {
+        const char* tag = elem.tagName();
+        if (!tag) return nullptr;
+
+        if (strcmp(tag, "math") == 0) return build_math(elem);
+        if (strcmp(tag, "group") == 0) return build_group(elem);
+        if (strcmp(tag, "brack_group") == 0) return build_group(elem);
+        if (strcmp(tag, "command") == 0) return build_command_elem(elem);
+        if (strcmp(tag, "subsup") == 0) return build_subsup(elem);
+        if (strcmp(tag, "fraction") == 0) return build_fraction(elem);
+        if (strcmp(tag, "radical") == 0) return build_radical(elem);
+        if (strcmp(tag, "big_operator") == 0) return build_big_operator(elem);
+        if (strcmp(tag, "delimiter_group") == 0) return build_delimiter_group(elem);
+        if (strcmp(tag, "accent") == 0) return build_accent(elem);
+        if (strcmp(tag, "environment") == 0) return build_environment(elem);
+        if (strcmp(tag, "operator") == 0) return build_operator_elem(elem);
+        if (strcmp(tag, "relation") == 0) return build_relation_elem(elem);
+        if (strcmp(tag, "punctuation") == 0) return build_punctuation_elem(elem);
+        if (strcmp(tag, "style_command") == 0) return build_style_command(elem);
+        if (strcmp(tag, "space_command") == 0) return build_space_command(elem);
+        if (strcmp(tag, "text_command") == 0) return build_text_command(elem);
+        if (strcmp(tag, "binomial") == 0) return build_binomial(elem);
+        if (strcmp(tag, "env_body") == 0) return build_env_body(elem);
+
+        log_debug("tex_math_ast: unknown element tag '%s'", tag);
+        return nullptr;
+    }
+
+    // Sequence builders
+    TexNode* build_math(const ElementReader& elem) {
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        AtomType prev_type = AtomType::Ord;
+        bool is_first = true;
+
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            TexNode* child_node = build_node(child);
+            if (!child_node) continue;
+
+            AtomType curr_type = get_node_atom_type(child_node);
+            if (!is_first) {
+                add_atom_spacing(last, prev_type, curr_type);
+            }
+            link_node(first, last, child_node);
+            prev_type = curr_type;
+            is_first = false;
+        }
+        return wrap_in_hbox(first, last);
+    }
+
+    TexNode* build_group(const ElementReader& elem) { return build_math(elem); }
+    TexNode* build_env_body(const ElementReader& elem) { return build_math(elem); }
+
+    // Atom builders
+    TexNode* build_string_item(const ItemReader& item) {
+        const char* text = item.cstring();
+        if (!text || strlen(text) == 0) return nullptr;
+        size_t len = strlen(text);
+
+        if (text[0] == '\\') {
+            return build_command(text + 1, len - 1);
+        }
+
+        bool is_number = true;
+        for (size_t i = 0; i < len; i++) {
+            if (!((text[i] >= '0' && text[i] <= '9') || text[i] == '.')) {
+                is_number = false;
+                break;
+            }
+        }
+        if (is_number) return build_number(text, len);
+        if (len == 1) return build_symbol(text[0]);
+
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        for (size_t i = 0; i < len; i++) {
+            link_node(first, last, build_symbol(text[i]));
+        }
+        return wrap_in_hbox(first, last);
+    }
+
+    TexNode* build_symbol(char c) {
+        FontSpec font = ctx.italic_font;
+        font.size_pt = current_size();
+        return make_char_node(c, AtomType::Ord, font, italic_tfm);
+    }
+
+    TexNode* build_number(const char* text, size_t len) {
+        FontSpec font = ctx.roman_font;
+        font.size_pt = current_size();
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        for (size_t i = 0; i < len; i++) {
+            AtomType atom = (text[i] == '.') ? AtomType::Punct : AtomType::Ord;
+            link_node(first, last, make_char_node(text[i], atom, font, roman_tfm));
+        }
+        return wrap_in_hbox(first, last);
+    }
+
+    TexNode* build_command(const char* cmd, size_t len) {
+        if (len > 0 && cmd[len - 1] == '*') len--;
+
+        int greek_code = lookup_greek(cmd, len);
+        if (greek_code >= 0) {
+            FontSpec font = ctx.italic_font;
+            font.size_pt = current_size();
+            return make_char_node(greek_code, AtomType::Ord, font, italic_tfm);
+        }
+
+        const SymbolEntry* sym = lookup_symbol_entry(cmd, len);
+        if (sym) {
+            FontSpec font = ctx.symbol_font;
+            font.size_pt = current_size();
+            return make_char_node(sym->code, sym->atom, font, symbol_tfm);
+        }
+
+        if (is_func_operator(cmd, len)) {
+            FontSpec font = ctx.roman_font;
+            font.size_pt = current_size();
+            TexNode* first = nullptr;
+            TexNode* last = nullptr;
+            for (size_t i = 0; i < len; i++) {
+                link_node(first, last, make_char_node(cmd[i], AtomType::Op, font, roman_tfm));
+            }
+            return wrap_in_hbox(first, last);
+        }
+
+        log_debug("tex_math_ast: unknown command \\%.*s", (int)len, cmd);
+        return nullptr;
+    }
+
+    // Handle <command name="alpha"/> elements
+    TexNode* build_command_elem(const ElementReader& elem) {
+        const char* name = elem.get_attr_string("name");
+        if (!name) return nullptr;
+        return build_command(name, strlen(name));
+    }
+
+    // Element atom builders
+    TexNode* build_operator_elem(const ElementReader& elem) {
+        const char* value = elem.get_attr_string("value");
+        if (!value) return nullptr;
+        float size = current_size();
+
+        if (value[0] == '\\') {
+            const SymbolEntry* sym = lookup_symbol_entry(value + 1, strlen(value) - 1);
+            if (sym) {
+                FontSpec font = ctx.symbol_font;
+                font.size_pt = size;
+                return make_char_node(sym->code, sym->atom, font, symbol_tfm);
+            }
+        }
+        if (value[0] == '-') {
+            FontSpec font = ctx.symbol_font;
+            font.size_pt = size;
+            return make_char_node(0, AtomType::Bin, font, symbol_tfm);
+        }
+        FontSpec font = ctx.roman_font;
+        font.size_pt = size;
+        return make_char_node(value[0], AtomType::Bin, font, roman_tfm);
+    }
+
+    TexNode* build_relation_elem(const ElementReader& elem) {
+        const char* value = elem.get_attr_string("value");
+        if (!value) return nullptr;
+        float size = current_size();
+
+        if (value[0] == '\\') {
+            const SymbolEntry* sym = lookup_symbol_entry(value + 1, strlen(value) - 1);
+            if (sym) {
+                FontSpec font = ctx.symbol_font;
+                font.size_pt = size;
+                return make_char_node(sym->code, sym->atom, font, symbol_tfm);
+            }
+        }
+        FontSpec font = ctx.roman_font;
+        font.size_pt = size;
+        return make_char_node(value[0], AtomType::Rel, font, roman_tfm);
+    }
+
+    TexNode* build_punctuation_elem(const ElementReader& elem) {
+        const char* value = elem.get_attr_string("value");
+        if (!value) return nullptr;
+        int32_t cp = value[0];
+        AtomType atom = AtomType::Punct;
+        if (cp == '(' || cp == '[') atom = AtomType::Open;
+        else if (cp == ')' || cp == ']') atom = AtomType::Close;
+        FontSpec font = ctx.roman_font;
+        font.size_pt = current_size();
+        return make_char_node(cp, atom, font, roman_tfm);
+    }
+
+    // Structure builders
+    TexNode* build_subsup(const ElementReader& elem) {
+        ItemReader base_item = elem.get_attr("base");
+        ItemReader sub_item = elem.get_attr("sub");
+        ItemReader sup_item = elem.get_attr("sup");
+
+        TexNode* base = build_node(base_item);
+        if (!base) return nullptr;
+
+        MathStyle saved = ctx.style;
+        TexNode* subscript = nullptr;
+        TexNode* superscript = nullptr;
+
+        if (!sub_item.isNull()) {
+            ctx.style = sub_style(saved);
+            subscript = build_node(sub_item);
+            ctx.style = saved;
+        }
+        if (!sup_item.isNull()) {
+            ctx.style = sup_style(saved);
+            superscript = build_node(sup_item);
+            ctx.style = saved;
+        }
+        return build_scripts_node(base, subscript, superscript);
+    }
+
+    TexNode* build_scripts_node(TexNode* base, TexNode* sub, TexNode* sup) {
+        Arena* arena = ctx.arena;
+        float size = current_size();
+        AtomType base_atom = get_node_atom_type(base);
+
+        TexNode* scripts = (TexNode*)arena_alloc(arena, sizeof(TexNode));
+        new (scripts) TexNode(NodeClass::Scripts);
+        scripts->content.scripts.nucleus = base;
+        scripts->content.scripts.subscript = sub;
+        scripts->content.scripts.superscript = sup;
+        scripts->content.scripts.nucleus_type = base_atom;
+
+        float sup_shift = size * 0.4f;
+        float sub_shift = size * 0.2f;
+        scripts->width = base->width;
+        scripts->height = base->height;
+        scripts->depth = base->depth;
+
+        if (sup) {
+            scripts->width += sup->width;
+            float sup_top = sup_shift + sup->height;
+            if (sup_top > scripts->height) scripts->height = sup_top;
+        }
+        if (sub) {
+            if (!sup) scripts->width += sub->width;
+            float sub_bot = sub_shift + sub->depth;
+            if (sub_bot > scripts->depth) scripts->depth = sub_bot;
+        }
+
+        base->parent = scripts;
+        base->x = 0;
+        base->y = 0;
+        scripts->first_child = base;
+        scripts->last_child = base;
+
+        float script_x = base->width + base->italic;
+        TexNode* prev = base;
+
+        if (sup) {
+            sup->parent = scripts;
+            sup->x = script_x;
+            sup->y = sup_shift;
+            prev->next_sibling = sup;
+            sup->prev_sibling = prev;
+            scripts->last_child = sup;
+            prev = sup;
+        }
+        if (sub) {
+            sub->parent = scripts;
+            sub->x = script_x;
+            sub->y = -sub_shift - sub->height;
+            prev->next_sibling = sub;
+            sub->prev_sibling = prev;
+            scripts->last_child = sub;
+        }
+        return scripts;
+    }
+
+    TexNode* build_fraction(const ElementReader& elem) {
+        TexNode* numer = build_node(elem.get_attr("numer"));
+        TexNode* denom = build_node(elem.get_attr("denom"));
+        if (!numer || !denom) return numer ? numer : denom;
+        return typeset_fraction(numer, denom, ctx.rule_thickness, ctx);
+    }
+
+    TexNode* build_radical(const ElementReader& elem) {
+        ItemReader index_item = elem.get_attr("index");
+        ItemReader radicand_item = elem.get_attr("radicand");
+        TexNode* radicand = build_node(radicand_item);
+        if (!radicand) return nullptr;
+
+        TexNode* index = nullptr;
+        if (!index_item.isNull()) {
+            MathStyle saved = ctx.style;
+            ctx.style = sub_style(sub_style(saved));
+            index = build_node(index_item);
+            ctx.style = saved;
+        }
+        return index ? typeset_root(index, radicand, ctx) : typeset_sqrt(radicand, ctx);
+    }
+
+    TexNode* build_big_operator(const ElementReader& elem) {
+        const char* op = elem.get_attr_string("op");
+        if (!op) return nullptr;
+
+        const char* op_cmd = (op[0] == '\\') ? op + 1 : op;
+        size_t op_len = strlen(op_cmd);
+        float size = current_size();
+        bool is_display = (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime);
+
+        TexNode* op_node = nullptr;
+
+        // Check if it's a function operator (rendered as roman text)
+        if (is_func_operator(op_cmd, op_len)) {
+            FontSpec font = ctx.roman_font;
+            font.size_pt = size;
+            TexNode* first = nullptr;
+            TexNode* last = nullptr;
+            for (size_t i = 0; i < op_len; i++) {
+                link_node(first, last, make_char_node(op_cmd[i], AtomType::Op, font, roman_tfm));
+            }
+            op_node = wrap_in_hbox(first, last);
+        } else {
+            // It's a symbol operator (\sum, \int, etc.)
+            int op_code = get_big_op_code(op_cmd, op_len);
+            float op_size = is_display ? size * 1.4f : size;
+
+            FontSpec font = ctx.symbol_font;
+            font.size_pt = op_size;
+
+            op_node = make_math_op(ctx.arena, op_code, is_display, font);
+            if (symbol_tfm && op_code >= 0 && op_code < 256) {
+                float scale = op_size / symbol_tfm->design_size;
+                op_node->width = symbol_tfm->char_width(op_code) * scale;
+                op_node->height = symbol_tfm->char_height(op_code) * scale;
+                op_node->depth = symbol_tfm->char_depth(op_code) * scale;
+            } else {
+                op_node->width = 10.0f * op_size / 10.0f;
+                op_node->height = 8.0f * op_size / 10.0f;
+                op_node->depth = 2.0f * op_size / 10.0f;
+            }
+        }
+
+        // Build limits
+        ItemReader lower_item = elem.get_attr("lower");
+        ItemReader upper_item = elem.get_attr("upper");
+
+        if (lower_item.isNull() && upper_item.isNull()) return op_node;
+
+        MathStyle saved = ctx.style;
+        ctx.style = sub_style(saved);
+
+        TexNode* lower = lower_item.isNull() ? nullptr : build_node(lower_item);
+        TexNode* upper = upper_item.isNull() ? nullptr : build_node(upper_item);
+        ctx.style = saved;
+
+        if (is_display) {
+            return typeset_op_limits(op_node, lower, upper, ctx);
+        }
+        return build_scripts_node(op_node, lower, upper);
+    }
+
+    TexNode* build_delimiter_group(const ElementReader& elem) {
+        const char* left_d = elem.get_attr_string("left");
+        const char* right_d = elem.get_attr_string("right");
+        if (!left_d) left_d = "(";
+        if (!right_d) right_d = ")";
+
+        TexNode* content = build_math(elem);
+        if (!content) content = make_hbox(ctx.arena);
+
+        float size = current_size();
+        float content_height = content->height + content->depth;
+        float threshold = size * 0.5f;
+        bool use_ext = content_height > threshold;
+
+        auto make_delim = [&](const char* d, bool is_left) -> TexNode* {
+            if (strcmp(d, ".") == 0) return nullptr;
+            int32_t cp;
+            AtomType atom = is_left ? AtomType::Open : AtomType::Close;
+            FontSpec font;
+            TFMFont* tfm;
+
+            if (d[0] == '\\') {
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                tfm = symbol_tfm;
+                if (strcmp(d, "\\{") == 0 || strcmp(d, "\\lbrace") == 0) cp = 'f';
+                else if (strcmp(d, "\\}") == 0 || strcmp(d, "\\rbrace") == 0) cp = 'g';
+                else if (strcmp(d, "\\|") == 0) cp = 107;
+                else if (strcmp(d, "\\langle") == 0) cp = 104;
+                else if (strcmp(d, "\\rangle") == 0) cp = 105;
+                else if (strcmp(d, "\\lfloor") == 0) cp = 98;
+                else if (strcmp(d, "\\rfloor") == 0) cp = 99;
+                else if (strcmp(d, "\\lceil") == 0) cp = 100;
+                else if (strcmp(d, "\\rceil") == 0) cp = 101;
+                else { font = ctx.roman_font; tfm = roman_tfm; cp = is_left ? '(' : ')'; }
+            } else if (!use_ext) {
+                font = ctx.roman_font;
+                font.size_pt = size;
+                tfm = roman_tfm;
+                cp = d[0];
+            } else {
+                font = ctx.extension_font;
+                font.size_pt = size;
+                tfm = extension_tfm;
+                if (d[0] == '(' || d[0] == ')') cp = is_left ? 0 : 1;
+                else if (d[0] == '[' || d[0] == ']') cp = is_left ? 'h' : 'i';
+                else if (d[0] == '{' || d[0] == '}') { font = ctx.symbol_font; tfm = symbol_tfm; cp = is_left ? 'f' : 'g'; }
+                else if (d[0] == '|') cp = 12;
+                else cp = is_left ? 0 : 1;
+            }
+            return make_char_node(cp, atom, font, tfm);
+        };
+
+        TexNode* left = make_delim(left_d, true);
+        TexNode* right = make_delim(right_d, false);
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        if (left) link_node(first, last, left);
+        link_node(first, last, content);
+        if (right) link_node(first, last, right);
+        return wrap_in_hbox(first, last);
+    }
+
+    TexNode* build_accent(const ElementReader& elem) {
+        const char* cmd = elem.get_attr_string("cmd");
+        ItemReader base_item = elem.get_attr("base");
+        if (!cmd) cmd = "\\hat";
+
+        const char* accent_name = (cmd[0] == '\\') ? cmd + 1 : cmd;
+        const AccentEntry* accent = lookup_accent(accent_name, strlen(accent_name));
+
+        TexNode* base = build_node(base_item);
+        if (!base) return nullptr;
+        if (!accent) {
+            log_debug("tex_math_ast: unknown accent '%s'", cmd);
+            return base;
+        }
+
+        float size = current_size();
+        FontSpec font = accent->wide ? ctx.symbol_font : ctx.italic_font;
+        font.size_pt = size * 0.8f;
+        TFMFont* tfm = accent->wide ? symbol_tfm : italic_tfm;
+
+        TexNode* accent_char = make_char_node(accent->code, AtomType::Ord, font, tfm);
+        TexNode* vbox = make_vbox(ctx.arena);
+        float gap = size * 0.05f;
+
+        accent_char->parent = vbox;
+        base->parent = vbox;
+        accent_char->x = (base->width - accent_char->width) / 2;
+        accent_char->y = base->height + gap + accent_char->depth;
+        base->x = 0;
+        base->y = 0;
+
+        vbox->first_child = accent_char;
+        accent_char->next_sibling = base;
+        base->prev_sibling = accent_char;
+        vbox->last_child = base;
+        vbox->width = base->width;
+        vbox->height = accent_char->y + accent_char->height;
+        vbox->depth = base->depth;
+        return vbox;
+    }
+
+    TexNode* build_environment(const ElementReader& elem) {
+        const char* name = elem.get_attr_string("name");
+        ItemReader body_item = elem.get_attr("body");
+        if (!name) return nullptr;
+
+        if (strcmp(name, "matrix") == 0 || strcmp(name, "pmatrix") == 0 ||
+            strcmp(name, "bmatrix") == 0 || strcmp(name, "vmatrix") == 0 ||
+            strcmp(name, "Vmatrix") == 0 || strcmp(name, "Bmatrix") == 0) {
+            return build_matrix(elem, name);
+        }
+        if (strcmp(name, "cases") == 0) return build_cases(elem);
+        return build_node(body_item);
+    }
+
+    TexNode* build_matrix(const ElementReader& elem, const char* name) {
+        ItemReader body_item = elem.get_attr("body");
+        TexNode* content = build_node(body_item);
+        if (!content) content = make_hbox(ctx.arena);
+
+        const char* left_d = ".";
+        const char* right_d = ".";
+        if (strcmp(name, "pmatrix") == 0) { left_d = "("; right_d = ")"; }
+        else if (strcmp(name, "bmatrix") == 0) { left_d = "["; right_d = "]"; }
+        else if (strcmp(name, "vmatrix") == 0) { left_d = "|"; right_d = "|"; }
+        else if (strcmp(name, "Vmatrix") == 0) { left_d = "\\|"; right_d = "\\|"; }
+        else if (strcmp(name, "Bmatrix") == 0) { left_d = "\\{"; right_d = "\\}"; }
+
+        if (strcmp(left_d, ".") == 0) return content;
+
+        float size = current_size();
+        FontSpec font = ctx.roman_font;
+        font.size_pt = size;
+
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        link_node(first, last, make_char_node(left_d[0], AtomType::Open, font, roman_tfm));
+        link_node(first, last, content);
+        link_node(first, last, make_char_node(right_d[0], AtomType::Close, font, roman_tfm));
+        return wrap_in_hbox(first, last);
+    }
+
+    TexNode* build_cases(const ElementReader& elem) {
+        ItemReader body_item = elem.get_attr("body");
+        TexNode* content = build_node(body_item);
+        if (!content) content = make_hbox(ctx.arena);
+
+        float size = current_size();
+        FontSpec font = ctx.symbol_font;
+        font.size_pt = size;
+
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        link_node(first, last, make_char_node('f', AtomType::Open, font, symbol_tfm));
+        link_node(first, last, content);
+        return wrap_in_hbox(first, last);
+    }
+
+    TexNode* build_binomial(const ElementReader& elem) {
+        TexNode* top = build_node(elem.get_attr("top"));
+        TexNode* bottom = build_node(elem.get_attr("bottom"));
+        if (!top || !bottom) return top ? top : bottom;
+
+        TexNode* frac = typeset_fraction(top, bottom, 0, ctx);
+        float size = current_size();
+        FontSpec font = ctx.roman_font;
+        font.size_pt = size;
+
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        link_node(first, last, make_char_node('(', AtomType::Open, font, roman_tfm));
+        link_node(first, last, frac);
+        link_node(first, last, make_char_node(')', AtomType::Close, font, roman_tfm));
+        return wrap_in_hbox(first, last);
+    }
+
+    TexNode* build_style_command(const ElementReader& elem) {
+        return build_node(elem.get_attr("arg"));
+    }
+
+    TexNode* build_space_command(const ElementReader& elem) {
+        const char* value = elem.get_attr_string("value");
+        if (!value) return nullptr;
+
+        float amount = 0;
+        if (strcmp(value, "\\quad") == 0) amount = ctx.quad;
+        else if (strcmp(value, "\\qquad") == 0) amount = ctx.quad * 2;
+        else if (strcmp(value, "\\,") == 0) amount = ctx.quad / 6;
+        else if (strcmp(value, "\\:") == 0) amount = ctx.quad * 4 / 18;
+        else if (strcmp(value, "\\;") == 0) amount = ctx.quad * 5 / 18;
+        else if (strcmp(value, "\\!") == 0) amount = -ctx.quad / 6;
+
+        return (amount != 0) ? make_kern(ctx.arena, amount) : nullptr;
+    }
+
+    TexNode* build_text_command(const ElementReader& elem) {
+        const char* content = elem.get_attr_string("content");
+        if (!content) return nullptr;
+
+        float size = current_size();
+        FontSpec font = ctx.roman_font;
+        font.size_pt = size;
+
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        for (size_t i = 0; i < strlen(content); i++) {
+            if (content[i] == ' ') {
+                link_node(first, last, make_kern(ctx.arena, size * 0.3f));
+            } else {
+                link_node(first, last, make_char_node(content[i], AtomType::Ord, font, roman_tfm));
+            }
+        }
+        return wrap_in_hbox(first, last);
+    }
+
+    // Helpers
+    TexNode* make_char_node(int32_t cp, AtomType atom, FontSpec& font, TFMFont* tfm) {
+        TexNode* node = make_math_char(ctx.arena, cp, atom, font);
+        float size = font.size_pt;
+        if (tfm && cp >= 0 && cp < 256) {
+            float scale = size / tfm->design_size;
+            node->width = tfm->char_width(cp) * scale;
+            node->height = tfm->char_height(cp) * scale;
+            node->depth = tfm->char_depth(cp) * scale;
+            node->italic = tfm->char_italic(cp) * scale;
+        } else {
+            node->width = 5.0f * size / 10.0f;
+            node->height = 7.0f * size / 10.0f;
+            node->depth = 0;
+            node->italic = 0;
+        }
+        return node;
+    }
+
+    AtomType get_node_atom_type(TexNode* node) {
+        if (!node) return AtomType::Ord;
+        switch (node->node_class) {
+            case NodeClass::MathChar: return node->content.math_char.atom_type;
+            case NodeClass::MathOp: return AtomType::Op;
+            case NodeClass::Fraction:
+            case NodeClass::Radical:
+            case NodeClass::Delimiter: return AtomType::Inner;
+            case NodeClass::Scripts: return node->content.scripts.nucleus_type;
+            default: return AtomType::Ord;
+        }
+    }
+
+    TexNode* wrap_in_hbox(TexNode* first, TexNode* last) {
+        TexNode* hbox = make_hbox(ctx.arena);
+        if (!first) return hbox;
+
+        hbox->first_child = first;
+        hbox->last_child = last;
+        float total_width = 0, max_height = 0, max_depth = 0;
+        for (TexNode* n = first; n; n = n->next_sibling) {
+            n->parent = hbox;
+            n->x = total_width;
+            total_width += n->width;
+            if (n->height > max_height) max_height = n->height;
+            if (n->depth > max_depth) max_depth = n->depth;
+        }
+        hbox->width = total_width;
+        hbox->height = max_height;
+        hbox->depth = max_depth;
+        return hbox;
+    }
+
+    void link_node(TexNode*& first, TexNode*& last, TexNode* node) {
+        if (!node) return;
+        if (!first) first = node;
+        if (last) { last->next_sibling = node; node->prev_sibling = last; }
+        last = node;
+    }
+
+    void add_atom_spacing(TexNode*& last, AtomType prev, AtomType curr) {
+        float spacing_mu = get_atom_spacing_mu(prev, curr, ctx.style);
+        if (spacing_mu > 0 && last) {
+            float spacing_pt = mu_to_pt(spacing_mu, ctx);
+            TexNode* kern = make_kern(ctx.arena, spacing_pt);
+            last->next_sibling = kern;
+            kern->prev_sibling = last;
+            last = kern;
+        }
+    }
+};
+
+// ============================================================================
 // Public API
 // ============================================================================
 
 TexNode* typeset_latex_math_ts(const char* latex_str, size_t len, MathContext& ctx) {
     MathTypesetter typesetter(ctx, latex_str, len);
     return typesetter.typeset();
+}
+
+TexNode* typeset_math_from_ast(const ItemReader& math_ast, MathContext& ctx) {
+    log_debug("tex_math_ast: typesetting from pre-parsed AST");
+    MathASTTypesetter typesetter(ctx);
+    return typesetter.typeset(math_ast);
 }
 
 } // namespace tex
