@@ -1456,8 +1456,21 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             // Special case: inline_math and display_math - deep parse using tree-sitter-latex-math
             if (strcmp(node_type, "inline_math") == 0 || strcmp(node_type, "display_math") == 0 ||
                 strcmp(node_type, "math") == 0) {
+                // Determine if this is display math or inline math
+                // For 'math' nodes, check the first named child
+                const char* effective_type = node_type;
+                if (strcmp(node_type, "math") == 0) {
+                    uint32_t child_count = ts_node_named_child_count(node);
+                    if (child_count > 0) {
+                        TSNode first_child = ts_node_named_child(node, 0);
+                        const char* child_type = ts_node_type(first_child);
+                        if (strcmp(child_type, "display_math") == 0 || strcmp(child_type, "inline_math") == 0) {
+                            effective_type = child_type;
+                        }
+                    }
+                }
                 MarkBuilder& builder = ctx.builder;
-                ElementBuilder elem_builder = builder.element(node_type);
+                ElementBuilder elem_builder = builder.element(effective_type);
 
                 // Store the original source text as 'source' attribute (strip $ delimiters)
                 uint32_t source_start = ts_node_start_byte(node);
