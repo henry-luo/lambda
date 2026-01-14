@@ -2,24 +2,20 @@
 //
 // Tests the LaTeX typesetting pipeline by comparing generated DVI files
 // against reference DVI files produced by standard TeX.
+//
+// This test uses the Lambda CLI (./lambda.exe render) to generate DVI output,
+// making it a true integration test of the full rendering pipeline.
 
 #include <gtest/gtest.h>
-#include "lambda/tex/tex_node.hpp"
-#include "lambda/tex/tex_tfm.hpp"
-#include "lambda/tex/tex_pagebreak.hpp"
-#include "lambda/tex/tex_dvi_out.hpp"
-#include "lambda/tex/tex_latex_bridge.hpp"
 #include "lambda/tex/dvi_parser.hpp"
-#include "lambda/input/input.hpp"
 #include "lib/arena.h"
 #include "lib/mempool.h"
 #include "lib/log.h"
-#include "lib/file.h"
-#include "lib/url.h"
 #include <cstring>
 #include <cstdio>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 using namespace tex;
 using namespace tex::dvi;
@@ -252,84 +248,42 @@ protected:
     }
 
     /**
-     * Render a LaTeX file to DVI using Radiant's pipeline.
+     * Render a LaTeX file to DVI using Lambda CLI.
+     * Uses: ./lambda.exe render input.tex -o output.dvi
      * Returns true on success, false on failure.
      */
     bool render_latex_to_dvi_internal(const char* latex_file, const char* dvi_output) {
-        // Read LaTeX file
-        char* latex_content = read_text_file(latex_file);
-        if (!latex_content) {
-            log_error("Failed to read LaTeX file: %s", latex_file);
+        // Build the command with timeout (30 seconds max)
+        // Redirect stderr to stdout, then to /dev/null to avoid buffer blocking
+        char cmd[1024];
+        
+        #ifdef __APPLE__
+        snprintf(cmd, sizeof(cmd), "gtimeout 30s ./lambda.exe render %s -o %s >/dev/null 2>&1", latex_file, dvi_output);
+        #else
+        snprintf(cmd, sizeof(cmd), "timeout 30s ./lambda.exe render %s -o %s >/dev/null 2>&1", latex_file, dvi_output);
+        #endif
+
+        // Execute the command
+        int exit_code = system(cmd);
+
+        // Check for timeout (exit code 124 for timeout command)
+        if (WEXITSTATUS(exit_code) == 124) {
+            fprintf(stderr, "[ERROR] lambda render timed out after 30 seconds for: %s\n", latex_file);
             return false;
         }
 
-        // Parse LaTeX URL
-        Url* cwd = get_current_dir();
-        Url* latex_url = url_parse_with_base(latex_file, cwd);
-        url_destroy(cwd);
-
-        // Create type string
-        String* type_str = (String*)pool_alloc(pool, sizeof(String) + 6);
-        type_str->len = 5;
-        strcpy(type_str->chars, "latex");
-
-        // Parse LaTeX
-        Input* latex_input = input_from_source(latex_content, latex_url, type_str, nullptr);
-        free(latex_content);
-
-        if (!latex_input || !latex_input->root.item) {
-            log_error("Failed to parse LaTeX file: %s", latex_file);
+        if (exit_code != 0) {
+            fprintf(stderr, "[ERROR] lambda render failed with exit code %d for: %s\n", WEXITSTATUS(exit_code), latex_file);
             return false;
         }
 
-        // Set up TeX context
-        TFMFontManager* fonts = create_font_manager(arena);
-        LaTeXContext ctx = LaTeXContext::create(arena, fonts, "article");
-
-        // Standard page layout
-        ctx.doc_ctx.page_width = 612.0f;
-        ctx.doc_ctx.page_height = 792.0f;
-        ctx.doc_ctx.margin_left = 72.0f;
-        ctx.doc_ctx.margin_right = 72.0f;
-        ctx.doc_ctx.margin_top = 72.0f;
-        ctx.doc_ctx.margin_bottom = 72.0f;
-        ctx.doc_ctx.text_width = ctx.doc_ctx.page_width - ctx.doc_ctx.margin_left - ctx.doc_ctx.margin_right;
-        ctx.doc_ctx.text_height = ctx.doc_ctx.page_height - ctx.doc_ctx.margin_top - ctx.doc_ctx.margin_bottom;
-
-        // Typeset
-        TexNode* document = typeset_latex_document(latex_input->root, ctx);
-        if (!document) {
-            log_error("Failed to typeset document");
+        // Verify output file exists
+        if (!file_exists(dvi_output)) {
+            fprintf(stderr, "[ERROR] DVI output file not created: %s\n", dvi_output);
             return false;
         }
 
-        // Break into pages
-        PageList pages = break_latex_into_pages(document, ctx);
-        if (pages.page_count == 0) {
-            log_error("No pages generated");
-            return false;
-        }
-
-        // Convert to PageContent array
-        PageContent* page_contents = (PageContent*)arena_alloc(
-            arena, pages.page_count * sizeof(PageContent)
-        );
-        for (int i = 0; i < pages.page_count; i++) {
-            page_contents[i].vlist = pages.pages[i];
-            page_contents[i].height = 0.0f;
-            page_contents[i].depth = 0.0f;
-            page_contents[i].break_penalty = 0;
-            page_contents[i].marks_first = nullptr;
-            page_contents[i].marks_top = nullptr;
-            page_contents[i].marks_bot = nullptr;
-            page_contents[i].inserts = nullptr;
-        }
-
-        // Write DVI
-        DVIParams params = DVIParams::defaults();
-        params.comment = "Lambda Script TeX Output";
-
-        return write_dvi_file(dvi_output, page_contents, pages.page_count, fonts, arena, params);
+        return true;
     }
 
     /**
