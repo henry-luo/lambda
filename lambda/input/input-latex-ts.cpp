@@ -9,6 +9,10 @@
 extern "C" {
     const TSLanguage *tree_sitter_latex(void);
 }
+// Tree-sitter LaTeX Math parser for deep parsing embedded math
+extern "C" {
+    const TSLanguage *tree_sitter_latex_math(void);
+}
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include <unordered_map>
@@ -185,6 +189,497 @@ static Item convert_text_node(InputContext& ctx, TSNode node, const char* source
 static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source);
 static String* extract_text(InputContext& ctx, TSNode node, const char* source);
 static String* normalize_latex_text(InputContext& ctx, const char* text, size_t len);
+
+// ============================================================================
+// Math AST Conversion (tree-sitter-latex-math)
+// ============================================================================
+
+// Forward declaration for recursive math node conversion
+static Item convert_math_node(InputContext& ctx, TSNode node, const char* source);
+
+/**
+ * Convert a tree-sitter-latex-math node to Lambda Mark element.
+ * This recursively builds an AST representation of the math content.
+ */
+static Item convert_math_node(InputContext& ctx, TSNode node, const char* source) {
+    if (ts_node_is_null(node)) {
+        return ItemNull;
+    }
+
+    MarkBuilder& builder = ctx.builder;
+    const char* node_type = ts_node_type(node);
+    uint32_t start = ts_node_start_byte(node);
+    uint32_t end = ts_node_end_byte(node);
+    size_t len = end - start;
+
+    log_debug("latex_math_ts: converting node '%s' [%u-%u]", node_type, start, end);
+
+    // Handle different math node types
+    if (strcmp(node_type, "math") == 0) {
+        // Root math node - convert all children
+        ElementBuilder elem = builder.element("math");
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            Item child_item = convert_math_node(ctx, child, source);
+            if (child_item.item != ITEM_NULL) {
+                elem.child(child_item);
+            }
+        }
+        return elem.final();
+    }
+
+    // Symbol (single letter variable)
+    if (strcmp(node_type, "symbol") == 0) {
+        return {.item = s2it(builder.createString(source + start, len))};
+    }
+
+    // Number
+    if (strcmp(node_type, "number") == 0) {
+        return {.item = s2it(builder.createString(source + start, len))};
+    }
+
+    // Operator, relation, punctuation - create elements with the operator text
+    if (strcmp(node_type, "operator") == 0 ||
+        strcmp(node_type, "relation") == 0 ||
+        strcmp(node_type, "punctuation") == 0) {
+        ElementBuilder elem = builder.element(node_type);
+        elem.attr("value", {.item = s2it(builder.createString(source + start, len))});
+        return elem.final();
+    }
+
+    // Group { ... }
+    if (strcmp(node_type, "group") == 0) {
+        ElementBuilder elem = builder.element("group");
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* child_type = ts_node_type(child);
+            // Skip braces
+            if (strcmp(child_type, "{") == 0 || strcmp(child_type, "}") == 0) continue;
+            Item child_item = convert_math_node(ctx, child, source);
+            if (child_item.item != ITEM_NULL) {
+                elem.child(child_item);
+            }
+        }
+        return elem.final();
+    }
+
+    // Bracket group [ ... ]
+    if (strcmp(node_type, "brack_group") == 0) {
+        ElementBuilder elem = builder.element("brack_group");
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "[") == 0 || strcmp(child_type, "]") == 0) continue;
+            Item child_item = convert_math_node(ctx, child, source);
+            if (child_item.item != ITEM_NULL) {
+                elem.child(child_item);
+            }
+        }
+        return elem.final();
+    }
+
+    // Subscript/Superscript
+    if (strcmp(node_type, "subsup") == 0) {
+        ElementBuilder elem = builder.element("subsup");
+
+        // Get fields: base, sub, sup
+        TSNode base = ts_node_child_by_field_name(node, "base", 4);
+        TSNode sub = ts_node_child_by_field_name(node, "sub", 3);
+        TSNode sup = ts_node_child_by_field_name(node, "sup", 3);
+
+        if (!ts_node_is_null(base)) {
+            Item base_item = convert_math_node(ctx, base, source);
+            elem.attr("base", base_item);
+        }
+        if (!ts_node_is_null(sub)) {
+            Item sub_item = convert_math_node(ctx, sub, source);
+            elem.attr("sub", sub_item);
+        }
+        if (!ts_node_is_null(sup)) {
+            Item sup_item = convert_math_node(ctx, sup, source);
+            elem.attr("sup", sup_item);
+        }
+
+        return elem.final();
+    }
+
+    // Fraction
+    if (strcmp(node_type, "fraction") == 0) {
+        ElementBuilder elem = builder.element("fraction");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode numer = ts_node_child_by_field_name(node, "numer", 5);
+        TSNode denom = ts_node_child_by_field_name(node, "denom", 5);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(numer)) {
+            elem.attr("numer", convert_math_node(ctx, numer, source));
+        }
+        if (!ts_node_is_null(denom)) {
+            elem.attr("denom", convert_math_node(ctx, denom, source));
+        }
+
+        return elem.final();
+    }
+
+    // Radical (sqrt)
+    if (strcmp(node_type, "radical") == 0) {
+        ElementBuilder elem = builder.element("radical");
+
+        TSNode index = ts_node_child_by_field_name(node, "index", 5);
+        TSNode radicand = ts_node_child_by_field_name(node, "radicand", 8);
+
+        if (!ts_node_is_null(index)) {
+            elem.attr("index", convert_math_node(ctx, index, source));
+        }
+        if (!ts_node_is_null(radicand)) {
+            elem.attr("radicand", convert_math_node(ctx, radicand, source));
+        }
+
+        return elem.final();
+    }
+
+    // Binomial
+    if (strcmp(node_type, "binomial") == 0) {
+        ElementBuilder elem = builder.element("binomial");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode top = ts_node_child_by_field_name(node, "top", 3);
+        TSNode bottom = ts_node_child_by_field_name(node, "bottom", 6);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(top)) {
+            elem.attr("top", convert_math_node(ctx, top, source));
+        }
+        if (!ts_node_is_null(bottom)) {
+            elem.attr("bottom", convert_math_node(ctx, bottom, source));
+        }
+
+        return elem.final();
+    }
+
+    // Delimiter group \left( ... \right)
+    if (strcmp(node_type, "delimiter_group") == 0) {
+        ElementBuilder elem = builder.element("delimiter_group");
+
+        TSNode left_delim = ts_node_child_by_field_name(node, "left_delim", 10);
+        TSNode right_delim = ts_node_child_by_field_name(node, "right_delim", 11);
+
+        if (!ts_node_is_null(left_delim)) {
+            uint32_t delim_start = ts_node_start_byte(left_delim);
+            uint32_t delim_end = ts_node_end_byte(left_delim);
+            elem.attr("left", {.item = s2it(builder.createString(source + delim_start, delim_end - delim_start))});
+        }
+        if (!ts_node_is_null(right_delim)) {
+            uint32_t delim_start = ts_node_start_byte(right_delim);
+            uint32_t delim_end = ts_node_end_byte(right_delim);
+            elem.attr("right", {.item = s2it(builder.createString(source + delim_start, delim_end - delim_start))});
+        }
+
+        // Process children (skip \left, \right, and delimiter tokens)
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "delimiter") == 0) continue;
+            uint32_t cs = ts_node_start_byte(child);
+            uint32_t ce = ts_node_end_byte(child);
+            const char* child_text = source + cs;
+            size_t child_len = ce - cs;
+            if (child_len == 5 && strncmp(child_text, "\\left", 5) == 0) continue;
+            if (child_len == 6 && strncmp(child_text, "\\right", 6) == 0) continue;
+
+            Item child_item = convert_math_node(ctx, child, source);
+            if (child_item.item != ITEM_NULL) {
+                elem.child(child_item);
+            }
+        }
+
+        return elem.final();
+    }
+
+    // Accent
+    if (strcmp(node_type, "accent") == 0) {
+        ElementBuilder elem = builder.element("accent");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode base = ts_node_child_by_field_name(node, "base", 4);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(base)) {
+            elem.attr("base", convert_math_node(ctx, base, source));
+        }
+
+        return elem.final();
+    }
+
+    // Big operator (sum, int, lim, etc.)
+    if (strcmp(node_type, "big_operator") == 0) {
+        ElementBuilder elem = builder.element("big_operator");
+
+        TSNode op = ts_node_child_by_field_name(node, "op", 2);
+        TSNode lower = ts_node_child_by_field_name(node, "lower", 5);
+        TSNode upper = ts_node_child_by_field_name(node, "upper", 5);
+
+        if (!ts_node_is_null(op)) {
+            uint32_t op_start = ts_node_start_byte(op);
+            uint32_t op_end = ts_node_end_byte(op);
+            elem.attr("op", {.item = s2it(builder.createString(source + op_start, op_end - op_start))});
+        }
+        if (!ts_node_is_null(lower)) {
+            elem.attr("lower", convert_math_node(ctx, lower, source));
+        }
+        if (!ts_node_is_null(upper)) {
+            elem.attr("upper", convert_math_node(ctx, upper, source));
+        }
+
+        return elem.final();
+    }
+
+    // Environment (matrix, aligned, cases, etc.)
+    if (strcmp(node_type, "environment") == 0) {
+        ElementBuilder elem = builder.element("environment");
+
+        TSNode name = ts_node_child_by_field_name(node, "name", 4);
+        TSNode columns = ts_node_child_by_field_name(node, "columns", 7);
+        TSNode body = ts_node_child_by_field_name(node, "body", 4);
+
+        if (!ts_node_is_null(name)) {
+            uint32_t name_start = ts_node_start_byte(name);
+            uint32_t name_end = ts_node_end_byte(name);
+            elem.attr("name", {.item = s2it(builder.createString(source + name_start, name_end - name_start))});
+        }
+        if (!ts_node_is_null(columns)) {
+            uint32_t col_start = ts_node_start_byte(columns);
+            uint32_t col_end = ts_node_end_byte(columns);
+            elem.attr("columns", {.item = s2it(builder.createString(source + col_start, col_end - col_start))});
+        }
+        if (!ts_node_is_null(body)) {
+            elem.attr("body", convert_math_node(ctx, body, source));
+        }
+
+        return elem.final();
+    }
+
+    // Environment body
+    if (strcmp(node_type, "env_body") == 0) {
+        ElementBuilder elem = builder.element("env_body");
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            Item child_item = convert_math_node(ctx, child, source);
+            if (child_item.item != ITEM_NULL) {
+                elem.child(child_item);
+            }
+        }
+        return elem.final();
+    }
+
+    // Row/column separators
+    if (strcmp(node_type, "row_sep") == 0) {
+        return {.item = y2it(builder.createSymbol("row_sep"))};
+    }
+    if (strcmp(node_type, "col_sep") == 0) {
+        return {.item = y2it(builder.createSymbol("col_sep"))};
+    }
+
+    // Text command (\text{...})
+    if (strcmp(node_type, "text_command") == 0) {
+        ElementBuilder elem = builder.element("text_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode content = ts_node_child_by_field_name(node, "content", 7);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(content)) {
+            uint32_t txt_start = ts_node_start_byte(content);
+            uint32_t txt_end = ts_node_end_byte(content);
+            // Strip { and } from text_group
+            const char* txt = source + txt_start;
+            size_t txt_len = txt_end - txt_start;
+            if (txt_len >= 2 && txt[0] == '{' && txt[txt_len - 1] == '}') {
+                txt++;
+                txt_len -= 2;
+            }
+            elem.attr("content", {.item = s2it(builder.createString(txt, txt_len))});
+        }
+
+        return elem.final();
+    }
+
+    // Style command (\mathbf, \displaystyle, etc.)
+    if (strcmp(node_type, "style_command") == 0) {
+        ElementBuilder elem = builder.element("style_command");
+
+        TSNode cmd = ts_node_child_by_field_name(node, "cmd", 3);
+        TSNode arg = ts_node_child_by_field_name(node, "arg", 3);
+
+        if (!ts_node_is_null(cmd)) {
+            uint32_t cmd_start = ts_node_start_byte(cmd);
+            uint32_t cmd_end = ts_node_end_byte(cmd);
+            elem.attr("cmd", {.item = s2it(builder.createString(source + cmd_start, cmd_end - cmd_start))});
+        }
+        if (!ts_node_is_null(arg)) {
+            elem.attr("arg", convert_math_node(ctx, arg, source));
+        }
+
+        return elem.final();
+    }
+
+    // Space command (\, \: \; \! \quad \qquad)
+    if (strcmp(node_type, "space_command") == 0) {
+        ElementBuilder elem = builder.element("space_command");
+        elem.attr("value", {.item = s2it(builder.createString(source + start, len))});
+        return elem.final();
+    }
+
+    // Generic command (fallback for Greek letters, symbols, etc.)
+    if (strcmp(node_type, "command") == 0) {
+        ElementBuilder elem = builder.element("command");
+
+        TSNode name = ts_node_child_by_field_name(node, "name", 4);
+        if (!ts_node_is_null(name)) {
+            uint32_t name_start = ts_node_start_byte(name);
+            uint32_t name_end = ts_node_end_byte(name);
+            // Strip leading backslash for cleaner output
+            const char* cmd_name = source + name_start;
+            size_t cmd_len = name_end - name_start;
+            if (cmd_len > 1 && cmd_name[0] == '\\') {
+                cmd_name++;
+                cmd_len--;
+            }
+            elem.attr("name", {.item = s2it(builder.createString(cmd_name, cmd_len))});
+        }
+
+        // Process arguments
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* field = ts_node_field_name_for_child(node, i);
+            if (field && strcmp(field, "arg") == 0) {
+                Item arg_item = convert_math_node(ctx, child, source);
+                if (arg_item.item != ITEM_NULL) {
+                    elem.child(arg_item);
+                }
+            }
+        }
+
+        return elem.final();
+    }
+
+    // Command name (for when encountered directly)
+    if (strcmp(node_type, "command_name") == 0) {
+        // Strip leading backslash
+        const char* cmd_name = source + start;
+        size_t cmd_len = len;
+        if (cmd_len > 1 && cmd_name[0] == '\\') {
+            cmd_name++;
+            cmd_len--;
+        }
+        return {.item = y2it(builder.createSymbol(cmd_name, cmd_len))};
+    }
+
+    // Delimiter (standalone)
+    if (strcmp(node_type, "delimiter") == 0) {
+        ElementBuilder elem = builder.element("delimiter");
+        elem.attr("value", {.item = s2it(builder.createString(source + start, len))});
+        return elem.final();
+    }
+
+    // Default: for any unhandled node type, create an element with children
+    if (ts_node_child_count(node) > 0) {
+        ElementBuilder elem = builder.element(node_type);
+        uint32_t child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            Item child_item = convert_math_node(ctx, child, source);
+            if (child_item.item != ITEM_NULL) {
+                elem.child(child_item);
+            }
+        }
+        return elem.final();
+    }
+
+    // Leaf node - return as string if it has content
+    if (len > 0) {
+        return {.item = s2it(builder.createString(source + start, len))};
+    }
+
+    return ItemNull;
+}
+
+/**
+ * Parse math content using tree-sitter-latex-math grammar and convert to Mark AST.
+ * Returns the parsed math AST as an Item, or ItemNull on failure.
+ */
+static Item parse_math_to_ast(InputContext& ctx, const char* math_source, size_t math_len) {
+    if (!math_source || math_len == 0) {
+        return ItemNull;
+    }
+
+    log_debug("latex_ts: parsing math to AST: '%.*s'", (int)math_len, math_source);
+
+    // Create a tree-sitter parser for latex-math
+    TSParser* parser = ts_parser_new();
+    if (!parser) {
+        log_error("latex_ts: failed to create math parser");
+        return ItemNull;
+    }
+
+    if (!ts_parser_set_language(parser, tree_sitter_latex_math())) {
+        log_error("latex_ts: failed to set latex_math language");
+        ts_parser_delete(parser);
+        return ItemNull;
+    }
+
+    // Parse the math content
+    TSTree* tree = ts_parser_parse_string(parser, nullptr, math_source, math_len);
+    if (!tree) {
+        log_error("latex_ts: failed to parse math content");
+        ts_parser_delete(parser);
+        return ItemNull;
+    }
+
+    TSNode root = ts_tree_root_node(tree);
+    if (ts_node_is_null(root)) {
+        log_error("latex_ts: math parse tree has null root");
+        ts_tree_delete(tree);
+        ts_parser_delete(parser);
+        return ItemNull;
+    }
+
+    // Convert the tree-sitter AST to Mark elements
+    Item result = convert_math_node(ctx, root, math_source);
+
+    // Cleanup
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+
+    return result;
+}
+
+// ============================================================================
+// LaTeX Node Conversion Helpers
+// ============================================================================
 
 // Helper: Check if current child is a comment that eats the following space
 // Returns true if current node is line_comment and next is space starting immediately after
@@ -569,6 +1064,12 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 Item src_item = {.item = s2it(src_str)};
                 elem_builder.attr("source", src_item);
 
+                // Deep parse the math content using tree-sitter-latex-math
+                Item math_ast = parse_math_to_ast(ctx, math_src, math_len);
+                if (math_ast.item != ITEM_NULL) {
+                    elem_builder.attr("ast", math_ast);
+                }
+
                 return elem_builder.final();
             }
 
@@ -605,6 +1106,13 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                         String* src_str = builder.createString(math_src, math_len);
                         Item src_item = {.item = s2it(src_str)};
                         elem.attr("source", src_item);
+
+                        // Deep parse the math content using tree-sitter-latex-math
+                        Item math_ast = parse_math_to_ast(ctx, math_src, math_len);
+                        if (math_ast.item != ITEM_NULL) {
+                            elem.attr("ast", math_ast);
+                        }
+
                         seq.child(elem.final());
                     }
                 }
@@ -945,7 +1453,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 return {.item = y2it(builder.createSymbol(source + start, len))};
             }
 
-            // Special case: inline_math and display_math - store original source as attribute
+            // Special case: inline_math and display_math - deep parse using tree-sitter-latex-math
             if (strcmp(node_type, "inline_math") == 0 || strcmp(node_type, "display_math") == 0 ||
                 strcmp(node_type, "math") == 0) {
                 MarkBuilder& builder = ctx.builder;
@@ -958,43 +1466,42 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
 
                 // Strip delimiters: $...$ or $$...$$ or \(...\) or \[...\]
                 const char* text = source + source_start;
+                size_t stripped_len = source_len;
                 if (source_len >= 2) {
                     if (text[0] == '$' && text[source_len - 1] == '$') {
                         // $...$ or $$...$$
                         if (source_len >= 4 && text[1] == '$' && text[source_len - 2] == '$') {
                             // $$...$$
                             text += 2;
-                            source_len -= 4;
+                            stripped_len -= 4;
                         } else {
                             // $...$
                             text += 1;
-                            source_len -= 2;
+                            stripped_len -= 2;
                         }
                     } else if (source_len >= 4 && text[0] == '\\' && text[1] == '(' &&
                                text[source_len - 2] == '\\' && text[source_len - 1] == ')') {
                         // \(...\)
                         text += 2;
-                        source_len -= 4;
+                        stripped_len -= 4;
                     } else if (source_len >= 4 && text[0] == '\\' && text[1] == '[' &&
                                text[source_len - 2] == '\\' && text[source_len - 1] == ']') {
                         // \[...\]
                         text += 2;
-                        source_len -= 4;
+                        stripped_len -= 4;
                     }
                 }
 
-                String* src_str = builder.createString(text, source_len);
+                // Store original source for reference
+                String* src_str = builder.createString(text, stripped_len);
                 Item src_item = {.item = s2it(src_str)};
                 elem_builder.attr("source", src_item);
 
-                // Also process children for the tree structure
-                uint32_t child_count = ts_node_child_count(node);
-                for (uint32_t i = 0; i < child_count; i++) {
-                    TSNode child = ts_node_child(node, i);
-                    Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
-                        elem_builder.child(child_item);
-                    }
+                // Deep parse the math content using tree-sitter-latex-math
+                Item math_ast = parse_math_to_ast(ctx, text, stripped_len);
+                if (math_ast.item != ITEM_NULL) {
+                    // Add the parsed AST as a child with 'ast' attribute
+                    elem_builder.attr("ast", math_ast);
                 }
 
                 return elem_builder.final();
