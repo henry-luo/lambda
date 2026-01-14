@@ -15,6 +15,7 @@
         "lambda/validator",
         "lambda/tex",
         "lambda/js",
+        "lambda/network",
         "radiant",
         "radiant/pdf",
         "radiant/webdriver"
