@@ -38,20 +38,23 @@ inline bool is_script(MathStyle style) {
     return style >= MathStyle::Script;
 }
 
-// Superscript style: D->S, T->S, S->SS, SS->SS (and cramped variants)
+// Superscript style: D->S, T->S, S->SS, SS->SS (cramped produces cramped)
 inline MathStyle sup_style(MathStyle style) {
     switch (style) {
         case MathStyle::Display:
-        case MathStyle::DisplayPrime:
         case MathStyle::Text:
-        case MathStyle::TextPrime:
             return MathStyle::Script;
+        case MathStyle::DisplayPrime:
+        case MathStyle::TextPrime:
+            return MathStyle::ScriptPrime;
         case MathStyle::Script:
+            return MathStyle::ScriptScript;
         case MathStyle::ScriptPrime:
-            return MathStyle::ScriptScript;
+            return MathStyle::ScriptScriptPrime;
         case MathStyle::ScriptScript:
-        case MathStyle::ScriptScriptPrime:
             return MathStyle::ScriptScript;
+        case MathStyle::ScriptScriptPrime:
+            return MathStyle::ScriptScriptPrime;
     }
     return MathStyle::Script;
 }

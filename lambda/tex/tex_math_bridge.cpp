@@ -244,11 +244,13 @@ TexNode* typeset_math_string(const char* math_str, size_t len, MathContext& ctx)
         float depth = 0;
         float italic_corr = 0;
 
+        // TFM stores metrics pre-scaled by design_size, so divide by it
         if (tfm && cp < 256) {
-            width = tfm->char_width((int)cp) * size;
-            height = tfm->char_height((int)cp) * size;
-            depth = tfm->char_depth((int)cp) * size;
-            italic_corr = tfm->char_italic((int)cp) * size;
+            float scale = size / tfm->design_size;
+            width = tfm->char_width((int)cp) * scale;
+            height = tfm->char_height((int)cp) * scale;
+            depth = tfm->char_depth((int)cp) * scale;
+            italic_corr = tfm->char_italic((int)cp) * scale;
         }
 
         // Create math character node
@@ -316,11 +318,13 @@ static TexNode* make_char_with_metrics(Arena* arena, int char_code,
     float depth = 0;
     float italic_corr = 0;
 
+    // TFM stores metrics pre-scaled by design_size, so divide by it
     if (tfm && char_code < 256 && char_code >= 0) {
-        width = tfm->char_width(char_code) * size;
-        height = tfm->char_height(char_code) * size;
-        depth = tfm->char_depth(char_code) * size;
-        italic_corr = tfm->char_italic(char_code) * size;
+        float scale = size / tfm->design_size;
+        width = tfm->char_width(char_code) * scale;
+        height = tfm->char_height(char_code) * scale;
+        depth = tfm->char_depth(char_code) * scale;
+        italic_corr = tfm->char_italic(char_code) * scale;
     }
 
     node->width = width;

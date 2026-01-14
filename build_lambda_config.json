@@ -20,8 +20,7 @@
         "radiant/pdf",
         "radiant/webdriver"
     ],
-    "source_files": [
-    ],
+    "source_files": [],
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
         "radiant/radiant.cpp"
@@ -2778,32 +2777,18 @@
                     {
                         "source": "test/test_latex_dvi_compare_gtest.cpp",
                         "name": "DVI Compare Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
+                        "dependencies": [],
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
+                            "rpmalloc"
                         ],
                         "binary": "test_latex_dvi_compare_gtest.exe",
                         "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_hyphen.cpp",
-                            "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_latex_bridge.cpp",
-                            "lambda/tex/tex_dvi_out.cpp",
-                            "lambda/tex/dvi_parser.cpp"
+                            "lambda/tex/dvi_parser.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c"
                         ],
                         "includes": [
                             "."
