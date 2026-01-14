@@ -260,6 +260,10 @@
         {
           "type": "SYMBOL",
           "name": "nbsp"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "alignment_tab"
         }
       ]
     },
