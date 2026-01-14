@@ -20,6 +20,11 @@
 #include <cfloat>
 using namespace std::chrono;
 
+// Thread-local iframe depth counter to prevent infinite recursion
+// (e.g., <iframe src="index.html"> loading itself)
+// Shared between layout_block.cpp and layout_flex_multipass.cpp
+__thread int iframe_depth = 0;
+
 // External timing accumulators from layout.cpp
 extern double g_table_layout_time;
 extern double g_flex_layout_time;
@@ -539,6 +544,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     DomDocument* doc = NULL;
     log_debug("layout iframe");
+    
+    // Iframe recursion depth limit to prevent infinite loops (e.g., <iframe src="index.html">)
+    // This is a thread-local variable shared with layout_flex_multipass.cpp
+    // Keep this low since each HTTP download can take seconds
+    const int MAX_IFRAME_DEPTH = 3;
+    
+    if (iframe_depth >= MAX_IFRAME_DEPTH) {
+        log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
+        return;
+    }
+    
     if (!(block->embed && block->embed->doc)) {
         // load iframe document
         const char *value = block->get_attribute("src");
@@ -550,7 +566,11 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             // This ensures the embedded document layouts to fit within the iframe
             int iframe_width = block->width > 0 ? (int)block->width : lycon->ui_context->window_width;
             int iframe_height = block->height > 0 ? (int)block->height : lycon->ui_context->window_height;
-            log_debug("load iframe doc src: %s (iframe viewport=%dx%d)", src->str, iframe_width, iframe_height);
+            log_debug("load iframe doc src: %s (iframe viewport=%dx%d, depth=%d)", src->str, iframe_width, iframe_height, iframe_depth);
+            
+            // Increment depth before loading
+            iframe_depth++;
+            
             // Load iframe document - pixel_ratio from ui_context is still used internally
             doc = load_html_doc(lycon->ui_context->document->url, src->str,
                 iframe_width, iframe_height,
@@ -558,6 +578,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             strbuf_free(src);
             if (!doc) {
                 log_debug("failed to load iframe document");
+                iframe_depth--;
                 // todo: use a placeholder
             } else {
                 if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
@@ -586,6 +607,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                     lycon->ui_context->window_height = saved_window_height;
                     log_debug("IFRAME TRACE: finished layout iframe document");
                 }
+                iframe_depth--;
                 // PDF scaling now happens inside pdf_page_to_view_tree via load_html_doc
             }
         } else {

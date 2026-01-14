@@ -446,6 +446,34 @@ TEST_F(NetworkLayoutTest, RenderHttpUrlToPdf) {
     unlink(output_file.c_str());
 }
 
+/**
+ * Test layout with external HTTPS URL (no extension, Content-Type detection)
+ */
+TEST_F(NetworkLayoutTest, LayoutExternalHttpsWithContentTypeDetection) {
+    std::cout << "\n🌍 Testing: lambda layout with external HTTPS URL (no extension)\n";
+
+    // Use example.com which is a stable test page with no extension
+    std::string url = "https://example.com/";
+    std::string cmd = "./lambda.exe layout " + url;
+
+    std::cout << "Executing: " << cmd << std::endl;
+
+    auto [exitCode, output] = executeCommand(cmd);
+
+    std::cout << "Exit code: " << exitCode << std::endl;
+    if (!output.empty()) {
+        std::cout << "Output: " << output.substr(0, 500) << std::endl;
+    }
+
+    // check exit code - 0 means success
+    EXPECT_EQ(exitCode, 0) << "Layout command should succeed with HTTPS URL without extension";
+
+    // check that output mentions success
+    EXPECT_TRUE(output.find("1 success") != std::string::npos ||
+                output.find("Completed layout command") != std::string::npos)
+        << "Layout should report success";
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

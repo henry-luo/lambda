@@ -3,6 +3,7 @@
 #include "../lib/image.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lambda/input/input.hpp"  // for download_http_content
 #include <algorithm>  // for std::max, std::min
 typedef struct ImageEntry {
     // ImageFormat format;
@@ -22,6 +23,32 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_xxhash3(image->path, strlen(image->path), seed0, seed1);
 }
 
+// Detect if memory content is SVG by checking for XML/SVG signature
+static bool is_svg_content(const unsigned char* data, size_t size) {
+    if (!data || size < 10) return false;
+    
+    // Skip UTF-8 BOM if present
+    size_t offset = 0;
+    if (size >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
+        offset = 3;
+    }
+    
+    // Skip whitespace
+    while (offset < size && (data[offset] == ' ' || data[offset] == '\t' || 
+                              data[offset] == '\n' || data[offset] == '\r')) {
+        offset++;
+    }
+    
+    // Check for XML declaration or SVG tag
+    if (size - offset >= 5) {
+        if (strncmp((const char*)data + offset, "<?xml", 5) == 0 ||
+            strncmp((const char*)data + offset, "<svg", 4) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->document == NULL || uicon->document->url == NULL) {
         log_error("Missing URL context for image: %s", img_url);
@@ -32,11 +59,34 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_error("Failed to parse URL: %s", img_url);
         return NULL;
     }
-    char* file_path = url_to_local_path(abs_url);
-    if (!file_path) {
-        log_error("Invalid local URL: %s", img_url);
-        url_destroy(abs_url);
-        return NULL;
+    
+    // Check if this is an HTTP URL
+    bool is_http = (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS);
+    char* file_path = nullptr;
+    char* temp_file_path = nullptr;
+    unsigned char* downloaded_data = nullptr;
+    size_t downloaded_size = 0;
+    
+    if (is_http) {
+        // Download the image from HTTP URL
+        const char* url_str = url_get_href(abs_url);
+        log_debug("[image] Downloading image from URL: %s", url_str);
+        downloaded_data = (unsigned char*)download_http_content(url_str, &downloaded_size, nullptr);
+        if (!downloaded_data || downloaded_size == 0) {
+            log_error("[image] Failed to download image: %s", url_str);
+            url_destroy(abs_url);
+            return NULL;
+        }
+        log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
+        // Use URL as cache key
+        file_path = (char*)url_str;
+    } else {
+        file_path = url_to_local_path(abs_url);
+        if (!file_path) {
+            log_error("Invalid local URL: %s", img_url);
+            url_destroy(abs_url);
+            return NULL;
+        }
     }
 
     if (uicon->image_cache == NULL) {
@@ -60,15 +110,31 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     int slen = strlen(file_path);
     // load image data
     log_debug("loading image at: %s", file_path);
-    if (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0) {
+    
+    // Determine if this is an SVG - check content for HTTP, extension for local files
+    bool is_svg = false;
+    if (is_http && downloaded_data) {
+        is_svg = is_svg_content(downloaded_data, downloaded_size);
+        log_debug("[image] HTTP image format detection: is_svg=%s", is_svg ? "yes" : "no");
+    } else {
+        is_svg = (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0);
+    }
+    
+    if (is_svg) {
         surface = (ImageSurface *)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
         surface->format = IMAGE_FORMAT_SVG;
         surface->pic = tvg_picture_new();
-        Tvg_Result ret = tvg_picture_load(surface->pic, file_path);
+        Tvg_Result ret;
+        if (is_http && downloaded_data) {
+            ret = tvg_picture_load_data(surface->pic, (const char*)downloaded_data, (uint32_t)downloaded_size, "svg", NULL, false);
+        } else {
+            ret = tvg_picture_load(surface->pic, file_path);
+        }
         if (ret != TVG_RESULT_SUCCESS) {
             log_debug("failed to load SVG image: %s", file_path);
             tvg_paint_unref(surface->pic, true);
             mem_free(surface);
+            if (downloaded_data) free(downloaded_data);
             return NULL;
         }
         float svg_w, svg_h;
@@ -76,10 +142,17 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         surface->width = svg_w;
         surface->height = svg_h;
         log_debug("SVG image size: %f x %f\n", svg_w, svg_h);
+        if (downloaded_data) free(downloaded_data);
     }
     else {
         int width, height, channels;
-        unsigned char *data = image_load(file_path, &width, &height, &channels, 4);
+        unsigned char *data;
+        if (is_http && downloaded_data) {
+            data = image_load_from_memory(downloaded_data, downloaded_size, &width, &height, &channels);
+            free(downloaded_data);
+        } else {
+            data = image_load(file_path, &width, &height, &channels, 4);
+        }
         if (!data) {
             log_debug("failed to load image: %s", file_path);
             return NULL;
