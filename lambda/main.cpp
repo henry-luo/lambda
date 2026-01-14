@@ -21,6 +21,11 @@
 #include "../radiant/graph_to_svg.hpp"
 #include "input/input-graph.h"
 
+// Network module includes
+#include "network/network_downloader.h"
+#include "network/network_resource_manager.h"
+#include "network/network_thread_pool.h"
+
 // Forward declaration for LaTeX HTML v2 formatter
 namespace lambda {
     Item format_latex_html_v2(Input* input, bool text_mode);
@@ -1470,6 +1475,145 @@ int main(int argc, char *argv[]) {
         log_debug("webdriver command completed with result: %d", exit_code);
         log_finish();
         return exit_code;
+    }
+
+    // Handle fetch command (network resource download)
+    log_debug("Checking for fetch command");
+    if (argc >= 2 && strcmp(argv[1], "fetch") == 0) {
+        log_debug("Entering fetch command handler");
+
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Fetch - HTTP/HTTPS Resource Downloader\n\n");
+            printf("Usage: %s fetch <url> [options]\n", argv[0]);
+            printf("\nOptions:\n");
+            printf("  -o, --output <file>    Save output to file (default: stdout)\n");
+            printf("  -t, --timeout <ms>     Request timeout in milliseconds (default: 30000)\n");
+            printf("  -v, --verbose          Show detailed progress and timing\n");
+            printf("  -h, --help             Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s fetch https://example.com                    # Fetch and print to stdout\n", argv[0]);
+            printf("  %s fetch https://example.com -o page.html       # Save to file\n", argv[0]);
+            printf("  %s fetch https://httpbin.org/delay/2 -t 5000    # 5 second timeout\n", argv[0]);
+            printf("  %s fetch https://httpbin.org/status/200 -v      # Verbose output\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        // Parse fetch command arguments
+        const char* url = NULL;
+        const char* output_file = NULL;
+        int timeout_ms = 30000;  // Default 30 seconds
+        bool verbose = false;
+
+        for (int i = 2; i < argc; i++) {
+            if ((strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) && i + 1 < argc) {
+                output_file = argv[++i];
+            } else if ((strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--timeout") == 0) && i + 1 < argc) {
+                timeout_ms = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
+                verbose = true;
+            } else if (argv[i][0] != '-') {
+                if (url == NULL) {
+                    url = argv[i];
+                } else {
+                    printf("Error: Multiple URLs not supported\n");
+                    log_finish();
+                    return 1;
+                }
+            } else {
+                printf("Error: Unknown option '%s'\n", argv[i]);
+                log_finish();
+                return 1;
+            }
+        }
+
+        if (!url) {
+            printf("Error: No URL specified\n");
+            printf("Usage: %s fetch <url> [options]\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+
+        if (verbose) {
+            printf("Fetching: %s\n", url);
+            printf("Timeout: %d ms\n", timeout_ms);
+        }
+
+        // Create a NetworkResource for the download
+        NetworkResource res = {0};
+        res.url = strdup(url);
+        res.timeout_ms = timeout_ms;
+        res.state = STATE_PENDING;
+        res.type = RESOURCE_HTML;  // Treat as generic content
+
+        // Perform the download
+        double start_time = (double)clock() / CLOCKS_PER_SEC;
+        bool success = network_download_resource(&res);
+        double end_time = (double)clock() / CLOCKS_PER_SEC;
+        double elapsed_ms = (end_time - start_time) * 1000.0;
+
+        if (success) {
+            if (verbose) {
+                printf("✅ Download successful\n");
+                printf("   HTTP Status: %ld\n", res.http_status_code);
+                printf("   Time: %.2f ms\n", elapsed_ms);
+                if (res.local_path) {
+                    printf("   Cached: %s\n", res.local_path);
+                }
+            }
+
+            // Output content
+            if (output_file) {
+                if (res.local_path) {
+                    // Copy from cache to output file
+                    char* content = read_text_file(res.local_path);
+                    if (content) {
+                        write_text_file(output_file, content);
+                        free(content);
+                        if (verbose) {
+                            printf("   Saved to: %s\n", output_file);
+                        }
+                    } else {
+                        printf("Error: Failed to read cached content\n");
+                        free(res.url);
+                        log_finish();
+                        return 1;
+                    }
+                } else {
+                    printf("Error: No content available\n");
+                    free(res.url);
+                    log_finish();
+                    return 1;
+                }
+            } else {
+                // Print to stdout
+                if (res.local_path) {
+                    char* content = read_text_file(res.local_path);
+                    if (content) {
+                        printf("%s", content);
+                        free(content);
+                    }
+                }
+            }
+
+            free(res.url);
+            log_finish();
+            return 0;
+        } else {
+            printf("❌ Download failed\n");
+            printf("   URL: %s\n", url);
+            printf("   HTTP Status: %ld\n", res.http_status_code);
+            if (res.error_message) {
+                printf("   Error: %s\n", res.error_message);
+            }
+            printf("   Retryable: %s\n", is_http_error_retryable(res.http_status_code) ? "yes" : "no");
+            printf("   Time: %.2f ms\n", elapsed_ms);
+
+            free(res.url);
+            log_finish();
+            return 1;
+        }
     }
 
     // Handle run command

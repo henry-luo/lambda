@@ -13,6 +13,7 @@
 #include "font_face.h"
 #include "state_store.hpp"
 #include "event_sim.hpp"
+#include "../lambda/network/network_resource_manager.h"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -443,6 +444,12 @@ void render(GLFWwindow* window) {
 
     // clear the framebuffer
     glClear(GL_COLOR_BUFFER_BIT);
+
+    // NETWORK INTEGRATION: Process network callbacks (MAIN THREAD ONLY)
+    // This handles resource completions and triggers reflows/repaints for loaded resources
+    if (ui_context.document && ui_context.document->resource_manager) {
+        resource_manager_flush_layout_updates(ui_context.document->resource_manager);
+    }
 
     // reflow the document if window size has changed
     if (width != ui_context.window_width || height != ui_context.window_height) {
