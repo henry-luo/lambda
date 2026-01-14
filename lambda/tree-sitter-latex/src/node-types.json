@@ -236,6 +236,10 @@
           "named": true
         },
         {
+          "type": "control_symbol",
+          "named": true
+        },
+        {
           "type": "curly_group",
           "named": true
         },
@@ -383,6 +387,10 @@
       "types": [
         {
           "type": "command",
+          "named": true
+        },
+        {
+          "type": "control_symbol",
           "named": true
         },
         {
