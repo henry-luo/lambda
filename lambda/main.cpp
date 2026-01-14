@@ -398,8 +398,9 @@ int exec_convert(int argc, char* argv[]) {
         return 1;
     }
 
-    // Check if input file exists
-    if (access(input_file, F_OK) != 0) {
+    // Check if input file exists (skip check for HTTP/HTTPS URLs)
+    bool is_http_url = (strncmp(input_file, "http://", 7) == 0 || strncmp(input_file, "https://", 8) == 0);
+    if (!is_http_url && access(input_file, F_OK) != 0) {
         printf("Error: Input file '%s' does not exist\n", input_file);
         return 1;
     }
@@ -1044,8 +1045,9 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // Check if HTML file exists
-        if (access(html_file, F_OK) != 0) {
+        // Check if HTML file exists (skip check for HTTP/HTTPS URLs)
+        bool is_http_url = (strncmp(html_file, "http://", 7) == 0 || strncmp(html_file, "https://", 8) == 0);
+        if (!is_http_url && access(html_file, F_OK) != 0) {
             printf("Error: Input file '%s' does not exist\n", html_file);
             log_finish();
             return 1;
@@ -1337,8 +1339,9 @@ int main(int argc, char *argv[]) {
             log_info("No file specified, using default: %s", filename);
         }
 
-        // Check if file exists
-        if (access(filename, F_OK) != 0) {
+        // Check if file exists (skip check for HTTP/HTTPS URLs)
+        bool is_http_url = (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0);
+        if (!is_http_url && access(filename, F_OK) != 0) {
             printf("Error: File '%s' does not exist\n", filename);
             log_finish();
             return 1;
