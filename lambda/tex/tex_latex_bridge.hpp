@@ -172,6 +172,12 @@ TexNode* convert_latex_verbatim(
     LaTeXContext& ctx
 );
 
+// Tabular environment
+TexNode* convert_latex_tabular(
+    const ElementReader& elem,
+    LaTeXContext& ctx
+);
+
 // Center/flush environments
 TexNode* convert_latex_alignment(
     const ElementReader& elem,

@@ -640,6 +640,23 @@ static TexNode* convert_inline_item(const ItemReader& item, LaTeXContext& ctx, P
                     transfer_nodes(hlist, child_nodes);
                 }
             }
+        } else if (tag_eq(tag, "tabular")) {
+            // Tabular inside inline context - convert and embed as hbox
+            TexNode* tabular_vlist = convert_latex_tabular(elem, ctx);
+            if (tabular_vlist) {
+                // Wrap the vlist in an hbox so it can go in horizontal mode
+                TexNode* hbox = make_hbox(ctx.doc_ctx.arena);
+                // Transfer all children from the vlist to the hbox
+                TexNode* child = tabular_vlist->first_child;
+                while (child) {
+                    TexNode* next = child->next_sibling;
+                    child->prev_sibling = nullptr;
+                    child->next_sibling = nullptr;
+                    hbox->append_child(child);
+                    child = next;
+                }
+                hlist->append_child(hbox);
+            }
         } else if (tag_eq(tag, "control_symbol")) {
             // Escaped special character
             auto iter = elem.children();
@@ -1096,6 +1113,327 @@ TexNode* convert_latex_verbatim(const ElementReader& elem, LaTeXContext& ctx) {
 }
 
 // ============================================================================
+// Tabular Environment Conversion
+// ============================================================================
+
+// Column alignment from column spec character
+enum class ColAlign { Left, Center, Right };
+
+// Parse tabular column specification (e.g., "|c|c|c|" or "lcr")
+struct TabularColSpec {
+    ColAlign* aligns;       // alignment for each column
+    bool* left_borders;     // border on left side of each column
+    bool* right_borders;    // border on right side of each column
+    int num_cols;
+};
+
+static TabularColSpec parse_tabular_colspec(const char* spec, Arena* arena) {
+    TabularColSpec result = {};
+    if (!spec || !*spec) return result;
+
+    // First pass: count columns
+    int col_count = 0;
+    for (const char* p = spec; *p; p++) {
+        if (*p == 'l' || *p == 'c' || *p == 'r') {
+            col_count++;
+        }
+    }
+
+    if (col_count == 0) return result;
+
+    result.num_cols = col_count;
+    result.aligns = (ColAlign*)arena_alloc(arena, col_count * sizeof(ColAlign));
+    result.left_borders = (bool*)arena_alloc(arena, col_count * sizeof(bool));
+    result.right_borders = (bool*)arena_alloc(arena, col_count * sizeof(bool));
+
+    // Second pass: parse columns
+    int col = 0;
+    bool pending_border = false;
+    for (const char* p = spec; *p && col < col_count; p++) {
+        if (*p == '|') {
+            if (col == 0 && result.aligns[0] == ColAlign::Left) {
+                // Border before first column
+                pending_border = true;
+            } else if (col > 0) {
+                result.right_borders[col - 1] = true;
+            }
+            if (col < col_count) {
+                result.left_borders[col] = true;
+            }
+        } else if (*p == 'l') {
+            result.aligns[col] = ColAlign::Left;
+            result.left_borders[col] = pending_border;
+            pending_border = false;
+            col++;
+        } else if (*p == 'c') {
+            result.aligns[col] = ColAlign::Center;
+            result.left_borders[col] = pending_border;
+            pending_border = false;
+            col++;
+        } else if (*p == 'r') {
+            result.aligns[col] = ColAlign::Right;
+            result.left_borders[col] = pending_border;
+            pending_border = false;
+            col++;
+        }
+    }
+
+    return result;
+}
+
+// Split text by separator, returning array of strings
+struct SplitResult {
+    const char** parts;
+    int count;
+};
+
+static SplitResult split_text(const char* text, size_t len, char sep, Arena* arena) {
+    SplitResult result = {};
+    if (!text || len == 0) return result;
+
+    // Count parts
+    int count = 1;
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] == sep) count++;
+    }
+
+    result.count = count;
+    result.parts = (const char**)arena_alloc(arena, count * sizeof(const char*));
+
+    // Split
+    int part = 0;
+    const char* start = text;
+    for (size_t i = 0; i <= len; i++) {
+        if (i == len || text[i] == sep) {
+            size_t part_len = (text + i) - start;
+            char* part_str = (char*)arena_alloc(arena, part_len + 1);
+            memcpy(part_str, start, part_len);
+            part_str[part_len] = '\0';
+            result.parts[part++] = part_str;
+            start = text + i + 1;
+        }
+    }
+
+    return result;
+}
+
+// Trim leading/trailing whitespace
+static const char* trim_whitespace(const char* str, Arena* arena) {
+    if (!str) return "";
+    while (*str && isspace(*str)) str++;
+    if (!*str) return "";
+
+    size_t len = strlen(str);
+    while (len > 0 && isspace(str[len - 1])) len--;
+
+    char* result = (char*)arena_alloc(arena, len + 1);
+    memcpy(result, str, len);
+    result[len] = '\0';
+    return result;
+}
+
+// Helper: collect content children from tabular, skipping curly_group but including inline_math
+// Returns a dynamically allocated array of child elements/strings
+enum TabularItemType {
+    TABULAR_CONTENT = 0,
+    TABULAR_ROW_SEP = 1,
+    TABULAR_HLINE = 2
+};
+
+struct TabularItem {
+    ItemReader item;
+    TabularItemType type;
+};
+
+static void collect_tabular_content(const ElementReader& elem, 
+                                     ArrayList* items,  // ArrayList of TabularItem*
+                                     bool* found_col_spec,
+                                     char** col_spec_out,
+                                     Arena* arena) {
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+
+            // First curly_group is the column spec
+            if (!*found_col_spec && tag_eq(tag, "curly_group")) {
+                Pool* spec_pool = pool_create();
+                StringBuf* sb = stringbuf_new(spec_pool);
+                child_elem.textContent(sb);
+                if (sb->str && sb->length > 0) {
+                    char* spec_str = (char*)arena_alloc(arena, sb->length + 1);
+                    memcpy(spec_str, sb->str->chars, sb->length);
+                    spec_str[sb->length] = '\0';
+                    *col_spec_out = spec_str;
+                }
+                stringbuf_free(sb);
+                pool_destroy(spec_pool);
+                *found_col_spec = true;
+                continue;
+            }
+
+            // Skip other curly_group
+            if (tag_eq(tag, "curly_group")) {
+                continue;
+            }
+
+            // Check for special items
+            if (tag_eq(tag, "linebreak_command")) {
+                TabularItem* item = (TabularItem*)arena_alloc(arena, sizeof(TabularItem));
+                item->item = child;
+                item->type = TABULAR_ROW_SEP;
+                arraylist_append(items, item);
+                continue;
+            }
+
+            if (tag_eq(tag, "hline")) {
+                TabularItem* item = (TabularItem*)arena_alloc(arena, sizeof(TabularItem));
+                item->item = child;
+                item->type = TABULAR_HLINE;
+                arraylist_append(items, item);
+                continue;
+            }
+
+            // For paragraph, recurse into its children
+            if (tag_eq(tag, "paragraph")) {
+                collect_tabular_content(child_elem, items, found_col_spec, col_spec_out, arena);
+                continue;
+            }
+
+            // For sequence, recurse into its children
+            if (tag_eq(tag, "sequence")) {
+                collect_tabular_content(child_elem, items, found_col_spec, col_spec_out, arena);
+                continue;
+            }
+
+            // Add this element as content
+            TabularItem* item = (TabularItem*)arena_alloc(arena, sizeof(TabularItem));
+            item->item = child;
+            item->type = TABULAR_CONTENT;
+            arraylist_append(items, item);
+        } else if (child.isString()) {
+            const char* str = child.cstring();
+            // Skip whitespace-only strings
+            if (str) {
+                bool all_whitespace = true;
+                for (const char* p = str; *p; p++) {
+                    if (!isspace(*p)) { all_whitespace = false; break; }
+                }
+                if (!all_whitespace) {
+                    TabularItem* item = (TabularItem*)arena_alloc(arena, sizeof(TabularItem));
+                    item->item = child;
+                    item->type = TABULAR_CONTENT;
+                    arraylist_append(items, item);
+                }
+            }
+        }
+    }
+}
+
+TexNode* convert_latex_tabular(const ElementReader& elem, LaTeXContext& ctx) {
+    Arena* arena = ctx.doc_ctx.arena;
+
+    // Collect all content items
+    Pool* pool = pool_create();
+    ArrayList* items = arraylist_new(32);
+    bool found_col_spec = false;
+    char* col_spec = nullptr;
+    
+    collect_tabular_content(elem, items, &found_col_spec, &col_spec, arena);
+
+    TabularColSpec spec = parse_tabular_colspec(col_spec, arena);
+    if (spec.num_cols == 0) {
+        spec.num_cols = 3;  // Default
+        spec.aligns = (ColAlign*)arena_alloc(arena, 3 * sizeof(ColAlign));
+        spec.aligns[0] = spec.aligns[1] = spec.aligns[2] = ColAlign::Center;
+        spec.left_borders = (bool*)arena_alloc(arena, 3 * sizeof(bool));
+        spec.right_borders = (bool*)arena_alloc(arena, 3 * sizeof(bool));
+    }
+
+    VListContext vctx(arena, ctx.doc_ctx.fonts);
+    init_vlist_context(vctx, ctx.doc_ctx.text_width);
+    begin_vlist(vctx);
+
+    // Space above table
+    add_vspace(vctx, Glue::flexible(6.0f, 2.0f, 1.0f));
+
+    float total_width = ctx.doc_ctx.text_width;
+    float col_width = total_width / spec.num_cols;
+
+    // Process items, building rows
+    // Items between row separators form a row
+    TexNode* current_row = make_hlist(arena);
+    int current_col = 0;
+    float x_offset = 0;
+
+    for (int i = 0; i < items->length; i++) {
+        TabularItem* tci = (TabularItem*)items->data[i];
+        
+        if (tci->type == TABULAR_HLINE) {
+            // Emit current row if not empty, then draw hline
+            if (current_row->first_child) {
+                current_row->width = total_width;
+                HListDimensions dims = measure_hlist(current_row);
+                current_row->height = dims.height;
+                current_row->depth = dims.depth;
+                add_line(vctx, current_row);
+                current_row = make_hlist(arena);
+                current_col = 0;
+                x_offset = 0;
+            }
+            TexNode* rule = make_rule(arena, total_width, 0.4f, 0);
+            if (rule) add_line(vctx, rule);
+            continue;
+        }
+
+        if (tci->type == TABULAR_ROW_SEP) {
+            // Emit current row
+            if (current_row->first_child) {
+                current_row->width = total_width;
+                HListDimensions dims = measure_hlist(current_row);
+                current_row->height = dims.height;
+                current_row->depth = dims.depth;
+                add_line(vctx, current_row);
+            }
+            current_row = make_hlist(arena);
+            current_col = 0;
+            x_offset = 0;
+            continue;
+        }
+
+        // Regular content - convert to tex nodes
+        TexNode* content_nodes = convert_inline_item(tci->item, ctx, pool);
+        if (content_nodes && content_nodes->first_child) {
+            // Add a leading space/kern for column positioning
+            if (x_offset > 0) {
+                TexNode* kern = make_kern(arena, x_offset - current_row->width);
+                if (kern) current_row->append_child(kern);
+            }
+            transfer_nodes(current_row, content_nodes);
+        }
+    }
+
+    // Emit final row if not empty
+    if (current_row->first_child) {
+        current_row->width = total_width;
+        HListDimensions dims = measure_hlist(current_row);
+        current_row->height = dims.height;
+        current_row->depth = dims.depth;
+        add_line(vctx, current_row);
+    }
+
+    arraylist_free(items);
+    pool_destroy(pool);
+
+    // Space below table
+    add_vspace(vctx, Glue::flexible(6.0f, 2.0f, 1.0f));
+
+    return end_vlist(vctx);
+}
+
+// ============================================================================
 // Display Math Conversion
 // ============================================================================
 
@@ -1185,6 +1523,8 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
                 return convert_latex_quote(elem, true, ctx);
             } else if (tag_eq(env_name, "verbatim")) {
                 return convert_latex_verbatim(elem, ctx);
+            } else if (tag_eq(env_name, "tabular")) {
+                return convert_latex_tabular(elem, ctx);
             } else if (tag_eq(env_name, "center")) {
                 return convert_latex_alignment(elem, 0, ctx);
             } else if (tag_eq(env_name, "flushleft")) {
@@ -1249,6 +1589,12 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
     // Verbatim
     if (tag_eq(tag, "verbatim_environment") || tag_eq(tag, "verbatim")) {
         return convert_latex_verbatim(elem, ctx);
+    }
+
+    // Tabular (can appear directly as tag when parsed as named environment)
+    if (tag_eq(tag, "tabular")) {
+        fprintf(stderr, "[DEBUG] convert_latex_block: found tabular tag, calling convert_latex_tabular\n");
+        return convert_latex_tabular(elem, ctx);
     }
 
     // Document structure
