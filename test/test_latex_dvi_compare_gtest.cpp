@@ -256,7 +256,7 @@ protected:
         // Build the command with timeout (30 seconds max)
         // Redirect stderr to stdout, then to /dev/null to avoid buffer blocking
         char cmd[1024];
-        
+
         #ifdef __APPLE__
         snprintf(cmd, sizeof(cmd), "gtimeout 30s ./lambda.exe render %s -o %s >/dev/null 2>&1", latex_file, dvi_output);
         #else
