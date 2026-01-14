@@ -427,17 +427,22 @@ static void append_monospace(TexNode* hlist, const ElementReader& elem, LaTeXCon
 
 // Convert inline math
 static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXContext& ctx, Pool* pool) {
-    // Check if this is actually display math wrapped in a 'math' element
-    bool is_display = false;
-    auto check_iter = elem.children();
-    ItemReader check_child;
-    while (check_iter.next(&check_child)) {
-        if (check_child.isElement()) {
-            ElementReader child_elem = check_child.asElement();
-            const char* child_tag = child_elem.tagName();
-            if (tag_eq(child_tag, "display_math") || tag_eq(child_tag, "displaymath")) {
-                is_display = true;
-                break;
+    // Check if this is display math - either by element tag or by child element
+    const char* elem_tag = elem.tagName();
+    bool is_display = tag_eq(elem_tag, "display_math") || tag_eq(elem_tag, "displaymath");
+    
+    // Also check children for nested display_math (legacy structure)
+    if (!is_display) {
+        auto check_iter = elem.children();
+        ItemReader check_child;
+        while (check_iter.next(&check_child)) {
+            if (check_child.isElement()) {
+                ElementReader child_elem = check_child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (tag_eq(child_tag, "display_math") || tag_eq(child_tag, "displaymath")) {
+                    is_display = true;
+                    break;
+                }
             }
         }
     }
@@ -608,7 +613,9 @@ static TexNode* convert_inline_item(const ItemReader& item, LaTeXContext& ctx, P
             append_emphasis(hlist, elem, ctx, pool);
         } else if (tag_eq(tag, "texttt") || tag_eq(tag, "verb") || tag_eq(tag, "verb_command")) {
             append_monospace(hlist, elem, ctx, pool);
-        } else if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
+        } else if (tag_eq(tag, "inline_math") || tag_eq(tag, "math") || tag_eq(tag, "display_math")) {
+            // Both inline and display math can appear in paragraphs
+            // append_inline_math checks for display_math to set style appropriately
             append_inline_math(hlist, elem, ctx, pool);
         } else if (tag_eq(tag, "space_cmd")) {
             // Get the space command content
@@ -1213,6 +1220,30 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
     if (tag_eq(tag, "display_math") || tag_eq(tag, "displaymath") ||
         tag_eq(tag, "equation") || tag_eq(tag, "align")) {
         return convert_latex_display_math(elem, ctx);
+    }
+
+    // Inline math in block context - wrap as a centered display
+    if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
+        MathContext math_ctx = ctx.doc_ctx.math_context();
+        math_ctx.style = MathStyle::Text;
+
+        ItemReader ast_attr = elem.get_attr("ast");
+        if (ast_attr.isNull() || !ast_attr.isElement()) {
+            return nullptr;
+        }
+
+        TexNode* math_hbox = typeset_math_from_ast(ast_attr, math_ctx);
+        if (!math_hbox) return nullptr;
+
+        // Wrap in a paragraph line
+        VListContext vctx(ctx.doc_ctx.arena, ctx.doc_ctx.fonts);
+        init_vlist_context(vctx, ctx.doc_ctx.text_width);
+        begin_vlist(vctx);
+        add_vspace(vctx, Glue::flexible(6.0f, 2.0f, 1.0f));
+        TexNode* centered = center_line(math_hbox, ctx.doc_ctx.text_width, ctx.doc_ctx.arena);
+        if (centered) add_raw(vctx, centered);
+        add_vspace(vctx, Glue::flexible(6.0f, 2.0f, 1.0f));
+        return end_vlist(vctx);
     }
 
     // Verbatim

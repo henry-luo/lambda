@@ -50,6 +50,7 @@ static const GreekEntry GREEK_TABLE[] = {
     // Variants
     {"varepsilon", 34, false}, {"vartheta", 35, false}, {"varpi", 36, false},
     {"varrho", 37, false}, {"varsigma", 38, false}, {"varphi", 39, false},
+    {"varkappa", 123, false},
     {nullptr, 0, false}
 };
 
@@ -172,19 +173,21 @@ static bool is_big_operator(const char* name, size_t len) {
     return false;
 }
 
-// Big operator cmsy10/cmex10 codes
-static int get_big_op_code(const char* name, size_t len) {
-    if (len == 3 && strncmp(name, "sum", 3) == 0) return 80;
-    if (len == 4 && strncmp(name, "prod", 4) == 0) return 81;
-    if (len == 3 && strncmp(name, "int", 3) == 0) return 82;
-    if (len == 4 && strncmp(name, "oint", 4) == 0) return 72;
-    if (len == 6 && strncmp(name, "bigcup", 6) == 0) return 83;
-    if (len == 6 && strncmp(name, "bigcap", 6) == 0) return 84;
-    if (len == 6 && strncmp(name, "bigvee", 6) == 0) return 87;
-    if (len == 8 && strncmp(name, "bigwedge", 8) == 0) return 86;
-    if (len == 7 && strncmp(name, "bigoplus", 7) == 0) return 76;
-    if (len == 8 && strncmp(name, "bigotimes", 8) == 0) return 78;
-    return 80;  // default to sum
+// Big operator cmex10 codes
+// Text mode uses positions 80-87, Display mode uses positions 88-95 (larger variants)
+static int get_big_op_code(const char* name, size_t len, bool display) {
+    int offset = display ? 8 : 0;  // Display mode uses larger variants (+8)
+    if (len == 3 && strncmp(name, "sum", 3) == 0) return 80 + offset;
+    if (len == 4 && strncmp(name, "prod", 4) == 0) return 81 + offset;
+    if (len == 3 && strncmp(name, "int", 3) == 0) return 82 + offset;
+    if (len == 4 && strncmp(name, "oint", 4) == 0) return 72 + (display ? 1 : 0);  // 72=text, 73=display
+    if (len == 6 && strncmp(name, "bigcup", 6) == 0) return 83 + offset;
+    if (len == 6 && strncmp(name, "bigcap", 6) == 0) return 84 + offset;
+    if (len == 6 && strncmp(name, "bigvee", 6) == 0) return 87 + offset;
+    if (len == 8 && strncmp(name, "bigwedge", 8) == 0) return 86 + offset;
+    if (len == 7 && strncmp(name, "bigoplus", 7) == 0) return 76 + offset;
+    if (len == 8 && strncmp(name, "bigotimes", 8) == 0) return 78 + offset;
+    return 80 + offset;  // default to sum
 }
 
 // ============================================================================
@@ -1154,22 +1157,22 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
 
         op = wrap_in_hbox(first, last);
     } else {
-        // It's a symbol operator (\sum, \int, etc.)
-        int op_code = get_big_op_code(op_name, op_len);
+        // It's a symbol operator (\sum, \int, etc.) - use cmex10 (extension font)
+        int op_code = get_big_op_code(op_name, op_len, is_display);
 
         // Create operator character (larger in display mode)
         float op_size = is_display ? size * 1.4f : size;
-        FontSpec font = ctx.symbol_font;
+        FontSpec font = ctx.extension_font;  // Use extension font for big operators
         font.size_pt = op_size;
 
         op = make_math_op(ctx.arena, op_code, is_display, font);
 
-        // Get metrics from TFM
-        if (symbol_tfm && op_code >= 0 && op_code < 256) {
-            float scale = op_size / symbol_tfm->design_size;
-            op->width = symbol_tfm->char_width(op_code) * scale;
-            op->height = symbol_tfm->char_height(op_code) * scale;
-            op->depth = symbol_tfm->char_depth(op_code) * scale;
+        // Get metrics from TFM (extension_tfm for cmex10)
+        if (extension_tfm && op_code >= 0 && op_code < 256) {
+            float scale = op_size / extension_tfm->design_size;
+            op->width = extension_tfm->char_width(op_code) * scale;
+            op->height = extension_tfm->char_height(op_code) * scale;
+            op->depth = extension_tfm->char_depth(op_code) * scale;
         } else {
             op->width = 10.0f * op_size / 10.0f;
             op->height = 8.0f * op_size / 10.0f;
@@ -1505,6 +1508,12 @@ private:
         if (!text || strlen(text) == 0) return nullptr;
         size_t len = strlen(text);
 
+        // Skip special marker strings from input parser
+        if (strcmp(text, "col_sep") == 0 || strcmp(text, "row_sep") == 0 ||
+            strcmp(text, "parbreak") == 0 || strcmp(text, "align_marker") == 0) {
+            return nullptr;
+        }
+
         if (text[0] == '\\') {
             return build_command(text + 1, len - 1);
         }
@@ -1767,19 +1776,22 @@ private:
             }
             op_node = wrap_in_hbox(first, last);
         } else {
-            // It's a symbol operator (\sum, \int, etc.)
-            int op_code = get_big_op_code(op_cmd, op_len);
+            // It's a symbol operator (\sum, \int, etc.) - use cmex10 (extension font)
+            int op_code = get_big_op_code(op_cmd, op_len, is_display);
             float op_size = is_display ? size * 1.4f : size;
 
-            FontSpec font = ctx.symbol_font;
+            FontSpec font = ctx.extension_font;  // Use extension font for big operators
             font.size_pt = op_size;
 
+            log_debug("build_big_operator: op='%s' code=%d font='%s' size=%.1f display=%d", 
+                      op_cmd, op_code, font.name ? font.name : "null", op_size, is_display);
+
             op_node = make_math_op(ctx.arena, op_code, is_display, font);
-            if (symbol_tfm && op_code >= 0 && op_code < 256) {
-                float scale = op_size / symbol_tfm->design_size;
-                op_node->width = symbol_tfm->char_width(op_code) * scale;
-                op_node->height = symbol_tfm->char_height(op_code) * scale;
-                op_node->depth = symbol_tfm->char_depth(op_code) * scale;
+            if (extension_tfm && op_code >= 0 && op_code < 256) {
+                float scale = op_size / extension_tfm->design_size;
+                op_node->width = extension_tfm->char_width(op_code) * scale;
+                op_node->height = extension_tfm->char_height(op_code) * scale;
+                op_node->depth = extension_tfm->char_depth(op_code) * scale;
             } else {
                 op_node->width = 10.0f * op_size / 10.0f;
                 op_node->height = 8.0f * op_size / 10.0f;
