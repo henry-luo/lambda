@@ -2015,9 +2015,11 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     StyleTree* parent_tree = (parent && parent->specified_style)
                              ? parent->specified_style : NULL;
 
-    if (parent_tree) {
-        log_debug("[Lambda CSS] Checking inheritance from parent <%s>",
-                parent->tag_name);
+    // Run inheritance check if parent has either specified_style or computed font
+    // This handles anonymous table elements that have font but no specified_style
+    if (parent_tree || (parent && parent->font)) {
+        log_debug("[Lambda CSS] Checking inheritance from parent <%s> (has_style=%d, has_font=%d)",
+                parent->tag_name, parent_tree != NULL, parent->font != nullptr);
 
         for (size_t i = 0; i < num_inheritable; i++) {
             CssPropertyId prop_id = inheritable_props[i];
@@ -2048,6 +2050,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // Special handling for font-family: also check ancestor's computed font->family
             // This handles cases where font shorthand was used (sets font->family without
             // creating a CSS_PROPERTY_FONT_FAMILY declaration)
+            // Apply for any parent with computed font->family (handles font shorthand case)
             if (prop_id == CSS_PROPERTY_FONT_FAMILY && ancestor && ancestor->font && ancestor->font->family) {
                 log_debug("[FONT INHERIT] Found computed font-family in parent <%s>: %s",
                     ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->family);
@@ -2057,6 +2060,23 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
                 // Copy font-family from parent's computed font
                 span->font->family = ancestor->font->family;
+                continue;  // Move to next property
+            }
+
+            // Special handling for font-size: also check ancestor's computed font->font_size
+            // This handles cases where ancestor is an anonymous box with no specified_style
+            // (e.g., anonymous table-row wrapping table-cells)
+            // ONLY apply for anonymous parents (have font but no specified_style)
+            if (prop_id == CSS_PROPERTY_FONT_SIZE && ancestor && !ancestor->specified_style
+                && ancestor->font && ancestor->font->font_size > 0) {
+                log_debug("[FONT INHERIT] Found computed font-size in anonymous parent <%s>: %.1f",
+                    ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->font_size);
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (!span->font) {
+                    span->font = alloc_font_prop(lycon);
+                }
+                // Copy font-size from parent's computed font
+                span->font->font_size = ancestor->font->font_size;
                 continue;  // Move to next property
             }
 
