@@ -444,48 +444,17 @@ static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXC
 
     MathContext math_ctx = ctx.doc_ctx.math_context();
     math_ctx.style = is_display ? MathStyle::Display : MathStyle::Text;
-    TexNode* math_hbox = nullptr;
 
-    // First, try to use pre-parsed AST if available (from input-latex-ts.cpp)
+    // Use pre-parsed AST from input-latex-ts.cpp
     ItemReader ast_attr = elem.get_attr("ast");
-    if (!ast_attr.isNull() && ast_attr.isElement()) {
-        log_debug("latex_bridge: using pre-parsed math AST for inline math");
-        fprintf(stderr, "[DEBUG] append_inline_math: using pre-parsed AST\n");
-        math_hbox = typeset_math_from_ast(ast_attr, math_ctx);
+    if (ast_attr.isNull() || !ast_attr.isElement()) {
+        log_debug("latex_bridge: inline math missing ast attribute");
+        return;
     }
 
-    // Fallback to source string if no AST or AST typesetting failed
-    if (!math_hbox) {
-        const char* math_source = latex_get_attr(elem, "source");
-
-        Pool* local_pool = pool ? pool : pool_create();
-        StringBuf* sb = nullptr;
-
-        if (!math_source) {
-            sb = stringbuf_new(local_pool);
-            elem.textContent(sb);
-            if (sb->length > 0 && sb->str) {
-                math_source = sb->str->chars;
-            }
-        }
-
-        if (math_source && strlen(math_source) > 0) {
-            fprintf(stderr, "[DEBUG] append_inline_math: source='%.30s', is_display=%d\n",
-                    math_source, is_display);
-            math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
-        } else {
-            fprintf(stderr, "[DEBUG] append_inline_math: no math_source\n");
-        }
-
-        if (sb) stringbuf_free(sb);
-        if (!pool) pool_destroy(local_pool);
-    }
-
+    TexNode* math_hbox = typeset_math_from_ast(ast_attr, math_ctx);
     if (math_hbox) {
-        fprintf(stderr, "[DEBUG] append_inline_math: math_hbox created\n");
         hlist->append_child(math_hbox);
-    } else {
-        fprintf(stderr, "[DEBUG] append_inline_math: typeset_latex_math returned NULL\n");
     }
 }
 
@@ -1126,38 +1095,15 @@ TexNode* convert_latex_verbatim(const ElementReader& elem, LaTeXContext& ctx) {
 TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx) {
     MathContext math_ctx = ctx.doc_ctx.math_context();
     math_ctx.style = MathStyle::Display;
-    TexNode* math_hbox = nullptr;
 
-    // First, try to use pre-parsed AST if available (from input-latex-ts.cpp)
+    // Use pre-parsed AST from input-latex-ts.cpp
     ItemReader ast_attr = elem.get_attr("ast");
-    if (!ast_attr.isNull() && ast_attr.isElement()) {
-        log_debug("latex_bridge: using pre-parsed math AST for display math");
-        math_hbox = typeset_math_from_ast(ast_attr, math_ctx);
+    if (ast_attr.isNull() || !ast_attr.isElement()) {
+        log_debug("latex_bridge: display math missing ast attribute");
+        return nullptr;
     }
 
-    // Fallback to source string if no AST or AST typesetting failed
-    if (!math_hbox) {
-        const char* math_source = latex_get_attr(elem, "source");
-
-        Pool* pool = pool_create();
-        StringBuf* sb = nullptr;
-
-        if (!math_source) {
-            sb = stringbuf_new(pool);
-            elem.textContent(sb);
-            if (sb->length > 0 && sb->str) {
-                math_source = sb->str->chars;
-            }
-        }
-
-        if (math_source && strlen(math_source) > 0) {
-            math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
-        }
-
-        if (sb) stringbuf_free(sb);
-        pool_destroy(pool);
-    }
-
+    TexNode* math_hbox = typeset_math_from_ast(ast_attr, math_ctx);
     if (!math_hbox) {
         return nullptr;
     }
