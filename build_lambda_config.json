@@ -2941,6 +2941,17 @@
                         "icon": "🌐"
                     },
                     {
+                        "source": "test/test_network_layout_gtest.cpp",
+                        "name": "Network Layout Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_network_layout_gtest.exe",
+                        "icon": "🌐"
+                    },
+                    {
                         "source": "test/test_lambda_proc_extended_gtest.cpp",
                         "name": "Lambda Procedural Extended Tests",
                         "dependencies": [],
