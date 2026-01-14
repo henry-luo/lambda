@@ -535,7 +535,7 @@ static TexNode* convert_inline_item(const ItemReader& item, LaTeXContext& ctx, P
         ElementReader elem = item.asElement();
         const char* tag = elem.tagName();
 
-        // Skip preamble-only commands
+        // Skip preamble-only commands and structural elements
         if (tag && (tag_eq(tag, "documentclass") || tag_eq(tag, "pagestyle") ||
                     tag_eq(tag, "usepackage") || tag_eq(tag, "title") ||
                     tag_eq(tag, "author") || tag_eq(tag, "date") ||
@@ -545,7 +545,8 @@ static TexNode* convert_inline_item(const ItemReader& item, LaTeXContext& ctx, P
                     tag_eq(tag, "newtheorem") || tag_eq(tag, "DeclareMathOperator") ||
                     tag_eq(tag, "bibliographystyle") || tag_eq(tag, "makeatletter") ||
                     tag_eq(tag, "makeatother") || tag_eq(tag, "input") ||
-                    tag_eq(tag, "include") || tag_eq(tag, "includeonly"))) {
+                    tag_eq(tag, "include") || tag_eq(tag, "includeonly") ||
+                    tag_eq(tag, "begin") || tag_eq(tag, "end"))) {
             return nullptr;
         }
 
@@ -657,6 +658,9 @@ static TexNode* convert_inline_item(const ItemReader& item, LaTeXContext& ctx, P
                 }
                 hlist->append_child(hbox);
             }
+        } else if (tag_eq(tag, "vspace") || tag_eq(tag, "hspace")) {
+            // Vertical/horizontal space commands - skip content, handled at block level
+            // (don't render "1cm" as text)
         } else if (tag_eq(tag, "control_symbol")) {
             // Escaped special character
             auto iter = elem.children();
@@ -1237,7 +1241,8 @@ static const char* trim_whitespace(const char* str, Arena* arena) {
 enum TabularItemType {
     TABULAR_CONTENT = 0,
     TABULAR_ROW_SEP = 1,
-    TABULAR_HLINE = 2
+    TABULAR_HLINE = 2,
+    TABULAR_COL_SEP = 3
 };
 
 struct TabularItem {
@@ -1328,6 +1333,16 @@ static void collect_tabular_content(const ElementReader& elem,
                     arraylist_append(items, item);
                 }
             }
+        } else if (child.isSymbol()) {
+            // Check for alignment_tab symbol
+            String* sym_str = child.asSymbol();
+            const char* sym = sym_str ? sym_str->chars : nullptr;
+            if (sym && tag_eq(sym, "alignment_tab")) {
+                TabularItem* item = (TabularItem*)arena_alloc(arena, sizeof(TabularItem));
+                item->item = child;
+                item->type = TABULAR_COL_SEP;
+                arraylist_append(items, item);
+            }
         }
     }
 }
@@ -1366,7 +1381,6 @@ TexNode* convert_latex_tabular(const ElementReader& elem, LaTeXContext& ctx) {
     // Items between row separators form a row
     TexNode* current_row = make_hlist(arena);
     int current_col = 0;
-    float x_offset = 0;
 
     for (int i = 0; i < items->length; i++) {
         TabularItem* tci = (TabularItem*)items->data[i];
@@ -1381,7 +1395,6 @@ TexNode* convert_latex_tabular(const ElementReader& elem, LaTeXContext& ctx) {
                 add_line(vctx, current_row);
                 current_row = make_hlist(arena);
                 current_col = 0;
-                x_offset = 0;
             }
             TexNode* rule = make_rule(arena, total_width, 0.4f, 0);
             if (rule) add_line(vctx, rule);
@@ -1399,18 +1412,18 @@ TexNode* convert_latex_tabular(const ElementReader& elem, LaTeXContext& ctx) {
             }
             current_row = make_hlist(arena);
             current_col = 0;
-            x_offset = 0;
+            continue;
+        }
+
+        if (tci->type == TABULAR_COL_SEP) {
+            // Move to next column
+            current_col++;
             continue;
         }
 
         // Regular content - convert to tex nodes
         TexNode* content_nodes = convert_inline_item(tci->item, ctx, pool);
         if (content_nodes && content_nodes->first_child) {
-            // Add a leading space/kern for column positioning
-            if (x_offset > 0) {
-                TexNode* kern = make_kern(arena, x_offset - current_row->width);
-                if (kern) current_row->append_child(kern);
-            }
             transfer_nodes(current_row, content_nodes);
         }
     }

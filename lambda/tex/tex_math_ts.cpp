@@ -94,7 +94,8 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"star", 5, AtomType::Bin}, {"circ", 14, AtomType::Bin},
     {"bullet", 15, AtomType::Bin}, {"cap", 92, AtomType::Bin},
     {"cup", 91, AtomType::Bin}, {"vee", 95, AtomType::Bin},
-    {"wedge", 94, AtomType::Bin}, {"setminus", 110, AtomType::Bin},
+    {"lor", 95, AtomType::Bin}, {"wedge", 94, AtomType::Bin},
+    {"land", 94, AtomType::Bin}, {"setminus", 110, AtomType::Bin},
     {"oplus", 8, AtomType::Bin}, {"ominus", 9, AtomType::Bin},
     {"otimes", 10, AtomType::Bin}, {"oslash", 11, AtomType::Bin},
     {"odot", 12, AtomType::Bin},
@@ -110,7 +111,7 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"infty", 49, AtomType::Ord}, {"partial", 64, AtomType::Ord},
     {"nabla", 114, AtomType::Ord}, {"forall", 56, AtomType::Ord},
     {"exists", 57, AtomType::Ord}, {"neg", 58, AtomType::Ord},
-    {"emptyset", 59, AtomType::Ord}, {"Re", 60, AtomType::Ord},
+    {"lnot", 58, AtomType::Ord}, {"emptyset", 59, AtomType::Ord},
     {"Im", 61, AtomType::Ord}, {"top", 62, AtomType::Ord},
     {"bot", 63, AtomType::Ord}, {"angle", 65, AtomType::Ord},
     {"triangle", 52, AtomType::Ord}, {"backslash", 110, AtomType::Ord},
@@ -1224,19 +1225,20 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
             if (lower->width > max_width) max_width = lower->width;
         }
 
-        // Center everything
-        if (upper) {
-            upper->x = (max_width - upper->width) / 2.0f;
-            vbox->append_child(upper);
-            vbox->append_child(make_kern(arena, gap));
-        }
-
+        // Add operator first (matches TeX DVI ordering)
         op->x = (max_width - op->width) / 2.0f;
         vbox->append_child(op);
 
+        // Then add limits (positioned via y-coordinates)
+        if (upper) {
+            upper->x = (max_width - upper->width) / 2.0f;
+            upper->y = -(op->height + gap);  // Position above operator
+            vbox->append_child(upper);
+        }
+
         if (lower) {
-            vbox->append_child(make_kern(arena, gap));
             lower->x = (max_width - lower->width) / 2.0f;
+            lower->y = op->depth + gap;  // Position below operator
             vbox->append_child(lower);
         }
 
@@ -1829,7 +1831,7 @@ private:
 
         float size = current_size();
         float content_height = content->height + content->depth;
-        float threshold = size * 0.5f;
+        float threshold = size * 0.5f;  // original threshold
         bool use_ext = content_height > threshold;
 
         auto make_delim = [&](const char* d, bool is_left) -> TexNode* {
@@ -1929,7 +1931,8 @@ private:
 
         if (strcmp(name, "matrix") == 0 || strcmp(name, "pmatrix") == 0 ||
             strcmp(name, "bmatrix") == 0 || strcmp(name, "vmatrix") == 0 ||
-            strcmp(name, "Vmatrix") == 0 || strcmp(name, "Bmatrix") == 0) {
+            strcmp(name, "Vmatrix") == 0 || strcmp(name, "Bmatrix") == 0 ||
+            strcmp(name, "array") == 0) {
             return build_matrix(elem, name);
         }
         if (strcmp(name, "cases") == 0) return build_cases(elem);
