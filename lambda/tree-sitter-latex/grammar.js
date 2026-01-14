@@ -130,6 +130,7 @@ module.exports = grammar({
       $.control_symbol,
       $.placeholder,    // #1, #2, etc. in macro definitions
       $.nbsp,           // Non-breaking space ~
+      $.alignment_tab,  // & for tabular cell separator
     ),
 
     // Text is everything that's not a special character
