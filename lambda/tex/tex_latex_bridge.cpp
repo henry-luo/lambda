@@ -426,6 +426,22 @@ static void append_monospace(TexNode* hlist, const ElementReader& elem, LaTeXCon
 
 // Convert inline math
 static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXContext& ctx, Pool* pool) {
+    // Check if this is actually display math wrapped in a 'math' element
+    // Look for display_math child
+    bool is_display = false;
+    auto check_iter = elem.children();
+    ItemReader check_child;
+    while (check_iter.next(&check_child)) {
+        if (check_child.isElement()) {
+            ElementReader child_elem = check_child.asElement();
+            const char* child_tag = child_elem.tagName();
+            if (tag_eq(child_tag, "display_math") || tag_eq(child_tag, "displaymath")) {
+                is_display = true;
+                break;
+            }
+        }
+    }
+
     // Get math source from 'source' attribute or text content
     const char* math_source = latex_get_attr(elem, "source");
 
@@ -442,12 +458,21 @@ static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXC
 
     if (math_source && strlen(math_source) > 0) {
         MathContext math_ctx = ctx.doc_ctx.math_context();
-        math_ctx.style = MathStyle::Text;  // Inline math
+        // Use Display style for display math, Text style for inline
+        math_ctx.style = is_display ? MathStyle::Display : MathStyle::Text;
+
+        fprintf(stderr, "[DEBUG] append_inline_math: source='%.30s', is_display=%d\n",
+                math_source, is_display);
 
         TexNode* math_hbox = typeset_latex_math(math_source, strlen(math_source), math_ctx);
         if (math_hbox) {
+            fprintf(stderr, "[DEBUG] append_inline_math: math_hbox created\n");
             hlist->append_child(math_hbox);
+        } else {
+            fprintf(stderr, "[DEBUG] append_inline_math: typeset_latex_math returned NULL\n");
         }
+    } else {
+        fprintf(stderr, "[DEBUG] append_inline_math: no math_source\n");
     }
 
     if (sb) stringbuf_free(sb);
@@ -674,16 +699,28 @@ TexNode* build_latex_paragraph_hlist(const ElementReader& elem, LaTeXContext& ct
     Pool* pool = pool_create();
     TexNode* hlist = make_hlist(ctx.doc_ctx.arena);
 
+    int child_idx = 0;
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
+        child_idx++;
+        if (child.isElement()) {
+            ElementReader ce = child.asElement();
+            fprintf(stderr, "[DEBUG] build_paragraph_hlist: child %d tag='%s'\n", child_idx, ce.tagName());
+        } else if (child.isString()) {
+            const char* s = child.cstring();
+            fprintf(stderr, "[DEBUG] build_paragraph_hlist: child %d is string '%s'\n", child_idx, s ? s : "(null)");
+        }
         TexNode* child_nodes = convert_inline_item(child, ctx, pool);
+        fprintf(stderr, "[DEBUG] build_paragraph_hlist: child %d produced %p\n", child_idx, (void*)child_nodes);
         if (child_nodes) {
             transfer_nodes(hlist, child_nodes);
         }
     }
 
     pool_destroy(pool);
+    fprintf(stderr, "[DEBUG] build_paragraph_hlist: final hlist has %d children\n",
+            hlist->first_child ? 1 : 0);
     return hlist;
 }
 
@@ -706,7 +743,10 @@ TexNode* break_latex_paragraph(TexNode* hlist, LaTeXContext& ctx) {
 }
 
 TexNode* convert_latex_paragraph(const ElementReader& elem, LaTeXContext& ctx) {
+    fprintf(stderr, "[DEBUG] convert_latex_paragraph: building hlist\n");
     TexNode* hlist = build_latex_paragraph_hlist(elem, ctx);
+    fprintf(stderr, "[DEBUG] convert_latex_paragraph: hlist=%p, has_children=%d\n",
+            (void*)hlist, hlist && hlist->first_child ? 1 : 0);
     return break_latex_paragraph(hlist, ctx);
 }
 
@@ -1157,6 +1197,7 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
 
     // Paragraph
     if (tag_eq(tag, "paragraph") || tag_eq(tag, "para")) {
+        fprintf(stderr, "[DEBUG] convert_latex_block: found paragraph, calling convert_latex_paragraph\n");
         return convert_latex_paragraph(elem, ctx);
     }
 
@@ -1221,6 +1262,7 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
 
     // Document structure
     if (tag_eq(tag, "document") || tag_eq(tag, "latex_document")) {
+        fprintf(stderr, "[DEBUG] convert_latex_block: processing document element\n");
         // Process children
         VListContext vctx(ctx.doc_ctx.arena, ctx.doc_ctx.fonts);
         init_vlist_context(vctx, ctx.doc_ctx.text_width);
@@ -1228,11 +1270,20 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
 
         ctx.in_preamble = false;  // After \begin{document}
 
+        int child_idx = 0;
         auto iter = elem.children();
         ItemReader child;
         while (iter.next(&child)) {
+            child_idx++;
+            if (child.isElement()) {
+                ElementReader ce = child.asElement();
+                fprintf(stderr, "[DEBUG] document: child %d tag='%s'\n", child_idx, ce.tagName());
+            } else if (child.isString()) {
+                fprintf(stderr, "[DEBUG] document: child %d is string\n", child_idx);
+            }
             TexNode* block = convert_latex_block(child, ctx);
             if (block) {
+                fprintf(stderr, "[DEBUG] document: child %d produced block\n", child_idx);
                 add_raw(vctx, block);
                 if (ctx.doc_ctx.parskip > 0) {
                     add_vspace(vctx, Glue::fixed(ctx.doc_ctx.parskip));
@@ -1246,6 +1297,37 @@ TexNode* convert_latex_block(const ElementReader& elem, LaTeXContext& ctx) {
     // Skip preamble content - only document body should be typeset
     if (tag_eq(tag, "preamble")) {
         return nullptr;
+    }
+
+    // Handle ERROR recovery 'sequence' nodes - they may contain valid content
+    if (tag_eq(tag, "sequence")) {
+        fprintf(stderr, "[DEBUG] convert_latex_block: processing sequence (error recovery)\n");
+        VListContext vctx(ctx.doc_ctx.arena, ctx.doc_ctx.fonts);
+        init_vlist_context(vctx, ctx.doc_ctx.text_width);
+        begin_vlist(vctx);
+
+        int child_count = 0;
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            child_count++;
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                fprintf(stderr, "[DEBUG] sequence: child %d tag='%s'\n", child_count, child_elem.tagName());
+            } else if (child.isString()) {
+                const char* s = child.cstring();
+                fprintf(stderr, "[DEBUG] sequence: child %d string='%s'\n", child_count, s ? s : "(null)");
+            } else {
+                fprintf(stderr, "[DEBUG] sequence: child %d is other type\n", child_count);
+            }
+            TexNode* block = convert_latex_block(child, ctx);
+            if (block) {
+                add_raw(vctx, block);
+            }
+        }
+        fprintf(stderr, "[DEBUG] sequence: total children = %d\n", child_count);
+
+        return end_vlist(vctx);
     }
 
     // Generic container (div, span, etc.)
@@ -1403,15 +1485,24 @@ TexNode* typeset_latex_document(Item latex_root, LaTeXContext& ctx) {
 }
 
 TexNode* typeset_latex_document(const ElementReader& latex_root, LaTeXContext& ctx) {
+    fprintf(stderr, "[DEBUG] typeset_latex_document: root tag='%s'\n", latex_root.tagName());
+
     // Create main VList for document
     VListContext vctx(ctx.doc_ctx.arena, ctx.doc_ctx.fonts);
     init_vlist_context(vctx, ctx.doc_ctx.text_width);
     begin_vlist(vctx);
 
     // Process all children of root element
+    int child_count = 0;
     auto iter = latex_root.children();
     ItemReader child;
     while (iter.next(&child)) {
+        child_count++;
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            fprintf(stderr, "[DEBUG] typeset_latex_document: processing child %d, tag='%s'\n",
+                    child_count, child_elem.tagName());
+        }
         TexNode* block = convert_latex_block(child, ctx);
         if (block) {
             add_raw(vctx, block);
