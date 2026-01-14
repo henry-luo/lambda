@@ -1,0 +1,478 @@
+// network_resource_manager.cpp
+// Simplified stub implementation for Phase 5
+// TODO: Full implementation with lib/hashmap.h and lib/arraylist.h
+
+#include "network_resource_manager.h"
+#include "network_downloader.h"
+#include "resource_loaders.h"
+#include "../../lib/url.h"
+#include "../../lib/log.h"
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+// CPP internal helpers
+namespace {
+
+
+// get current time in seconds
+double get_time_seconds() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+}
+
+// create network resource
+NetworkResource* create_network_resource(const char* url,
+                                                ResourceType type,
+                                                ResourcePriority priority,
+                                                struct DomElement* owner) {
+    NetworkResource* res = (NetworkResource*)calloc(1, sizeof(NetworkResource));
+    if (!res) return NULL;
+    
+    res->url = strdup(url);
+    res->type = type;
+    res->priority = priority;
+    res->owner_element = owner;
+    res->state = STATE_PENDING;
+    res->dependents = NULL;  // stub: no dependency tracking
+    res->start_time = get_time_seconds();
+    res->ref_count = 1;
+    res->http_status_code = 0;
+    
+    // Phase 5: timeout and retry defaults
+    res->timeout_ms = 30000;  // 30 seconds default
+    res->retry_count = 0;
+    res->max_retries = 3;
+    
+    return res;
+}
+
+// free network resource
+void free_network_resource(NetworkResource* res) {
+    if (!res) return;
+    
+    free(res->url);
+    free(res->local_path);
+    free(res->error_message);
+    free(res);
+}
+
+}  // namespace
+
+// download task function (called by thread pool worker)
+static void download_task_fn(void* task_data) {
+    NetworkResource* res = (NetworkResource*)task_data;
+    if (!res) return;
+    
+    log_debug("network: download task started: %s", res->url);
+    
+    // perform download with timeout enforcement
+    bool success = network_download_resource(res);
+    
+    if (success) {
+        res->state = STATE_COMPLETED;
+        res->end_time = get_time_seconds();
+        
+        log_debug("network: download complete: %s (%.3fs)",
+                  res->url, res->end_time - res->start_time);
+        
+        // invoke completion callback
+        if (res->on_complete) {
+            res->on_complete(res, res->user_data);
+        }
+        
+        // process resource based on type
+        if (res->manager && res->manager->document) {
+            switch (res->type) {
+                case RESOURCE_HTML:
+                    process_html_resource(res, res->manager->document);
+                    break;
+                case RESOURCE_CSS:
+                    process_css_resource(res, res->manager->document);
+                    break;
+                case RESOURCE_IMAGE:
+                    if (res->owner_element) {
+                        process_image_resource(res, res->owner_element);
+                    }
+                    break;
+                case RESOURCE_FONT:
+                    // Font requires FontFaceRule, not implemented yet
+                    log_debug("network: font resource processing not yet implemented");
+    estroy resource manager
+void resource_manager_destroy(NetworkResourceManager* mgr) {
+    if (!mgr) return;
+    
+    log_debug("network: destroying resource manager");
+    
+    pthread_mutex_destroy(&mgr->mutex);
+    free(mgr);eturn mgr;
+}
+
+// download task function (called by thread pool worker)
+static void download_task_fn(void* task_data) {
+    NetworkResource* res = (NetworkResource*)task_data;
+    if (!res) return;
+    
+    log_debug("network: download task started: %s", res->url);
+    
+    // perform download with timeout enforcement
+    bool success = network_download_resource(res);
+    
+    if (success) {
+        res->state = STATE_COMPLETED;
+        res->end_time = get_time_seconds();
+        
+        log_debug("network: download complete: %s (%.3fs)",
+                  res->url, res->end_time - res->start_time);
+        
+        // invoke completion callback
+        if (res->on_complete) {
+            res->on_complete(res, res->user_data);
+        }
+        
+        // process resource based on type
+        if (res->manager && res->manager->document) {
+            switch (res->type) {
+                case RESOURCE_HTML:
+                    process_html_resource(res, res->manager->document);
+                    break;
+                case RESOURCE_CSS:
+                    process_css_resource(res, res->manager->document);
+                    break;
+                case RESOURCE_IMAGE:
+                    if (res->owner_element) {
+                        process_image_resource(res, res->owner_element);
+                    }
+                    break;
+                case RESOURCE_FONT:
+                    // Font requires FontFaceRule, not implemented yet
+                    log_debug("network: font resource processing not yet implemented");
+                    break;
+                case RESOURCE_SVG:
+                    if (res->owner_element) {
+                        process_svg_resource(res, res->owner_element);
+                    }
+                    break;
+                case RESOURCE_SCRIPT:
+                    log_debug("network: script resource processing not yet implemented");
+                    break;
+            }
+        }
+        
+        // update manager statistics
+        if (res->manager) {
+            pthread_mutex_lock(&res->manager->mutex);
+            res->manager->completed_resources++;
+            pthread_mutex_unlock(&res->manager->mutex);
+        }
+    } else {
+        res->state = STATE_FAILED;
+        res->end_time = get_time_seconds();
+        
+        log_error("network: download failed: %s - %s",
+                  res->url, res->error_message ? res->error_message : "unknown error");
+        
+        // check if error is retryable
+        bool should_retry = is_http_error_retryable(res->http_status_code);
+        
+        if (should_retry && res->retry_count < res->max_retries) {
+            // retry with exponential backoff
+            if (res->manager) {
+                resource_manager_retry_download(res->manager, res);
+            }
+        } else {
+            // handle failure
+            if (res->manager && res->manager->document) {
+                handle_resource_failure(res, res->manager->document);
+            }
+            
+            // update manager statistics
+            if (res->manager) {
+                pthread_mutex_lock(&res->manager->mutex);
+                res->manager->failed_resources++;
+                pthread_mutex_unlock(&res->manager->mutex);
+            }
+        }
+    }
+}
+
+// load resource (simplified: direct download)
+NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
+                                      const char* url,
+   download task function (called by thread pool worker)
+static void download_task_fn(void* task_data) {
+    NetworkResource* res = (NetworkResource*)task_data;
+    if (!res) return;
+    
+    log_debug("network: download task started: %s", res->url);
+    
+    // perform download with timeout enforcement
+    bool success = network_download_resource(res);
+    
+    if (success) {
+        res->state = STATE_COMPLETED;
+        res->end_time = get_time_seconds();
+        
+        log_debug("network: download complete: %s (%.3fs)",
+                  res->url, res->end_time - res->start_time);
+        
+        // invoke completion callback
+        if (res->on_complete) {
+            res->on_complete(res, res->user_data);
+        }
+        
+        // process resource based on type
+        if (res->manager && res->manager->document) {
+            switch (res->type) {
+                case RESOURCE_HTML:
+                    process_html_resource(res, res->manager->document);
+                    break;
+                case RESOURCE_CSS:
+                    process_css_resource(res, res->manager->document);
+                    break;
+                case RESOURCE_IMAGE:
+                    if (res->owner_element) {
+                        process_image_resource(res, res->owner_element);
+                    }
+                    break;
+                case RESOURCE_FONT:
+                    // Font requires FontFaceRule, not implemented yet
+                    log_debug("network: font resource processing not yet implemented");
+                    break;
+                case RESOURCE_SVG:
+                    if (res->owner_element) {
+                        process_svg_resource(res, res->owner_element);
+                    }
+                    break;
+                case RESOURCE_SCRIPT:
+                    log_debug("network: script resource processing not yet implemented");
+                    break;
+            }
+        }
+        
+        // update manager statistics
+        if (res->manager) {
+            pthread_mutex_lock(&res->manager->mutex);
+            res->manager->completed_resources++;
+            pthread_mutex_unlock(&res->manager->mutex);
+        }
+    } else {
+        res->state = STATE_FAILED;
+        res->end_time = get_time_seconds();
+        
+        log_error("network: download failed: %s - %s",
+                  res->url, res->error_message ? res->error_message : "unknown error");
+        
+        // check if error is retryable
+        bool should_retry = is_http_error_retryable(res->http_status_code);
+        
+        if (should_retry && res->retry_count < res->max_retries) {
+            // retry with exponential backoff
+            if (res->manager) {
+                resource_manager_retry_download(res->manager, res);
+            }
+        } else {
+            // handle failure
+            if (res->manager && res->manager->document) {
+                handle_resource_failure(res, res->manager->document);
+            }
+            
+            // update manager statistics
+            if (res->manager) {
+                pthread_mutex_lock(&res->manager->mutex);
+                res->manager->failed_resources++;
+                pthread_mutex_unlock(&res->manager->mutex);
+            }
+        }
+    }
+}
+
+// load resource (simplified: direct download)
+NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
+                                      const char* url,
+                                      ResourceType type,
+                                      ResourcePriority priority,
+                                      struct DomElement* owner) {
+    if (!mgr || !url) return NULL;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    
+    // create new resource
+    NetworkResource* res = create_network_resource(url, type, priority, owner);
+    if (!res) {
+        pthread_mutex_unlock(&mgr->mutex);
+        return NULL;
+    }
+    
+    // set manager reference and cache
+    res->manager = mgr;
+    res->cache = mgr->file_cache;
+    res->timeout_ms = mgr->default_timeout_ms;
+    
+    mgr->total_resources++;
+    
+    log_debug("network: loading resource: %s (type=%d, priority=%d)", url, type, priority);
+    
+    // queue task via thread pool with download function
+    thread_pool_enqueue(mgr->thread_pool, download_task_fn
+    
+    return res;
+}
+
+// mark resource as completed
+void resource_manager_mark_completed(NetworkResourceManager* mgr, NetworkResource* res) {
+    if (!mgr || !res) return;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    
+    res->state = STATE_COMPLETED;
+    mgr->completed_resources++;
+    
+    log_debug("network: resource completed: %s (%d/%d)", 
+              res->url, mgr->completed_resources, mgr->total_resources);
+    
+    // invoke callback if set
+    if (res->on_complete) {
+        res->on_complete(res, res->user_data);
+    }
+    
+    pthread_mutex_unlock(&mgr->mutex);
+}
+
+// mark resource as failed
+void resource_manager_mark_failed(NetworkResourceManager* mgr, NetworkResource* res, const char* error) {
+    if (!mgr || !res) return;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    
+    res->state = STATE_FAILED;
+    res->error_message = strdup(error ? error : "Unknown error");
+    mgr->failed_resources++;
+    
+    log_error("network: resource failed: %s - %s", res->url, res->error_message);
+    
+    pthread_mutex_unlock(&mgr->mutex);
+}
+
+// schedule reflow
+void resource_manager_schedule_reflow(NetworkResourceManager* mgr, struct DomElement* element) {
+    if (!mgr || !element) return;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    log_debug("network: scheduled reflow for element");
+    pthread_mutex_unlock(&mgr->mutex);
+    
+    // stub: immediate reflow not batched
+}
+
+// schedule repaint
+void resource_manager_schedule_repaint(NetworkResourceManager* mgr, struct DomElement* element) {
+    if (!mgr || !element) return;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    log_debug("network: scheduled repaint for element");
+    pthread_mutex_unlock(&mgr->mutex);
+    
+    // stub: immediate repaint not batched
+}
+
+// flush pending layout updates
+void resource_manager_flush_layout_updates(NetworkResourceManager* mgr) {
+    if (!mgr) return;
+    
+    // stub: no batching, nothing to flush
+}
+
+// check if all resources loaded
+bool resource_manager_is_fully_loaded(const NetworkResourceManager* mgr) {
+    if (!mgr) return true;
+    
+    pthread_mutex_lock((pthread_mutex_t*)&mgr->mutex);
+    bool loaded = (mgr->completed_resources + mgr->failed_resources) >= mgr->total_resources;
+    pthread_mutex_unlock((pthread_mutex_t*)&mgr->mutex);
+    
+    return loaded;
+}
+
+// get load statistics
+void resource_manager_get_stats(NetworkResourceManager* mgr, int* total, int* completed, int* failed) {
+    if (!mgr) return;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    if (total) *total = mgr->total_resources;
+    if (completed) *completed = mgr->completed_resources;
+    if (failed) *failed = mgr->failed_resources;
+    pthread_mutex_unlock(&mgr->mutex);
+}
+
+// get load progress (0.0 to 1.0)
+float resource_manager_get_load_progress(const NetworkResourceManager* mgr) {
+    if (!mgr) return 1.0f;
+    if (mgr->total_resources == 0) return 1.0f;
+    return (float)(mgr->completed_resources + mgr->failed_resources) / mgr->total_resources;
+}
+
+// check if page load has timed out (Phase 5)
+bool resource_manager_check_page_timeout(NetworkResourceManager* mgr) {
+    if (!mgr) return false;
+    
+    double elapsed_ms = (get_time_seconds() - mgr->load_start_time) * 1000.0;
+    if (elapsed_ms > mgr->page_load_timeout_ms) {
+        log_error("network: page load timeout exceeded (%.0f ms > %d ms)",
+                  elapsed_ms, mgr->page_load_timeout_ms);
+        return true;
+    }
+    
+    return false;
+}
+
+// retry resource download with exponential backoff (Phase 5)
+bool resource_manager_retry_download(NetworkResourceManager* mgr, NetworkResource* res) {
+    if (!mgr || !res) return false;
+    
+    // check if retries exhausted
+    if (res->retry_count >= res->max_retries) {
+        log_error("network: max retries exceeded for %s (%d attempts)",
+                  res->url, res->retry_count + 1);
+        return false;
+    }
+    
+    // exponential backoff: 1s, 2s, 4s, 8s...
+    int backoff_ms = 1000 * (1 << res->retry_count);
+    
+    log_warn("network: retrying %s (attempt %d/%d, backoff %dms)",
+             res->url, res->retry_count + 1, res->max_retries, backoff_ms);
+    
+    // sleep for backoff period
+    struct timespec sleep_time;
+    sleep_time.tv_sec = backoff_ms / 1000;
+    sleep_time.tv_nsec = (backoff_ms % 1000) * 1000000;
+    nanosleep(&sleep_time, NULL);
+    
+    // increment retry counter
+    res->retry_count++;
+    res->state = STATE_PENDING;
+    res->start_time = get_time_seconds();
+    
+    // re-queue for download
+    thread_pool_enqueue(mgr->thread_pool, NULL, res, res->priority);
+    
+    return true;
+}
+
+// increment reference count
+void resource_retain(NetworkResource* res) {
+    if (!res) return;
+    __sync_fetch_and_add(&res->ref_count, 1);
+}
+
+// decrement reference count and free if zero
+void resource_release(NetworkResource* res) {
+    if (!res) return;
+    if (__sync_sub_and_fetch(&res->ref_count, 1) == 0) {
+        free_network_resource(res);
+    }
+}
+
+}  // extern "C"
