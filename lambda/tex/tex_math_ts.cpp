@@ -629,9 +629,18 @@ TexNode* MathTypesetter::build_operator(TSNode node) {
     if (!result) {
         // Single character operator
         int32_t cp = text[0];
-        FontSpec font = ctx.roman_font;
-        font.size_pt = size;
-        result = make_char_node(cp, AtomType::Bin, font, roman_tfm);
+
+        // Special handling for minus sign: use cmsy character 0 (proper minus)
+        if (cp == '-') {
+            FontSpec font = ctx.symbol_font;
+            font.size_pt = size;
+            result = make_char_node(0, AtomType::Bin, font, symbol_tfm);  // cmsy minus at 0
+        } else {
+            // Other operators (like +) use roman font
+            FontSpec font = ctx.roman_font;
+            font.size_pt = size;
+            result = make_char_node(cp, AtomType::Bin, font, roman_tfm);
+        }
     }
 
     free(text);
@@ -842,10 +851,15 @@ TexNode* MathTypesetter::build_subsup(TSNode node) {
         if (sub_bot > scripts->depth) scripts->depth = sub_bot;
     }
 
-    // Position children
+    // Position children and link them into child list
     base->parent = scripts;
     base->x = 0;
     base->y = 0;
+
+    // Build child list: nucleus first, then superscript, then subscript
+    scripts->first_child = base;
+    scripts->last_child = base;
+    TexNode* prev = base;
 
     float script_x = base->width + base->italic;
 
@@ -853,12 +867,19 @@ TexNode* MathTypesetter::build_subsup(TSNode node) {
         superscript->parent = scripts;
         superscript->x = script_x;
         superscript->y = sup_shift;
+        prev->next_sibling = superscript;
+        superscript->prev_sibling = prev;
+        scripts->last_child = superscript;
+        prev = superscript;
     }
 
     if (subscript) {
         subscript->parent = scripts;
         subscript->x = script_x;
         subscript->y = -sub_shift - subscript->height;
+        prev->next_sibling = subscript;
+        subscript->prev_sibling = prev;
+        scripts->last_child = subscript;
     }
 
     return scripts;
@@ -933,8 +954,12 @@ TexNode* MathTypesetter::build_delimiter_group(TSNode node) {
     }
 
     float size = current_size();
-    // Note: target_height for extensible delimiter sizing (future)
-    (void)(content->height + content->depth);
+    float content_height = content->height + content->depth;
+
+    // TeX delimiter sizing: use normal font for small content, cmex for larger
+    // Threshold is approximately 1 ex (height of lowercase 'x')
+    float threshold = size * 0.5f;  // ~5pt for 10pt size
+    bool use_extensible = content_height > threshold;
 
     // Helper to make delimiter character
     auto make_delim = [&](const char* d, bool is_left) -> TexNode* {
@@ -942,37 +967,73 @@ TexNode* MathTypesetter::build_delimiter_group(TSNode node) {
 
         int32_t cp;
         AtomType atom = is_left ? AtomType::Open : AtomType::Close;
-        FontSpec font = ctx.roman_font;
-        font.size_pt = size;
-        TFMFont* tfm = roman_tfm;
+        FontSpec font;
+        TFMFont* tfm;
 
-        // Parse delimiter
         if (d[0] == '\\') {
+            // Command delimiters - always use symbol/extension font
+            font = ctx.symbol_font;
+            font.size_pt = size;
+            tfm = symbol_tfm;
+
             if (strcmp(d, "\\{") == 0 || strcmp(d, "\\lbrace") == 0) {
                 cp = 'f';  // cmsy10 left brace
-                font = ctx.symbol_font;
-                tfm = symbol_tfm;
             } else if (strcmp(d, "\\}") == 0 || strcmp(d, "\\rbrace") == 0) {
                 cp = 'g';  // cmsy10 right brace
-                font = ctx.symbol_font;
-                tfm = symbol_tfm;
             } else if (strcmp(d, "\\|") == 0) {
-                cp = 107;  // double vertical bar
-                font = ctx.symbol_font;
-                tfm = symbol_tfm;
+                cp = 107;  // cmsy10 double vertical bar
             } else if (strcmp(d, "\\langle") == 0) {
-                cp = 104;
-                font = ctx.symbol_font;
-                tfm = symbol_tfm;
+                cp = 104;  // cmsy10 left angle
             } else if (strcmp(d, "\\rangle") == 0) {
-                cp = 105;
-                font = ctx.symbol_font;
-                tfm = symbol_tfm;
+                cp = 105;  // cmsy10 right angle
+            } else if (strcmp(d, "\\lfloor") == 0) {
+                cp = 98;   // cmsy10 left floor 'b'
+            } else if (strcmp(d, "\\rfloor") == 0) {
+                cp = 99;   // cmsy10 right floor 'c'
+            } else if (strcmp(d, "\\lceil") == 0) {
+                cp = 100;  // cmsy10 left ceil 'd'
+            } else if (strcmp(d, "\\rceil") == 0) {
+                cp = 101;  // cmsy10 right ceil 'e'
             } else {
-                cp = '(';  // fallback
+                // Unknown command - use roman paren
+                font = ctx.roman_font;
+                font.size_pt = size;
+                tfm = roman_tfm;
+                cp = is_left ? '(' : ')';
             }
-        } else {
+        } else if (!use_extensible) {
+            // Small content: use roman font with ASCII characters
+            font = ctx.roman_font;
+            font.size_pt = size;
+            tfm = roman_tfm;
             cp = d[0];
+        } else {
+            // Large content: use cmex10 extensible characters
+            font = ctx.extension_font;
+            font.size_pt = size;
+            tfm = extension_tfm;
+
+            // cmex10 delimiter codepoints - use medium-sized variants for fractions
+            // These correspond to printable ASCII which matches TeX behavior
+            //   'h','i' (104,105) = medium brackets
+            //   larger parens are at lower codepoints (non-printable)
+            if (d[0] == '(' || d[0] == ')') {
+                // cmex10 codepoints 0,1 (small) or 16,17 (medium) - both non-printable
+                cp = is_left ? 0 : 1;
+            } else if (d[0] == '[' || d[0] == ']') {
+                // cmex10 uses 'h'=104, 'i'=105 for medium brackets (printable)
+                cp = is_left ? 'h' : 'i';
+            } else if (d[0] == '{' || d[0] == '}') {
+                // For braces, TeX uses cmsy10 'f'/'g' (102,103), not cmex10
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                tfm = symbol_tfm;
+                cp = is_left ? 'f' : 'g';
+            } else if (d[0] == '|') {
+                cp = 12;
+            } else {
+                cp = is_left ? 0 : 1;  // fallback to parens
+            }
         }
 
         return make_char_node(cp, atom, font, tfm);
@@ -1070,25 +1131,46 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
     float size = current_size();
     bool is_display = (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime);
 
-    // Get operator code
-    int op_code = get_big_op_code(op_name, op_len);
+    TexNode* op = nullptr;
 
-    // Create operator character (larger in display mode)
-    float op_size = is_display ? size * 1.4f : size;
-    FontSpec font = ctx.symbol_font;
-    font.size_pt = op_size;
+    // Check if it's a function operator (rendered as roman text)
+    if (is_func_operator(op_name, op_len)) {
+        // Build as text in roman font
+        FontSpec font = ctx.roman_font;
+        font.size_pt = size;
 
-    TexNode* op = make_math_op(ctx.arena, op_code, is_display, font);
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
 
-    // Get metrics
-    if (symbol_tfm && op_code >= 0 && op_code < 256) {
-        op->width = symbol_tfm->char_width(op_code) * op_size;
-        op->height = symbol_tfm->char_height(op_code) * op_size;
-        op->depth = symbol_tfm->char_depth(op_code) * op_size;
+        for (size_t i = 0; i < op_len; i++) {
+            int32_t cp = op_name[i];
+            TexNode* ch = make_char_node(cp, AtomType::Op, font, roman_tfm);
+            link_node(first, last, ch);
+        }
+
+        op = wrap_in_hbox(first, last);
     } else {
-        op->width = 10.0f * op_size / 10.0f;
-        op->height = 8.0f * op_size / 10.0f;
-        op->depth = 2.0f * op_size / 10.0f;
+        // It's a symbol operator (\sum, \int, etc.)
+        int op_code = get_big_op_code(op_name, op_len);
+
+        // Create operator character (larger in display mode)
+        float op_size = is_display ? size * 1.4f : size;
+        FontSpec font = ctx.symbol_font;
+        font.size_pt = op_size;
+
+        op = make_math_op(ctx.arena, op_code, is_display, font);
+
+        // Get metrics from TFM
+        if (symbol_tfm && op_code >= 0 && op_code < 256) {
+            float scale = op_size / symbol_tfm->design_size;
+            op->width = symbol_tfm->char_width(op_code) * scale;
+            op->height = symbol_tfm->char_height(op_code) * scale;
+            op->depth = symbol_tfm->char_depth(op_code) * scale;
+        } else {
+            op->width = 10.0f * op_size / 10.0f;
+            op->height = 8.0f * op_size / 10.0f;
+            op->depth = 2.0f * op_size / 10.0f;
+        }
     }
 
     free(op_text);
@@ -1158,7 +1240,8 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
         return vbox;
     } else {
         // Use subscript/superscript positioning
-        TexNode* scripts = (TexNode*)arena_alloc(ctx.arena, sizeof(TexNode));
+        Arena* arena = ctx.arena;
+        TexNode* scripts = (TexNode*)arena_alloc(arena, sizeof(TexNode));
         new (scripts) TexNode(NodeClass::Scripts);
 
         scripts->content.scripts.nucleus = op;
@@ -1167,12 +1250,38 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
         scripts->content.scripts.nucleus_type = AtomType::Op;
 
         // Simple positioning
+        float script_x = op->width;
         scripts->width = op->width;
         scripts->height = op->height;
         scripts->depth = op->depth;
 
-        if (upper) scripts->width += upper->width;
-        if (lower && !upper) scripts->width += lower->width;
+        // Link children
+        op->parent = scripts;
+        op->x = 0;
+        op->y = 0;
+        scripts->first_child = op;
+        scripts->last_child = op;
+        TexNode* prev = op;
+
+        if (upper) {
+            scripts->width += upper->width;
+            upper->parent = scripts;
+            upper->x = script_x;
+            upper->y = size * 0.4f;  // raise superscript
+            prev->next_sibling = upper;
+            upper->prev_sibling = prev;
+            scripts->last_child = upper;
+            prev = upper;
+        }
+        if (lower) {
+            if (!upper) scripts->width += lower->width;
+            lower->parent = scripts;
+            lower->x = script_x;
+            lower->y = -size * 0.2f - lower->height;  // lower subscript
+            prev->next_sibling = lower;
+            lower->prev_sibling = prev;
+            scripts->last_child = lower;
+        }
 
         return scripts;
     }

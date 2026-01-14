@@ -726,6 +726,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "control_symbol"
+        },
+        {
+          "type": "SYMBOL",
           "name": "curly_group"
         },
         {
