@@ -1952,14 +1952,63 @@ private:
         if (strcmp(left_d, ".") == 0) return content;
 
         float size = current_size();
-        FontSpec font = ctx.roman_font;
-        font.size_pt = size;
+        float content_height = content->height + content->depth;
+
+        // Matrix delimiters should use cmex10 extensible characters
+        // following TeX's delimiter sizing behavior
+        auto make_delim = [&](const char* d, bool is_left) -> TexNode* {
+            if (strcmp(d, ".") == 0) return nullptr;
+            int32_t cp;
+            AtomType atom = is_left ? AtomType::Open : AtomType::Close;
+            FontSpec font;
+            TFMFont* tfm;
+
+            if (d[0] == '\\') {
+                // Command delimiters use cmsy10
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                tfm = symbol_tfm;
+                if (strcmp(d, "\\{") == 0 || strcmp(d, "\\lbrace") == 0) cp = 'f';
+                else if (strcmp(d, "\\}") == 0 || strcmp(d, "\\rbrace") == 0) cp = 'g';
+                else if (strcmp(d, "\\|") == 0) cp = 107;
+                else { font = ctx.roman_font; tfm = roman_tfm; cp = is_left ? '(' : ')'; }
+            } else {
+                // Matrix content is typically tall, so always use cmex10
+                // for parentheses/brackets to match TeX reference output
+                font = ctx.extension_font;
+                font.size_pt = size;
+                tfm = extension_tfm;
+                if (d[0] == '(' || d[0] == ')') {
+                    // cmex10 codepoints 0,1 for parentheses
+                    cp = is_left ? 0 : 1;
+                } else if (d[0] == '[' || d[0] == ']') {
+                    // cmex10 codepoints 2,3 for brackets (small)
+                    // or use 'h','i' (104,105) for medium brackets
+                    cp = is_left ? 2 : 3;
+                } else if (d[0] == '{' || d[0] == '}') {
+                    // Braces use cmsy10
+                    font = ctx.symbol_font;
+                    font.size_pt = size;
+                    tfm = symbol_tfm;
+                    cp = is_left ? 'f' : 'g';
+                } else if (d[0] == '|') {
+                    // cmex10 codepoint 12 for vertical bar
+                    cp = 12;
+                } else {
+                    cp = is_left ? 0 : 1;  // fallback to parens
+                }
+            }
+            return make_char_node(cp, atom, font, tfm);
+        };
+
+        TexNode* left = make_delim(left_d, true);
+        TexNode* right = make_delim(right_d, false);
 
         TexNode* first = nullptr;
         TexNode* last = nullptr;
-        link_node(first, last, make_char_node(left_d[0], AtomType::Open, font, roman_tfm));
+        if (left) link_node(first, last, left);
         link_node(first, last, content);
-        link_node(first, last, make_char_node(right_d[0], AtomType::Close, font, roman_tfm));
+        if (right) link_node(first, last, right);
         return wrap_in_hbox(first, last);
     }
 
@@ -1986,14 +2035,17 @@ private:
 
         TexNode* frac = typeset_fraction(top, bottom, 0, ctx);
         float size = current_size();
-        FontSpec font = ctx.roman_font;
+
+        // Binomial coefficients use cmex10 extensible parentheses like TeX
+        FontSpec font = ctx.extension_font;
         font.size_pt = size;
 
         TexNode* first = nullptr;
         TexNode* last = nullptr;
-        link_node(first, last, make_char_node('(', AtomType::Open, font, roman_tfm));
+        // cmex10 codepoints 0,1 for parentheses
+        link_node(first, last, make_char_node(0, AtomType::Open, font, extension_tfm));
         link_node(first, last, frac);
-        link_node(first, last, make_char_node(')', AtomType::Close, font, roman_tfm));
+        link_node(first, last, make_char_node(1, AtomType::Close, font, extension_tfm));
         return wrap_in_hbox(first, last);
     }
 
