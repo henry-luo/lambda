@@ -86,6 +86,11 @@ struct DomDocument {
     // Body transform scale (from CSS transform: scale() on body element)
     float body_transform_scale;    // transform: scale() value from body CSS (default 1.0)
 
+    // Network support (Phase 4 integration)
+    struct NetworkResourceManager* resource_manager;  // Network resource coordinator (nullptr for local-only docs)
+    double load_start_time;                           // Document load start timestamp (for total timeout)
+    bool fully_loaded;                                // True when all network resources complete
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -94,7 +99,8 @@ struct DomDocument {
                     given_scale(1.0f), scale(1.0f),
                     viewport_initial_scale(1.0f), viewport_min_scale(0.0f), viewport_max_scale(0.0f),
                     viewport_width(0), viewport_height(0),
-                    body_transform_scale(1.0f) {}
+                    body_transform_scale(1.0f),
+                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true) {}
 };
 
 typedef struct {
