@@ -507,6 +507,44 @@ void extract_viewport_meta(Element* elem, DomDocument* doc) {
 }
 
 /**
+ * Extract <base href="..."> from the HTML document and return the URL
+ * This is used to properly resolve relative URLs when loading remote HTML
+ * @param elem The root element to search
+ * @return The base href URL or nullptr if not found
+ */
+const char* extract_base_href(Element* elem) {
+    if (!elem) return nullptr;
+
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type) return nullptr;
+
+    // Check if this is a <base> element with href attribute
+    if (strcasecmp(type->name.str, "base") == 0) {
+        const char* href = extract_element_attribute(elem, "href", nullptr);
+        if (href && strlen(href) > 0) {
+            log_debug("[base] Found <base href=\"%s\">", href);
+            return href;
+        }
+        return nullptr;
+    }
+
+    // Stop searching after <body> - base should be in <head>
+    if (strcasecmp(type->name.str, "body") == 0) {
+        return nullptr;
+    }
+
+    // Recursively process children
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            const char* result = extract_base_href(child_item.element);
+            if (result) return result;
+        }
+    }
+    return nullptr;
+}
+
+/**
  * Extract scale value from a CSS transform declaration
  * Parses transform functions like scale(0.9), scale(0.9, 0.9), scaleX(0.9), scaleY(0.9)
  * Returns the uniform scale factor if found, 1.0 otherwise
@@ -645,28 +683,66 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
         if (rel && href && strcasecmp(rel, "stylesheet") == 0) {
             log_debug("[CSS] Found <link rel='stylesheet' href='%s'>", href);
 
-            // Resolve relative path using base_path
+            // Resolve relative path using base_path (supports file:// and http:// URLs)
             char css_path[1024];
-            if (href[0] == '/' || strstr(href, "://") != nullptr) {
-                // Absolute path or URL - use as-is (URLs won't load locally)
+            bool is_http_css = false;
+            
+            if (href[0] == '/' && href[1] != '/') {
+                // Absolute local path - use as-is
                 strncpy(css_path, href, sizeof(css_path) - 1);
                 css_path[sizeof(css_path) - 1] = '\0';
+            } else if (strstr(href, "://") != nullptr) {
+                // Full URL - use as-is
+                strncpy(css_path, href, sizeof(css_path) - 1);
+                css_path[sizeof(css_path) - 1] = '\0';
+                is_http_css = (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0);
             } else if (base_path) {
-                // Relative path - resolve against base_path
-                const char* last_slash = strrchr(base_path, '/');
-                if (last_slash) {
-                    size_t dir_len = last_slash - base_path + 1;
-                    if (dir_len < sizeof(css_path) - strlen(href) - 1) {
-                        strncpy(css_path, base_path, dir_len);
-                        css_path[dir_len] = '\0';
-                        strncat(css_path, href, sizeof(css_path) - dir_len - 1);
+                // Relative path - resolve against base_path using URL resolution
+                Url* base_url = url_parse(base_path);
+                if (base_url && base_url->is_valid) {
+                    Url* resolved_url = parse_url(base_url, href);
+                    if (resolved_url && resolved_url->is_valid) {
+                        if (resolved_url->scheme == URL_SCHEME_HTTP || resolved_url->scheme == URL_SCHEME_HTTPS) {
+                            // HTTP URL - use the full href
+                            const char* url_str = url_get_href(resolved_url);
+                            strncpy(css_path, url_str, sizeof(css_path) - 1);
+                            css_path[sizeof(css_path) - 1] = '\0';
+                            is_http_css = true;
+                        } else {
+                            // File URL - convert to local path
+                            char* local_path = url_to_local_path(resolved_url);
+                            if (local_path) {
+                                strncpy(css_path, local_path, sizeof(css_path) - 1);
+                                css_path[sizeof(css_path) - 1] = '\0';
+                                free(local_path);
+                            } else {
+                                strncpy(css_path, href, sizeof(css_path) - 1);
+                                css_path[sizeof(css_path) - 1] = '\0';
+                            }
+                        }
+                        url_destroy(resolved_url);
                     } else {
                         strncpy(css_path, href, sizeof(css_path) - 1);
                         css_path[sizeof(css_path) - 1] = '\0';
                     }
+                    url_destroy(base_url);
                 } else {
-                    strncpy(css_path, href, sizeof(css_path) - 1);
-                    css_path[sizeof(css_path) - 1] = '\0';
+                    // Fallback: simple string concatenation for non-URL base paths
+                    const char* last_slash = strrchr(base_path, '/');
+                    if (last_slash) {
+                        size_t dir_len = last_slash - base_path + 1;
+                        if (dir_len < sizeof(css_path) - strlen(href) - 1) {
+                            strncpy(css_path, base_path, dir_len);
+                            css_path[dir_len] = '\0';
+                            strncat(css_path, href, sizeof(css_path) - dir_len - 1);
+                        } else {
+                            strncpy(css_path, href, sizeof(css_path) - 1);
+                            css_path[sizeof(css_path) - 1] = '\0';
+                        }
+                    } else {
+                        strncpy(css_path, href, sizeof(css_path) - 1);
+                        css_path[sizeof(css_path) - 1] = '\0';
+                    }
                 }
             } else {
                 strncpy(css_path, href, sizeof(css_path) - 1);
@@ -675,8 +751,18 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 
             log_debug("[CSS] Loading stylesheet from: %s", css_path);
 
-            // Load and parse CSS file
-            char* css_content = read_text_file(css_path);
+            // Load and parse CSS file (or download from HTTP URL)
+            char* css_content = nullptr;
+            if (is_http_css) {
+                // Download CSS from HTTP URL
+                size_t content_size = 0;
+                css_content = download_http_content(css_path, &content_size, nullptr);
+                if (css_content) {
+                    log_debug("[CSS] Downloaded stylesheet from URL: %s (%zu bytes)", css_path, content_size);
+                }
+            } else {
+                css_content = read_text_file(css_path);
+            }
             if (css_content) {
                 size_t css_len = strlen(css_content);
                 char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
@@ -1421,6 +1507,18 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_info("[viewport] Applied initial-scale=%.2f to given_scale", dom_doc->given_scale);
     }
 
+    // Extract <base href="..."> and update document URL if found
+    // This ensures relative URLs resolve correctly when loading remote HTML
+    const char* base_href = extract_base_href(html_root);
+    if (base_href) {
+        Url* base_url = url_parse(base_href);
+        if (base_url && base_url->is_valid) {
+            log_info("[base] Overriding document URL with base href: %s", base_href);
+            // Don't destroy old html_url as it may be referenced elsewhere
+            html_url = base_url;
+        }
+    }
+
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");
@@ -1478,8 +1576,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // Step 5: Extract and parse <style> elements
     log_debug("[Lambda CSS] Extracting inline <style> elements...");
     int inline_stylesheet_count = 0;
+    // Use the potentially-updated html_url (may be overridden by <base href>) for CSS resolution
+    const char* css_base_path = url_get_href(html_url);
+    log_debug("[Lambda CSS] Using base path for CSS: %s", css_base_path);
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
-        html_root, css_engine, html_filepath, pool, &inline_stylesheet_count);
+        html_root, css_engine, css_base_path, pool, &inline_stylesheet_count);
 
     auto t_css_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());
@@ -3513,9 +3614,51 @@ static bool layout_single_file(
 
     Url* input_url = url_parse_with_base(input_file, cwd);
 
+    // For HTTP URLs without clear extension, fetch and determine type from Content-Type
+    const char* effective_ext = nullptr;
+    bool is_http_url = (input_url->scheme == URL_SCHEME_HTTP || input_url->scheme == URL_SCHEME_HTTPS);
+    
     // Detect file type by extension and load appropriate document
     DomDocument* doc = nullptr;
     const char* ext = strrchr(input_file, '.');
+
+    // Check if extension looks valid (not just a domain TLD like .org, .com, etc.)
+    bool has_valid_ext = ext && (
+        strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
+        strcmp(ext, ".ls") == 0 || strcmp(ext, ".tex") == 0 ||
+        strcmp(ext, ".latex") == 0 || strcmp(ext, ".md") == 0 ||
+        strcmp(ext, ".markdown") == 0 || strcmp(ext, ".xml") == 0 ||
+        strcmp(ext, ".wiki") == 0 || strcmp(ext, ".pdf") == 0 ||
+        strcmp(ext, ".svg") == 0 || strcmp(ext, ".png") == 0 ||
+        strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
+        strcmp(ext, ".gif") == 0
+    );
+
+    // If HTTP URL with no valid extension, fetch to determine type
+    if (is_http_url && !has_valid_ext) {
+        const char* url_str = url_get_href(input_url);
+        log_info("[Layout] HTTP URL without extension, fetching to determine type: %s", url_str);
+        
+        FetchResponse* response = http_fetch(url_str, nullptr);
+        if (!response || !response->data || response->status_code >= 400) {
+            log_error("Failed to fetch URL: %s (HTTP %ld)", url_str, 
+                      response ? response->status_code : 0);
+            if (response) free_fetch_response(response);
+            pool_destroy(pool);
+            return false;
+        }
+
+        // Get extension from Content-Type
+        effective_ext = content_type_to_extension(response->content_type);
+        log_info("[Layout] HTTP Content-Type: %s -> extension: %s",
+                 response->content_type ? response->content_type : "(none)",
+                 effective_ext ? effective_ext : ".html");
+        
+        // Use the effective extension for routing
+        ext = effective_ext;
+        
+        free_fetch_response(response);
+    }
 
     if (ext && strcmp(ext, ".ls") == 0) {
         log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");

@@ -63,6 +63,54 @@ static bool init_curl() {
     return true;
 }
 
+// Map HTTP Content-Type to file extension for routing
+// Returns a static string (no need to free)
+const char* content_type_to_extension(const char* content_type) {
+    if (!content_type) return nullptr;
+
+    // Extract the main type, ignoring charset and other params
+    // e.g., "text/html; charset=utf-8" -> "text/html"
+    char main_type[128];
+    const char* semicolon = strchr(content_type, ';');
+    size_t len = semicolon ? (size_t)(semicolon - content_type) : strlen(content_type);
+    if (len >= sizeof(main_type)) len = sizeof(main_type) - 1;
+    strncpy(main_type, content_type, len);
+    main_type[len] = '\0';
+
+    // Trim trailing whitespace
+    while (len > 0 && (main_type[len-1] == ' ' || main_type[len-1] == '\t')) {
+        main_type[--len] = '\0';
+    }
+
+    // Map common MIME types to extensions
+    if (strcasecmp(main_type, "text/html") == 0) return ".html";
+    if (strcasecmp(main_type, "application/xhtml+xml") == 0) return ".html";
+    if (strcasecmp(main_type, "text/plain") == 0) return ".txt";
+    if (strcasecmp(main_type, "text/css") == 0) return ".css";
+    if (strcasecmp(main_type, "text/javascript") == 0) return ".js";
+    if (strcasecmp(main_type, "application/javascript") == 0) return ".js";
+    if (strcasecmp(main_type, "application/json") == 0) return ".json";
+    if (strcasecmp(main_type, "text/xml") == 0) return ".xml";
+    if (strcasecmp(main_type, "application/xml") == 0) return ".xml";
+    if (strcasecmp(main_type, "text/markdown") == 0) return ".md";
+    if (strcasecmp(main_type, "text/x-markdown") == 0) return ".md";
+    if (strcasecmp(main_type, "application/pdf") == 0) return ".pdf";
+    if (strcasecmp(main_type, "image/svg+xml") == 0) return ".svg";
+    if (strcasecmp(main_type, "image/png") == 0) return ".png";
+    if (strcasecmp(main_type, "image/jpeg") == 0) return ".jpg";
+    if (strcasecmp(main_type, "image/gif") == 0) return ".gif";
+    if (strcasecmp(main_type, "image/webp") == 0) return ".webp";
+    if (strcasecmp(main_type, "application/x-latex") == 0) return ".tex";
+    if (strcasecmp(main_type, "text/x-tex") == 0) return ".tex";
+    if (strcasecmp(main_type, "application/x-yaml") == 0) return ".yaml";
+    if (strcasecmp(main_type, "text/yaml") == 0) return ".yaml";
+    if (strcasecmp(main_type, "application/toml") == 0) return ".toml";
+    if (strcasecmp(main_type, "text/csv") == 0) return ".csv";
+
+    log_debug("HTTP: Unknown content-type '%s', defaulting to .html", content_type);
+    return ".html";  // Default to HTML for unknown types
+}
+
 // Generate cache filename from URL (simple hash-based approach)
 static char* generate_cache_filename(const char* url, const char* cache_dir) {
     // Simple hash function for URL

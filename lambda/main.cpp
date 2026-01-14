@@ -1347,8 +1347,94 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
+        // For HTTP URLs, fetch content and determine type from Content-Type header
+        const char* effective_ext = nullptr;
+        char* temp_file_path = nullptr;
+        const char* original_url = nullptr;  // preserve original URL for base tag injection
+        if (is_http_url) {
+            original_url = filename;  // save original URL before we change filename
+            log_info("Fetching URL: %s", filename);
+            FetchResponse* response = http_fetch(filename, nullptr);
+            if (!response || !response->data || response->status_code >= 400) {
+                printf("Error: Failed to fetch URL '%s'", filename);
+                if (response && response->status_code >= 400) {
+                    printf(" (HTTP %ld)", response->status_code);
+                }
+                printf("\n");
+                if (response) free_fetch_response(response);
+                log_finish();
+                return 1;
+            }
+
+            // Get file extension from Content-Type
+            effective_ext = content_type_to_extension(response->content_type);
+            log_info("HTTP Content-Type: %s -> extension: %s", 
+                     response->content_type ? response->content_type : "(none)", 
+                     effective_ext ? effective_ext : "(none)");
+
+            // Write to temp file with appropriate extension
+            char temp_path[256];
+            snprintf(temp_path, sizeof(temp_path), "/tmp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
+            FILE* f = fopen(temp_path, "wb");
+            if (f) {
+                // For HTML content, inject a <base> tag to preserve the original URL context
+                // This ensures relative URLs (CSS, images, etc.) resolve correctly
+                if (effective_ext && strcmp(effective_ext, ".html") == 0) {
+                    // Find where to inject the base tag (after <head> or at start of content)
+                    const char* head_tag = strcasestr(response->data, "<head");
+                    const char* html_tag = strcasestr(response->data, "<html");
+                    
+                    if (head_tag) {
+                        // Find the end of the <head> tag
+                        const char* head_end = strchr(head_tag, '>');
+                        if (head_end) {
+                            head_end++; // Move past the '>'
+                            // Write content before insertion point
+                            fwrite(response->data, 1, head_end - response->data, f);
+                            // Inject base tag
+                            fprintf(f, "\n<base href=\"%s\">\n", original_url);
+                            // Write rest of content
+                            fwrite(head_end, 1, response->size - (head_end - response->data), f);
+                            log_info("Injected <base href=\"%s\"> into HTML", original_url);
+                        } else {
+                            fwrite(response->data, 1, response->size, f);
+                        }
+                    } else if (html_tag) {
+                        // Find the end of the <html> tag and inject after it
+                        const char* html_end = strchr(html_tag, '>');
+                        if (html_end) {
+                            html_end++;
+                            fwrite(response->data, 1, html_end - response->data, f);
+                            fprintf(f, "\n<head><base href=\"%s\"></head>\n", original_url);
+                            fwrite(html_end, 1, response->size - (html_end - response->data), f);
+                            log_info("Injected <head><base href=\"%s\"></head> into HTML", original_url);
+                        } else {
+                            fwrite(response->data, 1, response->size, f);
+                        }
+                    } else {
+                        // No head or html tag, prepend base tag
+                        fprintf(f, "<base href=\"%s\">\n", original_url);
+                        fwrite(response->data, 1, response->size, f);
+                        log_info("Prepended <base href=\"%s\"> to HTML", original_url);
+                    }
+                } else {
+                    fwrite(response->data, 1, response->size, f);
+                }
+                fclose(f);
+                temp_file_path = strdup(temp_path);
+                filename = temp_file_path;
+                log_debug("Saved HTTP content to: %s (%zu bytes)", temp_file_path, response->size);
+            } else {
+                printf("Error: Failed to create temp file for HTTP content\n");
+                free_fetch_response(response);
+                log_finish();
+                return 1;
+            }
+            free_fetch_response(response);
+        }
+
         // Detect file type by extension
-        const char* ext = strrchr(filename, '.');
+        const char* ext = effective_ext ? effective_ext : strrchr(filename, '.');
         int exit_code;
         
         // Check if this is a graph file that needs conversion
@@ -1459,8 +1545,15 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            if (temp_file_path) { unlink(temp_file_path); free(temp_file_path); }
             log_finish();
             return 1;
+        }
+
+        // Cleanup temp file if we created one from HTTP URL
+        if (temp_file_path) {
+            unlink(temp_file_path);
+            free(temp_file_path);
         }
 
         log_debug("view command completed with result: %d", exit_code);
