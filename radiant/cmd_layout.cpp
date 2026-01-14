@@ -1336,11 +1336,25 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     char* html_filepath = url_to_local_path(html_url);
     log_debug("[Lambda CSS] Loading HTML document: %s", html_filepath);
+    
     // Step 1: Parse HTML with Lambda parser
-    char* html_content = read_text_file(html_filepath);
-    if (!html_content) {
-        log_error("Failed to read HTML file: %s", html_filepath);
-        return nullptr;
+    // Check if URL is HTTP/HTTPS and download, otherwise read local file
+    char* html_content = nullptr;
+    if (html_url->scheme == URL_SCHEME_HTTP || html_url->scheme == URL_SCHEME_HTTPS) {
+        const char* url_str = url_get_href(html_url);
+        log_debug("[Lambda CSS] Downloading HTML from URL: %s", url_str);
+        size_t content_size = 0;
+        html_content = download_http_content(url_str, &content_size, nullptr);
+        if (!html_content) {
+            log_error("Failed to download HTML from URL: %s", url_str);
+            return nullptr;
+        }
+    } else {
+        html_content = read_text_file(html_filepath);
+        if (!html_content) {
+            log_error("Failed to read HTML file: %s", html_filepath);
+            return nullptr;
+        }
     }
 
     auto t_read = high_resolution_clock::now();
