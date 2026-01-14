@@ -1202,6 +1202,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Treat inline replaced elements as inline-block for layout
                 display.outer = CSS_VALUE_INLINE_BLOCK;
                 layout_block(lycon, node, display);
+            } else if (display.inner == CSS_VALUE_TABLE) {
+                // CSS 2.1 Section 17.2: inline-table elements
+                // Outer display is inline (participates in inline flow)
+                // but inner display is table (creates table formatting context)
+                // Treat as inline-block for positioning, with table inner layout
+                display.outer = CSS_VALUE_INLINE_BLOCK;
+                layout_block(lycon, node, display);
             } else {
                 layout_inline(lycon, node, display);
             }

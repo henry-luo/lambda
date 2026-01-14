@@ -3891,6 +3891,28 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int min_table_width = min_table_content_width + border_spacing_total;
     int pref_table_width = pref_table_content_width + border_spacing_total;
 
+    // CSS 2.1: Table width must be at least as wide as the caption
+    // Only consider caption's EXPLICIT CSS width (width: 200px), not computed/auto width
+    int caption_specified_width = 0;
+    if (caption) {
+        // Get caption's explicitly specified CSS width (not auto/computed width)
+        if (caption->blk && caption->blk->given_width > 0) {
+            caption_specified_width = (int)caption->blk->given_width;
+            log_debug("Caption has explicit CSS width: %dpx", caption_specified_width);
+            
+            // Table minimum width must accommodate caption's explicit width
+            if (caption_specified_width > pref_table_width) {
+                log_debug("Caption wider than table content: caption=%dpx > table=%dpx", 
+                         caption_specified_width, pref_table_width);
+                pref_table_width = caption_specified_width;
+                // Also expand min_table_width if needed
+                if (caption_specified_width > min_table_width) {
+                    min_table_width = caption_specified_width;
+                }
+            }
+        }
+    }
+
     log_debug("Table content: min=%dpx, preferred=%dpx", min_table_content_width, pref_table_content_width);
     log_debug("Table total (with spacing): min=%dpx, preferred=%dpx", min_table_width, pref_table_width);
 
@@ -5612,6 +5634,11 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // CRITICAL: Set advance_y to table height so finalize_block_flow works correctly
     // The block layout system uses advance_y to calculate the final block height
     lycon->block.advance_y = table->height;
+
+    // CRITICAL FIX: Update max_width for inline-table elements
+    // finalize_block_flow uses lycon->block.max_width to calculate flow_width
+    // Without this, inline-table width becomes 0 because min(flow_width, block->width) uses flow_width=0
+    lycon->block.max_width = table->width;
 
     // CRITICAL FIX: Ensure proper line state management for tables
     // Tables are block-level elements and should not participate in line layout
