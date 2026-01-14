@@ -285,6 +285,7 @@ module.exports = grammar({
     _math_content: $ => choice(
       $.math_text,
       $.command,
+      $.control_symbol,   // Spacing commands like \, \; \! etc.
       $.curly_group,
       $.subscript,
       $.superscript,
