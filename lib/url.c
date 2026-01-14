@@ -697,7 +697,8 @@ char* url_to_local_path(const Url* url) {
 
     // Check if this is a file:// URL
     if (url->scheme != URL_SCHEME_FILE) {
-        log_warn("URL scheme is not 'file://', got: %s", url_scheme_to_string(url->scheme));
+        // Use debug level since HTTP/HTTPS URLs are now valid and this is expected behavior
+        log_debug("url_to_local_path: URL scheme is not 'file://', got: %s", url_scheme_to_string(url->scheme));
         return NULL;
     }
 
