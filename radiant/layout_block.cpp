@@ -2451,9 +2451,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = (ViewBlock*)set_view(lycon,
+        // Check table first to handle inline-table correctly
+        display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE :
         display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
         display.outer == CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
-        display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
+        RDT_VIEW_BLOCK,
         elmt);
     block->display = display;
 
