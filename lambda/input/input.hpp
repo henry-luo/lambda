@@ -115,6 +115,8 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
 FetchResponse* http_fetch(const char* url, const FetchConfig* config);
+void free_fetch_response(FetchResponse* response);
+const char* content_type_to_extension(const char* content_type);
 
 // System information functions (from input_sysinfo.cpp)
 typedef struct SysInfoManager SysInfoManager;
