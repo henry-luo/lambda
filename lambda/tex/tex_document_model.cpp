@@ -9,6 +9,12 @@
 #include <cstring>
 #include <cstdio>
 
+// Include input system for doc_model_from_string
+#ifndef DOC_MODEL_MINIMAL
+#include "../input/input.hpp"
+extern "C" void parse_latex_ts(Input* input, const char* latex_string);
+#endif
+
 // Conditionally include SVG support
 #ifndef DOC_MODEL_NO_SVG
 #include "tex_svg_out.hpp"
@@ -1326,9 +1332,19 @@ static DocElement* build_section_command(const char* cmd_name, const ElementRead
             if (tag_eq(tag, "star") || tag_eq(tag, "*")) {
                 has_star = true;
             } else if (tag_eq(tag, "curly_group") || tag_eq(tag, "title") || 
-                       tag_eq(tag, "brack_group")) {
+                       tag_eq(tag, "brack_group") || tag_eq(tag, "text") || 
+                       tag_eq(tag, "arg")) {
                 // Extract title text
                 heading->heading.title = extract_text_content(child, arena);
+            }
+        } else if (child.isString() && !heading->heading.title) {
+            // Direct string child is the title
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0 && text[0] != '\n') {
+                size_t len = strlen(text);
+                char* title = (char*)arena_alloc(arena, len + 1);
+                memcpy(title, text, len + 1);
+                heading->heading.title = title;
             }
         }
     }
@@ -1576,6 +1592,67 @@ static DocElement* build_list_item(const ElementReader& item_elem, Arena* arena,
     return li;
 }
 
+// Helper to process items from a content container
+static void process_list_content(DocElement* list, const ItemReader& container,
+                                  Arena* arena, TexDocumentModel* doc, int& item_number) {
+    if (!container.isElement()) return;
+    
+    ElementReader elem = container.asElement();
+    DocElement* current_item = nullptr;
+    
+    // Scan children for items and their content
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && tag_eq(child_tag, "item")) {
+                // Save previous item if exists
+                if (current_item && current_item->first_child) {
+                    doc_append_child(list, current_item);
+                }
+                // Start new item
+                current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
+                if (list->list.list_type == ListType::ENUMERATE) {
+                    current_item->list_item.item_number = item_number++;
+                }
+            } else if (child_tag && (tag_eq(child_tag, "paragraph") || 
+                                     tag_eq(child_tag, "text_mode") ||
+                                     tag_eq(child_tag, "content"))) {
+                // Recurse into nested content containers
+                process_list_content(list, child, arena, doc, item_number);
+            } else if (current_item) {
+                // Add content to current item
+                DocElement* content = build_doc_element(child, arena, doc);
+                if (content) {
+                    doc_append_child(current_item, content);
+                }
+            }
+        } else if (child.isString() && current_item) {
+            // String content for current item
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0) {
+                // Skip whitespace-only strings
+                const char* p = text;
+                while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
+                if (*p) {
+                    DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                    if (text_elem) {
+                        doc_append_child(current_item, text_elem);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add last item
+    if (current_item && current_item->first_child) {
+        doc_append_child(list, current_item);
+    }
+}
+
 // Build a list environment (itemize, enumerate, description)
 static DocElement* build_list_environment(const char* env_name, const ElementReader& elem,
                                            Arena* arena, TexDocumentModel* doc) {
@@ -1594,24 +1671,61 @@ static DocElement* build_list_environment(const char* env_name, const ElementRea
     int item_number = list->list.start_num;
     
     // Process children, looking for \item commands
+    // Items may be directly under the environment or nested inside paragraph elements
     auto iter = elem.children();
     ItemReader child;
+    DocElement* current_item = nullptr;
+    
     while (iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* child_tag = child_elem.tagName();
             
-            if (child_tag && tag_eq(child_tag, "item")) {
-                DocElement* li = build_list_item(child_elem, arena, doc, list->list.list_type);
-                if (li) {
-                    // For enumerate, assign number
-                    if (list->list.list_type == ListType::ENUMERATE) {
-                        li->list_item.item_number = item_number++;
+            if (!child_tag) continue;
+            
+            if (tag_eq(child_tag, "item")) {
+                // Save previous item if exists
+                if (current_item && current_item->first_child) {
+                    doc_append_child(list, current_item);
+                }
+                // Start new item
+                current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
+                if (list->list.list_type == ListType::ENUMERATE) {
+                    current_item->list_item.item_number = item_number++;
+                }
+                // Process item children
+                auto item_iter = child_elem.children();
+                ItemReader item_child;
+                while (item_iter.next(&item_child)) {
+                    DocElement* content = build_doc_element(item_child, arena, doc);
+                    if (content) {
+                        doc_append_child(current_item, content);
                     }
-                    doc_append_child(list, li);
+                }
+            } else if (tag_eq(child_tag, "paragraph") || tag_eq(child_tag, "text_mode") ||
+                       tag_eq(child_tag, "content")) {
+                // Items may be inside paragraph - process recursively
+                process_list_content(list, child, arena, doc, item_number);
+            }
+        } else if (child.isString() && current_item) {
+            // String content for current item
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0) {
+                const char* p = text;
+                while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
+                if (*p) {
+                    DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                    if (text_elem) {
+                        doc_append_child(current_item, text_elem);
+                    }
                 }
             }
         }
+    }
+    
+    // Add last item
+    if (current_item && current_item->first_child) {
+        doc_append_child(list, current_item);
     }
     
     return list->first_child ? list : nullptr;
@@ -1948,6 +2062,22 @@ static DocElement* build_href_command(const ElementReader& elem, Arena* arena,
                 }
                 arg_index++;
             }
+        } else if (child.isString()) {
+            // Direct string children (tree-sitter output format)
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0 && text[0] != '\n') {
+                // Copy the string
+                size_t len = strlen(text);
+                char* str = (char*)arena_alloc(arena, len + 1);
+                memcpy(str, text, len + 1);
+                
+                if (arg_index == 0) {
+                    link->link.href = str;  // first string is URL
+                } else {
+                    link->link.link_text = str;  // second string is display text
+                }
+                arg_index++;
+            }
         }
     }
     
@@ -2241,6 +2371,15 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     
     if (!tag) return nullptr;
     
+    // Text formatting commands
+    if (tag_eq(tag, "textbf") || tag_eq(tag, "textit") || tag_eq(tag, "texttt") ||
+        tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline") ||
+        tag_eq(tag, "bf") || tag_eq(tag, "it") || tag_eq(tag, "tt") ||
+        tag_eq(tag, "bfseries") || tag_eq(tag, "itshape") || tag_eq(tag, "ttfamily") ||
+        tag_eq(tag, "scshape") || tag_eq(tag, "sout") || tag_eq(tag, "st")) {
+        return build_text_command(tag, elem, arena, doc);
+    }
+    
     // Section commands
     if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || 
         tag_eq(tag, "subsubsection") || tag_eq(tag, "paragraph") ||
@@ -2426,6 +2565,57 @@ TexDocumentModel* doc_model_from_latex(Item elem, Arena* arena, LaTeXContext& ct
     return doc;
 }
 
+TexDocumentModel* doc_model_from_string(const char* latex, size_t len, Arena* arena, TFMFontManager* fonts) {
+    (void)len; // length can be used for optimization
+    
+    // Create Input structure for parsing
+    Input* input = InputManager::create_input(nullptr);
+    if (!input) {
+        log_error("doc_model_from_string: failed to create input");
+        TexDocumentModel* doc = doc_model_create(arena);
+        doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+        return doc;
+    }
+    
+    // Parse LaTeX source using tree-sitter parser
+    parse_latex_ts(input, latex);
+    
+    // Get the parsed root element
+    Item root = input->root;
+    
+    if (get_type_id(root) == LMD_TYPE_NULL) {
+        log_error("doc_model_from_string: parse returned null");
+        TexDocumentModel* doc = doc_model_create(arena);
+        doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+        return doc;
+    }
+    
+    // Create document model and build from AST
+    TexDocumentModel* doc = doc_model_create(arena);
+    
+    // Use ItemReader to traverse the Lambda Element tree
+    ItemReader reader(root.to_const());
+    
+    // Build the document tree (simplified path without LaTeXContext for HTML-only use)
+    DocElement* doc_root = build_doc_element(reader, arena, doc);
+    
+    if (doc_root) {
+        if (doc_root->type != DocElemType::DOCUMENT) {
+            // Wrap in document element
+            doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+            doc_append_child(doc->root, doc_root);
+        } else {
+            doc->root = doc_root;
+        }
+    } else {
+        doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+    }
+    
+    log_debug("doc_model_from_string: built document model from %zu bytes of LaTeX", len);
+    
+    return doc;
+}
+
 #else // DOC_MODEL_MINIMAL
 
 // Stub implementation when Lambda runtime is not available
@@ -2437,18 +2627,15 @@ TexDocumentModel* doc_model_from_latex(Item elem, Arena* arena, TFMFontManager* 
     return doc;
 }
 
-#endif // DOC_MODEL_MINIMAL
-
 TexDocumentModel* doc_model_from_string(const char* latex, size_t len, Arena* arena, TFMFontManager* fonts) {
-    // TODO: Parse LaTeX string and build document model
-    // For now, create a minimal document structure
+    (void)latex; (void)len; (void)fonts;
     TexDocumentModel* doc = doc_model_create(arena);
     doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
-    
-    log_debug("doc_model_from_string: created empty document model (implementation pending)");
-    
+    log_debug("doc_model_from_string: minimal stub (DOC_MODEL_MINIMAL defined)");
     return doc;
 }
+
+#endif // DOC_MODEL_MINIMAL
 
 // ============================================================================
 // Placeholder for TexNode conversion
