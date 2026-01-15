@@ -448,22 +448,53 @@ static void render_text_span_html(DocElement* elem, StrBuf* out,
     DocTextStyle& style = elem->text.style;
     
     // Opening tags
-    if (style.has(DocTextStyle::BOLD))
-        strbuf_append_str(out, "<strong>");
-    if (style.has(DocTextStyle::ITALIC))
-        strbuf_append_str(out, "<em>");
-    if (style.has(DocTextStyle::MONOSPACE))
-        strbuf_append_str(out, "<code>");
-    if (style.has(DocTextStyle::UNDERLINE))
-        strbuf_append_str(out, "<u>");
-    if (style.has(DocTextStyle::STRIKEOUT))
-        strbuf_append_str(out, "<s>");
-    if (style.has(DocTextStyle::SMALLCAPS))
-        strbuf_append_format(out, "<span class=\"%ssmallcaps\">", opts.css_class_prefix);
-    if (style.has(DocTextStyle::SUPERSCRIPT))
-        strbuf_append_str(out, "<sup>");
-    if (style.has(DocTextStyle::SUBSCRIPT))
-        strbuf_append_str(out, "<sub>");
+    if (opts.legacy_mode) {
+        // Legacy mode: use span classes
+        // Font size (must be outermost)
+        const char* size_class = font_size_name_class(style.font_size_name);
+        if (size_class) {
+            strbuf_append_format(out, "<span class=\"%s\">", size_class);
+        }
+        if (style.has(DocTextStyle::BOLD))
+            strbuf_append_str(out, "<span class=\"bf\">");
+        if (style.has(DocTextStyle::ITALIC))
+            strbuf_append_str(out, "<span class=\"it\">");
+        if (style.has(DocTextStyle::MONOSPACE))
+            strbuf_append_str(out, "<span class=\"tt\">");
+        if (style.has(DocTextStyle::UNDERLINE))
+            strbuf_append_str(out, "<span class=\"underline\">");
+        if (style.has(DocTextStyle::STRIKEOUT))
+            strbuf_append_str(out, "<span class=\"sout\">");
+        if (style.has(DocTextStyle::SMALLCAPS))
+            strbuf_append_str(out, "<span class=\"sc\">");
+        if (style.has(DocTextStyle::SUPERSCRIPT))
+            strbuf_append_str(out, "<sup>");
+        if (style.has(DocTextStyle::SUBSCRIPT))
+            strbuf_append_str(out, "<sub>");
+    } else {
+        // Modern mode: use semantic HTML tags
+        if (style.has(DocTextStyle::BOLD))
+            strbuf_append_str(out, "<strong>");
+        if (style.has(DocTextStyle::ITALIC))
+            strbuf_append_str(out, "<em>");
+        if (style.has(DocTextStyle::MONOSPACE))
+            strbuf_append_str(out, "<code>");
+        if (style.has(DocTextStyle::UNDERLINE))
+            strbuf_append_str(out, "<u>");
+        if (style.has(DocTextStyle::STRIKEOUT))
+            strbuf_append_str(out, "<s>");
+        if (style.has(DocTextStyle::SMALLCAPS))
+            strbuf_append_format(out, "<span class=\"%ssmallcaps\">", opts.css_class_prefix);
+        if (style.has(DocTextStyle::SUPERSCRIPT))
+            strbuf_append_str(out, "<sup>");
+        if (style.has(DocTextStyle::SUBSCRIPT))
+            strbuf_append_str(out, "<sub>");
+        // Font size in modern mode - use class
+        const char* size_class = font_size_name_class(style.font_size_name);
+        if (size_class) {
+            strbuf_append_format(out, "<span class=\"%s%s\">", opts.css_class_prefix, size_class);
+        }
+    }
     
     // Content
     if (elem->text.text && elem->text.text_len > 0) {
@@ -474,45 +505,103 @@ static void render_text_span_html(DocElement* elem, StrBuf* out,
     render_children_html(elem, out, opts, 0);
     
     // Closing tags (reverse order)
-    if (style.has(DocTextStyle::SUBSCRIPT))
-        strbuf_append_str(out, "</sub>");
-    if (style.has(DocTextStyle::SUPERSCRIPT))
-        strbuf_append_str(out, "</sup>");
-    if (style.has(DocTextStyle::SMALLCAPS))
-        strbuf_append_str(out, "</span>");
-    if (style.has(DocTextStyle::STRIKEOUT))
-        strbuf_append_str(out, "</s>");
-    if (style.has(DocTextStyle::UNDERLINE))
-        strbuf_append_str(out, "</u>");
-    if (style.has(DocTextStyle::MONOSPACE))
-        strbuf_append_str(out, "</code>");
-    if (style.has(DocTextStyle::ITALIC))
-        strbuf_append_str(out, "</em>");
-    if (style.has(DocTextStyle::BOLD))
-        strbuf_append_str(out, "</strong>");
+    if (opts.legacy_mode) {
+        // Legacy mode: close span tags
+        if (style.has(DocTextStyle::SUBSCRIPT))
+            strbuf_append_str(out, "</sub>");
+        if (style.has(DocTextStyle::SUPERSCRIPT))
+            strbuf_append_str(out, "</sup>");
+        if (style.has(DocTextStyle::SMALLCAPS))
+            strbuf_append_str(out, "</span>");
+        if (style.has(DocTextStyle::STRIKEOUT))
+            strbuf_append_str(out, "</span>");
+        if (style.has(DocTextStyle::UNDERLINE))
+            strbuf_append_str(out, "</span>");
+        if (style.has(DocTextStyle::MONOSPACE))
+            strbuf_append_str(out, "</span>");
+        if (style.has(DocTextStyle::ITALIC))
+            strbuf_append_str(out, "</span>");
+        if (style.has(DocTextStyle::BOLD))
+            strbuf_append_str(out, "</span>");
+        // Close font size (outermost)
+        if (style.font_size_name != FontSizeName::INHERIT)
+            strbuf_append_str(out, "</span>");
+    } else {
+        // Modern mode: close semantic tags
+        // Close font size first (innermost in modern mode)
+        if (style.font_size_name != FontSizeName::INHERIT)
+            strbuf_append_str(out, "</span>");
+        if (style.has(DocTextStyle::SUBSCRIPT))
+            strbuf_append_str(out, "</sub>");
+        if (style.has(DocTextStyle::SUPERSCRIPT))
+            strbuf_append_str(out, "</sup>");
+        if (style.has(DocTextStyle::SMALLCAPS))
+            strbuf_append_str(out, "</span>");
+        if (style.has(DocTextStyle::STRIKEOUT))
+            strbuf_append_str(out, "</s>");
+        if (style.has(DocTextStyle::UNDERLINE))
+            strbuf_append_str(out, "</u>");
+        if (style.has(DocTextStyle::MONOSPACE))
+            strbuf_append_str(out, "</code>");
+        if (style.has(DocTextStyle::ITALIC))
+            strbuf_append_str(out, "</em>");
+        if (style.has(DocTextStyle::BOLD))
+            strbuf_append_str(out, "</strong>");
+    }
 }
 
 static void render_heading_html(DocElement* elem, StrBuf* out,
                                  const HtmlOutputOptions& opts, int depth) {
     // Map level to HTML heading
-    int h_level = elem->heading.level + 1;  // level 0 (part) -> h1
-    if (h_level > 6) h_level = 6;
+    // Legacy mode: chapter->h1, section->h2, etc.
+    // Modern mode: part(0)->h1, chapter(1)->h2, etc.
+    int h_level;
+    if (opts.legacy_mode) {
+        // Legacy mapping: chapter=h1, section=h2, subsection=h3, etc.
+        // level 1 (chapter) -> h1, level 2 (section) -> h2
+        h_level = elem->heading.level;
+        if (h_level < 1) h_level = 1;  // part->h1
+        if (h_level > 6) h_level = 6;
+    } else {
+        h_level = elem->heading.level + 1;  // level 0 (part) -> h1
+        if (h_level > 6) h_level = 6;
+    }
     
     if (opts.pretty_print) html_indent(out, depth);
     
-    // Add id for cross-references
-    if (elem->heading.label) {
-        strbuf_append_format(out, "<h%d id=\"%s\" class=\"%sheading-%d\">", 
-            h_level, elem->heading.label, opts.css_class_prefix, elem->heading.level);
+    if (opts.legacy_mode) {
+        // Legacy mode: <h1 id="sec-N">
+        if (elem->heading.label) {
+            strbuf_append_format(out, "<h%d id=\"%s\">", h_level, elem->heading.label);
+        } else {
+            strbuf_append_format(out, "<h%d>", h_level);
+        }
+        
+        // Chapter number in a div
+        if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
+            if (elem->heading.level == 1) {
+                // Chapter: <div>Chapter N</div>
+                strbuf_append_format(out, "<div>Chapter %s</div>", elem->heading.number);
+            } else {
+                // Section: number before title with quad space
+                strbuf_append_format(out, "%s ", elem->heading.number);
+            }
+        }
     } else {
-        strbuf_append_format(out, "<h%d class=\"%sheading-%d\">", 
-            h_level, opts.css_class_prefix, elem->heading.level);
-    }
-    
-    // Number if present
-    if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
-        strbuf_append_format(out, "<span class=\"%ssection-number\">%s</span>",
-            opts.css_class_prefix, elem->heading.number);
+        // Modern mode: <h1 class="latex-heading-0">
+        if (elem->heading.label) {
+            strbuf_append_format(out, "<h%d id=\"%s\" class=\"%sheading-%d\">", 
+                h_level, elem->heading.label, opts.css_class_prefix, elem->heading.level);
+        } else {
+            strbuf_append_format(out, "<h%d class=\"%sheading-%d\">", 
+                h_level, opts.css_class_prefix, elem->heading.level);
+        }
+        
+        // Number if present
+        if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
+            strbuf_append_format(out, "<span class=\"%ssection-number\">%s</span>",
+                opts.css_class_prefix, elem->heading.number);
+        }
     }
     
     // Title
@@ -527,7 +616,12 @@ static void render_heading_html(DocElement* elem, StrBuf* out,
 static void render_paragraph_html(DocElement* elem, StrBuf* out,
                                    const HtmlOutputOptions& opts, int depth) {
     if (opts.pretty_print) html_indent(out, depth);
-    strbuf_append_format(out, "<p class=\"%sparagraph\">", opts.css_class_prefix);
+    
+    if (opts.legacy_mode) {
+        strbuf_append_str(out, "<p>");
+    } else {
+        strbuf_append_format(out, "<p class=\"%sparagraph\">", opts.css_class_prefix);
+    }
     
     render_children_html(elem, out, opts, depth + 1);
     
@@ -546,7 +640,12 @@ static void render_list_html(DocElement* elem, StrBuf* out,
     }
     
     if (opts.pretty_print) html_indent(out, depth);
-    strbuf_append_format(out, "<%s class=\"%slist\">", tag, opts.css_class_prefix);
+    
+    if (opts.legacy_mode) {
+        strbuf_append_format(out, "<%s class=\"list\">", tag);
+    } else {
+        strbuf_append_format(out, "<%s class=\"%slist\">", tag, opts.css_class_prefix);
+    }
     if (opts.pretty_print) strbuf_append_str(out, "\n");
     
     render_children_html(elem, out, opts, depth + 1);
@@ -573,9 +672,30 @@ static void render_list_item_html(DocElement* elem, StrBuf* out,
         strbuf_append_str(out, "<dd>");
     } else {
         strbuf_append_str(out, "<li>");
+        
+        // In legacy mode, add item label (bullet or number)
+        if (opts.legacy_mode) {
+            strbuf_append_str(out, "<span class=\"itemlabel\">");
+            if (parent_type == ListType::ITEMIZE) {
+                // Bullet: • in a span with left margin
+                strbuf_append_str(out, "<span class=\"hbox llap\">\xE2\x80\xA2</span>");  // •
+            } else if (parent_type == ListType::ENUMERATE && elem->list_item.item_number > 0) {
+                // Number: (number) in a span
+                strbuf_append_format(out, "<span class=\"hbox llap\">%d.</span>", elem->list_item.item_number);
+            }
+            strbuf_append_str(out, "</span>");
+        }
     }
     
-    render_children_html(elem, out, opts, depth + 1);
+    // Wrap children in <p> tags for legacy mode if they're text content
+    if (opts.legacy_mode && parent_type != ListType::DESCRIPTION) {
+        // Render children wrapped in <p>
+        strbuf_append_str(out, "<p>");
+        render_children_html(elem, out, opts, depth + 1);
+        strbuf_append_str(out, "</p>");
+    } else {
+        render_children_html(elem, out, opts, depth + 1);
+    }
     
     if (parent_type == ListType::DESCRIPTION) {
         strbuf_append_str(out, "</dd>");
@@ -900,13 +1020,71 @@ static void render_children_html(DocElement* parent, StrBuf* out,
     }
 }
 
+// helper: check if element is inline (should be wrapped in paragraph at doc level)
+static bool is_inline_element(DocElement* elem) {
+    if (!elem) return false;
+    switch (elem->type) {
+    case DocElemType::TEXT_RUN:
+    case DocElemType::TEXT_SPAN:
+    case DocElemType::SPACE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// render document children in legacy mode - wraps consecutive inline elements in <p>
+static void render_document_children_legacy(DocElement* doc, StrBuf* out,
+                                            const HtmlOutputOptions& opts, int depth) {
+    bool in_paragraph = false;
+    
+    for (DocElement* child = doc->first_child; child; child = child->next_sibling) {
+        if (is_inline_element(child)) {
+            // skip whitespace-only text runs at start
+            if (!in_paragraph) {
+                if (child->type == DocElemType::TEXT_RUN && child->text.text) {
+                    // check if whitespace only
+                    bool whitespace_only = true;
+                    for (size_t i = 0; i < child->text.text_len; i++) {
+                        char c = child->text.text[i];
+                        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                            whitespace_only = false;
+                            break;
+                        }
+                    }
+                    if (whitespace_only) continue;
+                }
+                strbuf_append_str(out, "<p>");
+                in_paragraph = true;
+            }
+            doc_element_to_html(child, out, opts, depth);
+        } else {
+            // block element - close paragraph if open
+            if (in_paragraph) {
+                strbuf_append_str(out, "</p>\n");
+                in_paragraph = false;
+            }
+            doc_element_to_html(child, out, opts, depth);
+        }
+    }
+    
+    // close trailing paragraph
+    if (in_paragraph) {
+        strbuf_append_str(out, "</p>\n");
+    }
+}
+
 void doc_element_to_html(DocElement* elem, StrBuf* out,
                           const HtmlOutputOptions& opts, int depth) {
     if (!elem) return;
     
     switch (elem->type) {
     case DocElemType::DOCUMENT:
-        render_children_html(elem, out, opts, depth);
+        if (opts.legacy_mode) {
+            render_document_children_legacy(elem, out, opts, depth);
+        } else {
+            render_children_html(elem, out, opts, depth);
+        }
         break;
         
     case DocElemType::TEXT_SPAN:
@@ -1078,11 +1256,17 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     }
     
     // Document container
-    strbuf_append_format(output, "<article class=\"%sdocument %s%s\">\n", 
-        opts.css_class_prefix, opts.css_class_prefix, doc->document_class);
+    if (opts.legacy_mode) {
+        // Legacy mode: <div class="body">
+        strbuf_append_str(output, "<div class=\"body\">\n");
+    } else {
+        // Modern mode: <article class="latex-document ...">
+        strbuf_append_format(output, "<article class=\"%sdocument %s%s\">\n", 
+            opts.css_class_prefix, opts.css_class_prefix, doc->document_class);
+    }
     
-    // Title block
-    if (doc->title || doc->author || doc->date) {
+    // Title block (only in non-legacy mode)
+    if (!opts.legacy_mode && (doc->title || doc->author || doc->date)) {
         strbuf_append_format(output, "  <header class=\"%stitle-block\">\n", opts.css_class_prefix);
         if (doc->title) {
             strbuf_append_format(output, "    <h1 class=\"%sdoc-title\">", opts.css_class_prefix);
@@ -1107,7 +1291,12 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
         doc_element_to_html(doc->root, output, opts, 1);
     }
     
-    strbuf_append_str(output, "</article>\n");
+    // Close document container
+    if (opts.legacy_mode) {
+        strbuf_append_str(output, "</div>\n");
+    } else {
+        strbuf_append_str(output, "</article>\n");
+    }
     
     // HTML footer
     if (opts.standalone) {
@@ -1222,6 +1411,23 @@ static bool tag_eq(const char* a, const char* b) {
     return strcmp(a, b) == 0;
 }
 
+// Check if a string is a font size command (returns the FontSizeName or INHERIT if not)
+static FontSizeName get_font_size_cmd(const char* text) {
+    if (!text || text[0] != '\\') return FontSizeName::INHERIT;
+    const char* cmd = text + 1;  // skip backslash
+    if (strcmp(cmd, "tiny") == 0) return FontSizeName::FONT_TINY;
+    if (strcmp(cmd, "scriptsize") == 0) return FontSizeName::FONT_SCRIPTSIZE;
+    if (strcmp(cmd, "footnotesize") == 0) return FontSizeName::FONT_FOOTNOTESIZE;
+    if (strcmp(cmd, "small") == 0) return FontSizeName::FONT_SMALL;
+    if (strcmp(cmd, "normalsize") == 0) return FontSizeName::FONT_NORMALSIZE;
+    if (strcmp(cmd, "large") == 0) return FontSizeName::FONT_LARGE;
+    if (strcmp(cmd, "Large") == 0) return FontSizeName::FONT_LARGE2;
+    if (strcmp(cmd, "LARGE") == 0) return FontSizeName::FONT_LARGE3;
+    if (strcmp(cmd, "huge") == 0) return FontSizeName::FONT_HUGE;
+    if (strcmp(cmd, "Huge") == 0) return FontSizeName::FONT_HUGE2;
+    return FontSizeName::INHERIT;
+}
+
 // Extract text content from an item (recursively collects all text)
 static const char* extract_text_content(const ItemReader& item, Arena* arena) {
     if (item.isString()) {
@@ -1298,6 +1504,28 @@ static DocElement* build_text_command(const char* cmd_name, const ElementReader&
         span->text.style.flags |= DocTextStyle::UNDERLINE;
     } else if (tag_eq(cmd_name, "sout") || tag_eq(cmd_name, "st")) {
         span->text.style.flags |= DocTextStyle::STRIKEOUT;
+    }
+    // Font size commands
+    else if (tag_eq(cmd_name, "tiny")) {
+        span->text.style.font_size_name = FontSizeName::FONT_TINY;
+    } else if (tag_eq(cmd_name, "scriptsize")) {
+        span->text.style.font_size_name = FontSizeName::FONT_SCRIPTSIZE;
+    } else if (tag_eq(cmd_name, "footnotesize")) {
+        span->text.style.font_size_name = FontSizeName::FONT_FOOTNOTESIZE;
+    } else if (tag_eq(cmd_name, "small")) {
+        span->text.style.font_size_name = FontSizeName::FONT_SMALL;
+    } else if (tag_eq(cmd_name, "normalsize")) {
+        span->text.style.font_size_name = FontSizeName::FONT_NORMALSIZE;
+    } else if (tag_eq(cmd_name, "large")) {
+        span->text.style.font_size_name = FontSizeName::FONT_LARGE;
+    } else if (tag_eq(cmd_name, "Large")) {
+        span->text.style.font_size_name = FontSizeName::FONT_LARGE2;
+    } else if (tag_eq(cmd_name, "LARGE")) {
+        span->text.style.font_size_name = FontSizeName::FONT_LARGE3;
+    } else if (tag_eq(cmd_name, "huge")) {
+        span->text.style.font_size_name = FontSizeName::FONT_HUGE;
+    } else if (tag_eq(cmd_name, "Huge")) {
+        span->text.style.font_size_name = FontSizeName::FONT_HUGE2;
     }
     
     // Process children
@@ -2413,7 +2641,11 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline") ||
         tag_eq(tag, "bf") || tag_eq(tag, "it") || tag_eq(tag, "tt") ||
         tag_eq(tag, "bfseries") || tag_eq(tag, "itshape") || tag_eq(tag, "ttfamily") ||
-        tag_eq(tag, "scshape") || tag_eq(tag, "sout") || tag_eq(tag, "st")) {
+        tag_eq(tag, "scshape") || tag_eq(tag, "sout") || tag_eq(tag, "st") ||
+        // Font size commands
+        tag_eq(tag, "tiny") || tag_eq(tag, "scriptsize") || tag_eq(tag, "footnotesize") ||
+        tag_eq(tag, "small") || tag_eq(tag, "normalsize") || tag_eq(tag, "large") ||
+        tag_eq(tag, "Large") || tag_eq(tag, "LARGE") || tag_eq(tag, "huge") || tag_eq(tag, "Huge")) {
         return build_text_command(tag, elem, arena, doc);
     }
     
@@ -2533,10 +2765,46 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "latex_document") || tag_eq(tag, "document")) {
         DocElement* doc_elem = doc_alloc_element(arena, DocElemType::DOCUMENT);
         
-        auto iter = elem.children();
-        ItemReader child;
-        while (iter.next(&child)) {
-            DocElement* child_elem = build_doc_element(child, arena, doc);
+        // Process children with look-ahead using indexed access
+        int64_t child_count = elem.childCount();
+        for (int64_t i = 0; i < child_count; i++) {
+            ItemReader child_item = elem.childAt(i);
+            
+            // Check if this is a font size command followed by a curly_group
+            if (child_item.isString()) {
+                const char* text = child_item.cstring();
+                FontSizeName font_size = get_font_size_cmd(text);
+                if (font_size != FontSizeName::INHERIT && i + 1 < child_count) {
+                    ItemReader next_child = elem.childAt(i + 1);
+                    if (next_child.isElement()) {
+                        ElementReader next_elem = next_child.asElement();
+                        const char* next_tag = next_elem.tagName();
+                        if (next_tag && tag_eq(next_tag, "curly_group")) {
+                            // Create a styled span with the font size
+                            DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                            span->text.style = DocTextStyle::plain();
+                            span->text.style.font_size_name = font_size;
+                            
+                            // Process curly_group contents as children
+                            auto group_iter = next_elem.children();
+                            ItemReader group_child;
+                            while (group_iter.next(&group_child)) {
+                                DocElement* group_elem = build_doc_element(group_child, arena, doc);
+                                if (group_elem) {
+                                    doc_append_child(span, group_elem);
+                                }
+                            }
+                            
+                            doc_append_child(doc_elem, span);
+                            i++;  // skip the curly_group
+                            continue;
+                        }
+                    }
+                }
+            }
+            
+            // Normal processing
+            DocElement* child_elem = build_doc_element(child_item, arena, doc);
             if (child_elem) {
                 doc_append_child(doc_elem, child_elem);
             }

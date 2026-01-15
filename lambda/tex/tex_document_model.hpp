@@ -63,6 +63,7 @@ enum class DocElemType : uint8_t {
     FIGURE,             // figure environment
     BLOCKQUOTE,         // quote/quotation environment
     CODE_BLOCK,         // verbatim environment
+    ALIGNMENT,          // center/flushleft/flushright environment
     
     // Math elements (always typeset via TexNode)
     MATH_INLINE,        // $...$
@@ -99,6 +100,37 @@ const char* doc_elem_type_name(DocElemType type);
 // Text Styling
 // ============================================================================
 
+enum class FontSizeName : uint8_t {
+    INHERIT = 0,    // use parent's font size
+    FONT_TINY,           // \tiny
+    FONT_SCRIPTSIZE,     // \scriptsize  
+    FONT_FOOTNOTESIZE,   // \footnotesize
+    FONT_SMALL,          // \small
+    FONT_NORMALSIZE,     // \normalsize (default)
+    FONT_LARGE,          // \large
+    FONT_LARGE2,         // \Large
+    FONT_LARGE3,         // \LARGE
+    FONT_HUGE,           // \huge
+    FONT_HUGE2,          // \Huge
+};
+
+// Get CSS class name for font size
+inline const char* font_size_name_class(FontSizeName sz) {
+    switch (sz) {
+    case FontSizeName::FONT_TINY: return "tiny";
+    case FontSizeName::FONT_SCRIPTSIZE: return "scriptsize";
+    case FontSizeName::FONT_FOOTNOTESIZE: return "footnotesize";
+    case FontSizeName::FONT_SMALL: return "small";
+    case FontSizeName::FONT_NORMALSIZE: return "normalsize";
+    case FontSizeName::FONT_LARGE: return "large";
+    case FontSizeName::FONT_LARGE2: return "Large";
+    case FontSizeName::FONT_LARGE3: return "LARGE";
+    case FontSizeName::FONT_HUGE: return "huge";
+    case FontSizeName::FONT_HUGE2: return "Huge";
+    default: return nullptr;
+    }
+}
+
 struct DocTextStyle {
     enum Flags : uint16_t {
         NONE        = 0x0000,
@@ -115,6 +147,7 @@ struct DocTextStyle {
     };
     
     uint16_t flags;
+    FontSizeName font_size_name;  // Named size (\tiny, \small, etc.)
     const char* font_family;    // Override font (null = inherit)
     float font_size_pt;         // 0 = inherit
     uint32_t color;             // 0 = inherit (RGBA)
@@ -123,6 +156,7 @@ struct DocTextStyle {
     static DocTextStyle plain() {
         DocTextStyle s = {};
         s.flags = NONE;
+        s.font_size_name = FontSizeName::INHERIT;
         s.font_family = nullptr;
         s.font_size_pt = 0;
         s.color = 0;
@@ -442,6 +476,7 @@ struct HtmlOutputOptions {
     bool standalone;            // Include <!DOCTYPE>, <html> wrapper
     bool pretty_print;          // Indent output
     bool include_css;           // Include default CSS styles
+    bool legacy_mode;           // true = latex-js compatible output
     const char* css_class_prefix; // Prefix for CSS classes (default "latex-")
     const char* lang;           // Language code (default "en")
     
@@ -453,7 +488,22 @@ struct HtmlOutputOptions {
         o.standalone = true;
         o.pretty_print = true;
         o.include_css = true;
+        o.legacy_mode = false;
         o.css_class_prefix = "latex-";
+        o.lang = "en";
+        return o;
+    }
+    
+    static HtmlOutputOptions legacy() {
+        HtmlOutputOptions o = {};
+        o.font_mode = FONT_WEBFONT;
+        o.math_as_svg = false;
+        o.typeset_paragraphs = false;
+        o.standalone = false;
+        o.pretty_print = true;
+        o.include_css = false;
+        o.legacy_mode = true;
+        o.css_class_prefix = "";  // No prefix in legacy mode
         o.lang = "en";
         return o;
     }

@@ -45,7 +45,7 @@ protected:
     }
 
     // Render using unified pipeline
-    std::string renderUnified(const std::string& latex) {
+    std::string renderUnified(const std::string& latex, bool legacy = false) {
         arena_reset(arena);
         
         TexDocumentModel* doc = doc_model_from_string(
@@ -56,7 +56,7 @@ protected:
         }
         
         StrBuf* out = strbuf_new_cap(4096);
-        HtmlOutputOptions opts = HtmlOutputOptions::defaults();
+        HtmlOutputOptions opts = legacy ? HtmlOutputOptions::legacy() : HtmlOutputOptions::defaults();
         opts.standalone = false;  // Fragment mode, no full HTML document
         opts.pretty_print = false;
         opts.include_css = false;
@@ -67,6 +67,11 @@ protected:
         strbuf_free(out);
         
         return result;
+    }
+    
+    // Render in legacy mode for fixture comparison
+    std::string renderLegacy(const std::string& latex) {
+        return renderUnified(latex, true);
     }
     
     // Extract text content from HTML (ignoring tags)
@@ -339,9 +344,12 @@ TEST_P(UnifiedPipelineFixtureTest, FixtureContent) {
         GTEST_SKIP() << "Skipped: " << fixture.header;
     }
     
-    std::string html = renderUnified(fixture.latex_source);
+    // Use legacy mode for fixture comparison
+    std::string html = renderLegacy(fixture.latex_source);
     
     // Normalize whitespace for comparison
+    // - Collapse consecutive whitespace into single space
+    // - Remove whitespace between tags (><)
     auto normalize = [](const std::string& s) {
         std::string result;
         bool in_whitespace = false;
@@ -360,7 +368,17 @@ TEST_P(UnifiedPipelineFixtureTest, FixtureContent) {
         while (!result.empty() && result.back() == ' ') {
             result.pop_back();
         }
-        return result;
+        // Remove whitespace between > and < (between tags)
+        std::string final_result;
+        for (size_t i = 0; i < result.size(); i++) {
+            if (result[i] == ' ' && i > 0 && i + 1 < result.size() &&
+                result[i - 1] == '>' && result[i + 1] == '<') {
+                // skip this space
+                continue;
+            }
+            final_result += result[i];
+        }
+        return final_result;
     };
     
     std::string expected_normalized = normalize(fixture.expected_html);
