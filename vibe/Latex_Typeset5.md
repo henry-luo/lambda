@@ -1104,7 +1104,26 @@ DocElement* build_figure_environment(const ItemReader& env, Arena* arena,
 ## Phase F: Test Parity Validation
 
 **Duration**: 2 weeks  
-**Deliverable**: 100% pass rate on existing HTML tests
+**Deliverable**: 100% pass rate on existing HTML tests  
+**Status**: ✅ **COMPLETED** (2026-01-15)
+
+### Implementation Summary
+
+Created `test/test_html_parity.cpp` with:
+- `HtmlNormalizer` class for HTML comparison utilities
+- `HtmlParityTest` fixture with `renderLegacy()` and `renderUnified()` methods
+- 18 parity tests covering: plain text, bold/italic/mono, sections, lists, tables, quotes, verbatim, links, images, math
+
+**Key fixes applied:**
+1. Added text formatting command handling (`\textbf`, `\textit`, `\texttt`) to `build_doc_element()`
+2. Updated `build_section_command()` to handle direct string children for section titles
+3. Rewrote `build_list_environment()` to handle nested paragraph structure
+4. Fixed `build_href_command()` to handle direct string children for URL/text
+
+**Test Results:**
+- 18/18 parity tests passing
+- 61/61 document model unit tests passing
+- 73/73 baseline tests passing
 
 ### F.1 Test Infrastructure
 
