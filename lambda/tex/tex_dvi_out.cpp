@@ -79,6 +79,94 @@ enum DVIOpcode : uint8_t {
 };
 
 // ============================================================================
+// Font Encoding Translation
+// ============================================================================
+// TeX CM fonts use different character encodings than ASCII/Unicode.
+// This translates Unicode/ASCII codepoints to font-specific positions.
+
+// CMMI (Computer Modern Math Italic) encoding for punctuation
+// In cmmi10: position 58='.', 59=',', 60='<', 61='/', 62='>', 63='*'
+static int32_t unicode_to_cmmi(int32_t cp) {
+    // Punctuation remapping (key differences from ASCII)
+    if (cp == ',') return 59;   // ASCII 44 -> cmmi 59
+    if (cp == '.') return 58;   // ASCII 46 -> cmmi 58
+    if (cp == '<') return 60;   // same
+    if (cp == '/') return 61;   // ASCII 47 -> cmmi 61
+    if (cp == '>') return 62;   // same
+    if (cp == '*') return 63;   // ASCII 42 -> cmmi 63
+    
+    // Letters and digits are at same positions
+    if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) return cp;
+    if (cp >= '0' && cp <= '9') return cp - '0' + 48;  // digits at 48-57
+    
+    // Greek uppercase (positions 0-10)
+    // Greek lowercase (positions 11-33)
+    // These are typically set via symbol lookup, not here
+    
+    return cp;  // default: pass through
+}
+
+// CMR (Computer Modern Roman) encoding - mostly matches ASCII
+static int32_t unicode_to_cmr(int32_t cp) {
+    // CMR is mostly ASCII-compatible for printable characters
+    // Some special characters:
+    if (cp == 0x2018) return 96;   // left single quote
+    if (cp == 0x2019) return 39;   // right single quote  
+    if (cp == 0x201C) return 92;   // left double quote
+    if (cp == 0x201D) return 34;   // right double quote
+    if (cp == 0x2013) return 123;  // en-dash
+    if (cp == 0x2014) return 124;  // em-dash
+    
+    return cp;  // mostly pass through for ASCII
+}
+
+// CMSY (Computer Modern Symbol) encoding
+static int32_t unicode_to_cmsy(int32_t cp) {
+    // Most symbols are set via explicit code lookup, but handle some cases
+    if (cp == '-') return 0;    // minus sign at position 0
+    if (cp == 0x2212) return 0; // Unicode minus
+    
+    // Delimiters - cmsy uses different positions than ASCII
+    if (cp == '{') return 102;  // left brace at 102 (shows as 'f')
+    if (cp == '}') return 103;  // right brace at 103 (shows as 'g')
+    if (cp == '|') return 106;  // vertical bar at 106 (shows as 'j')
+    // Note: backslash/setminus is at 110, but should come from symbol lookup, not ASCII translation
+    
+    return cp;
+}
+
+// CMEX (Computer Modern Extension) encoding  
+static int32_t unicode_to_cmex(int32_t cp) {
+    // Large delimiters - mostly set via explicit lookup
+    return cp;
+}
+
+// Main translation function - dispatches based on font name
+static int32_t translate_to_font_encoding(const char* font_name, int32_t cp) {
+    if (!font_name) return cp;
+    
+    int32_t result = cp;
+    
+    // Check font family
+    if (strncmp(font_name, "cmmi", 4) == 0) {
+        result = unicode_to_cmmi(cp);
+    } else if (strncmp(font_name, "cmr", 3) == 0) {
+        result = unicode_to_cmr(cp);
+    } else if (strncmp(font_name, "cmsy", 4) == 0) {
+        result = unicode_to_cmsy(cp);
+    } else if (strncmp(font_name, "cmex", 4) == 0) {
+        result = unicode_to_cmex(cp);
+    }
+    
+    // Debug: log translations for punctuation
+    if (cp != result) {
+        log_debug("tex_dvi_out: font_encoding %s: %d -> %d", font_name, cp, result);
+    }
+    
+    return result;
+}
+
+// ============================================================================
 // Low-Level Writing Helpers
 // ============================================================================
 
@@ -530,7 +618,9 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 dvi_select_font(writer, font_num);
             }
 
-            dvi_set_char(writer, node->content.ch.codepoint);
+            // Translate Unicode/ASCII to font-specific encoding
+            int32_t font_cp = translate_to_font_encoding(font_name, node->content.ch.codepoint);
+            dvi_set_char(writer, font_cp);
 
             // Advance by character width
             int32_t width_sp = pt_to_sp(node->width);
@@ -547,7 +637,9 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 dvi_select_font(writer, font_num);
             }
 
-            dvi_set_char(writer, node->content.lig.codepoint);
+            // Translate Unicode/ASCII to font-specific encoding
+            int32_t font_cp = translate_to_font_encoding(font_name, node->content.lig.codepoint);
+            dvi_set_char(writer, font_cp);
 
             int32_t width_sp = pt_to_sp(node->width);
             writer.h += width_sp;
@@ -564,7 +656,13 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 dvi_select_font(writer, font_num);
             }
 
-            dvi_set_char(writer, node->content.math_char.codepoint);
+            // Translate Unicode/ASCII to font-specific encoding
+            int32_t orig_cp = node->content.math_char.codepoint;
+            int32_t font_cp = translate_to_font_encoding(font_name, orig_cp);
+            log_debug("tex_dvi_out: MathChar font=%s orig=%d (0x%02x '%c') -> %d",
+                      font_name ? font_name : "null", orig_cp, orig_cp, 
+                      (orig_cp >= 32 && orig_cp < 127) ? orig_cp : '?', font_cp);
+            dvi_set_char(writer, font_cp);
 
             int32_t width_sp = pt_to_sp(node->width);
             writer.h += width_sp;
@@ -581,7 +679,9 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 dvi_select_font(writer, font_num);
             }
 
-            dvi_set_char(writer, node->content.math_op.codepoint);
+            // Translate Unicode/ASCII to font-specific encoding
+            int32_t font_cp = translate_to_font_encoding(font_name, node->content.math_op.codepoint);
+            dvi_set_char(writer, font_cp);
 
             int32_t width_sp = pt_to_sp(node->width);
             writer.h += width_sp;
