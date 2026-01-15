@@ -189,6 +189,29 @@ void svg_render_vlist(SVGWriter& writer, TexNode* node, float x, float y);
 // Compute content bounds
 void svg_compute_bounds(TexNode* root, float& min_x, float& min_y, float& max_x, float& max_y);
 
+/**
+ * Compute tight bounding box for math node.
+ * Used to set SVG viewBox for inline math.
+ *
+ * @param math Math TexNode tree
+ * @param width Output width in points
+ * @param height Output height (above baseline) in points
+ * @param depth Output depth (below baseline) in points
+ */
+void svg_compute_math_bounds(TexNode* math, float* width, float* height, float* depth);
+
+/**
+ * Render math TexNode to inline SVG string suitable for HTML embedding.
+ * Unlike svg_render_to_string, this produces a compact SVG without XML declaration
+ * and with tight viewBox suitable for inline use.
+ *
+ * @param math Math TexNode (from tex_math_ts.cpp)
+ * @param arena Arena for allocations
+ * @param opts SVG parameters (optional, defaults used if null)
+ * @return SVG string without XML declaration (for inline use)
+ */
+const char* svg_render_math_inline(TexNode* math, Arena* arena, const SVGParams* opts);
+
 // Map TeX font name to SVG font-family
 const char* svg_font_family(const char* tex_font_name);
 
