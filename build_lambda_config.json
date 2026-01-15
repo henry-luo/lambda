@@ -2989,6 +2989,29 @@
                             "gtest_main"
                         ],
                         "icon": "🐑"
+                    },
+                    {
+                        "source": "test/test_html_parity.cpp",
+                        "name": "HTML Parity Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_html_parity.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_document_model.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "defines": [
+                            "DOC_MODEL_NO_SVG"
+                        ],
+                        "icon": "🔄"
                     }
                 ],
                 "type": "extended",
