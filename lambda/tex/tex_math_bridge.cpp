@@ -452,34 +452,58 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
                           float rule_thickness, MathContext& ctx) {
     Arena* arena = ctx.arena;
 
-    // Use cramped style for numerator, scripted for denominator
-    float num_scale = style_size_factor(ctx.style);
-
-    // TeX fraction layout parameters (from sigma table, TeXBook p. 445)
-    float axis = ctx.axis_height * num_scale;
-    float num_shift, denom_shift;
-    float num_gap, denom_gap;
-
+    float size_pt = ctx.base_size_pt;
+    
+    // TeX sigma table values (from cmsy10 fontdimens, TeXBook p. 445)
+    // These are the shift amounts from the main baseline to num/denom baselines
+    float axis = 2.5f * size_pt / 10.0f;  // axis_height (fontdimen22)
+    float num1 = 6.77f * size_pt / 10.0f;   // display num shift (fontdimen8)
+    float num2 = 3.94f * size_pt / 10.0f;   // text num shift with rule (fontdimen9)
+    float denom1 = 6.86f * size_pt / 10.0f; // display denom shift (fontdimen11)
+    float denom2 = 3.45f * size_pt / 10.0f; // text denom shift (fontdimen12)
+    
+    // Minimum clearance between content and rule (3*rule for display, 1*rule for text)
+    float default_rule = 0.4f * size_pt / 10.0f;
+    float min_gap_display = 3.0f * default_rule;
+    float min_gap_text = default_rule;
+    
+    float num_shift, denom_shift, min_gap;
     if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
-        num_shift = 7.0f * ctx.base_size_pt / 10.0f;    // num1
-        denom_shift = 7.0f * ctx.base_size_pt / 10.0f;  // denom1
-        num_gap = 3.0f * rule_thickness;
-        denom_gap = 3.0f * rule_thickness;
+        num_shift = num1;
+        denom_shift = denom1;
+        min_gap = min_gap_display;
     } else {
-        num_shift = 4.0f * ctx.base_size_pt / 10.0f;    // num2/num3
-        denom_shift = 4.0f * ctx.base_size_pt / 10.0f;  // denom2
-        num_gap = rule_thickness;
-        denom_gap = rule_thickness;
+        num_shift = num2;
+        denom_shift = denom2;
+        min_gap = min_gap_text;
+    }
+    
+    // TeX algorithm: position num/denom baselines, then adjust if clearance insufficient
+    // num_y is the y-position of numerator baseline (positive = above main baseline)
+    // denom_y is the y-position of denominator baseline (negative = below main baseline)
+    float num_y = num_shift;
+    float denom_y = -denom_shift;
+    
+    // Check clearance: gap between bottom of numerator and top of rule
+    float rule_top = axis + rule_thickness / 2.0f;
+    float num_bottom = num_y - numerator->depth;
+    float clearance_above = num_bottom - rule_top;
+    if (clearance_above < min_gap) {
+        num_y += (min_gap - clearance_above);
+    }
+    
+    // Check clearance: gap between bottom of rule and top of denominator
+    float rule_bottom = axis - rule_thickness / 2.0f;
+    float denom_top = denom_y + denominator->height;
+    float clearance_below = rule_bottom - denom_top;
+    if (clearance_below < min_gap) {
+        denom_y -= (min_gap - clearance_below);
     }
 
-    // Calculate positions relative to axis
-    float num_y = axis + num_shift + numerator->depth + num_gap;
-    float denom_y = axis - denom_shift - denominator->height - denom_gap;
-
-    // Create fraction bar
+    // Create fraction bar at axis height
     float bar_width = fmaxf(numerator->width, denominator->width) + 4.0f;
     TexNode* bar = make_rule(arena, bar_width, rule_thickness, 0);
-    bar->y = axis - rule_thickness / 2.0f;
+    bar->y = axis;  // bar is centered on axis
 
     // Create VBox for fraction
     TexNode* frac = make_vbox(arena);
