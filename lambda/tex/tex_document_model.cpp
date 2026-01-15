@@ -1,0 +1,2470 @@
+// tex_document_model.cpp - Intermediate Document Model for Unified Pipeline
+//
+// Implementation of the document model layer that bridges LaTeX AST to
+// multiple output formats (HTML, DVI, SVG, PDF).
+
+#include "tex_document_model.hpp"
+#include "tex_math_ts.hpp"
+#include "lib/log.h"
+#include <cstring>
+#include <cstdio>
+
+// Conditionally include SVG support
+#ifndef DOC_MODEL_NO_SVG
+#include "tex_svg_out.hpp"
+#endif
+
+namespace tex {
+
+// ============================================================================
+// SVG Stub (when SVG support is disabled)
+// ============================================================================
+
+#ifdef DOC_MODEL_NO_SVG
+// Stub function when SVG library is not linked
+static const char* svg_render_math_inline(TexNode*, Arena*, void*) {
+    return nullptr;
+}
+struct SVGParams {
+    bool indent;
+    static SVGParams defaults() { return {false}; }
+};
+#endif
+
+// ============================================================================
+// Debug Utilities
+// ============================================================================
+
+const char* doc_elem_type_name(DocElemType type) {
+    switch (type) {
+    case DocElemType::PARAGRAPH:    return "PARAGRAPH";
+    case DocElemType::HEADING:      return "HEADING";
+    case DocElemType::LIST:         return "LIST";
+    case DocElemType::LIST_ITEM:    return "LIST_ITEM";
+    case DocElemType::TABLE:        return "TABLE";
+    case DocElemType::TABLE_ROW:    return "TABLE_ROW";
+    case DocElemType::TABLE_CELL:   return "TABLE_CELL";
+    case DocElemType::FIGURE:       return "FIGURE";
+    case DocElemType::BLOCKQUOTE:   return "BLOCKQUOTE";
+    case DocElemType::CODE_BLOCK:   return "CODE_BLOCK";
+    case DocElemType::MATH_INLINE:  return "MATH_INLINE";
+    case DocElemType::MATH_DISPLAY: return "MATH_DISPLAY";
+    case DocElemType::MATH_EQUATION: return "MATH_EQUATION";
+    case DocElemType::MATH_ALIGN:   return "MATH_ALIGN";
+    case DocElemType::TEXT_SPAN:    return "TEXT_SPAN";
+    case DocElemType::TEXT_RUN:     return "TEXT_RUN";
+    case DocElemType::LINK:         return "LINK";
+    case DocElemType::IMAGE:        return "IMAGE";
+    case DocElemType::FOOTNOTE:     return "FOOTNOTE";
+    case DocElemType::CITATION:     return "CITATION";
+    case DocElemType::CROSS_REF:    return "CROSS_REF";
+    case DocElemType::DOCUMENT:     return "DOCUMENT";
+    case DocElemType::SECTION:      return "SECTION";
+    case DocElemType::ABSTRACT:     return "ABSTRACT";
+    case DocElemType::TITLE_BLOCK:  return "TITLE_BLOCK";
+    case DocElemType::RAW_HTML:     return "RAW_HTML";
+    case DocElemType::RAW_LATEX:    return "RAW_LATEX";
+    case DocElemType::SPACE:        return "SPACE";
+    case DocElemType::ERROR:        return "ERROR";
+    default:                        return "UNKNOWN";
+    }
+}
+
+// ============================================================================
+// Document Model Methods
+// ============================================================================
+
+void TexDocumentModel::add_label(const char* label, const char* ref_text, int page) {
+    if (label_count >= label_capacity) {
+        int new_capacity = label_capacity == 0 ? 16 : label_capacity * 2;
+        LabelEntry* new_labels = (LabelEntry*)arena_alloc(arena, new_capacity * sizeof(LabelEntry));
+        if (labels) {
+            memcpy(new_labels, labels, label_count * sizeof(LabelEntry));
+        }
+        labels = new_labels;
+        label_capacity = new_capacity;
+    }
+    
+    labels[label_count].label = label;
+    labels[label_count].ref_text = ref_text;
+    labels[label_count].page = page;
+    label_count++;
+}
+
+const char* TexDocumentModel::resolve_ref(const char* label) const {
+    for (int i = 0; i < label_count; i++) {
+        if (strcmp(labels[i].label, label) == 0) {
+            return labels[i].ref_text;
+        }
+    }
+    return "??";  // Unresolved reference marker
+}
+
+void TexDocumentModel::add_macro(const char* name, int num_args, const char* replacement) {
+    if (macro_count >= macro_capacity) {
+        int new_capacity = macro_capacity == 0 ? 16 : macro_capacity * 2;
+        MacroDef* new_macros = (MacroDef*)arena_alloc(arena, new_capacity * sizeof(MacroDef));
+        if (macros) {
+            memcpy(new_macros, macros, macro_count * sizeof(MacroDef));
+        }
+        macros = new_macros;
+        macro_capacity = new_capacity;
+    }
+    
+    macros[macro_count].name = name;
+    macros[macro_count].num_args = num_args;
+    macros[macro_count].replacement = replacement;
+    macro_count++;
+}
+
+const TexDocumentModel::MacroDef* TexDocumentModel::find_macro(const char* name) const {
+    for (int i = 0; i < macro_count; i++) {
+        if (strcmp(macros[i].name, name) == 0) {
+            return &macros[i];
+        }
+    }
+    return nullptr;
+}
+
+void TexDocumentModel::add_bib_entry(const char* key, const char* formatted) {
+    if (bib_count >= bib_capacity) {
+        int new_capacity = bib_capacity == 0 ? 16 : bib_capacity * 2;
+        BibEntry* new_entries = (BibEntry*)arena_alloc(arena, new_capacity * sizeof(BibEntry));
+        if (bib_entries) {
+            memcpy(new_entries, bib_entries, bib_count * sizeof(BibEntry));
+        }
+        bib_entries = new_entries;
+        bib_capacity = new_capacity;
+    }
+    
+    bib_entries[bib_count].key = key;
+    bib_entries[bib_count].formatted = formatted;
+    bib_count++;
+}
+
+const char* TexDocumentModel::resolve_cite(const char* key) const {
+    for (int i = 0; i < bib_count; i++) {
+        if (strcmp(bib_entries[i].key, key) == 0) {
+            return bib_entries[i].formatted;
+        }
+    }
+    return "[?]";  // Unresolved citation marker
+}
+
+// ============================================================================
+// Element Allocation
+// ============================================================================
+
+TexDocumentModel* doc_model_create(Arena* arena) {
+    TexDocumentModel* doc = (TexDocumentModel*)arena_alloc(arena, sizeof(TexDocumentModel));
+    memset(doc, 0, sizeof(TexDocumentModel));
+    doc->arena = arena;
+    doc->document_class = "article";  // Default
+    return doc;
+}
+
+DocElement* doc_alloc_element(Arena* arena, DocElemType type) {
+    DocElement* elem = (DocElement*)arena_alloc(arena, sizeof(DocElement));
+    memset(elem, 0, sizeof(DocElement));
+    elem->type = type;
+    return elem;
+}
+
+void doc_append_child(DocElement* parent, DocElement* child) {
+    if (!parent || !child) return;
+    
+    child->parent = parent;
+    child->next_sibling = nullptr;
+    
+    if (!parent->first_child) {
+        parent->first_child = child;
+        parent->last_child = child;
+    } else {
+        parent->last_child->next_sibling = child;
+        parent->last_child = child;
+    }
+}
+
+void doc_insert_before(DocElement* parent, DocElement* before, DocElement* child) {
+    if (!parent || !child) return;
+    
+    child->parent = parent;
+    
+    if (!before || parent->first_child == before) {
+        // Insert at beginning
+        child->next_sibling = parent->first_child;
+        parent->first_child = child;
+        if (!parent->last_child) {
+            parent->last_child = child;
+        }
+    } else {
+        // Find the element before 'before'
+        DocElement* prev = parent->first_child;
+        while (prev && prev->next_sibling != before) {
+            prev = prev->next_sibling;
+        }
+        if (prev) {
+            child->next_sibling = before;
+            prev->next_sibling = child;
+        }
+    }
+}
+
+void doc_remove_child(DocElement* parent, DocElement* child) {
+    if (!parent || !child || child->parent != parent) return;
+    
+    if (parent->first_child == child) {
+        parent->first_child = child->next_sibling;
+        if (parent->last_child == child) {
+            parent->last_child = nullptr;
+        }
+    } else {
+        DocElement* prev = parent->first_child;
+        while (prev && prev->next_sibling != child) {
+            prev = prev->next_sibling;
+        }
+        if (prev) {
+            prev->next_sibling = child->next_sibling;
+            if (parent->last_child == child) {
+                parent->last_child = prev;
+            }
+        }
+    }
+    
+    child->parent = nullptr;
+    child->next_sibling = nullptr;
+}
+
+DocElement* doc_create_text(Arena* arena, const char* text, size_t len, DocTextStyle style) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::TEXT_RUN);
+    
+    // Copy text to arena
+    char* text_copy = (char*)arena_alloc(arena, len + 1);
+    memcpy(text_copy, text, len);
+    text_copy[len] = '\0';
+    
+    elem->text.text = text_copy;
+    elem->text.text_len = len;
+    elem->text.style = style;
+    
+    return elem;
+}
+
+DocElement* doc_create_text_cstr(Arena* arena, const char* text, DocTextStyle style) {
+    return doc_create_text(arena, text, strlen(text), style);
+}
+
+// ============================================================================
+// HTML Utilities
+// ============================================================================
+
+void html_escape_append(StrBuf* out, const char* text, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
+        switch (c) {
+        case '&':  strbuf_append_str(out, "&amp;"); break;
+        case '<':  strbuf_append_str(out, "&lt;"); break;
+        case '>':  strbuf_append_str(out, "&gt;"); break;
+        case '"':  strbuf_append_str(out, "&quot;"); break;
+        case '\'': strbuf_append_str(out, "&#39;"); break;
+        default:   strbuf_append_char(out, c); break;
+        }
+    }
+}
+
+void html_indent(StrBuf* out, int depth) {
+    for (int i = 0; i < depth; i++) {
+        strbuf_append_str(out, "  ");
+    }
+}
+
+void html_write_default_css(StrBuf* out, const char* prefix) {
+    strbuf_append_str(out, "<style>\n");
+    
+    // Document container
+    strbuf_append_format(out, ".%sdocument {\n", prefix);
+    strbuf_append_str(out, "  max-width: 800px;\n");
+    strbuf_append_str(out, "  margin: 0 auto;\n");
+    strbuf_append_str(out, "  padding: 2em;\n");
+    strbuf_append_str(out, "  font-family: 'Computer Modern Serif', 'Latin Modern Roman', Georgia, serif;\n");
+    strbuf_append_str(out, "  font-size: 12pt;\n");
+    strbuf_append_str(out, "  line-height: 1.5;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Headings
+    for (int level = 0; level < 6; level++) {
+        float sizes[] = {2.0f, 1.7f, 1.4f, 1.2f, 1.1f, 1.0f};
+        strbuf_append_format(out, ".%sheading-%d {\n", prefix, level);
+        strbuf_append_format(out, "  font-size: %.1fem;\n", sizes[level]);
+        strbuf_append_str(out, "  font-weight: bold;\n");
+        strbuf_append_format(out, "  margin-top: %.1fem;\n", level == 0 ? 1.5f : 1.2f);
+        strbuf_append_format(out, "  margin-bottom: %.1fem;\n", 0.5f);
+        strbuf_append_str(out, "}\n\n");
+    }
+    
+    // Section numbers
+    strbuf_append_format(out, ".%ssection-number {\n", prefix);
+    strbuf_append_str(out, "  margin-right: 0.5em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Paragraphs
+    strbuf_append_format(out, ".%sparagraph {\n", prefix);
+    strbuf_append_str(out, "  margin: 1em 0;\n");
+    strbuf_append_str(out, "  text-align: justify;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Math
+    strbuf_append_format(out, ".%smath-inline {\n", prefix);
+    strbuf_append_str(out, "  display: inline-block;\n");
+    strbuf_append_str(out, "  vertical-align: middle;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%smath-inline svg {\n", prefix);
+    strbuf_append_str(out, "  display: inline-block;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%smath-display {\n", prefix);
+    strbuf_append_str(out, "  display: block;\n");
+    strbuf_append_str(out, "  text-align: center;\n");
+    strbuf_append_str(out, "  margin: 1em 0;\n");
+    strbuf_append_str(out, "  position: relative;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%smath-display svg {\n", prefix);
+    strbuf_append_str(out, "  display: inline-block;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%seq-number {\n", prefix);
+    strbuf_append_str(out, "  position: absolute;\n");
+    strbuf_append_str(out, "  right: 0;\n");
+    strbuf_append_str(out, "  top: 50%;\n");
+    strbuf_append_str(out, "  transform: translateY(-50%);\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%smath-fallback {\n", prefix);
+    strbuf_append_str(out, "  font-family: 'CMU Serif', serif;\n");
+    strbuf_append_str(out, "  font-style: italic;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Lists
+    strbuf_append_format(out, ".%slist {\n", prefix);
+    strbuf_append_str(out, "  margin: 0.5em 0;\n");
+    strbuf_append_str(out, "  padding-left: 2em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Tables
+    strbuf_append_format(out, ".%stable {\n", prefix);
+    strbuf_append_str(out, "  border-collapse: collapse;\n");
+    strbuf_append_str(out, "  margin: 1em auto;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%stable td, .%stable th {\n", prefix, prefix);
+    strbuf_append_str(out, "  padding: 0.3em 0.6em;\n");
+    strbuf_append_str(out, "  border: 1px solid #ccc;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Text styling
+    strbuf_append_format(out, ".%ssmallcaps {\n", prefix);
+    strbuf_append_str(out, "  font-variant: small-caps;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Blockquote
+    strbuf_append_format(out, ".%sblockquote {\n", prefix);
+    strbuf_append_str(out, "  margin: 1em 2em;\n");
+    strbuf_append_str(out, "  font-style: italic;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Code
+    strbuf_append_format(out, ".%scode-block {\n", prefix);
+    strbuf_append_str(out, "  font-family: 'Computer Modern Typewriter', monospace;\n");
+    strbuf_append_str(out, "  background: #f5f5f5;\n");
+    strbuf_append_str(out, "  padding: 1em;\n");
+    strbuf_append_str(out, "  overflow-x: auto;\n");
+    strbuf_append_str(out, "  white-space: pre;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Figure
+    strbuf_append_format(out, ".%sfigure {\n", prefix);
+    strbuf_append_str(out, "  text-align: center;\n");
+    strbuf_append_str(out, "  margin: 1em 0;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%sfigcaption {\n", prefix);
+    strbuf_append_str(out, "  font-style: italic;\n");
+    strbuf_append_str(out, "  margin-top: 0.5em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Abstract
+    strbuf_append_format(out, ".%sabstract {\n", prefix);
+    strbuf_append_str(out, "  margin: 2em 3em;\n");
+    strbuf_append_str(out, "  font-size: 0.9em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%sabstract-title {\n", prefix);
+    strbuf_append_str(out, "  text-align: center;\n");
+    strbuf_append_str(out, "  font-weight: bold;\n");
+    strbuf_append_str(out, "  margin-bottom: 0.5em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    // Title block
+    strbuf_append_format(out, ".%stitle-block {\n", prefix);
+    strbuf_append_str(out, "  text-align: center;\n");
+    strbuf_append_str(out, "  margin-bottom: 2em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%sdoc-title {\n", prefix);
+    strbuf_append_str(out, "  font-size: 1.8em;\n");
+    strbuf_append_str(out, "  font-weight: bold;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%sdoc-author {\n", prefix);
+    strbuf_append_str(out, "  font-size: 1.2em;\n");
+    strbuf_append_str(out, "  margin-top: 0.5em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_format(out, ".%sdoc-date {\n", prefix);
+    strbuf_append_str(out, "  margin-top: 0.5em;\n");
+    strbuf_append_str(out, "}\n\n");
+    
+    strbuf_append_str(out, "</style>\n");
+}
+
+// ============================================================================
+// HTML Element Rendering
+// ============================================================================
+
+// Forward declarations for mutual recursion
+static void render_children_html(DocElement* parent, StrBuf* out, 
+                                  const HtmlOutputOptions& opts, int depth);
+
+static void render_text_span_html(DocElement* elem, StrBuf* out, 
+                                   const HtmlOutputOptions& opts) {
+    DocTextStyle& style = elem->text.style;
+    
+    // Opening tags
+    if (style.has(DocTextStyle::BOLD))
+        strbuf_append_str(out, "<strong>");
+    if (style.has(DocTextStyle::ITALIC))
+        strbuf_append_str(out, "<em>");
+    if (style.has(DocTextStyle::MONOSPACE))
+        strbuf_append_str(out, "<code>");
+    if (style.has(DocTextStyle::UNDERLINE))
+        strbuf_append_str(out, "<u>");
+    if (style.has(DocTextStyle::STRIKEOUT))
+        strbuf_append_str(out, "<s>");
+    if (style.has(DocTextStyle::SMALLCAPS))
+        strbuf_append_format(out, "<span class=\"%ssmallcaps\">", opts.css_class_prefix);
+    if (style.has(DocTextStyle::SUPERSCRIPT))
+        strbuf_append_str(out, "<sup>");
+    if (style.has(DocTextStyle::SUBSCRIPT))
+        strbuf_append_str(out, "<sub>");
+    
+    // Content
+    if (elem->text.text && elem->text.text_len > 0) {
+        html_escape_append(out, elem->text.text, elem->text.text_len);
+    }
+    
+    // Recurse to children
+    render_children_html(elem, out, opts, 0);
+    
+    // Closing tags (reverse order)
+    if (style.has(DocTextStyle::SUBSCRIPT))
+        strbuf_append_str(out, "</sub>");
+    if (style.has(DocTextStyle::SUPERSCRIPT))
+        strbuf_append_str(out, "</sup>");
+    if (style.has(DocTextStyle::SMALLCAPS))
+        strbuf_append_str(out, "</span>");
+    if (style.has(DocTextStyle::STRIKEOUT))
+        strbuf_append_str(out, "</s>");
+    if (style.has(DocTextStyle::UNDERLINE))
+        strbuf_append_str(out, "</u>");
+    if (style.has(DocTextStyle::MONOSPACE))
+        strbuf_append_str(out, "</code>");
+    if (style.has(DocTextStyle::ITALIC))
+        strbuf_append_str(out, "</em>");
+    if (style.has(DocTextStyle::BOLD))
+        strbuf_append_str(out, "</strong>");
+}
+
+static void render_heading_html(DocElement* elem, StrBuf* out,
+                                 const HtmlOutputOptions& opts, int depth) {
+    // Map level to HTML heading
+    int h_level = elem->heading.level + 1;  // level 0 (part) -> h1
+    if (h_level > 6) h_level = 6;
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    
+    // Add id for cross-references
+    if (elem->heading.label) {
+        strbuf_append_format(out, "<h%d id=\"%s\" class=\"%sheading-%d\">", 
+            h_level, elem->heading.label, opts.css_class_prefix, elem->heading.level);
+    } else {
+        strbuf_append_format(out, "<h%d class=\"%sheading-%d\">", 
+            h_level, opts.css_class_prefix, elem->heading.level);
+    }
+    
+    // Number if present
+    if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
+        strbuf_append_format(out, "<span class=\"%ssection-number\">%s</span>",
+            opts.css_class_prefix, elem->heading.number);
+    }
+    
+    // Title
+    if (elem->heading.title) {
+        html_escape_append(out, elem->heading.title, strlen(elem->heading.title));
+    }
+    
+    strbuf_append_format(out, "</h%d>", h_level);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_paragraph_html(DocElement* elem, StrBuf* out,
+                                   const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<p class=\"%sparagraph\">", opts.css_class_prefix);
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    strbuf_append_str(out, "</p>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_list_html(DocElement* elem, StrBuf* out,
+                              const HtmlOutputOptions& opts, int depth) {
+    const char* tag;
+    switch (elem->list.list_type) {
+    case ListType::ITEMIZE:     tag = "ul"; break;
+    case ListType::ENUMERATE:   tag = "ol"; break;
+    case ListType::DESCRIPTION: tag = "dl"; break;
+    default:                    tag = "ul"; break;
+    }
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<%s class=\"%slist\">", tag, opts.css_class_prefix);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "</%s>", tag);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_list_item_html(DocElement* elem, StrBuf* out,
+                                   const HtmlOutputOptions& opts, int depth,
+                                   ListType parent_type) {
+    if (opts.pretty_print) html_indent(out, depth);
+    
+    if (parent_type == ListType::DESCRIPTION) {
+        // Description list: <dt>term</dt><dd>content</dd>
+        if (elem->list_item.label) {
+            strbuf_append_str(out, "<dt>");
+            html_escape_append(out, elem->list_item.label, strlen(elem->list_item.label));
+            strbuf_append_str(out, "</dt>");
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+            if (opts.pretty_print) html_indent(out, depth);
+        }
+        strbuf_append_str(out, "<dd>");
+    } else {
+        strbuf_append_str(out, "<li>");
+    }
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (parent_type == ListType::DESCRIPTION) {
+        strbuf_append_str(out, "</dd>");
+    } else {
+        strbuf_append_str(out, "</li>");
+    }
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_table_html(DocElement* elem, StrBuf* out,
+                               const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<table class=\"%stable\">", opts.css_class_prefix);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_str(out, "</table>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_table_row_html(DocElement* elem, StrBuf* out,
+                                   const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_str(out, "<tr>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_str(out, "</tr>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_table_cell_html(DocElement* elem, StrBuf* out,
+                                    const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    
+    const char* align_style = "";
+    switch (elem->cell.alignment) {
+    case 'c': align_style = " style=\"text-align: center;\""; break;
+    case 'r': align_style = " style=\"text-align: right;\""; break;
+    case 'l': 
+    default:  align_style = " style=\"text-align: left;\""; break;
+    }
+    
+    strbuf_append_format(out, "<td%s", align_style);
+    if (elem->cell.colspan > 1) {
+        strbuf_append_format(out, " colspan=\"%d\"", elem->cell.colspan);
+    }
+    if (elem->cell.rowspan > 1) {
+        strbuf_append_format(out, " rowspan=\"%d\"", elem->cell.rowspan);
+    }
+    strbuf_append_str(out, ">");
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    strbuf_append_str(out, "</td>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_math_html(DocElement* elem, StrBuf* out,
+                              const HtmlOutputOptions& opts, int depth) {
+    bool is_display = (elem->type == DocElemType::MATH_DISPLAY ||
+                       elem->type == DocElemType::MATH_EQUATION ||
+                       elem->type == DocElemType::MATH_ALIGN);
+    
+    const char* css_class = is_display ? "math-display" : "math-inline";
+    
+    // Check if we have a typeset TexNode tree
+    bool has_svg = (opts.math_as_svg && elem->math.node != nullptr);
+    
+    if (is_display) {
+        if (opts.pretty_print) html_indent(out, depth);
+        strbuf_append_format(out, "<div class=\"%s%s\">", opts.css_class_prefix, css_class);
+        if (opts.pretty_print) strbuf_append_str(out, "\n");
+        
+        if (has_svg) {
+            // Render math as inline SVG
+            if (opts.pretty_print) html_indent(out, depth + 1);
+            
+            // Create temporary arena for SVG rendering
+            Pool* temp_pool = pool_create();
+            Arena* temp_arena = arena_create_default(temp_pool);
+            
+            SVGParams svg_params = SVGParams::defaults();
+            svg_params.indent = false;  // Compact for inline
+            
+            const char* svg = svg_render_math_inline(elem->math.node, temp_arena, &svg_params);
+            if (svg) {
+                strbuf_append_str(out, svg);
+            }
+            
+            arena_destroy(temp_arena);
+            pool_destroy(temp_pool);
+            
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+        } else if (elem->math.latex_src) {
+            // Fallback: output LaTeX source in a comment
+            if (opts.pretty_print) html_indent(out, depth + 1);
+            strbuf_append_str(out, "<span class=\"");
+            strbuf_append_str(out, opts.css_class_prefix);
+            strbuf_append_str(out, "math-fallback\">");
+            html_escape_append(out, elem->math.latex_src, strlen(elem->math.latex_src));
+            strbuf_append_str(out, "</span>");
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+        }
+        
+        // Equation number
+        if (elem->math.number) {
+            if (opts.pretty_print) html_indent(out, depth + 1);
+            strbuf_append_format(out, "<span class=\"%seq-number\">(%s)</span>",
+                opts.css_class_prefix, elem->math.number);
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+        }
+        
+        if (opts.pretty_print) html_indent(out, depth);
+        strbuf_append_str(out, "</div>");
+        if (opts.pretty_print) strbuf_append_str(out, "\n");
+    } else {
+        // Inline math
+        strbuf_append_format(out, "<span class=\"%s%s\">", opts.css_class_prefix, css_class);
+        
+        if (has_svg) {
+            // Render math as inline SVG
+            Pool* temp_pool = pool_create();
+            Arena* temp_arena = arena_create_default(temp_pool);
+            
+            SVGParams svg_params = SVGParams::defaults();
+            svg_params.indent = false;
+            
+            const char* svg = svg_render_math_inline(elem->math.node, temp_arena, &svg_params);
+            if (svg) {
+                strbuf_append_str(out, svg);
+            }
+            
+            arena_destroy(temp_arena);
+            pool_destroy(temp_pool);
+        } else if (elem->math.latex_src) {
+            // Fallback: output escaped LaTeX
+            html_escape_append(out, elem->math.latex_src, strlen(elem->math.latex_src));
+        }
+        
+        strbuf_append_str(out, "</span>");
+    }
+}
+
+static void render_link_html(DocElement* elem, StrBuf* out,
+                              const HtmlOutputOptions& opts) {
+    strbuf_append_str(out, "<a href=\"");
+    if (elem->link.href) {
+        html_escape_append(out, elem->link.href, strlen(elem->link.href));
+    }
+    strbuf_append_str(out, "\">");
+    
+    if (elem->link.link_text) {
+        html_escape_append(out, elem->link.link_text, strlen(elem->link.link_text));
+    }
+    
+    render_children_html(elem, out, opts, 0);
+    
+    strbuf_append_str(out, "</a>");
+}
+
+static void render_image_html(DocElement* elem, StrBuf* out,
+                               const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    
+    strbuf_append_str(out, "<img src=\"");
+    if (elem->image.src) {
+        html_escape_append(out, elem->image.src, strlen(elem->image.src));
+    }
+    strbuf_append_str(out, "\"");
+    
+    if (elem->image.width > 0) {
+        strbuf_append_format(out, " width=\"%.0f\"", elem->image.width);
+    }
+    if (elem->image.height > 0) {
+        strbuf_append_format(out, " height=\"%.0f\"", elem->image.height);
+    }
+    if (elem->image.alt) {
+        strbuf_append_str(out, " alt=\"");
+        html_escape_append(out, elem->image.alt, strlen(elem->image.alt));
+        strbuf_append_str(out, "\"");
+    }
+    
+    strbuf_append_str(out, " />");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_figure_html(DocElement* elem, StrBuf* out,
+                                const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<figure class=\"%sfigure\">", opts.css_class_prefix);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_str(out, "</figure>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_blockquote_html(DocElement* elem, StrBuf* out,
+                                    const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<blockquote class=\"%sblockquote\">", opts.css_class_prefix);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_str(out, "</blockquote>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_code_block_html(DocElement* elem, StrBuf* out,
+                                    const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<pre class=\"%scode-block\"><code>", opts.css_class_prefix);
+    
+    // For code blocks, render text directly without escaping newlines
+    if (elem->text.text && elem->text.text_len > 0) {
+        html_escape_append(out, elem->text.text, elem->text.text_len);
+    }
+    render_children_html(elem, out, opts, depth + 1);
+    
+    strbuf_append_str(out, "</code></pre>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_cross_ref_html(DocElement* elem, StrBuf* out,
+                                   const HtmlOutputOptions& opts) {
+    strbuf_append_str(out, "<a href=\"#");
+    if (elem->ref.ref_label) {
+        html_escape_append(out, elem->ref.ref_label, strlen(elem->ref.ref_label));
+    }
+    strbuf_append_str(out, "\">");
+    
+    if (elem->ref.ref_text) {
+        html_escape_append(out, elem->ref.ref_text, strlen(elem->ref.ref_text));
+    }
+    
+    strbuf_append_str(out, "</a>");
+}
+
+static void render_citation_html(DocElement* elem, StrBuf* out,
+                                  const HtmlOutputOptions& opts) {
+    strbuf_append_str(out, "<cite>");
+    if (elem->citation.cite_text) {
+        html_escape_append(out, elem->citation.cite_text, strlen(elem->citation.cite_text));
+    }
+    strbuf_append_str(out, "</cite>");
+}
+
+static void render_footnote_html(DocElement* elem, StrBuf* out,
+                                  const HtmlOutputOptions& opts) {
+    strbuf_append_format(out, "<sup class=\"%sfootnote\"><a href=\"#fn%d\">[%d]</a></sup>",
+        opts.css_class_prefix, elem->footnote.footnote_number, elem->footnote.footnote_number);
+}
+
+static void render_abstract_html(DocElement* elem, StrBuf* out,
+                                  const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<div class=\"%sabstract\">", opts.css_class_prefix);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    if (opts.pretty_print) html_indent(out, depth + 1);
+    strbuf_append_format(out, "<div class=\"%sabstract-title\">Abstract</div>", opts.css_class_prefix);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_str(out, "</div>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_title_block_html(DocElement* elem, StrBuf* out,
+                                     const HtmlOutputOptions& opts, int depth,
+                                     TexDocumentModel* doc) {
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_format(out, "<div class=\"%stitle-block\">", opts.css_class_prefix);
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+    
+    if (doc && doc->title) {
+        if (opts.pretty_print) html_indent(out, depth + 1);
+        strbuf_append_format(out, "<div class=\"%sdoc-title\">", opts.css_class_prefix);
+        html_escape_append(out, doc->title, strlen(doc->title));
+        strbuf_append_str(out, "</div>");
+        if (opts.pretty_print) strbuf_append_str(out, "\n");
+    }
+    
+    if (doc && doc->author) {
+        if (opts.pretty_print) html_indent(out, depth + 1);
+        strbuf_append_format(out, "<div class=\"%sdoc-author\">", opts.css_class_prefix);
+        html_escape_append(out, doc->author, strlen(doc->author));
+        strbuf_append_str(out, "</div>");
+        if (opts.pretty_print) strbuf_append_str(out, "\n");
+    }
+    
+    if (doc && doc->date) {
+        if (opts.pretty_print) html_indent(out, depth + 1);
+        strbuf_append_format(out, "<div class=\"%sdoc-date\">", opts.css_class_prefix);
+        html_escape_append(out, doc->date, strlen(doc->date));
+        strbuf_append_str(out, "</div>");
+        if (opts.pretty_print) strbuf_append_str(out, "\n");
+    }
+    
+    render_children_html(elem, out, opts, depth + 1);
+    
+    if (opts.pretty_print) html_indent(out, depth);
+    strbuf_append_str(out, "</div>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
+static void render_children_html(DocElement* parent, StrBuf* out,
+                                  const HtmlOutputOptions& opts, int depth) {
+    for (DocElement* child = parent->first_child; child; child = child->next_sibling) {
+        doc_element_to_html(child, out, opts, depth);
+    }
+}
+
+void doc_element_to_html(DocElement* elem, StrBuf* out,
+                          const HtmlOutputOptions& opts, int depth) {
+    if (!elem) return;
+    
+    switch (elem->type) {
+    case DocElemType::DOCUMENT:
+        render_children_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::TEXT_SPAN:
+        render_text_span_html(elem, out, opts);
+        break;
+        
+    case DocElemType::TEXT_RUN:
+        if (elem->text.text && elem->text.text_len > 0) {
+            html_escape_append(out, elem->text.text, elem->text.text_len);
+        }
+        break;
+        
+    case DocElemType::HEADING:
+        render_heading_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::PARAGRAPH:
+        render_paragraph_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::LIST:
+        render_list_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::LIST_ITEM: {
+        // Determine parent list type
+        ListType parent_type = ListType::ITEMIZE;
+        if (elem->parent && elem->parent->type == DocElemType::LIST) {
+            parent_type = elem->parent->list.list_type;
+        }
+        render_list_item_html(elem, out, opts, depth, parent_type);
+        break;
+    }
+        
+    case DocElemType::TABLE:
+        render_table_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::TABLE_ROW:
+        render_table_row_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::TABLE_CELL:
+        render_table_cell_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::MATH_INLINE:
+    case DocElemType::MATH_DISPLAY:
+    case DocElemType::MATH_EQUATION:
+    case DocElemType::MATH_ALIGN:
+        render_math_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::LINK:
+        render_link_html(elem, out, opts);
+        break;
+        
+    case DocElemType::IMAGE:
+        render_image_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::FIGURE:
+        render_figure_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::BLOCKQUOTE:
+        render_blockquote_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::CODE_BLOCK:
+        render_code_block_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::CROSS_REF:
+        render_cross_ref_html(elem, out, opts);
+        break;
+        
+    case DocElemType::CITATION:
+        render_citation_html(elem, out, opts);
+        break;
+        
+    case DocElemType::FOOTNOTE:
+        render_footnote_html(elem, out, opts);
+        break;
+        
+    case DocElemType::ABSTRACT:
+        render_abstract_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::TITLE_BLOCK:
+        render_title_block_html(elem, out, opts, depth, nullptr);
+        break;
+        
+    case DocElemType::SECTION:
+        render_children_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::SPACE:
+        if (elem->space.is_linebreak) {
+            strbuf_append_str(out, "<br />");
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+        } else {
+            strbuf_append_str(out, " ");
+        }
+        break;
+        
+    case DocElemType::RAW_HTML:
+        if (elem->raw.raw_content && elem->raw.raw_len > 0) {
+            strbuf_append_str_n(out, elem->raw.raw_content, elem->raw.raw_len);
+        }
+        break;
+        
+    case DocElemType::RAW_LATEX:
+        // Skip raw LaTeX in HTML output
+        strbuf_append_str(out, "<!-- LaTeX: ");
+        if (elem->raw.raw_content && elem->raw.raw_len > 0) {
+            html_escape_append(out, elem->raw.raw_content, elem->raw.raw_len);
+        }
+        strbuf_append_str(out, " -->");
+        break;
+        
+    case DocElemType::ERROR:
+        strbuf_append_str(out, "<span class=\"error\">[ERROR]</span>");
+        break;
+        
+    default:
+        log_debug("doc_element_to_html: unhandled type %s", doc_elem_type_name(elem->type));
+        break;
+    }
+}
+
+// ============================================================================
+// Document to HTML
+// ============================================================================
+
+bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOptions& opts) {
+    if (!doc || !output) return false;
+    
+    // HTML header
+    if (opts.standalone) {
+        strbuf_append_str(output, "<!DOCTYPE html>\n");
+        strbuf_append_format(output, "<html lang=\"%s\">\n", opts.lang);
+        strbuf_append_str(output, "<head>\n");
+        strbuf_append_str(output, "  <meta charset=\"UTF-8\">\n");
+        strbuf_append_str(output, "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+        
+        // Title
+        if (doc->title) {
+            strbuf_append_str(output, "  <title>");
+            html_escape_append(output, doc->title, strlen(doc->title));
+            strbuf_append_str(output, "</title>\n");
+        } else {
+            strbuf_append_str(output, "  <title>Document</title>\n");
+        }
+        
+        // Web fonts
+        if (opts.font_mode == HtmlOutputOptions::FONT_WEBFONT) {
+            strbuf_append_str(output, "  <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/computer-modern@0.1.2/cmsans.min.css\">\n");
+            strbuf_append_str(output, "  <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/computer-modern@0.1.2/cmserif.min.css\">\n");
+        }
+        
+        // CSS
+        if (opts.include_css) {
+            html_write_default_css(output, opts.css_class_prefix);
+        }
+        
+        strbuf_append_str(output, "</head>\n");
+        strbuf_append_str(output, "<body>\n");
+    }
+    
+    // Document container
+    strbuf_append_format(output, "<article class=\"%sdocument %s%s\">\n", 
+        opts.css_class_prefix, opts.css_class_prefix, doc->document_class);
+    
+    // Title block
+    if (doc->title || doc->author || doc->date) {
+        strbuf_append_format(output, "  <header class=\"%stitle-block\">\n", opts.css_class_prefix);
+        if (doc->title) {
+            strbuf_append_format(output, "    <h1 class=\"%sdoc-title\">", opts.css_class_prefix);
+            html_escape_append(output, doc->title, strlen(doc->title));
+            strbuf_append_str(output, "</h1>\n");
+        }
+        if (doc->author) {
+            strbuf_append_format(output, "    <div class=\"%sdoc-author\">", opts.css_class_prefix);
+            html_escape_append(output, doc->author, strlen(doc->author));
+            strbuf_append_str(output, "</div>\n");
+        }
+        if (doc->date) {
+            strbuf_append_format(output, "    <div class=\"%sdoc-date\">", opts.css_class_prefix);
+            html_escape_append(output, doc->date, strlen(doc->date));
+            strbuf_append_str(output, "</div>\n");
+        }
+        strbuf_append_str(output, "  </header>\n");
+    }
+    
+    // Document content
+    if (doc->root) {
+        doc_element_to_html(doc->root, output, opts, 1);
+    }
+    
+    strbuf_append_str(output, "</article>\n");
+    
+    // HTML footer
+    if (opts.standalone) {
+        strbuf_append_str(output, "</body>\n");
+        strbuf_append_str(output, "</html>\n");
+    }
+    
+    return true;
+}
+
+// ============================================================================
+// Debug Output
+// ============================================================================
+
+void doc_element_dump(DocElement* elem, StrBuf* out, int depth) {
+    if (!elem) return;
+    
+    // Indent
+    for (int i = 0; i < depth; i++) {
+        strbuf_append_str(out, "  ");
+    }
+    
+    // Type name
+    strbuf_append_format(out, "[%s]", doc_elem_type_name(elem->type));
+    
+    // Type-specific info
+    switch (elem->type) {
+    case DocElemType::TEXT_SPAN:
+    case DocElemType::TEXT_RUN:
+        if (elem->text.text && elem->text.text_len > 0) {
+            strbuf_append_str(out, " \"");
+            size_t show_len = elem->text.text_len > 40 ? 40 : elem->text.text_len;
+            strbuf_append_str_n(out, elem->text.text, show_len);
+            if (elem->text.text_len > 40) strbuf_append_str(out, "...");
+            strbuf_append_str(out, "\"");
+        }
+        if (elem->text.style.flags != DocTextStyle::NONE) {
+            strbuf_append_format(out, " flags=0x%x", elem->text.style.flags);
+        }
+        break;
+        
+    case DocElemType::HEADING:
+        strbuf_append_format(out, " level=%d", elem->heading.level);
+        if (elem->heading.title) {
+            strbuf_append_format(out, " title=\"%s\"", elem->heading.title);
+        }
+        if (elem->heading.number) {
+            strbuf_append_format(out, " number=\"%s\"", elem->heading.number);
+        }
+        break;
+        
+    case DocElemType::LIST:
+        strbuf_append_format(out, " type=%d", (int)elem->list.list_type);
+        break;
+        
+    case DocElemType::MATH_INLINE:
+    case DocElemType::MATH_DISPLAY:
+        if (elem->math.latex_src) {
+            strbuf_append_format(out, " src=\"%s\"", elem->math.latex_src);
+        }
+        break;
+        
+    default:
+        break;
+    }
+    
+    strbuf_append_str(out, "\n");
+    
+    // Recurse to children
+    for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+        doc_element_dump(child, out, depth + 1);
+    }
+}
+
+void doc_model_dump(TexDocumentModel* doc, StrBuf* out) {
+    if (!doc) {
+        strbuf_append_str(out, "(null document)\n");
+        return;
+    }
+    
+    strbuf_append_str(out, "=== Document Model ===\n");
+    strbuf_append_format(out, "Class: %s\n", doc->document_class ? doc->document_class : "(none)");
+    if (doc->title) strbuf_append_format(out, "Title: %s\n", doc->title);
+    if (doc->author) strbuf_append_format(out, "Author: %s\n", doc->author);
+    if (doc->date) strbuf_append_format(out, "Date: %s\n", doc->date);
+    strbuf_append_str(out, "\n--- Tree ---\n");
+    
+    if (doc->root) {
+        doc_element_dump(doc->root, out, 0);
+    } else {
+        strbuf_append_str(out, "(no root element)\n");
+    }
+}
+
+// ============================================================================
+// Phase C: LaTeX AST to Document Model Builder
+// ============================================================================
+
+// This section requires the Lambda runtime (ItemReader, ElementReader).
+// Define DOC_MODEL_MINIMAL to exclude this section for minimal test builds.
+#ifndef DOC_MODEL_MINIMAL
+
+// Forward declarations for recursive builders
+static DocElement* build_doc_element(const ItemReader& item, Arena* arena, 
+                                      TexDocumentModel* doc);
+static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
+                                         TexDocumentModel* doc);
+
+// Helper to check tag name equality (case-insensitive for safety)
+static bool tag_eq(const char* a, const char* b) {
+    if (!a || !b) return false;
+    return strcmp(a, b) == 0;
+}
+
+// Extract text content from an item (recursively collects all text)
+static const char* extract_text_content(const ItemReader& item, Arena* arena) {
+    if (item.isString()) {
+        const char* str = item.cstring();
+        if (str) {
+            size_t len = strlen(str);
+            char* copy = (char*)arena_alloc(arena, len + 1);
+            memcpy(copy, str, len + 1);
+            return copy;
+        }
+        return nullptr;
+    }
+    
+    if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        StrBuf* buf = strbuf_new_cap(256);
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            const char* child_text = extract_text_content(child, arena);
+            if (child_text) {
+                strbuf_append_str(buf, child_text);
+            }
+        }
+        
+        if (buf->length > 0) {
+            char* result = (char*)arena_alloc(arena, buf->length + 1);
+            memcpy(result, buf->str, buf->length + 1);
+            strbuf_free(buf);
+            return result;
+        }
+        strbuf_free(buf);
+    }
+    
+    return nullptr;
+}
+
+// Build a TEXT_SPAN element with style flags
+static DocElement* build_text_command(const char* cmd_name, const ElementReader& elem,
+                                       Arena* arena, TexDocumentModel* doc) {
+    DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+    span->text.style = DocTextStyle::plain();
+    
+    // Set style flags based on command
+    if (tag_eq(cmd_name, "textbf") || tag_eq(cmd_name, "bf") || tag_eq(cmd_name, "bfseries")) {
+        span->text.style.flags |= DocTextStyle::BOLD;
+    } else if (tag_eq(cmd_name, "textit") || tag_eq(cmd_name, "it") || 
+               tag_eq(cmd_name, "itshape") || tag_eq(cmd_name, "emph")) {
+        span->text.style.flags |= DocTextStyle::ITALIC;
+    } else if (tag_eq(cmd_name, "texttt") || tag_eq(cmd_name, "tt") || tag_eq(cmd_name, "ttfamily")) {
+        span->text.style.flags |= DocTextStyle::MONOSPACE;
+    } else if (tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "scshape")) {
+        span->text.style.flags |= DocTextStyle::SMALLCAPS;
+    } else if (tag_eq(cmd_name, "underline")) {
+        span->text.style.flags |= DocTextStyle::UNDERLINE;
+    } else if (tag_eq(cmd_name, "sout") || tag_eq(cmd_name, "st")) {
+        span->text.style.flags |= DocTextStyle::STRIKEOUT;
+    }
+    
+    // Process children
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        DocElement* child_elem = build_inline_content(child, arena, doc);
+        if (child_elem) {
+            doc_append_child(span, child_elem);
+        }
+    }
+    
+    return span;
+}
+
+// Build a HEADING element from section command
+static DocElement* build_section_command(const char* cmd_name, const ElementReader& elem,
+                                          Arena* arena, TexDocumentModel* doc) {
+    DocElement* heading = doc_alloc_element(arena, DocElemType::HEADING);
+    
+    // Determine level from command name
+    if (tag_eq(cmd_name, "part")) {
+        heading->heading.level = 0;
+    } else if (tag_eq(cmd_name, "chapter")) {
+        heading->heading.level = 1;
+    } else if (tag_eq(cmd_name, "section")) {
+        heading->heading.level = 2;
+    } else if (tag_eq(cmd_name, "subsection")) {
+        heading->heading.level = 3;
+    } else if (tag_eq(cmd_name, "subsubsection")) {
+        heading->heading.level = 4;
+    } else if (tag_eq(cmd_name, "paragraph")) {
+        heading->heading.level = 5;
+    } else if (tag_eq(cmd_name, "subparagraph")) {
+        heading->heading.level = 6;
+    } else {
+        heading->heading.level = 2; // default to section
+    }
+    
+    // Check for starred version (no numbering)
+    // Look for "star" child element
+    auto iter = elem.children();
+    ItemReader child;
+    bool has_star = false;
+    
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag_eq(tag, "star") || tag_eq(tag, "*")) {
+                has_star = true;
+            } else if (tag_eq(tag, "curly_group") || tag_eq(tag, "title") || 
+                       tag_eq(tag, "brack_group")) {
+                // Extract title text
+                heading->heading.title = extract_text_content(child, arena);
+            }
+        }
+    }
+    
+    if (has_star) {
+        heading->flags |= DocElement::FLAG_STARRED;
+    } else {
+        heading->flags |= DocElement::FLAG_NUMBERED;
+        
+        // Generate section number
+        switch (heading->heading.level) {
+            case 1: doc->chapter_num++; 
+                    doc->section_num = 0; 
+                    break;
+            case 2: doc->section_num++;
+                    doc->subsection_num = 0;
+                    break;
+            case 3: doc->subsection_num++; break;
+        }
+        
+        // Format number string
+        char num_buf[64];
+        switch (heading->heading.level) {
+            case 1:
+                snprintf(num_buf, sizeof(num_buf), "%d", doc->chapter_num);
+                break;
+            case 2:
+                if (doc->chapter_num > 0) {
+                    snprintf(num_buf, sizeof(num_buf), "%d.%d", 
+                             doc->chapter_num, doc->section_num);
+                } else {
+                    snprintf(num_buf, sizeof(num_buf), "%d", doc->section_num);
+                }
+                break;
+            case 3:
+                if (doc->chapter_num > 0) {
+                    snprintf(num_buf, sizeof(num_buf), "%d.%d.%d",
+                             doc->chapter_num, doc->section_num, doc->subsection_num);
+                } else {
+                    snprintf(num_buf, sizeof(num_buf), "%d.%d", 
+                             doc->section_num, doc->subsection_num);
+                }
+                break;
+            default:
+                num_buf[0] = '\0';
+        }
+        
+        if (num_buf[0]) {
+            size_t len = strlen(num_buf);
+            char* num = (char*)arena_alloc(arena, len + 1);
+            memcpy(num, num_buf, len + 1);
+            heading->heading.number = num;
+        }
+    }
+    
+    return heading;
+}
+
+// Build inline content (text runs, styled spans, etc.)
+static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
+                                         TexDocumentModel* doc) {
+    if (item.isString()) {
+        const char* text = item.cstring();
+        if (text && strlen(text) > 0) {
+            return doc_create_text_cstr(arena, text, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    
+    if (!item.isElement()) {
+        return nullptr;
+    }
+    
+    ElementReader elem = item.asElement();
+    const char* tag = elem.tagName();
+    
+    if (!tag) return nullptr;
+    
+    // Text formatting commands
+    if (tag_eq(tag, "textbf") || tag_eq(tag, "textit") || tag_eq(tag, "texttt") ||
+        tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline")) {
+        return build_text_command(tag, elem, arena, doc);
+    }
+    
+    // Generic command - check command_name child
+    if (tag_eq(tag, "generic_command") || tag_eq(tag, "command")) {
+        auto iter = elem.children();
+        ItemReader child;
+        const char* cmd_name = nullptr;
+        
+        // Find command name
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                cmd_name = child.cstring();
+                if (cmd_name && cmd_name[0] == '\\') cmd_name++;
+                break;
+            }
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                if (tag_eq(child_elem.tagName(), "command_name")) {
+                    cmd_name = extract_text_content(child, arena);
+                    if (cmd_name && cmd_name[0] == '\\') cmd_name++;
+                    break;
+                }
+            }
+        }
+        
+        if (cmd_name) {
+            if (tag_eq(cmd_name, "textbf") || tag_eq(cmd_name, "textit") || 
+                tag_eq(cmd_name, "texttt") || tag_eq(cmd_name, "emph") ||
+                tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "underline")) {
+                return build_text_command(cmd_name, elem, arena, doc);
+            }
+        }
+    }
+    
+    // Curly group - process children
+    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group")) {
+        DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        span->text.style = DocTextStyle::plain();
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            DocElement* child_elem = build_inline_content(child, arena, doc);
+            if (child_elem) {
+                doc_append_child(span, child_elem);
+            }
+        }
+        
+        // If only one child, return it directly
+        if (span->first_child && span->first_child == span->last_child) {
+            DocElement* only_child = span->first_child;
+            only_child->parent = nullptr;
+            only_child->next_sibling = nullptr;
+            return only_child;
+        }
+        
+        return span->first_child ? span : nullptr;
+    }
+    
+    // Inline math
+    if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
+        DocElement* math = doc_alloc_element(arena, DocElemType::MATH_INLINE);
+        math->math.latex_src = extract_text_content(item, arena);
+        math->math.node = nullptr; // Will be populated by typesetter if needed
+        return math;
+    }
+    
+    // Text content
+    if (tag_eq(tag, "text") || tag_eq(tag, "word") || tag_eq(tag, "TEXT")) {
+        const char* text = extract_text_content(item, arena);
+        if (text && strlen(text) > 0) {
+            return doc_create_text_cstr(arena, text, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    
+    // Default: process children
+    auto iter = elem.children();
+    ItemReader child;
+    DocElement* result = nullptr;
+    
+    while (iter.next(&child)) {
+        DocElement* child_elem = build_inline_content(child, arena, doc);
+        if (child_elem) {
+            if (!result) {
+                result = child_elem;
+            } else {
+                // Multiple children - wrap in span
+                DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                span->text.style = DocTextStyle::plain();
+                doc_append_child(span, result);
+                doc_append_child(span, child_elem);
+                result = span;
+            }
+        }
+    }
+    
+    return result;
+}
+
+// Build a paragraph element
+static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
+                                    TexDocumentModel* doc) {
+    DocElement* para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        DocElement* child_elem = build_inline_content(child, arena, doc);
+        if (child_elem) {
+            doc_append_child(para, child_elem);
+        }
+    }
+    
+    return para->first_child ? para : nullptr;
+}
+
+// ============================================================================
+// Phase D: List and Table Environment Builders
+// ============================================================================
+
+// Forward declaration for recursive builder
+static DocElement* build_doc_element(const ItemReader& item, Arena* arena, 
+                                      TexDocumentModel* doc);
+
+// Build a list item element
+static DocElement* build_list_item(const ElementReader& item_elem, Arena* arena,
+                                    TexDocumentModel* doc, ListType list_type) {
+    DocElement* li = doc_alloc_element(arena, DocElemType::LIST_ITEM);
+    
+    // For description lists, extract label from optional argument
+    if (list_type == ListType::DESCRIPTION) {
+        // Look for label child
+        auto iter = item_elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (child_tag && (tag_eq(child_tag, "label") || tag_eq(child_tag, "optional"))) {
+                    li->list_item.label = extract_text_content(child, arena);
+                    continue;
+                }
+            }
+            // Build content
+            DocElement* content_elem = build_doc_element(child, arena, doc);
+            if (content_elem) {
+                doc_append_child(li, content_elem);
+            }
+        }
+    } else {
+        // Process all children as content
+        auto iter = item_elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            DocElement* content_elem = build_doc_element(child, arena, doc);
+            if (content_elem) {
+                doc_append_child(li, content_elem);
+            }
+        }
+    }
+    
+    return li;
+}
+
+// Build a list environment (itemize, enumerate, description)
+static DocElement* build_list_environment(const char* env_name, const ElementReader& elem,
+                                           Arena* arena, TexDocumentModel* doc) {
+    DocElement* list = doc_alloc_element(arena, DocElemType::LIST);
+    
+    // Determine list type
+    if (tag_eq(env_name, "itemize")) {
+        list->list.list_type = ListType::ITEMIZE;
+    } else if (tag_eq(env_name, "enumerate")) {
+        list->list.list_type = ListType::ENUMERATE;
+        list->list.start_num = 1;
+    } else if (tag_eq(env_name, "description")) {
+        list->list.list_type = ListType::DESCRIPTION;
+    }
+    
+    int item_number = list->list.start_num;
+    
+    // Process children, looking for \item commands
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && tag_eq(child_tag, "item")) {
+                DocElement* li = build_list_item(child_elem, arena, doc, list->list.list_type);
+                if (li) {
+                    // For enumerate, assign number
+                    if (list->list.list_type == ListType::ENUMERATE) {
+                        li->list_item.item_number = item_number++;
+                    }
+                    doc_append_child(list, li);
+                }
+            }
+        }
+    }
+    
+    return list->first_child ? list : nullptr;
+}
+
+// Parse column alignment from column spec (e.g., "l|c|r")
+static char get_column_alignment(const char* spec, int col_index) {
+    if (!spec) return 'l';
+    
+    int col = 0;
+    for (const char* p = spec; *p; p++) {
+        if (*p == 'l' || *p == 'c' || *p == 'r' || *p == 'p') {
+            if (col == col_index) {
+                return *p;
+            }
+            col++;
+        }
+        // Skip modifiers like |, @{}, etc.
+    }
+    return 'l'; // default to left
+}
+
+// Count columns from column spec
+static int count_columns_from_spec(const char* spec) {
+    if (!spec) return 0;
+    
+    int count = 0;
+    for (const char* p = spec; *p; p++) {
+        if (*p == 'l' || *p == 'c' || *p == 'r' || *p == 'p') {
+            count++;
+        }
+    }
+    return count;
+}
+
+// Build a table environment
+static DocElement* build_table_environment(const char* env_name, const ElementReader& elem,
+                                            Arena* arena, TexDocumentModel* doc) {
+    DocElement* table = doc_alloc_element(arena, DocElemType::TABLE);
+    
+    // Look for column spec in first argument
+    auto iter = elem.children();
+    ItemReader child;
+    
+    // First pass: find column spec
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            if (child_tag && (tag_eq(child_tag, "column_spec") || tag_eq(child_tag, "arg"))) {
+                table->table.column_spec = extract_text_content(child, arena);
+                table->table.num_columns = count_columns_from_spec(table->table.column_spec);
+                break;
+            }
+        }
+    }
+    
+    // Second pass: process rows
+    DocElement* current_row = nullptr;
+    DocElement* current_cell = nullptr;
+    
+    iter = elem.children();
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (!child_tag) continue;
+            
+            // Row separator (\\)
+            if (tag_eq(child_tag, "row_sep") || tag_eq(child_tag, "newline") || 
+                tag_eq(child_tag, "\\\\")) {
+                if (current_cell) {
+                    if (!current_row) {
+                        current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
+                    }
+                    doc_append_child(current_row, current_cell);
+                    current_cell = nullptr;
+                }
+                if (current_row && current_row->first_child) {
+                    doc_append_child(table, current_row);
+                }
+                current_row = nullptr;
+                continue;
+            }
+            
+            // Cell separator (&)
+            if (tag_eq(child_tag, "cell_sep") || tag_eq(child_tag, "ampersand") ||
+                tag_eq(child_tag, "&")) {
+                if (current_cell) {
+                    if (!current_row) {
+                        current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
+                    }
+                    doc_append_child(current_row, current_cell);
+                }
+                current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
+                continue;
+            }
+            
+            // Skip column spec
+            if (tag_eq(child_tag, "column_spec") || tag_eq(child_tag, "arg")) {
+                continue;
+            }
+        }
+        
+        // Content for current cell
+        if (!current_row) {
+            current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
+        }
+        if (!current_cell) {
+            current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
+        }
+        
+        DocElement* content = build_doc_element(child, arena, doc);
+        if (content) {
+            doc_append_child(current_cell, content);
+        }
+    }
+    
+    // Append final row/cell
+    if (current_cell) {
+        if (!current_row) {
+            current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
+        }
+        doc_append_child(current_row, current_cell);
+    }
+    if (current_row && current_row->first_child) {
+        doc_append_child(table, current_row);
+    }
+    
+    return table->first_child ? table : nullptr;
+}
+
+// Build blockquote environment (quote, quotation)
+static DocElement* build_blockquote_environment(const ElementReader& elem,
+                                                 Arena* arena, TexDocumentModel* doc) {
+    DocElement* quote = doc_alloc_element(arena, DocElemType::BLOCKQUOTE);
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        DocElement* child_elem = build_doc_element(child, arena, doc);
+        if (child_elem) {
+            doc_append_child(quote, child_elem);
+        }
+    }
+    
+    return quote->first_child ? quote : nullptr;
+}
+
+// Build code block environment (verbatim, lstlisting)
+static DocElement* build_code_block_environment(const char* env_name, const ElementReader& elem,
+                                                 Arena* arena, TexDocumentModel* doc) {
+    (void)doc; // unused
+    DocElement* code = doc_alloc_element(arena, DocElemType::CODE_BLOCK);
+    code->text.text = nullptr;
+    code->text.text_len = 0;
+    code->text.style = DocTextStyle::plain();
+    
+    // Collect all text content from children
+    StrBuf* buf = strbuf_new_cap(256);
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            // Skip optional arguments for lstlisting
+            if (child_tag && tag_eq(child_tag, "optional")) {
+                continue;
+            }
+        }
+        // Collect text content
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text) {
+                strbuf_append_str(buf, text);
+            }
+        }
+    }
+    
+    if (buf->length > 0) {
+        char* text_copy = (char*)arena_alloc(arena, buf->length + 1);
+        memcpy(text_copy, buf->str, buf->length + 1);
+        code->text.text = text_copy;
+        code->text.text_len = buf->length;
+    }
+    
+    strbuf_free(buf);
+    return code;
+}
+
+// ============================================================================
+// Phase E: Image, Link, Figure, and Cross-Reference Builders
+// ============================================================================
+
+// Parse dimension value (e.g., "10cm", "100pt", "0.5\textwidth")
+static float parse_dimension(const char* value, Arena* arena) {
+    (void)arena;
+    if (!value) return 0.0f;
+    
+    // Try to parse as a simple number
+    char* end = nullptr;
+    float num = strtof(value, &end);
+    
+    if (end == value) return 0.0f; // no number found
+    
+    // Handle units
+    if (end && *end) {
+        // Skip whitespace
+        while (*end == ' ') end++;
+        
+        // Convert common units to pixels (approximate)
+        if (strncmp(end, "pt", 2) == 0) {
+            return num * 1.333f;  // 1pt ≈ 1.333px
+        } else if (strncmp(end, "cm", 2) == 0) {
+            return num * 37.795f; // 1cm ≈ 37.795px
+        } else if (strncmp(end, "mm", 2) == 0) {
+            return num * 3.7795f; // 1mm ≈ 3.7795px
+        } else if (strncmp(end, "in", 2) == 0) {
+            return num * 96.0f;   // 1in = 96px
+        } else if (strncmp(end, "px", 2) == 0) {
+            return num;
+        } else if (strncmp(end, "em", 2) == 0) {
+            return num * 16.0f;   // assume 1em = 16px
+        }
+        // textwidth, linewidth - return as percentage approximation
+        if (strstr(end, "textwidth") || strstr(end, "linewidth")) {
+            return num * 600.0f;  // assume textwidth ~600px
+        }
+    }
+    
+    return num;
+}
+
+// Parse graphics options like [width=10cm, height=5cm]
+static void parse_graphics_options(const char* opts, float* width, float* height, Arena* arena) {
+    if (!opts) return;
+    
+    *width = 0.0f;
+    *height = 0.0f;
+    
+    // Look for width=...
+    const char* w = strstr(opts, "width=");
+    if (w) {
+        w += 6; // skip "width="
+        // Find end of value (comma or end of string)
+        const char* end = w;
+        while (*end && *end != ',' && *end != ']' && *end != ' ') end++;
+        size_t len = end - w;
+        char* val = (char*)arena_alloc(arena, len + 1);
+        memcpy(val, w, len);
+        val[len] = '\0';
+        *width = parse_dimension(val, arena);
+    }
+    
+    // Look for height=...
+    const char* h = strstr(opts, "height=");
+    if (h) {
+        h += 7; // skip "height="
+        const char* end = h;
+        while (*end && *end != ',' && *end != ']' && *end != ' ') end++;
+        size_t len = end - h;
+        char* val = (char*)arena_alloc(arena, len + 1);
+        memcpy(val, h, len);
+        val[len] = '\0';
+        *height = parse_dimension(val, arena);
+    }
+}
+
+// Build image command (\includegraphics)
+static DocElement* build_image_command(const ElementReader& elem, Arena* arena,
+                                        TexDocumentModel* doc) {
+    (void)doc;
+    DocElement* img = doc_alloc_element(arena, DocElemType::IMAGE);
+    img->image.src = nullptr;
+    img->image.width = 0.0f;
+    img->image.height = 0.0f;
+    img->image.alt = nullptr;
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag) {
+                // Optional arguments contain width/height
+                if (tag_eq(child_tag, "optional") || tag_eq(child_tag, "brack_group")) {
+                    const char* opts = extract_text_content(child, arena);
+                    parse_graphics_options(opts, &img->image.width, &img->image.height, arena);
+                }
+                // Required argument is the file path
+                else if (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg") ||
+                         tag_eq(child_tag, "path")) {
+                    img->image.src = extract_text_content(child, arena);
+                }
+            }
+        } else if (child.isString()) {
+            // Could be the path directly
+            if (!img->image.src) {
+                img->image.src = child.cstring();
+            }
+        }
+    }
+    
+    return img;
+}
+
+// Build href command (\href{url}{text})
+static DocElement* build_href_command(const ElementReader& elem, Arena* arena,
+                                       TexDocumentModel* doc) {
+    (void)doc;
+    DocElement* link = doc_alloc_element(arena, DocElemType::LINK);
+    link->link.href = nullptr;
+    link->link.link_text = nullptr;
+    
+    int arg_index = 0;
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                const char* text = extract_text_content(child, arena);
+                if (arg_index == 0) {
+                    link->link.href = text;  // first arg is URL
+                } else {
+                    link->link.link_text = text;  // second arg is display text
+                }
+                arg_index++;
+            }
+        }
+    }
+    
+    return link;
+}
+
+// Build url command (\url{...})
+static DocElement* build_url_command(const ElementReader& elem, Arena* arena,
+                                      TexDocumentModel* doc) {
+    (void)doc;
+    DocElement* link = doc_alloc_element(arena, DocElemType::LINK);
+    link->link.href = nullptr;
+    link->link.link_text = nullptr;
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                const char* url = extract_text_content(child, arena);
+                link->link.href = url;
+                link->link.link_text = url;  // Display URL as link text
+            }
+        } else if (child.isString()) {
+            const char* url = child.cstring();
+            if (url) {
+                link->link.href = url;
+                link->link.link_text = url;
+            }
+        }
+    }
+    
+    return link;
+}
+
+// Build label command (\label{...})
+static void process_label_command(const ElementReader& elem, Arena* arena,
+                                   TexDocumentModel* doc, DocElement* parent) {
+    const char* label = nullptr;
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                label = extract_text_content(child, arena);
+            }
+        } else if (child.isString()) {
+            label = child.cstring();
+        }
+    }
+    
+    if (label) {
+        doc->add_label(label, nullptr, -1);
+        
+        // If parent is a heading, set the label on it
+        if (parent && parent->type == DocElemType::HEADING) {
+            parent->heading.label = label;
+        }
+    }
+}
+
+// Build ref command (\ref{...})
+static DocElement* build_ref_command(const ElementReader& elem, Arena* arena,
+                                      TexDocumentModel* doc) {
+    DocElement* ref = doc_alloc_element(arena, DocElemType::CROSS_REF);
+    ref->ref.ref_label = nullptr;
+    ref->ref.ref_text = nullptr;
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                ref->ref.ref_label = extract_text_content(child, arena);
+            }
+        } else if (child.isString()) {
+            ref->ref.ref_label = child.cstring();
+        }
+    }
+    
+    // Try to resolve the reference
+    if (ref->ref.ref_label) {
+        const char* resolved = doc->resolve_ref(ref->ref.ref_label);
+        if (resolved) {
+            ref->ref.ref_text = resolved;
+        } else {
+            // Unresolved reference - show ?? for now
+            ref->ref.ref_text = "??";
+        }
+    }
+    
+    return ref;
+}
+
+// Build figure environment
+static DocElement* build_figure_environment(const ElementReader& elem, Arena* arena,
+                                             TexDocumentModel* doc) {
+    DocElement* fig = doc_alloc_element(arena, DocElemType::FIGURE);
+    fig->flags |= DocElement::FLAG_NUMBERED;
+    
+    // Track caption and label for this figure
+    const char* caption_text = nullptr;
+    const char* label = nullptr;
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (!child.isElement()) continue;
+        
+        ElementReader child_elem = child.asElement();
+        const char* child_tag = child_elem.tagName();
+        
+        if (!child_tag) continue;
+        
+        // Handle caption
+        if (tag_eq(child_tag, "caption")) {
+            auto caption_iter = child_elem.children();
+            ItemReader caption_child;
+            while (caption_iter.next(&caption_child)) {
+                if (caption_child.isElement()) {
+                    ElementReader cc_elem = caption_child.asElement();
+                    const char* cc_tag = cc_elem.tagName();
+                    if (cc_tag && (tag_eq(cc_tag, "curly_group") || tag_eq(cc_tag, "arg"))) {
+                        caption_text = extract_text_content(caption_child, arena);
+                    }
+                }
+            }
+        }
+        // Handle label
+        else if (tag_eq(child_tag, "label")) {
+            auto label_iter = child_elem.children();
+            ItemReader label_child;
+            while (label_iter.next(&label_child)) {
+                if (label_child.isElement()) {
+                    ElementReader lc_elem = label_child.asElement();
+                    const char* lc_tag = lc_elem.tagName();
+                    if (lc_tag && (tag_eq(lc_tag, "curly_group") || tag_eq(lc_tag, "arg"))) {
+                        label = extract_text_content(label_child, arena);
+                    }
+                } else if (label_child.isString()) {
+                    label = label_child.cstring();
+                }
+            }
+        }
+        // Handle centering (skip)
+        else if (tag_eq(child_tag, "centering")) {
+            fig->flags |= DocElement::FLAG_CENTERED;
+        }
+        // Handle includegraphics
+        else if (tag_eq(child_tag, "includegraphics")) {
+            DocElement* img = build_image_command(child_elem, arena, doc);
+            if (img) {
+                doc_append_child(fig, img);
+            }
+        }
+        // Other content
+        else {
+            DocElement* content = build_doc_element(child, arena, doc);
+            if (content) {
+                doc_append_child(fig, content);
+            }
+        }
+    }
+    
+    // Add caption element if present
+    if (caption_text) {
+        // Create figcaption structure
+        DocElement* caption_elem = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        caption_elem->text.style = DocTextStyle::plain();
+        
+        // Format caption with figure number
+        // Note: In a full implementation, we'd track figure numbering per chapter
+        static int figure_num = 0;
+        figure_num++;
+        
+        char* formatted = (char*)arena_alloc(arena, strlen(caption_text) + 32);
+        sprintf(formatted, "Figure %d: %s", figure_num, caption_text);
+        caption_elem->text.text = formatted;
+        caption_elem->text.text_len = strlen(formatted);
+        
+        doc_append_child(fig, caption_elem);
+        
+        // Register label if present
+        if (label) {
+            char num_str[16];
+            sprintf(num_str, "%d", figure_num);
+            doc->add_label(label, num_str, -1);
+        }
+    }
+    
+    return fig;
+}
+
+// Build footnote command (\footnote{...})
+static DocElement* build_footnote_command(const ElementReader& elem, Arena* arena,
+                                           TexDocumentModel* doc) {
+    (void)doc;
+    DocElement* fn = doc_alloc_element(arena, DocElemType::FOOTNOTE);
+    
+    static int footnote_num = 0;
+    footnote_num++;
+    fn->footnote.footnote_number = footnote_num;
+    
+    // Process footnote content
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                DocElement* content = build_doc_element(child, arena, doc);
+                if (content) {
+                    doc_append_child(fn, content);
+                }
+            }
+        }
+    }
+    
+    return fn;
+}
+
+// Build cite command (\cite{...})
+static DocElement* build_cite_command(const ElementReader& elem, Arena* arena,
+                                       TexDocumentModel* doc) {
+    DocElement* cite = doc_alloc_element(arena, DocElemType::CITATION);
+    cite->citation.key = nullptr;
+    cite->citation.cite_text = nullptr;
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                cite->citation.key = extract_text_content(child, arena);
+            }
+        } else if (child.isString()) {
+            cite->citation.key = child.cstring();
+        }
+    }
+    
+    // Try to resolve citation
+    if (cite->citation.key) {
+        const char* resolved = doc->resolve_cite(cite->citation.key);
+        if (resolved) {
+            cite->citation.cite_text = resolved;
+        } else {
+            // Unresolved citation - format as [key]
+            size_t len = strlen(cite->citation.key) + 3;
+            char* text = (char*)arena_alloc(arena, len);
+            sprintf(text, "[%s]", cite->citation.key);
+            cite->citation.cite_text = text;
+        }
+    }
+    
+    return cite;
+}
+
+// Main builder - converts LaTeX AST item to DocElement
+static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
+                                      TexDocumentModel* doc) {
+    if (item.isString()) {
+        const char* text = item.cstring();
+        if (text && strlen(text) > 0) {
+            // Create a text run for bare strings
+            return doc_create_text_cstr(arena, text, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    
+    if (!item.isElement()) {
+        return nullptr;
+    }
+    
+    ElementReader elem = item.asElement();
+    const char* tag = elem.tagName();
+    
+    if (!tag) return nullptr;
+    
+    // Section commands
+    if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || 
+        tag_eq(tag, "subsubsection") || tag_eq(tag, "paragraph") ||
+        tag_eq(tag, "chapter") || tag_eq(tag, "part")) {
+        return build_section_command(tag, elem, arena, doc);
+    }
+    
+    // Paragraph
+    if (tag_eq(tag, "paragraph_content") || tag_eq(tag, "text_mode")) {
+        return build_paragraph(elem, arena, doc);
+    }
+    
+    // Display math
+    if (tag_eq(tag, "display_math") || tag_eq(tag, "equation") || 
+        tag_eq(tag, "equation*") || tag_eq(tag, "displaymath")) {
+        DocElement* math = doc_alloc_element(arena, DocElemType::MATH_DISPLAY);
+        math->math.latex_src = extract_text_content(item, arena);
+        math->math.node = nullptr;
+        return math;
+    }
+    
+    // Inline math
+    if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
+        DocElement* math = doc_alloc_element(arena, DocElemType::MATH_INLINE);
+        math->math.latex_src = extract_text_content(item, arena);
+        math->math.node = nullptr;
+        return math;
+    }
+    
+    // List environments
+    if (tag_eq(tag, "itemize") || tag_eq(tag, "enumerate") || tag_eq(tag, "description")) {
+        return build_list_environment(tag, elem, arena, doc);
+    }
+    
+    // Table environments
+    if (tag_eq(tag, "tabular") || tag_eq(tag, "tabular*") || tag_eq(tag, "array")) {
+        return build_table_environment(tag, elem, arena, doc);
+    }
+    
+    // Quote environments
+    if (tag_eq(tag, "quote") || tag_eq(tag, "quotation")) {
+        return build_blockquote_environment(elem, arena, doc);
+    }
+    
+    // Code environments
+    if (tag_eq(tag, "verbatim") || tag_eq(tag, "lstlisting") || tag_eq(tag, "listing")) {
+        return build_code_block_environment(tag, elem, arena, doc);
+    }
+    
+    // Phase E: Image, Link, Figure, Cross-Reference Commands
+    
+    // Image command (\includegraphics)
+    if (tag_eq(tag, "includegraphics")) {
+        return build_image_command(elem, arena, doc);
+    }
+    
+    // Link commands (\href, \url)
+    if (tag_eq(tag, "href")) {
+        return build_href_command(elem, arena, doc);
+    }
+    if (tag_eq(tag, "url")) {
+        return build_url_command(elem, arena, doc);
+    }
+    
+    // Figure environment
+    if (tag_eq(tag, "figure") || tag_eq(tag, "figure*")) {
+        return build_figure_environment(elem, arena, doc);
+    }
+    
+    // Cross-reference commands
+    if (tag_eq(tag, "label")) {
+        // Labels don't produce visible output, but register with doc
+        process_label_command(elem, arena, doc, nullptr);
+        return nullptr;
+    }
+    if (tag_eq(tag, "ref") || tag_eq(tag, "eqref") || tag_eq(tag, "pageref")) {
+        return build_ref_command(elem, arena, doc);
+    }
+    
+    // Footnote command
+    if (tag_eq(tag, "footnote")) {
+        return build_footnote_command(elem, arena, doc);
+    }
+    
+    // Citation command
+    if (tag_eq(tag, "cite") || tag_eq(tag, "citep") || tag_eq(tag, "citet")) {
+        return build_cite_command(elem, arena, doc);
+    }
+    
+    // Document root
+    if (tag_eq(tag, "latex_document") || tag_eq(tag, "document")) {
+        DocElement* doc_elem = doc_alloc_element(arena, DocElemType::DOCUMENT);
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            DocElement* child_elem = build_doc_element(child, arena, doc);
+            if (child_elem) {
+                doc_append_child(doc_elem, child_elem);
+            }
+        }
+        
+        return doc_elem;
+    }
+    
+    // Document body (between \begin{document} and \end{document})
+    if (tag_eq(tag, "document_body") || tag_eq(tag, "body")) {
+        // Process children directly, appending to parent
+        DocElement* container = doc_alloc_element(arena, DocElemType::SECTION);
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            DocElement* child_elem = build_doc_element(child, arena, doc);
+            if (child_elem) {
+                doc_append_child(container, child_elem);
+            }
+        }
+        
+        return container->first_child ? container : nullptr;
+    }
+    
+    // Generic element - recurse to children
+    DocElement* container = nullptr;
+    
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        DocElement* child_elem = build_doc_element(child, arena, doc);
+        if (child_elem) {
+            if (!container) {
+                container = child_elem;
+            } else {
+                // Multiple children - need to wrap
+                if (container->type != DocElemType::SECTION) {
+                    DocElement* wrapper = doc_alloc_element(arena, DocElemType::SECTION);
+                    doc_append_child(wrapper, container);
+                    container = wrapper;
+                }
+                doc_append_child(container, child_elem);
+            }
+        }
+    }
+    
+    return container;
+}
+
+// ============================================================================
+// Main API: LaTeX AST to Document Model
+// ============================================================================
+
+TexDocumentModel* doc_model_from_latex(Item elem, Arena* arena, LaTeXContext& ctx) {
+    TexDocumentModel* doc = doc_model_create(arena);
+    
+    // Check for null element
+    if (get_type_id(elem) == LMD_TYPE_NULL) {
+        log_error("doc_model_from_latex: null element");
+        doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+        return doc;
+    }
+    
+    // Use ItemReader to traverse the Lambda Element tree
+    ItemReader reader(elem.to_const());
+    
+    // Build the document tree
+    DocElement* root = build_doc_element(reader, arena, doc);
+    
+    if (root) {
+        if (root->type != DocElemType::DOCUMENT) {
+            // Wrap in document element
+            doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+            doc_append_child(doc->root, root);
+        } else {
+            doc->root = root;
+        }
+    } else {
+        doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+    }
+    
+    log_debug("doc_model_from_latex: built document with %d labels, %d macros",
+              doc->label_count, doc->macro_count);
+    
+    return doc;
+}
+
+#else // DOC_MODEL_MINIMAL
+
+// Stub implementation when Lambda runtime is not available
+TexDocumentModel* doc_model_from_latex(Item elem, Arena* arena, TFMFontManager* fonts) {
+    (void)elem; (void)fonts;
+    TexDocumentModel* doc = doc_model_create(arena);
+    doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+    log_debug("doc_model_from_latex: minimal stub (DOC_MODEL_MINIMAL defined)");
+    return doc;
+}
+
+#endif // DOC_MODEL_MINIMAL
+
+TexDocumentModel* doc_model_from_string(const char* latex, size_t len, Arena* arena, TFMFontManager* fonts) {
+    // TODO: Parse LaTeX string and build document model
+    // For now, create a minimal document structure
+    TexDocumentModel* doc = doc_model_create(arena);
+    doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
+    
+    log_debug("doc_model_from_string: created empty document model (implementation pending)");
+    
+    return doc;
+}
+
+// ============================================================================
+// Placeholder for TexNode conversion
+// (To be implemented in Phase B)
+// ============================================================================
+
+TexNode* doc_model_to_texnode(TexDocumentModel* doc, Arena* arena, LaTeXContext& ctx) {
+    // TODO: Implement document model to TexNode conversion
+    log_debug("doc_model_to_texnode: not yet implemented");
+    return nullptr;
+}
+
+TexNode* doc_element_to_texnode(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    // TODO: Implement element to TexNode conversion
+    log_debug("doc_element_to_texnode: not yet implemented");
+    return nullptr;
+}
+
+} // namespace tex

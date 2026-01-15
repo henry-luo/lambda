@@ -609,4 +609,107 @@ const char* svg_render_to_string(
     return svg_get_output(writer);
 }
 
+// ============================================================================
+// Math-Specific SVG Functions (for HTML embedding)
+// ============================================================================
+
+void svg_compute_math_bounds(TexNode* math, float* width, float* height, float* depth) {
+    if (!math) {
+        if (width) *width = 0;
+        if (height) *height = 0;
+        if (depth) *depth = 0;
+        return;
+    }
+
+    // Use the node's own dimensions
+    if (width) *width = math->width;
+    if (height) *height = math->height;
+    if (depth) *depth = math->depth;
+}
+
+/**
+ * Write SVG header for inline math (no XML declaration, compact format).
+ */
+static void svg_write_inline_header(SVGWriter& writer, float width, float height, float depth) {
+    // Total height is height + depth
+    float total_height = height + depth;
+    
+    // ViewBox starts at (0, -height) so baseline is at y=0
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+        "viewBox=\"0 %.2f %.2f %.2f\" "
+        "width=\"%.2fpt\" height=\"%.2fpt\" "
+        "style=\"vertical-align: %.2fpt;\">",
+        -height,                          // viewBox y starts at -height (baseline at 0)
+        width, total_height,              // viewBox dimensions
+        width, total_height,              // actual dimensions in points
+        -depth);                          // CSS vertical-align to align baseline
+    strbuf_append_str(writer.output, buf);
+    
+    if (writer.params.indent) {
+        strbuf_append_char(writer.output, '\n');
+    }
+    
+    writer.indent_level++;
+}
+
+/**
+ * Write compact font styles for inline SVG.
+ */
+static void svg_write_inline_styles(SVGWriter& writer) {
+    write_indent(writer);
+    strbuf_append_str(writer.output, "<style>");
+    strbuf_append_str(writer.output, 
+        ".m{font-family:'CMU Serif','STIX Two Math',serif;font-style:italic}"
+        ".s{font-family:'CMU Serif','STIX Two Math',serif}"
+    );
+    strbuf_append_str(writer.output, "</style>");
+    write_newline(writer);
+}
+
+const char* svg_render_math_inline(TexNode* math, Arena* arena, const SVGParams* opts) {
+    if (!math) {
+        log_error("tex_svg_out: null math node for inline render");
+        return nullptr;
+    }
+
+    // Get dimensions
+    float width = math->width;
+    float height = math->height;
+    float depth = math->depth;
+
+    // Ensure minimum dimensions
+    if (width < 1.0f) width = 1.0f;
+    if (height + depth < 1.0f) height = 1.0f;
+
+    // Setup writer with compact params
+    SVGParams p = opts ? *opts : SVGParams::defaults();
+    p.indent = false;           // Compact output
+    p.include_metadata = false; // No title/desc for inline
+    p.viewport_width = width;
+    p.viewport_height = height + depth;
+
+    SVGWriter writer;
+    if (!svg_init(writer, arena, p)) {
+        return nullptr;
+    }
+
+    // Write inline SVG header (no XML declaration)
+    svg_write_inline_header(writer, width, height, depth);
+
+    // Write compact styles
+    svg_write_inline_styles(writer);
+
+    // Render math content at baseline y=0
+    // The viewBox is set up so y=0 is the baseline
+    svg_render_node(writer, math, 0, 0);
+
+    // Close SVG
+    writer.indent_level--;
+    strbuf_append_str(writer.output, "</svg>");
+
+    return svg_get_output(writer);
+}
+
 } // namespace tex
