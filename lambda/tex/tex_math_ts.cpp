@@ -194,6 +194,18 @@ static int get_big_op_code(const char* name, size_t len, bool display) {
     return 80 + offset;  // default to sum
 }
 
+// Check if a big operator uses limits-style display (above/below) in display mode
+// Returns false for integral-type operators which use scripts to the right even in display mode
+static bool op_uses_limits_display(const char* name, size_t len) {
+    // Integral operators never use limits above/below by default
+    if (len == 3 && strncmp(name, "int", 3) == 0) return false;
+    if (len == 4 && strncmp(name, "iint", 4) == 0) return false;
+    if (len == 5 && strncmp(name, "iiint", 5) == 0) return false;
+    if (len == 4 && strncmp(name, "oint", 4) == 0) return false;
+    // All other big operators use limits in display mode
+    return true;
+}
+
 // ============================================================================
 // Accent codes (cmmi10)
 // ============================================================================
@@ -817,12 +829,35 @@ TexNode* MathTypesetter::build_greek_letter(const char* cmd, size_t len) {
 }
 
 TexNode* MathTypesetter::build_symbol_command(const char* cmd, size_t len) {
-    const SymbolEntry* sym = lookup_symbol_entry(cmd, len);
-    if (!sym) return nullptr;
-
     float size = current_size();
     FontSpec font = ctx.symbol_font;
     font.size_pt = size;
+
+    // Handle composite symbols that require multiple characters
+    // \notin = \not (negation slash at 54) overlaid with \in (element-of at 50)
+    // In TeX DVI, this is rendered as two characters with negative kern to overlap
+    if (len == 5 && strncmp(cmd, "notin", 5) == 0) {
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        
+        // NOT slash (cmsy10 position 54)
+        TexNode* not_char = make_char_node(54, AtomType::Rel, font, symbol_tfm);
+        link_node(first, last, not_char);
+        
+        // Negative kern to overlap the characters
+        float kern_amount = -0.55f * size / 10.0f;
+        TexNode* kern = make_kern(ctx.arena, kern_amount);
+        link_node(first, last, kern);
+        
+        // IN symbol (cmsy10 position 50)
+        TexNode* in_char = make_char_node(50, AtomType::Rel, font, symbol_tfm);
+        link_node(first, last, in_char);
+        
+        return wrap_in_hbox(first, last);
+    }
+
+    const SymbolEntry* sym = lookup_symbol_entry(cmd, len);
+    if (!sym) return nullptr;
 
     return make_char_node(sym->code, sym->atom, font, symbol_tfm);
 }
@@ -1083,8 +1118,9 @@ TexNode* MathTypesetter::build_delimiter_group(TSNode node) {
     float content_height = content->height + content->depth;
 
     // TeX delimiter sizing: use normal font for small content, cmex for larger
-    // Threshold is approximately 1 ex (height of lowercase 'x')
-    float threshold = size * 0.5f;  // ~5pt for 10pt size
+    // TeX uses ~1.2× base font height as threshold for switching to extensible
+    // For 10pt font, that's about 12pt; for 14pt display font, about 17pt
+    float threshold = size * 1.2f;
     bool use_extensible = content_height > threshold;
 
     // Helper to make delimiter character
@@ -1139,15 +1175,14 @@ TexNode* MathTypesetter::build_delimiter_group(TSNode node) {
             font.size_pt = size;
             tfm = extension_tfm;
 
-            // cmex10 delimiter codepoints - use medium-sized variants for fractions
-            // These correspond to printable ASCII which matches TeX behavior
-            //   'h','i' (104,105) = medium brackets
-            //   larger parens are at lower codepoints (non-printable)
+            // cmex10 delimiter codepoints
+            //   Positions 0-15 are small delimiters
+            //   Positions 104/105 ('h'/'i') are bracket variants used by TeX
             if (d[0] == '(' || d[0] == ')') {
-                // cmex10 codepoints 0,1 (small) or 16,17 (medium) - both non-printable
+                // cmex10 codepoints 0,1 (small) 
                 cp = is_left ? 0 : 1;
             } else if (d[0] == '[' || d[0] == ']') {
-                // cmex10 uses 'h'=104, 'i'=105 for medium brackets (printable)
+                // cmex10 codepoints 104,105 ('h','i') - matches TeX output
                 cp = is_left ? 'h' : 'i';
             } else if (d[0] == '{' || d[0] == '}') {
                 // For braces, TeX uses cmsy10 'f'/'g' (102,103), not cmex10
@@ -1284,27 +1319,80 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
         FontSpec font = ctx.extension_font;  // Use extension font for big operators
         font.size_pt = op_size;
 
-        op = make_math_op(ctx.arena, op_code, is_display, font);
+        // Handle \iint and \iiint as multiple integral symbols
+        int num_ints = 0;
+        if (op_len == 4 && strncmp(op_name, "iint", 4) == 0) {
+            num_ints = 2;
+            op_code = is_display ? 90 : 82;  // integral code
+        } else if (op_len == 5 && strncmp(op_name, "iiint", 5) == 0) {
+            num_ints = 3;
+            op_code = is_display ? 90 : 82;  // integral code
+        }
 
-        // Get metrics from TFM (extension_tfm for cmex10)
-        if (extension_tfm && op_code >= 0 && op_code < 256) {
-            float scale = op_size / extension_tfm->design_size;
-            op->width = extension_tfm->char_width(op_code) * scale;
-            op->height = extension_tfm->char_height(op_code) * scale;
-            op->depth = extension_tfm->char_depth(op_code) * scale;
+        if (num_ints > 0) {
+            // Build multiple integral signs with small negative kerns between them
+            TexNode* first = nullptr;
+            TexNode* last = nullptr;
+            float total_width = 0;
+            float kern_amount = -0.3f * op_size / 10.0f;  // small overlap
+
+            for (int i = 0; i < num_ints; i++) {
+                TexNode* int_node = make_math_op(ctx.arena, op_code, is_display, font);
+
+                // Get metrics from TFM
+                if (extension_tfm && op_code >= 0 && op_code < 256) {
+                    float scale = op_size / extension_tfm->design_size;
+                    int_node->width = extension_tfm->char_width(op_code) * scale;
+                    int_node->height = extension_tfm->char_height(op_code) * scale;
+                    int_node->depth = extension_tfm->char_depth(op_code) * scale;
+                } else {
+                    int_node->width = 10.0f * op_size / 10.0f;
+                    int_node->height = 8.0f * op_size / 10.0f;
+                    int_node->depth = 2.0f * op_size / 10.0f;
+                }
+
+                link_node(first, last, int_node);
+                total_width += int_node->width;
+
+                // Add kern between integrals (but not after the last one)
+                if (i < num_ints - 1) {
+                    TexNode* kern = make_kern(ctx.arena, kern_amount);
+                    link_node(first, last, kern);
+                    total_width += kern_amount;
+                }
+            }
+
+            op = wrap_in_hbox(first, last);
         } else {
-            op->width = 10.0f * op_size / 10.0f;
-            op->height = 8.0f * op_size / 10.0f;
-            op->depth = 2.0f * op_size / 10.0f;
+            op = make_math_op(ctx.arena, op_code, is_display, font);
+
+            // Get metrics from TFM (extension_tfm for cmex10)
+            if (extension_tfm && op_code >= 0 && op_code < 256) {
+                float scale = op_size / extension_tfm->design_size;
+                op->width = extension_tfm->char_width(op_code) * scale;
+                op->height = extension_tfm->char_height(op_code) * scale;
+                op->depth = extension_tfm->char_depth(op_code) * scale;
+            } else {
+                op->width = 10.0f * op_size / 10.0f;
+                op->height = 8.0f * op_size / 10.0f;
+                op->depth = 2.0f * op_size / 10.0f;
+            }
         }
     }
 
-    free(op_text);
-
     // If no limits, return just the operator
     if (ts_node_is_null(lower_node) && ts_node_is_null(upper_node)) {
+        free(op_text);
         return op;
     }
+
+    // Check if this operator uses limits-style display (above/below) in display mode
+    // Integrals use scripts to the right even in display mode
+    // Note: op_name points into op_text, so check before freeing
+    bool use_limits_display = is_display && op_uses_limits_display(op_name, op_len);
+    
+    // Now we can free op_text since we've captured the limits style decision
+    free(op_text);
 
     // Build limits
     MathStyle saved = ctx.style;
@@ -1322,49 +1410,80 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
 
     ctx.style = saved;
 
-    // In display mode, limits go above/below
-    // In text mode, limits go as sub/superscript
-    if (is_display) {
-        // Build VBox with limits above/below
+    // In display mode with limits-style, put limits above/below
+    // Otherwise use sub/superscript positioning
+    if (use_limits_display) {
+        // Use Scripts node for explicit positioning (respects x,y coordinates in DVI output)
         Arena* arena = ctx.arena;
-        TexNode* vbox = make_vbox(arena);
+        TexNode* scripts = (TexNode*)arena_alloc(arena, sizeof(TexNode));
+        new (scripts) TexNode(NodeClass::Scripts);
 
         float gap = size * 0.1f;
-        float total_height = op->height;
-        float total_depth = op->depth;
         float max_width = op->width;
+        if (upper && upper->width > max_width) max_width = upper->width;
+        if (lower && lower->width > max_width) max_width = lower->width;
 
+        // Calculate vertical positions
+        // Upper limit goes above the operator
+        float upper_y = 0;
         if (upper) {
-            total_height += gap + upper->height + upper->depth;
-            if (upper->width > max_width) max_width = upper->width;
+            upper_y = op->height + gap + upper->depth;  // positive = up from baseline
         }
+        // Lower limit goes below the operator  
+        float lower_y = 0;
         if (lower) {
-            total_depth += gap + lower->height + lower->depth;
-            if (lower->width > max_width) max_width = lower->width;
+            lower_y = -(op->depth + gap + lower->height);  // negative = down from baseline
         }
 
-        // Add operator first (matches TeX DVI ordering)
+        // Set up scripts node
+        scripts->content.scripts.nucleus = op;
+        scripts->content.scripts.subscript = lower;
+        scripts->content.scripts.superscript = upper;
+        scripts->content.scripts.nucleus_type = AtomType::Op;
+
+        // Position operator at center
+        op->parent = scripts;
         op->x = (max_width - op->width) / 2.0f;
-        vbox->append_child(op);
+        op->y = 0;
 
-        // Then add limits (positioned via y-coordinates)
+        // Link children in DVI output order: upper (top) -> op (middle) -> lower (bottom)
+        // This matches TeX reference DVI ordering
+        TexNode* prev = nullptr;
         if (upper) {
+            upper->parent = scripts;
             upper->x = (max_width - upper->width) / 2.0f;
-            upper->y = -(op->height + gap);  // Position above operator
-            vbox->append_child(upper);
+            upper->y = upper_y;
+            scripts->first_child = upper;
+            scripts->last_child = upper;
+            prev = upper;
         }
 
+        // Link operator
+        if (prev) {
+            prev->next_sibling = op;
+            op->prev_sibling = prev;
+        } else {
+            scripts->first_child = op;
+        }
+        scripts->last_child = op;
+        prev = op;
+
+        // Position and link lower limit
         if (lower) {
+            lower->parent = scripts;
             lower->x = (max_width - lower->width) / 2.0f;
-            lower->y = op->depth + gap;  // Position below operator
-            vbox->append_child(lower);
+            lower->y = lower_y;
+            prev->next_sibling = lower;
+            lower->prev_sibling = prev;
+            scripts->last_child = lower;
         }
 
-        vbox->width = max_width;
-        vbox->height = total_height;
-        vbox->depth = total_depth;
+        // Set dimensions
+        scripts->width = max_width;
+        scripts->height = op->height + (upper ? gap + upper->height + upper->depth : 0);
+        scripts->depth = op->depth + (lower ? gap + lower->height + lower->depth : 0);
 
-        return vbox;
+        return scripts;
     } else {
         // Use subscript/superscript positioning
         Arena* arena = ctx.arena;
@@ -1994,16 +2113,59 @@ private:
             log_debug("build_big_operator: op='%s' code=%d font='%s' size=%.1f display=%d", 
                       op_cmd, op_code, font.name ? font.name : "null", op_size, is_display);
 
-            op_node = make_math_op(ctx.arena, op_code, is_display, font);
-            if (extension_tfm && op_code >= 0 && op_code < 256) {
-                float scale = op_size / extension_tfm->design_size;
-                op_node->width = extension_tfm->char_width(op_code) * scale;
-                op_node->height = extension_tfm->char_height(op_code) * scale;
-                op_node->depth = extension_tfm->char_depth(op_code) * scale;
+            // Handle \iint and \iiint as multiple integral symbols
+            int num_ints = 0;
+            if (op_len == 4 && strncmp(op_cmd, "iint", 4) == 0) {
+                num_ints = 2;
+                op_code = is_display ? 90 : 82;  // integral code
+            } else if (op_len == 5 && strncmp(op_cmd, "iiint", 5) == 0) {
+                num_ints = 3;
+                op_code = is_display ? 90 : 82;  // integral code
+            }
+
+            if (num_ints > 0) {
+                // Build multiple integral signs with small negative kerns between them
+                TexNode* first = nullptr;
+                TexNode* last = nullptr;
+                float kern_amount = -0.3f * op_size / 10.0f;  // small overlap
+
+                for (int i = 0; i < num_ints; i++) {
+                    TexNode* int_node = make_math_op(ctx.arena, op_code, is_display, font);
+
+                    // Get metrics from TFM
+                    if (extension_tfm && op_code >= 0 && op_code < 256) {
+                        float scale = op_size / extension_tfm->design_size;
+                        int_node->width = extension_tfm->char_width(op_code) * scale;
+                        int_node->height = extension_tfm->char_height(op_code) * scale;
+                        int_node->depth = extension_tfm->char_depth(op_code) * scale;
+                    } else {
+                        int_node->width = 10.0f * op_size / 10.0f;
+                        int_node->height = 8.0f * op_size / 10.0f;
+                        int_node->depth = 2.0f * op_size / 10.0f;
+                    }
+
+                    link_node(first, last, int_node);
+
+                    // Add kern between integrals (but not after the last one)
+                    if (i < num_ints - 1) {
+                        TexNode* kern = make_kern(ctx.arena, kern_amount);
+                        link_node(first, last, kern);
+                    }
+                }
+
+                op_node = wrap_in_hbox(first, last);
             } else {
-                op_node->width = 10.0f * op_size / 10.0f;
-                op_node->height = 8.0f * op_size / 10.0f;
-                op_node->depth = 2.0f * op_size / 10.0f;
+                op_node = make_math_op(ctx.arena, op_code, is_display, font);
+                if (extension_tfm && op_code >= 0 && op_code < 256) {
+                    float scale = op_size / extension_tfm->design_size;
+                    op_node->width = extension_tfm->char_width(op_code) * scale;
+                    op_node->height = extension_tfm->char_height(op_code) * scale;
+                    op_node->depth = extension_tfm->char_depth(op_code) * scale;
+                } else {
+                    op_node->width = 10.0f * op_size / 10.0f;
+                    op_node->height = 8.0f * op_size / 10.0f;
+                    op_node->depth = 2.0f * op_size / 10.0f;
+                }
             }
         }
 
@@ -2020,7 +2182,11 @@ private:
         TexNode* upper = upper_item.isNull() ? nullptr : build_node(upper_item);
         ctx.style = saved;
 
-        if (is_display) {
+        // Check if this operator uses limits-style display (above/below) in display mode
+        // Integrals use scripts to the right even in display mode
+        bool use_limits_display = is_display && op_uses_limits_display(op_cmd, op_len);
+
+        if (use_limits_display) {
             return typeset_op_limits(op_node, lower, upper, ctx);
         }
         return build_scripts_node(op_node, lower, upper);
@@ -2037,7 +2203,8 @@ private:
 
         float size = current_size();
         float content_height = content->height + content->depth;
-        float threshold = size * 0.5f;  // original threshold
+        // TeX uses ~1.2× base font height as threshold for switching to extensible
+        float threshold = size * 1.2f;
         bool use_ext = content_height > threshold;
 
         auto make_delim = [&](const char* d, bool is_left) -> TexNode* {
@@ -2071,7 +2238,7 @@ private:
                 font.size_pt = size;
                 tfm = extension_tfm;
                 if (d[0] == '(' || d[0] == ')') cp = is_left ? 0 : 1;
-                else if (d[0] == '[' || d[0] == ']') cp = is_left ? 'h' : 'i';
+                else if (d[0] == '[' || d[0] == ']') cp = is_left ? 'h' : 'i';  // cmex10 positions 104/105
                 else if (d[0] == '{' || d[0] == '}') { font = ctx.symbol_font; tfm = symbol_tfm; cp = is_left ? 'f' : 'g'; }
                 else if (d[0] == '|') cp = 12;
                 else cp = is_left ? 0 : 1;
