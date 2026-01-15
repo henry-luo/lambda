@@ -2916,6 +2916,34 @@
                             "."
                         ],
                         "icon": "❓"
+                    },
+                    {
+                        "source": "test/test_tex_document_model_gtest.cpp",
+                        "name": "TeX Document Model Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_document_model_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_document_model.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "defines": [
+                            "DOC_MODEL_NO_SVG",
+                            "DOC_MODEL_MINIMAL"
+                        ],
+                        "icon": "📄"
                     }
                 ],
                 "type": "tex",
