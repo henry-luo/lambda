@@ -1260,6 +1260,24 @@ static const char* extract_text_content(const ItemReader& item, Arena* arena) {
     return nullptr;
 }
 
+// Extract math source - checks "source" attribute first, then falls back to text content
+static const char* extract_math_source(const ElementReader& elem, Arena* arena) {
+    // Check for "source" attribute (present in display_math, inline_math)
+    const char* src = elem.get_attr_string("source");
+    if (src) {
+        size_t len = strlen(src);
+        char* copy = (char*)arena_alloc(arena, len + 1);
+        memcpy(copy, src, len + 1);
+        return copy;
+    }
+    
+    // Fallback to extracting text content from children
+    ConstItem item;
+    item.element = elem.element();
+    ItemReader item_reader(item);
+    return extract_text_content(item_reader, arena);
+}
+
 // Build a TEXT_SPAN element with style flags
 static DocElement* build_text_command(const char* cmd_name, const ElementReader& elem,
                                        Arena* arena, TexDocumentModel* doc) {
@@ -1489,8 +1507,17 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     // Inline math
     if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
         DocElement* math = doc_alloc_element(arena, DocElemType::MATH_INLINE);
-        math->math.latex_src = extract_text_content(item, arena);
+        math->math.latex_src = extract_math_source(elem, arena);
         math->math.node = nullptr; // Will be populated by typesetter if needed
+        return math;
+    }
+    
+    // Display math (can appear inside paragraphs too)
+    if (tag_eq(tag, "display_math") || tag_eq(tag, "displaymath") ||
+        tag_eq(tag, "equation") || tag_eq(tag, "equation*")) {
+        DocElement* math = doc_alloc_element(arena, DocElemType::MATH_DISPLAY);
+        math->math.latex_src = extract_math_source(elem, arena);
+        math->math.node = nullptr;
         return math;
     }
     
@@ -1877,35 +1904,45 @@ static DocElement* build_blockquote_environment(const ElementReader& elem,
 }
 
 // Build code block environment (verbatim, lstlisting)
+// Helper to collect all text content recursively
+static void collect_text_recursive(const ItemReader& item, StrBuf* buf) {
+    if (item.isString()) {
+        const char* text = item.cstring();
+        if (text) {
+            strbuf_append_str(buf, text);
+        }
+    } else if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        const char* tag = elem.tagName();
+        // Skip optional arguments
+        if (tag && tag_eq(tag, "optional")) {
+            return;
+        }
+        // Recurse into children
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            collect_text_recursive(child, buf);
+        }
+    }
+}
+
 static DocElement* build_code_block_environment(const char* env_name, const ElementReader& elem,
                                                  Arena* arena, TexDocumentModel* doc) {
     (void)doc; // unused
+    (void)env_name; // unused
     DocElement* code = doc_alloc_element(arena, DocElemType::CODE_BLOCK);
     code->text.text = nullptr;
     code->text.text_len = 0;
     code->text.style = DocTextStyle::plain();
     
-    // Collect all text content from children
+    // Collect all text content from children recursively
     StrBuf* buf = strbuf_new_cap(256);
     
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            // Skip optional arguments for lstlisting
-            if (child_tag && tag_eq(child_tag, "optional")) {
-                continue;
-            }
-        }
-        // Collect text content
-        if (child.isString()) {
-            const char* text = child.cstring();
-            if (text) {
-                strbuf_append_str(buf, text);
-            }
-        }
+        collect_text_recursive(child, buf);
     }
     
     if (buf->length > 0) {
@@ -2380,11 +2417,34 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return build_text_command(tag, elem, arena, doc);
     }
     
-    // Section commands
+    // Section commands (but not paragraph element containing content)
     if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || 
-        tag_eq(tag, "subsubsection") || tag_eq(tag, "paragraph") ||
-        tag_eq(tag, "chapter") || tag_eq(tag, "part")) {
+        tag_eq(tag, "subsubsection") || tag_eq(tag, "chapter") || tag_eq(tag, "part")) {
         return build_section_command(tag, elem, arena, doc);
+    }
+    
+    // Handle "paragraph" tag - could be \paragraph{} command or content paragraph
+    // \paragraph{} command: children are text for title
+    // Content paragraph: children include elements like display_math, inline_math, etc.
+    if (tag_eq(tag, "paragraph")) {
+        // Check if any child is an element (not just text)
+        bool has_element_children = false;
+        auto check_iter = elem.children();
+        ItemReader check_child;
+        while (check_iter.next(&check_child)) {
+            if (check_child.isElement()) {
+                has_element_children = true;
+                break;
+            }
+        }
+        
+        if (has_element_children) {
+            // Content paragraph - process like paragraph_content
+            return build_paragraph(elem, arena, doc);
+        } else {
+            // \paragraph{} sectioning command
+            return build_section_command(tag, elem, arena, doc);
+        }
     }
     
     // Paragraph
@@ -2396,7 +2456,7 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "display_math") || tag_eq(tag, "equation") || 
         tag_eq(tag, "equation*") || tag_eq(tag, "displaymath")) {
         DocElement* math = doc_alloc_element(arena, DocElemType::MATH_DISPLAY);
-        math->math.latex_src = extract_text_content(item, arena);
+        math->math.latex_src = extract_math_source(elem, arena);
         math->math.node = nullptr;
         return math;
     }
@@ -2404,7 +2464,7 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     // Inline math
     if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
         DocElement* math = doc_alloc_element(arena, DocElemType::MATH_INLINE);
-        math->math.latex_src = extract_text_content(item, arena);
+        math->math.latex_src = extract_math_source(elem, arena);
         math->math.node = nullptr;
         return math;
     }

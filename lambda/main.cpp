@@ -4,6 +4,7 @@
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
 #include "../lib/strbuf.h"  // For string buffer
+#include "../lib/arena.h"   // For arena allocator
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
@@ -15,6 +16,9 @@
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
+
+// Unified LaTeX pipeline
+#include "tex/tex_document_model.hpp"
 
 // Graph layout includes
 #include "../radiant/layout_graph.hpp"
@@ -344,6 +348,7 @@ int exec_convert(int argc, char* argv[]) {
     const char* to_format = NULL;    // Required
     const char* output_file = NULL;  // Required
     bool full_document = false;      // For LaTeX to HTML: generate complete HTML with CSS
+    const char* pipeline = NULL;     // Pipeline selection: "legacy" or "unified"
 
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
@@ -370,6 +375,24 @@ int exec_convert(int argc, char* argv[]) {
             }
         } else if (strcmp(argv[i], "--full-document") == 0) {
             full_document = true;
+        } else if (strcmp(argv[i], "--pipeline") == 0) {
+            if (i + 1 < argc) {
+                pipeline = argv[++i];
+                if (strcmp(pipeline, "legacy") != 0 && strcmp(pipeline, "unified") != 0) {
+                    printf("Error: --pipeline must be 'legacy' or 'unified'\n");
+                    return 1;
+                }
+            } else {
+                printf("Error: --pipeline option requires an argument (legacy|unified)\n");
+                return 1;
+            }
+        } else if (strncmp(argv[i], "--pipeline=", 11) == 0) {
+            // Handle --pipeline=value format
+            pipeline = argv[i] + 11;
+            if (strcmp(pipeline, "legacy") != 0 && strcmp(pipeline, "unified") != 0) {
+                printf("Error: --pipeline must be 'legacy' or 'unified'\n");
+                return 1;
+            }
         } else if (argv[i][0] != '-') {
             // This should be the input file
             if (input_file == NULL) {
@@ -510,23 +533,75 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "xml") == 0) {
             formatted_output = format_xml(input->pool, input->root);
         } else if (strcmp(to_format, "html") == 0) {
-            // Check if input is LaTeX and route to LaTeX-HTML v2 converter
+            // Check if input is LaTeX and route to appropriate converter
             if (is_latex_input) {
-                // Use LaTeX to HTML v2 converter (hybrid grammar support)
-                printf("Using LaTeX to HTML v2 converter\n");
-                if (full_document) {
-                    // Generate complete HTML document with external CSS links
-                    printf("Generating full HTML document with external CSS links\n");
-                    full_doc_output = lambda::format_latex_html_v2_document(input, "article", nullptr, false);
-                    if (full_doc_output.empty()) {
-                        printf("Error: LaTeX to HTML v2 full document conversion failed\n");
+                // Check if unified pipeline is requested
+                bool use_unified = (pipeline && strcmp(pipeline, "unified") == 0);
+                
+                if (use_unified) {
+                    // Use unified pipeline (doc model based)
+                    printf("Using unified LaTeX pipeline\n");
+                    
+                    // Read the source file content
+                    char* source_content = read_text_file(input_file);
+                    if (!source_content) {
+                        printf("Error: Failed to read source file for unified pipeline\n");
+                        pool_destroy(temp_pool);
+                        return 1;
                     }
-                } else {
-                    Item result = lambda::format_latex_html_v2(input, true);  // text mode for HTML string output
-                    if (result.item != 0 && get_type_id(result) == LMD_TYPE_STRING) {
-                        formatted_output = (String*)result.string_ptr;
+                    
+                    // Create arena for document model
+                    Pool* doc_pool = pool_create();
+                    Arena* doc_arena = arena_create_default(doc_pool);
+                    
+                    // Build document model
+                    tex::TexDocumentModel* doc = tex::doc_model_from_string(
+                        source_content, strlen(source_content), doc_arena, nullptr);
+                    
+                    free(source_content);
+                    
+                    if (!doc || !doc->root) {
+                        printf("Error: Unified pipeline - document model creation failed\n");
+                        arena_destroy(doc_arena);
+                        pool_destroy(doc_pool);
+                        pool_destroy(temp_pool);
+                        return 1;
+                    }
+                    
+                    // Render to HTML
+                    StrBuf* html_buf = strbuf_new_cap(8192);
+                    tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::defaults();
+                    opts.standalone = full_document;
+                    opts.pretty_print = true;
+                    
+                    bool success = tex::doc_model_to_html(doc, html_buf, opts);
+                    
+                    if (success && html_buf->length > 0) {
+                        full_doc_output = std::string(html_buf->str, html_buf->length);
                     } else {
-                        printf("Error: LaTeX to HTML v2 conversion failed\n");
+                        printf("Error: Unified pipeline - HTML rendering failed\n");
+                    }
+                    
+                    strbuf_free(html_buf);
+                    arena_destroy(doc_arena);
+                    pool_destroy(doc_pool);
+                } else {
+                    // Use legacy LaTeX to HTML v2 converter (hybrid grammar support)
+                    printf("Using LaTeX to HTML v2 converter (legacy)\n");
+                    if (full_document) {
+                        // Generate complete HTML document with external CSS links
+                        printf("Generating full HTML document with external CSS links\n");
+                        full_doc_output = lambda::format_latex_html_v2_document(input, "article", nullptr, false);
+                        if (full_doc_output.empty()) {
+                            printf("Error: LaTeX to HTML v2 full document conversion failed\n");
+                        }
+                    } else {
+                        Item result = lambda::format_latex_html_v2(input, true);  // text mode for HTML string output
+                        if (result.item != 0 && get_type_id(result) == LMD_TYPE_STRING) {
+                            formatted_output = (String*)result.string_ptr;
+                        } else {
+                            printf("Error: LaTeX to HTML v2 conversion failed\n");
+                        }
                     }
                 }
             } else {
