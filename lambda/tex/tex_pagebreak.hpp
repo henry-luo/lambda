@@ -88,8 +88,10 @@ struct BreakCandidate {
     int index;                  // Index in vlist
     PageBreakType type;         // Type of break
     int penalty;                // Break penalty
-    float page_height;          // Height of page if broken here
+    float page_height;          // Height of page if broken here (natural)
     float page_depth;           // Depth of page if broken here
+    float page_shrink;          // Cumulative shrink up to this point
+    float page_stretch;         // Cumulative stretch up to this point
     int badness;                // Page badness
     int cost;                   // Total cost (badness + penalty adjustments)
 };

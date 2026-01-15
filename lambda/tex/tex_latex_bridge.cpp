@@ -749,12 +749,93 @@ TexNode* break_latex_paragraph(TexNode* hlist, LaTeXContext& ctx) {
     return paragraph;
 }
 
+// Convert paragraph that may contain display math
+// Returns a VList containing all content (text paragraphs + display math blocks)
 TexNode* convert_latex_paragraph(const ElementReader& elem, LaTeXContext& ctx) {
-    fprintf(stderr, "[DEBUG] convert_latex_paragraph: building hlist\n");
-    TexNode* hlist = build_latex_paragraph_hlist(elem, ctx);
-    fprintf(stderr, "[DEBUG] convert_latex_paragraph: hlist=%p, has_children=%d\n",
-            (void*)hlist, hlist && hlist->first_child ? 1 : 0);
-    return break_latex_paragraph(hlist, ctx);
+    fprintf(stderr, "[DEBUG] convert_latex_paragraph: processing paragraph with display math splitting\n");
+    
+    VListContext vctx(ctx.doc_ctx.arena, ctx.doc_ctx.fonts);
+    init_vlist_context(vctx, ctx.doc_ctx.text_width);
+    begin_vlist(vctx);
+
+    Pool* pool = pool_create();
+    TexNode* current_hlist = make_hlist(ctx.doc_ctx.arena);
+    bool has_inline_content = false;
+
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        bool is_display = false;
+        ElementReader child_elem;
+        
+        if (child.isElement()) {
+            child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && (tag_eq(tag, "display_math") || tag_eq(tag, "displaymath"))) {
+                is_display = true;
+            }
+        }
+        
+        if (is_display) {
+            // Flush current inline content as a paragraph first
+            if (has_inline_content && current_hlist->first_child) {
+                TexNode* para = break_latex_paragraph(current_hlist, ctx);
+                if (para) {
+                    add_raw(vctx, para);
+                    // Add inter-paragraph skip
+                    add_vspace(vctx, Glue::flexible(6.0f, 2.0f, 1.0f));
+                }
+                // Start new hlist
+                current_hlist = make_hlist(ctx.doc_ctx.arena);
+                has_inline_content = false;
+            }
+            
+            // Add the display math block - flatten if it's a VList to enable page breaks
+            TexNode* display = convert_latex_display_math(child_elem, ctx);
+            if (display) {
+                if (display->node_class == NodeClass::VList && display->first_child) {
+                    // Flatten: move children to parent VList
+                    TexNode* dchild = display->first_child;
+                    while (dchild) {
+                        TexNode* next = dchild->next_sibling;
+                        dchild->prev_sibling = nullptr;
+                        dchild->next_sibling = nullptr;
+                        dchild->parent = nullptr;
+                        add_raw(vctx, dchild);
+                        dchild = next;
+                    }
+                } else {
+                    add_raw(vctx, display);
+                }
+            }
+        } else {
+            // Add to current inline content
+            TexNode* child_nodes = convert_inline_item(child, ctx, pool);
+            if (child_nodes) {
+                transfer_nodes(current_hlist, child_nodes);
+                // Check if we added any real content (not just whitespace)
+                if (current_hlist->first_child) {
+                    has_inline_content = true;
+                }
+            }
+        }
+    }
+
+    // Flush any remaining inline content
+    if (has_inline_content && current_hlist->first_child) {
+        TexNode* para = break_latex_paragraph(current_hlist, ctx);
+        if (para) {
+            add_raw(vctx, para);
+        }
+    }
+
+    pool_destroy(pool);
+    
+    TexNode* result = end_vlist(vctx);
+    if (result && !result->first_child) {
+        return nullptr;  // Empty paragraph
+    }
+    return result;
 }
 
 // ============================================================================
@@ -1471,8 +1552,10 @@ TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx
     init_vlist_context(vctx, ctx.doc_ctx.text_width);
     begin_vlist(vctx);
 
-    // Space above
-    add_vspace(vctx, Glue::flexible(12.0f, 3.0f, 2.0f));
+    // Space above - use even higher shrink to compensate for our taller math
+    // TeX's values: 10pt plus 2pt minus 5pt, but our math tends to be ~10pt taller per display
+    // Need to allow shrinking to about 0pt to match TeX page breaking behavior
+    add_vspace(vctx, Glue::flexible(10.0f, 2.0f, 10.0f));
 
     // Center the math
     TexNode* centered = center_line(math_hbox, ctx.doc_ctx.text_width, ctx.doc_ctx.arena);
@@ -1480,8 +1563,8 @@ TexNode* convert_latex_display_math(const ElementReader& elem, LaTeXContext& ctx
         add_raw(vctx, centered);
     }
 
-    // Space below
-    add_vspace(vctx, Glue::flexible(12.0f, 3.0f, 2.0f));
+    // Space below - use same high shrink for balance
+    add_vspace(vctx, Glue::flexible(10.0f, 2.0f, 10.0f));
 
     return end_vlist(vctx);
 }
@@ -1855,7 +1938,43 @@ TexNode* typeset_latex_document(const ElementReader& latex_root, LaTeXContext& c
         }
         TexNode* block = convert_latex_block(child, ctx);
         if (block) {
-            add_raw(vctx, block);
+            fprintf(stderr, "[DEBUG] typeset_latex_document: got block class=%d (VList=%d)\n",
+                    (int)block->node_class, (int)NodeClass::VList);
+            // If block is a VList, flatten its children into the document recursively
+            // This ensures page breaks can happen between display math blocks
+            if (block->node_class == NodeClass::VList && block->first_child) {
+                fprintf(stderr, "[DEBUG] typeset_latex_document: flattening VList with children\n");
+                TexNode* child_node = block->first_child;
+                int flat_count = 0;
+                while (child_node) {
+                    flat_count++;
+                    TexNode* next = child_node->next_sibling;
+                    // Detach from old VList
+                    child_node->prev_sibling = nullptr;
+                    child_node->next_sibling = nullptr;
+                    child_node->parent = nullptr;
+                    
+                    // If this child is also a VList, flatten it recursively
+                    if (child_node->node_class == NodeClass::VList && child_node->first_child) {
+                        fprintf(stderr, "[DEBUG] typeset_latex_document: recursively flattening nested VList\n");
+                        TexNode* nested = child_node->first_child;
+                        while (nested) {
+                            TexNode* nnext = nested->next_sibling;
+                            nested->prev_sibling = nullptr;
+                            nested->next_sibling = nullptr;
+                            nested->parent = nullptr;
+                            add_raw(vctx, nested);
+                            nested = nnext;
+                        }
+                    } else {
+                        add_raw(vctx, child_node);
+                    }
+                    child_node = next;
+                }
+                fprintf(stderr, "[DEBUG] typeset_latex_document: flattened %d children\n", flat_count);
+            } else {
+                add_raw(vctx, block);
+            }
             if (ctx.doc_ctx.parskip > 0) {
                 add_vspace(vctx, Glue::fixed(ctx.doc_ctx.parskip));
             }

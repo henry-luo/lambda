@@ -115,11 +115,15 @@ BreakCandidate* find_break_candidates(
     int* candidate_count,
     Arena* arena
 ) {
+    log_debug("pagebreak: find_break_candidates page_height=%.1f top_skip=%.1f",
+              params.page_height, params.top_skip);
+
     // First pass: count nodes
     int node_count = 0;
     for (TexNode* c = vlist->first_child; c; c = c->next_sibling) {
         node_count++;
     }
+    log_debug("pagebreak: vlist has %d children", node_count);
 
     // Worst case: can break after every node
     BreakCandidate* candidates = (BreakCandidate*)arena_alloc(
@@ -135,6 +139,21 @@ BreakCandidate* find_break_candidates(
     TexNode* prev = nullptr;
 
     for (TexNode* c = vlist->first_child; c; c = c->next_sibling) {
+        // Log child info
+        const char* class_name = "unknown";
+        switch (c->node_class) {
+            case NodeClass::Glue: class_name = "Glue"; break;
+            case NodeClass::Kern: class_name = "Kern"; break;
+            case NodeClass::HBox: class_name = "HBox"; break;
+            case NodeClass::VBox: class_name = "VBox"; break;
+            case NodeClass::HList: class_name = "HList"; break;
+            case NodeClass::VList: class_name = "VList"; break;
+            case NodeClass::Penalty: class_name = "Penalty"; break;
+            default: break;
+        }
+        log_debug("pagebreak: child[%d] class=%s h=%.1f d=%.1f", 
+                  index, class_name, c->height, c->depth);
+
         // Update cumulative dimensions
         if (c->node_class == NodeClass::Glue) {
             const Glue& g = c->content.glue.spec;
@@ -177,6 +196,8 @@ BreakCandidate* find_break_candidates(
             cand.penalty = penalty;
             cand.page_height = cumulative_height;
             cand.page_depth = c->depth;
+            cand.page_shrink = cumulative_shrink;
+            cand.page_stretch = cumulative_stretch;
 
             // Compute badness at this break
             cand.badness = compute_page_badness(
@@ -203,6 +224,8 @@ BreakCandidate* find_break_candidates(
         cand.penalty = 0;
         cand.page_height = cumulative_height;
         cand.page_depth = vlist->last_child ? vlist->last_child->depth : 0;
+        cand.page_shrink = cumulative_shrink;
+        cand.page_stretch = cumulative_stretch;
         cand.badness = compute_page_badness(
             cumulative_height, params.page_height,
             cumulative_stretch, cumulative_shrink
@@ -210,6 +233,9 @@ BreakCandidate* find_break_candidates(
         cand.cost = cand.badness;
         count++;
     }
+
+    log_debug("pagebreak: found %d break candidates, total_height=%.1f, total_shrink=%.1f", 
+              count, cumulative_height, cumulative_shrink);
 
     *candidate_count = count;
     return candidates;
@@ -322,57 +348,117 @@ PageBreakResult break_into_pages(
 
     int page_count = 0;
     float current_page_start_height = params.top_skip;
+    float current_page_start_shrink = 0.0f;
     int last_break_index = -1;
 
     for (int i = 0; i < candidate_count; ++i) {
         BreakCandidate& cand = candidates[i];
 
-        // Calculate page height if we break here
+        // Calculate page dimensions if we break here
         float page_height = cand.page_height - current_page_start_height;
+        float page_shrink = cand.page_shrink - current_page_start_shrink;
+        
+        // Calculate how much shrink we'd need to fit this page
+        float excess = page_height - params.page_height;
+        float shrink_ratio = (excess > 0 && page_shrink > 0) ? excess / page_shrink : 0;
+        
+        // Also look ahead: can the remaining document fit on the current page with shrink?
+        BreakCandidate& final_cand = candidates[candidate_count - 1];
+        float total_remaining_height = final_cand.page_height - current_page_start_height;
+        float total_remaining_shrink = final_cand.page_shrink - current_page_start_shrink;
+        float final_excess = total_remaining_height - params.page_height;
+        float final_shrink_ratio = (final_excess > 0 && total_remaining_shrink > 0) ? 
+                                   final_excess / total_remaining_shrink : 0;
+        
+        // Maximum acceptable shrink ratio - TeX allows using all shrink (ratio up to 1.0)
+        // If ratio > 1.0, the page is truly overfull and must break
+        const float MAX_SHRINK_RATIO = 1.0f;
+        
+        log_debug("pagebreak: candidate[%d] page_height=%.1f excess=%.1f shrink=%.1f ratio=%.2f final_ratio=%.2f type=%d",
+                  i, page_height, excess, page_shrink, shrink_ratio, final_shrink_ratio, (int)cand.type);
 
         // Check if this is a good break point
         bool should_break = false;
 
-        // Forced break
+        // Forced break or document end
         if (cand.type == PageBreakType::Forced || cand.type == PageBreakType::End) {
             should_break = true;
         }
-        // Page would overflow
-        else if (page_height > params.page_height * 1.1f) {
-            // Find the best previous break point
-            for (int j = i - 1; j > last_break_index; --j) {
-                if (candidates[j].page_height - current_page_start_height <= params.page_height) {
-                    i = j;  // Back up to this break
-                    should_break = true;
-                    break;
+        // Page would overflow - but check if everything fits with acceptable shrink
+        else if (page_height > params.page_height) {
+            // Key decision: if ALL remaining content fits with acceptable shrink, don't break
+            if (final_shrink_ratio <= MAX_SHRINK_RATIO) {
+                // Everything fits on one page with reasonable shrink - don't break yet
+                log_debug("pagebreak: skipping break - final content fits with ratio=%.2f", final_shrink_ratio);
+            } else {
+                // Can't fit everything - need to break
+                // Find the last candidate that fits without any shrink (natural height <= page)
+                for (int j = i - 1; j > last_break_index; --j) {
+                    float j_height = candidates[j].page_height - current_page_start_height;
+                    if (j_height <= params.page_height) {
+                        // Found a break point where natural height fits
+                        i = j;
+                        should_break = true;
+                        log_debug("pagebreak: backing up to candidate %d (height=%.1f fits)", j, j_height);
+                        break;
+                    }
+                }
+                if (!should_break) {
+                    // No previous break fits naturally - use shrink if acceptable
+                    if (shrink_ratio <= MAX_SHRINK_RATIO) {
+                        should_break = true;
+                        log_debug("pagebreak: breaking at overfull with acceptable shrink ratio=%.2f", shrink_ratio);
+                    } else if (shrink_ratio <= 1.0f) {
+                        // High shrink but still valid - break anyway
+                        should_break = true;
+                        log_debug("pagebreak: breaking with high shrink ratio=%.2f", shrink_ratio);
+                    } else {
+                        // Overfull page - break anyway
+                        log_debug("pagebreak: forced overfull break at height=%.1f", page_height);
+                        should_break = true;
+                    }
                 }
             }
-            if (!should_break) {
-                // Can't find good break, use current anyway (overfull)
-                should_break = true;
-            }
         }
-        // Page is within reasonable bounds and we have good content
-        else if (page_height >= params.page_height * 0.9f) {
-            // Check if penalty is acceptable
-            if (cand.penalty <= 0 || cand.badness < 50) {
-                should_break = true;
-            }
+        // For negative penalties, break even if page isn't full (e.g., \newpage)
+        else if (cand.penalty < 0) {
+            should_break = true;
         }
 
         if (should_break) {
             result.break_indices[page_count] = cand.index;
             result.page_penalties[page_count] = cand.penalty;
+            log_debug("pagebreak: BREAK at candidate %d, page_count=%d, index=%d",
+                      i, page_count + 1, cand.index);
             page_count++;
 
             // Update for next page
             current_page_start_height = cand.page_height;
+            current_page_start_shrink = cand.page_shrink;
             last_break_index = i;
 
             // Stop at end
             if (cand.type == PageBreakType::End) {
                 break;
             }
+        }
+    }
+
+    // Add final page for any remaining content after the last break
+    // Only add if there was a real page break (not just the End marker being processed)
+    if (page_count > 0 && last_break_index < candidate_count - 1) {
+        // There's content after the last break - add it as the final page
+        // But only if the last break wasn't at the very end already
+        BreakCandidate& last_cand = candidates[candidate_count - 1];
+        float remaining_height = last_cand.page_height - current_page_start_height;
+        float remaining_shrink = last_cand.page_shrink - current_page_start_shrink;
+        float remaining_min = remaining_height - remaining_shrink;
+        if (remaining_min > 0.1f) {  // Have meaningful remaining content (after shrink)
+            result.break_indices[page_count] = last_cand.index;
+            result.page_penalties[page_count] = 0;
+            log_debug("pagebreak: adding final page for remaining content (%.1fpt min, natural=%.1fpt), page_count=%d", 
+                      remaining_min, remaining_height, page_count + 1);
+            page_count++;
         }
     }
 
