@@ -61,7 +61,14 @@ This document provides a detailed implementation plan for unifying the LaTeX→H
 ## Phase A: Document Model Layer
 
 **Duration**: 1 week  
-**Deliverable**: `tex_document_model.hpp`, `tex_document_model.cpp`
+**Deliverable**: `tex_document_model.hpp`, `tex_document_model.cpp`  
+**Status**: ✅ **COMPLETED** (2026-01-14)
+
+### Implementation Notes
+- Created `tex_document_model.hpp` with full DocElement structure, 20+ element types
+- Created `tex_document_model.cpp` with HTML rendering, CSS generation, tree operations
+- Added comprehensive unit tests (27 tests passing)
+- Integrated into build system via `build_lambda_config.json`
 
 ### A.1 Create Document Model Header
 
@@ -467,7 +474,15 @@ TexDocumentModel* doc_model_from_latex(Item elem, Arena* arena, LaTeXContext& ct
 ## Phase B: Math SVG Embedding
 
 **Duration**: 2 weeks  
-**Deliverable**: Math renders identically in HTML (as inline SVG) and DVI
+**Deliverable**: Math renders identically in HTML (as inline SVG) and DVI  
+**Status**: ✅ **COMPLETED** (2026-01-15)
+
+### Implementation Notes
+- Added `svg_render_math_inline()` and `svg_compute_math_bounds()` to `tex_svg_out.hpp/cpp`
+- Updated `render_math_html()` in document model to use SVG when TexNode available
+- Added math-specific CSS styles (`.math-inline svg`, `.math-display svg`, `.eq-number`)
+- Added conditional compilation (`DOC_MODEL_NO_SVG`) for lightweight test builds
+- Added 6 new math tests (33 total tests passing)
 
 ### B.1 SVG String Rendering API
 
@@ -564,7 +579,43 @@ void render_math_to_html(DocElement* elem, StrBuf* out, const HtmlOutputOptions&
 ## Phase C: P0 Command Migration
 
 **Duration**: 2 weeks  
-**Deliverable**: Basic text formatting works in unified pipeline
+**Deliverable**: Basic text formatting works in unified pipeline  
+**Status**: ✅ **COMPLETED** (2026-01-15)
+
+### Implementation Summary
+
+All Phase C functionality has been implemented in `tex_document_model.cpp`:
+
+1. **Text Formatting Commands** (`build_text_command()`):
+   - `\textbf{...}` → TEXT_SPAN + BOLD → `<strong>...</strong>`
+   - `\textit{...}` → TEXT_SPAN + ITALIC → `<em>...</em>`
+   - `\texttt{...}` → TEXT_SPAN + MONOSPACE → `<code>...</code>`
+   - `\emph{...}` → TEXT_SPAN + ITALIC → `<em>...</em>`
+   - `\underline{...}` → TEXT_SPAN + UNDERLINE → `<u>...</u>`
+   - `\textsc{...}` → TEXT_SPAN + SMALLCAPS → `<span class="smallcaps">...</span>`
+
+2. **Section Commands** (`build_section_command()`):
+   - `\part{...}` → HEADING level=0 → `<h1>...</h1>`
+   - `\chapter{...}` → HEADING level=1 → `<h2>...</h2>`
+   - `\section{...}` → HEADING level=2 → `<h3>...</h3>`
+   - `\subsection{...}` → HEADING level=3 → `<h4>...</h4>`
+   - `\subsubsection{...}` → HEADING level=4 → `<h5>...</h5>`
+   - `\paragraph{...}` → HEADING level=5 → `<h6>...</h6>`
+   - `\subparagraph{...}` → HEADING level=6 → `<h6>...</h6>`
+
+3. **Builder Infrastructure**:
+   - `build_doc_element()` - Main recursive AST traversal
+   - `build_inline_content()` - Inline text and math handling
+   - `build_paragraph()` - Paragraph construction from children
+   - `extract_text_content()` - Helper to extract text from AST nodes
+   - Conditional compilation with `DOC_MODEL_MINIMAL` for minimal test builds
+
+4. **Tests**: 42 unit tests passing including:
+   - Text style rendering (bold, italic, monospace, underline, smallcaps)
+   - Section heading rendering at all levels
+   - Starred sections (unnumbered)
+   - Nested text styles
+   - Style combinations (bold + italic)
 
 ### C.1 Text Formatting Commands
 
@@ -733,22 +784,59 @@ void render_heading_html(DocElement* elem, StrBuf* out, const HtmlOutputOptions&
 
 ### C.5 Tasks
 
-| Task | File | Effort |
-|------|------|--------|
-| Implement `build_text_command()` | `tex_document_model.cpp` | 1 day |
-| Implement `build_section_command()` | `tex_document_model.cpp` | 1 day |
-| Implement `render_text_span_html()` | `tex_document_model.cpp` | 1 day |
-| Implement `render_heading_html()` | `tex_document_model.cpp` | 1 day |
-| Implement `render_paragraph_html()` | `tex_document_model.cpp` | 2 days |
-| HTML escaping utilities | `tex_document_model.cpp` | 0.5 day |
-| Integration tests | `test_doc_model_p0.cpp` | 3 days |
+| Task | File | Effort | Status |
+|------|------|--------|--------|
+| Implement `build_text_command()` | `tex_document_model.cpp` | 1 day | ✅ Done |
+| Implement `build_section_command()` | `tex_document_model.cpp` | 1 day | ✅ Done |
+| Implement `render_text_span_html()` | `tex_document_model.cpp` | 1 day | ✅ Done |
+| Implement `render_heading_html()` | `tex_document_model.cpp` | 1 day | ✅ Done |
+| Implement `render_paragraph_html()` | `tex_document_model.cpp` | 2 days | ✅ Done |
+| HTML escaping utilities | `tex_document_model.cpp` | 0.5 day | ✅ Done |
+| Integration tests | `test_tex_document_model_gtest.cpp` | 3 days | ✅ Done (42 tests) |
 
 ---
 
 ## Phase D: P1 Command Migration
 
 **Duration**: 3 weeks  
-**Deliverable**: Lists, tables, and environments work
+**Deliverable**: Lists, tables, and environments work  
+**Status**: ✅ **COMPLETED** (2026-01-15)
+
+### Implementation Summary
+
+All Phase D functionality has been implemented in `tex_document_model.cpp`:
+
+1. **List Environments** (`build_list_environment()`):
+   - `itemize` → LIST + ITEMIZE → `<ul>...</ul>`
+   - `enumerate` → LIST + ENUMERATE → `<ol>...</ol>`
+   - `description` → LIST + DESCRIPTION → `<dl>...</dl>`
+
+2. **List Item Builder** (`build_list_item()`):
+   - Regular items with content
+   - Description items with labels (`<dt>term</dt><dd>content</dd>`)
+   - Auto-numbering for enumerate lists
+
+3. **Table Environments** (`build_table_environment()`):
+   - `tabular` environment parsing
+   - Column specification parsing (l/c/r alignment)
+   - Row and cell separation handling
+
+4. **Quote Environments** (`build_blockquote_environment()`):
+   - `quote` → BLOCKQUOTE → `<blockquote>...</blockquote>`
+   - `quotation` → BLOCKQUOTE → `<blockquote>...</blockquote>`
+
+5. **Code Environments** (`build_code_block_environment()`):
+   - `verbatim` → CODE_BLOCK → `<pre><code>...</code></pre>`
+   - `lstlisting` → CODE_BLOCK → `<pre><code>...</code></pre>`
+
+6. **Tests**: 49 unit tests passing including:
+   - Unordered list (itemize) rendering
+   - Ordered list (enumerate) rendering
+   - Description list rendering
+   - Table rendering with cells and rows
+   - Blockquote rendering
+   - Code block rendering
+   - Nested list rendering
 
 ### D.1 List Environments
 
@@ -909,23 +997,34 @@ void render_table_html(DocElement* elem, StrBuf* out,
 
 ### D.4 Tasks
 
-| Task | File | Effort |
-|------|------|--------|
-| Implement `build_list_environment()` | `tex_document_model.cpp` | 2 days |
-| Implement `build_tabular_environment()` | `tex_document_model.cpp` | 3 days |
-| Implement `render_list_html()` | `tex_document_model.cpp` | 1 day |
-| Implement `render_table_html()` | `tex_document_model.cpp` | 2 days |
-| Quote/verbatim environments | `tex_document_model.cpp` | 2 days |
-| Column spec parsing | `tex_document_model.cpp` | 1 day |
-| Integration tests (lists) | `test_doc_model_lists.cpp` | 2 days |
-| Integration tests (tables) | `test_doc_model_tables.cpp` | 2 days |
+| Task | File | Effort | Status |
+|------|------|--------|--------|
+| Implement `build_list_environment()` | `tex_document_model.cpp` | 2 days | ✅ Done |
+| Implement `build_tabular_environment()` | `tex_document_model.cpp` | 3 days | ✅ Done |
+| Implement `render_list_html()` | `tex_document_model.cpp` | 1 day | ✅ Done |
+| Implement `render_table_html()` | `tex_document_model.cpp` | 2 days | ✅ Done |
+| Quote/verbatim environments | `tex_document_model.cpp` | 2 days | ✅ Done |
+| Column spec parsing | `tex_document_model.cpp` | 1 day | ✅ Done |
+| Integration tests (lists) | `test_tex_document_model_gtest.cpp` | 2 days | ✅ Done |
+| Integration tests (tables) | `test_tex_document_model_gtest.cpp` | 2 days | ✅ Done |
 
 ---
 
 ## Phase E: P2 Command Migration
 
 **Duration**: 2 weeks  
-**Deliverable**: Images, links, figures, and cross-references work
+**Deliverable**: Images, links, figures, and cross-references work  
+**Status**: ✅ **COMPLETED** (2026-01-15)
+
+### Implementation Notes
+- Implemented `build_image_command()` for `\includegraphics` with width/height parsing
+- Implemented `build_href_command()` and `build_url_command()` for hyperlinks
+- Implemented `build_figure_environment()` with caption and label support
+- Implemented `process_label_command()` and `build_ref_command()` for cross-references
+- Implemented `build_footnote_command()` and `build_cite_command()` for footnotes/citations
+- Added graphics dimension parsing (pt, cm, mm, in, px, em, textwidth)
+- Added 12 new unit tests for Phase E elements (61 total tests passing)
+- Label/citation resolution uses existing `TexDocumentModel` methods
 
 ### E.1 Commands to Migrate
 
