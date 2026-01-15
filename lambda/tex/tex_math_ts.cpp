@@ -117,6 +117,9 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"triangle", 52, AtomType::Ord}, {"backslash", 110, AtomType::Ord},
     {"prime", 48, AtomType::Ord}, {"ell", 96, AtomType::Ord},
     {"wp", 125, AtomType::Ord}, {"aleph", 64, AtomType::Ord},
+    // Braces (for \{ and \} in math mode) - cmsy10 positions
+    {"{", 102, AtomType::Open}, {"}", 103, AtomType::Close},
+    {"lbrace", 102, AtomType::Open}, {"rbrace", 103, AtomType::Close},
     {nullptr, 0, AtomType::Ord}
 };
 
@@ -266,6 +269,7 @@ private:
     TexNode* build_greek_letter(const char* cmd, size_t len);
     TexNode* build_symbol_command(const char* cmd, size_t len);
     TexNode* build_function_operator(const char* cmd, size_t len);
+    TexNode* build_dots_command(const char* cmd, size_t len);  // \ldots, \cdots, etc.
 
     // Structures
     TexNode* build_subsup(TSNode node);         // x^2, x_i, x_i^n
@@ -688,20 +692,62 @@ TexNode* MathTypesetter::build_relation(TSNode node) {
 TexNode* MathTypesetter::build_punctuation(TSNode node) {
     char* text = node_text_dup(node);
     float size = current_size();
+    size_t len = strlen(text);
 
     int32_t cp = text[0];
     AtomType atom = AtomType::Punct;
+    
+    // Handle escaped braces (\{ and \}) - use cmsy10 positions
+    FontSpec font;
+    TFMFont* tfm;
+    if (len >= 2 && text[0] == '\\') {
+        if (text[1] == '{' || strncmp(text, "\\lbrace", 7) == 0) {
+            // Left brace: cmsy10 position 102
+            cp = 102;
+            atom = AtomType::Open;
+            font = ctx.symbol_font;
+            tfm = symbol_tfm;
+        } else if (text[1] == '}' || strncmp(text, "\\rbrace", 7) == 0) {
+            // Right brace: cmsy10 position 103
+            cp = 103;
+            atom = AtomType::Close;
+            font = ctx.symbol_font;
+            tfm = symbol_tfm;
+        } else {
+            // Unknown escape - treat as roman
+            cp = text[1];  // Use the character after backslash
+            font = ctx.roman_font;
+            tfm = roman_tfm;
+        }
+    } else if (cp == '|') {
+        // Vertical bar uses cmsy10 position 106 (shows as 'j' in printable range)
+        cp = 106;
+        atom = AtomType::Ord;  // |x| for absolute value - treated as ordinary
+        font = ctx.symbol_font;
+        tfm = symbol_tfm;
+    } else {
+        // Parentheses are open/close
+        if (cp == '(') atom = AtomType::Open;
+        else if (cp == ')') atom = AtomType::Close;
+        else if (cp == '[') atom = AtomType::Open;
+        else if (cp == ']') atom = AtomType::Close;
 
-    // Parentheses are open/close
-    if (cp == '(') atom = AtomType::Open;
-    else if (cp == ')') atom = AtomType::Close;
-    else if (cp == '[') atom = AtomType::Open;
-    else if (cp == ']') atom = AtomType::Close;
-
-    FontSpec font = ctx.roman_font;
+        // TeX uses cmmi (math italic) for comma, cmr (roman) for semicolon
+        // In cmmi10: position 59 is comma glyph
+        // In cmr10: position 59 is semicolon glyph
+        if (cp == ',') {
+            // Comma uses math italic font (cmmi10) at position 59
+            font = ctx.italic_font;
+            tfm = italic_tfm;
+        } else {
+            // Other punctuation (semicolon, colon, etc.) uses roman font
+            font = ctx.roman_font;
+            tfm = roman_tfm;
+        }
+    }
     font.size_pt = size;
 
-    TexNode* result = make_char_node(cp, atom, font, roman_tfm);
+    TexNode* result = make_char_node(cp, atom, font, tfm);
     free(text);
     return result;
 }
@@ -732,21 +778,28 @@ TexNode* MathTypesetter::build_command(TSNode node) {
         return result;
     }
 
-    // 2. Try symbols
+    // 2. Try dots commands (\ldots, \cdots, etc.)
+    result = build_dots_command(cmd, cmd_len);
+    if (result) {
+        free(full_cmd);
+        return result;
+    }
+
+    // 3. Try symbols
     result = build_symbol_command(cmd, cmd_len);
     if (result) {
         free(full_cmd);
         return result;
     }
 
-    // 3. Try function operators
+    // 4. Try function operators
     result = build_function_operator(cmd, cmd_len);
     if (result) {
         free(full_cmd);
         return result;
     }
 
-    // 4. Unknown command - render as text
+    // 5. Unknown command - render as text
     log_debug("tex_math_ts: unknown command \\%.*s", (int)cmd_len, cmd);
     free(full_cmd);
     return nullptr;
@@ -791,6 +844,71 @@ TexNode* MathTypesetter::build_function_operator(const char* cmd, size_t len) {
     }
 
     return wrap_in_hbox(first, last);
+}
+
+// ============================================================================
+// build_dots_command - \ldots, \cdots, \vdots, \ddots
+// ============================================================================
+
+TexNode* MathTypesetter::build_dots_command(const char* cmd, size_t len) {
+    // TeX dots commands:
+    //   - ldots: 3× period(58) from cmmi10 with kerns
+    //   - cdots: 3× cdot(1) from cmsy10 with kerns
+    //   - vdots: single char(61) from cmsy10
+    //   - ddots: single char(62) from cmsy10
+    
+    int dot_code = -1;
+    bool is_triple = false;
+    bool use_cmmi = false;  // true for ldots (cmmi10), false for cdots/vdots/ddots (cmsy10)
+    
+    if ((len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
+        (len == 4 && strncmp(cmd, "dots", 4) == 0)) {
+        dot_code = 58;  // period in cmmi10
+        is_triple = true;
+        use_cmmi = true;
+    } else if (len == 5 && strncmp(cmd, "cdots", 5) == 0) {
+        dot_code = 1;   // cdot in cmsy10
+        is_triple = true;
+        use_cmmi = false;
+    } else if (len == 5 && strncmp(cmd, "vdots", 5) == 0) {
+        dot_code = 61;  // vdots in cmsy10
+        is_triple = false;
+        use_cmmi = false;
+    } else if (len == 5 && strncmp(cmd, "ddots", 5) == 0) {
+        dot_code = 62;  // ddots in cmsy10
+        is_triple = false;
+        use_cmmi = false;
+    } else {
+        return nullptr;  // Not a dots command
+    }
+    
+    float size = current_size();
+    FontSpec font = use_cmmi ? ctx.italic_font : ctx.symbol_font;
+    TFMFont* tfm = use_cmmi ? italic_tfm : symbol_tfm;
+    font.size_pt = size;
+    
+    if (is_triple) {
+        // Build 3 dots with proper spacing (like TeX does)
+        TexNode* first = nullptr;
+        TexNode* last = nullptr;
+        
+        for (int i = 0; i < 3; i++) {
+            TexNode* dot = make_char_node(dot_code, AtomType::Inner, font, tfm);
+            link_node(first, last, dot);
+            
+            // Add kern between dots (except after last)
+            if (i < 2) {
+                // TeX uses thin space kerns between dots
+                TexNode* space = make_kern(ctx.arena, size * 0.167f);  // ~3mu
+                link_node(first, last, space);
+            }
+        }
+        
+        return wrap_in_hbox(first, last);
+    } else {
+        // Single character for vdots/ddots
+        return make_char_node(dot_code, AtomType::Inner, font, tfm);
+    }
 }
 
 // ============================================================================
@@ -1566,6 +1684,60 @@ private:
             return make_char_node(greek_code, AtomType::Ord, font, italic_tfm);
         }
 
+        // Try dots commands (\ldots, \cdots, etc.)
+        // TeX uses:
+        //   - ldots: 3× period(58) from cmmi10 with kerns
+        //   - cdots: 3× cdot(1) from cmsy10 with kerns
+        //   - vdots: single char(61) from cmsy10
+        //   - ddots: single char(62) from cmsy10
+        {
+            int dot_code = -1;
+            bool is_triple = false;
+            bool use_cmmi = false;
+            
+            if ((len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
+                (len == 4 && strncmp(cmd, "dots", 4) == 0)) {
+                dot_code = 58;  // period in cmmi10
+                is_triple = true;
+                use_cmmi = true;
+            } else if (len == 5 && strncmp(cmd, "cdots", 5) == 0) {
+                dot_code = 1;   // cdot in cmsy10
+                is_triple = true;
+                use_cmmi = false;
+            } else if (len == 5 && strncmp(cmd, "vdots", 5) == 0) {
+                dot_code = 61;  // vdots in cmsy10
+                is_triple = false;
+                use_cmmi = false;
+            } else if (len == 5 && strncmp(cmd, "ddots", 5) == 0) {
+                dot_code = 62;  // ddots in cmsy10
+                is_triple = false;
+                use_cmmi = false;
+            }
+            
+            if (dot_code >= 0) {
+                float size = current_size();
+                FontSpec font = use_cmmi ? ctx.italic_font : ctx.symbol_font;
+                TFMFont* tfm = use_cmmi ? italic_tfm : symbol_tfm;
+                font.size_pt = size;
+                
+                if (is_triple) {
+                    TexNode* first = nullptr;
+                    TexNode* last = nullptr;
+                    for (int i = 0; i < 3; i++) {
+                        TexNode* dot = make_char_node(dot_code, AtomType::Inner, font, tfm);
+                        link_node(first, last, dot);
+                        if (i < 2) {
+                            TexNode* space = make_kern(ctx.arena, size * 0.167f);
+                            link_node(first, last, space);
+                        }
+                    }
+                    return wrap_in_hbox(first, last);
+                } else {
+                    return make_char_node(dot_code, AtomType::Inner, font, tfm);
+                }
+            }
+        }
+
         const SymbolEntry* sym = lookup_symbol_entry(cmd, len);
         if (sym) {
             FontSpec font = ctx.symbol_font;
@@ -1640,13 +1812,47 @@ private:
     TexNode* build_punctuation_elem(const ElementReader& elem) {
         const char* value = elem.get_attr_string("value");
         if (!value) return nullptr;
+        size_t len = strlen(value);
         int32_t cp = value[0];
         AtomType atom = AtomType::Punct;
-        if (cp == '(' || cp == '[') atom = AtomType::Open;
-        else if (cp == ')' || cp == ']') atom = AtomType::Close;
-        FontSpec font = ctx.roman_font;
+        FontSpec font;
+        TFMFont* tfm;
+        
+        // Handle escaped braces (\{ and \}) - use cmsy10 positions
+        if (len >= 2 && value[0] == '\\') {
+            if (value[1] == '{' || strncmp(value, "\\lbrace", 7) == 0) {
+                // Left brace: cmsy10 position 102
+                cp = 102;
+                atom = AtomType::Open;
+                font = ctx.symbol_font;
+                tfm = symbol_tfm;
+            } else if (value[1] == '}' || strncmp(value, "\\rbrace", 7) == 0) {
+                // Right brace: cmsy10 position 103
+                cp = 103;
+                atom = AtomType::Close;
+                font = ctx.symbol_font;
+                tfm = symbol_tfm;
+            } else {
+                // Unknown escape - treat as roman
+                cp = value[1];
+                font = ctx.roman_font;
+                tfm = roman_tfm;
+            }
+        } else if (cp == '|') {
+            // Vertical bar uses cmsy10 position 106
+            cp = 106;
+            atom = AtomType::Ord;
+            font = ctx.symbol_font;
+            tfm = symbol_tfm;
+        } else {
+            if (cp == '(' || cp == '[') atom = AtomType::Open;
+            else if (cp == ')' || cp == ']') atom = AtomType::Close;
+            // comma in TeX is from cmmi10 (math italic), others from cmr10
+            font = (cp == ',') ? ctx.italic_font : ctx.roman_font;
+            tfm = (cp == ',') ? italic_tfm : roman_tfm;
+        }
         font.size_pt = current_size();
-        return make_char_node(cp, atom, font, roman_tfm);
+        return make_char_node(cp, atom, font, tfm);
     }
 
     // Structure builders
