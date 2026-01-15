@@ -720,17 +720,12 @@ TexNode* typeset_op_limits(TexNode* op_node, TexNode* subscript, TexNode* supers
         return scripts;
     }
 
-    // Create VBox to stack: superscript / operator / subscript
-    TexNode* vbox = make_vbox(arena, 0);
-
-    float total_width = op_node->width;
-    float total_height = 0;
-    float total_depth = 0;
-
-    // Centering offsets
-    float sup_offset = 0;
-    float sub_offset = 0;
-    float op_offset = 0;
+    // Display mode: Use Scripts node with explicit x,y coordinates
+    // so DVI output respects the stacking order (superscript above, subscript below)
+    TexNode* result = alloc_node(arena, NodeClass::Scripts);
+    result->content.scripts.nucleus = op_node;
+    result->content.scripts.subscript = subscript;
+    result->content.scripts.superscript = superscript;
 
     // Calculate widths for centering
     float sup_width = superscript ? superscript->width : 0;
@@ -739,87 +734,68 @@ TexNode* typeset_op_limits(TexNode* op_node, TexNode* subscript, TexNode* supers
     if (sup_width > max_width) max_width = sup_width;
     if (sub_width > max_width) max_width = sub_width;
 
-    total_width = max_width;
-
-    // Center each element
-    op_offset = (max_width - op_node->width) / 2.0f;
-    if (superscript) sup_offset = (max_width - sup_width) / 2.0f;
-    if (subscript) sub_offset = (max_width - sub_width) / 2.0f;
+    // Centering offsets
+    float sup_offset = (max_width - sup_width) / 2.0f;
+    float sub_offset = (max_width - sub_width) / 2.0f;
+    float op_offset = (max_width - op_node->width) / 2.0f;
 
     // Spacing parameters (TeXBook p. 445)
-    float big_op_spacing1 = ctx.base_size_pt * 0.111f;  // min above/below limits
-    float big_op_spacing3 = ctx.base_size_pt * 0.2f;    // between op and limits
-    float big_op_spacing5 = ctx.base_size_pt * 0.1f;    // extra above/below
-    (void)big_op_spacing1;  // TODO: use for minimum limit gap calculation
-    (void)big_op_spacing5;  // TODO: use for extra padding at top/bottom
+    float big_op_spacing3 = ctx.base_size_pt * 0.2f;  // between op and limits
 
-    // Build from top to bottom
-    // Superscript at top
-    if (superscript) {
-        TexNode* sup_hbox = make_hbox(arena);
-        sup_hbox->append_child(superscript);
-        sup_hbox->width = sup_width;
-        sup_hbox->height = superscript->height;
-        sup_hbox->depth = superscript->depth;
-        superscript->x = sup_offset;
-        superscript->y = 0;
-
-        vbox->append_child(sup_hbox);
-        total_height += sup_hbox->height + sup_hbox->depth;
-
-        // Add spacing below superscript
-        TexNode* gap = make_kern(arena, big_op_spacing3);
-        vbox->append_child(gap);
-        total_height += big_op_spacing3;
-    }
-
-    // The operator
-    TexNode* op_hbox = make_hbox(arena);
-    op_hbox->append_child(op_node);
-    op_hbox->width = op_node->width;
-    op_hbox->height = op_node->height;
-    op_hbox->depth = op_node->depth;
+    // Position operator at center
     op_node->x = op_offset;
     op_node->y = 0;
+    op_node->parent = result;
 
-    vbox->append_child(op_hbox);
-    float op_center_height = op_hbox->height;
-    float op_center_depth = op_hbox->depth;
+    float total_height = op_node->height;
+    float total_depth = op_node->depth;
 
-    // Subscript below
-    if (subscript) {
-        // Add spacing above subscript
-        TexNode* gap = make_kern(arena, big_op_spacing3);
-        vbox->append_child(gap);
+    // Link children in DVI output order: superscript (top) -> operator (middle) -> subscript (bottom)
+    // This matches TeX reference DVI ordering
+    TexNode* prev = nullptr;
 
-        TexNode* sub_hbox = make_hbox(arena);
-        sub_hbox->append_child(subscript);
-        sub_hbox->width = sub_width;
-        sub_hbox->height = subscript->height;
-        sub_hbox->depth = subscript->depth;
-        subscript->x = sub_offset;
-        subscript->y = 0;
-
-        vbox->append_child(sub_hbox);
-        total_depth += big_op_spacing3 + sub_hbox->height + sub_hbox->depth;
-    }
-
-    // Set VBox dimensions
-    // Position so operator is centered on math axis
-    float axis = ctx.axis_height;
+    // Position superscript above operator (output first in DVI)
     if (superscript) {
-        vbox->height = total_height + op_center_height - axis;
-        vbox->depth = op_center_depth + (subscript ? total_depth : 0) + axis;
-    } else {
-        vbox->height = op_center_height;
-        vbox->depth = op_center_depth + (subscript ? total_depth : 0);
+        superscript->x = sup_offset;
+        superscript->y = op_node->height + big_op_spacing3 + superscript->depth;
+        superscript->parent = result;
+        total_height = superscript->y + superscript->height;
+
+        result->first_child = superscript;
+        result->last_child = superscript;
+        prev = superscript;
     }
-    vbox->width = total_width;
+
+    // Link operator
+    if (prev) {
+        prev->next_sibling = op_node;
+        op_node->prev_sibling = prev;
+    } else {
+        result->first_child = op_node;
+    }
+    result->last_child = op_node;
+    prev = op_node;
+
+    // Position and link subscript below operator
+    if (subscript) {
+        subscript->x = sub_offset;
+        subscript->y = -(op_node->depth + big_op_spacing3 + subscript->height);
+        subscript->parent = result;
+        total_depth = -subscript->y + subscript->depth;
+
+        prev->next_sibling = subscript;
+        subscript->prev_sibling = prev;
+        result->last_child = subscript;
+    }
+
+    result->width = max_width;
+    result->height = total_height;
+    result->depth = total_depth;
 
     log_debug("math_bridge: op_limits %.2fpt x (%.2f + %.2f)",
-              vbox->width, vbox->height, vbox->depth);
+              result->width, result->height, result->depth);
 
-    return vbox;
+    return result;
 }
 
 // ============================================================================
