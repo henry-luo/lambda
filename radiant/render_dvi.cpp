@@ -109,15 +109,16 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
     // Create LaTeX context with default document class
     tex::LaTeXContext ctx = tex::LaTeXContext::create(arena, fonts, "article");
 
-    // Set page dimensions (US Letter default)
+    // Set page dimensions to match LaTeX article class defaults
+    // LaTeX uses textheight=550pt, textwidth=345pt for US Letter paper
     ctx.doc_ctx.page_width = 612.0f;   // 8.5 inches
-    ctx.doc_ctx.page_height = 792.0f;  // 11 inches
-    ctx.doc_ctx.margin_left = 72.0f;   // 1 inch
+    ctx.doc_ctx.page_height = 795.0f;  // 11 inches (TeX default is 794.97pt)
+    ctx.doc_ctx.margin_left = 72.0f;   // 1 inch (but textwidth differs)
     ctx.doc_ctx.margin_right = 72.0f;
-    ctx.doc_ctx.margin_top = 72.0f;
+    ctx.doc_ctx.margin_top = 72.0f;    // Simplified - TeX has complex top margin
     ctx.doc_ctx.margin_bottom = 72.0f;
-    ctx.doc_ctx.text_width = ctx.doc_ctx.page_width - ctx.doc_ctx.margin_left - ctx.doc_ctx.margin_right;
-    ctx.doc_ctx.text_height = ctx.doc_ctx.page_height - ctx.doc_ctx.margin_top - ctx.doc_ctx.margin_bottom;
+    ctx.doc_ctx.text_width = 345.0f;   // Match LaTeX article class default
+    ctx.doc_ctx.text_height = 550.0f;  // Match LaTeX article class default
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - Setup context: %.1fms",
