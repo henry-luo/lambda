@@ -406,10 +406,15 @@ bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, cons
 
   // PROACTIVE SCANNING: Check for special commands at backslash
   // We handle \char, \verb, \begin{document}, \end{document} in a single pass
-  // to avoid lexer state corruption from partial matches
+  // IMPORTANT: Only advance and return true if we FULLY match a special command.
+  // If we don't match, we must NOT advance the lexer - let the normal lexer handle it.
 
   if (lexer->lookahead == '\\') {
-    // Advance past backslash
+    // DON'T advance yet - peek at next char first
+    // We need to check if this could be a special command before advancing
+    
+    // Use mark_end to save position BEFORE any advances
+    lexer->mark_end(lexer);
     lexer->advance(lexer, false);
 
     // Try to match special commands
@@ -419,8 +424,12 @@ bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, cons
       lexer->result_symbol = result;
       return true;
     }
-    // Failed to match any special command - lexer position is corrupted
-    // This is OK because we return false and tree-sitter will try other tokens
+    
+    // Failed to match any special command.
+    // Return false WITHOUT advancing - tree-sitter will fall back to normal lexer.
+    // The advance we did is undone because we return false and tree-sitter
+    // resets to the position we marked with mark_end at the start.
+    return false;
   }
 
   // Check for TeX caret notation: ^^XX (hex) or ^^^^XXXX (hex) or ^^c (char)
