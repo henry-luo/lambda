@@ -613,47 +613,6 @@ static bool is_diacritic_tag(const char* tag) {
     return get_diacritic_combining(tag[0]) != 0;
 }
 
-// Check if a tag is a word-forming command that absorbs following space
-// These are single-char commands that produce letters and should consume trailing space
-// unless followed by {} (which acts as a terminator)
-static bool is_word_forming_command(const char* tag) {
-    if (!tag) return false;
-    // Single-char commands for special letters
-    static const char* word_forming[] = {
-        "i", "j",           // Dotless letters
-        "o", "O",           // Scandinavian slashed o
-        "l", "L",           // Polish L with stroke
-        "ae", "AE",         // AE ligature
-        "oe", "OE",         // OE ligature
-        "aa", "AA",         // Double-a ring (Scandinavian)
-        "ss",               // German sharp s (eszett)
-        nullptr
-    };
-    for (int k = 0; word_forming[k]; k++) {
-        if (tag_eq(tag, word_forming[k])) return true;
-    }
-    return false;
-}
-
-// Check if an element has an empty curly_group child (terminator like \ss{})
-static bool has_empty_curly_terminator(const ElementReader& elem, Arena* arena) {
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "group"))) {
-                const char* content = extract_text_content(child, arena);
-                if (!content || content[0] == '\0') {
-                    return true;  // Empty curly_group found
-                }
-            }
-        }
-    }
-    return false;
-}
-
 // ============================================================================
 // HTML Utilities
 // ============================================================================
@@ -1862,6 +1821,38 @@ static bool tag_eq(const char* a, const char* b) {
     return strcmp(a, b) == 0;
 }
 
+// Helper to transform text content with typographic ligatures
+// Handles: !´ → ¡, ?´ → ¿, --- → —, -- → –, etc.
+static const char* transform_text_ligatures(const char* text, Arena* arena) {
+    if (!text || text[0] == '\0') return text;
+    
+    size_t len = strlen(text);
+    // Allocate enough for worst case (each char could expand)
+    char* result = (char*)arena_alloc(arena, len * 3 + 1);
+    char* out = result;
+    const char* p = text;
+    
+    while (*p) {
+        // !´ (exclamation + acute accent U+00B4) → ¡ (inverted exclamation U+00A1)
+        if (*p == '!' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
+            *out++ = '\xC2';
+            *out++ = '\xA1';  // ¡
+            p += 3;  // Skip ! and ´ (2 bytes)
+        }
+        // ?´ (question + acute accent U+00B4) → ¿ (inverted question U+00BF)
+        else if (*p == '?' && (unsigned char)*(p+1) == 0xC2 && (unsigned char)*(p+2) == 0xB4) {
+            *out++ = '\xC2';
+            *out++ = '\xBF';  // ¿
+            p += 3;  // Skip ? and ´ (2 bytes)
+        }
+        else {
+            *out++ = *p++;
+        }
+    }
+    *out = '\0';
+    return result;
+}
+
 // Sentinel pointer values for special markers (used internally during tree building)
 static DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break marker
 static DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
@@ -1967,6 +1958,47 @@ static const char* extract_text_content(const ItemReader& item, Arena* arena) {
     }
     
     return nullptr;
+}
+
+// Check if a tag is a word-forming command that absorbs following space
+// These are single-char commands that produce letters and should consume trailing space
+// unless followed by {} (which acts as a terminator)
+static bool is_word_forming_command(const char* tag) {
+    if (!tag) return false;
+    // Single-char commands for special letters
+    static const char* word_forming[] = {
+        "i", "j",           // Dotless letters
+        "o", "O",           // Scandinavian slashed o
+        "l", "L",           // Polish L with stroke
+        "ae", "AE",         // AE ligature
+        "oe", "OE",         // OE ligature
+        "aa", "AA",         // Double-a ring (Scandinavian)
+        "ss",               // German sharp s (eszett)
+        nullptr
+    };
+    for (int k = 0; word_forming[k]; k++) {
+        if (tag_eq(tag, word_forming[k])) return true;
+    }
+    return false;
+}
+
+// Check if an element has an empty curly_group child (terminator like \ss{})
+static bool has_empty_curly_terminator(const ElementReader& elem, Arena* arena) {
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "group"))) {
+                const char* content = extract_text_content(child, arena);
+                if (!content || content[0] == '\0') {
+                    return true;  // Empty curly_group found
+                }
+            }
+        }
+    }
+    return false;
 }
 
 // Extract math source - checks "source" attribute first, then falls back to text content
@@ -3956,10 +3988,45 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
     DocElement* current_para = nullptr;
     bool after_block_element = false;  // Track if the previous element was a block
     bool next_para_noindent = false;   // Track if next paragraph should have noindent class
+    bool strip_next_leading_space = false;  // Track if next text should have leading space stripped
     
     int64_t child_count = elem.childCount();
     for (int64_t i = 0; i < child_count; i++) {
         ItemReader child_item = elem.childAt(i);
+        
+        // Handle string children - may need to strip leading space
+        if (child_item.isString()) {
+            const char* text = child_item.cstring();
+            if (text && text[0] != '\0') {
+                // Strip leading space if flag is set
+                if (strip_next_leading_space) {
+                    strip_next_leading_space = false;
+                    while (*text == ' ' || *text == '\t') text++;
+                    if (text[0] == '\0') continue;  // String was only whitespace
+                }
+                
+                // Apply typographic ligature transformations (!´ → ¡, ?´ → ¿)
+                text = transform_text_ligatures(text, arena);
+                
+                // Ensure we have a paragraph
+                if (!current_para) {
+                    current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                    if (after_block_element) {
+                        current_para->flags |= DocElement::FLAG_CONTINUE;
+                        after_block_element = false;
+                    }
+                    if (next_para_noindent) {
+                        current_para->flags |= DocElement::FLAG_NOINDENT;
+                        next_para_noindent = false;
+                    }
+                }
+                DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                if (text_elem) {
+                    doc_append_child(current_para, text_elem);
+                }
+            }
+            continue;
+        }
         
         // Check for diacritic command elements (single-char tags like ^, ", ', `, ~, etc.)
         if (child_item.isElement()) {
@@ -4122,6 +4189,9 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                                     }
                                     
                                     i++;  // Skip the consumed next item
+                                    
+                                    // \i and \j are word-forming - strip next leading space
+                                    strip_next_leading_space = true;
                                     continue;
                                 }
                             }
@@ -4176,6 +4246,40 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                 }
                 
                 // If we get here, diacritic processing failed - fall through to normal processing
+            }
+            
+            // Check for word-forming commands (\i, \o, \ss, etc.)
+            if (tag && is_word_forming_command(tag)) {
+                // Build the character output
+                DocElement* char_elem = build_doc_element(child_item, arena, doc);
+                if (char_elem) {
+                    // Ensure we have a paragraph
+                    if (!current_para) {
+                        current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                        if (after_block_element) {
+                            current_para->flags |= DocElement::FLAG_CONTINUE;
+                            after_block_element = false;
+                        }
+                        if (next_para_noindent) {
+                            current_para->flags |= DocElement::FLAG_NOINDENT;
+                            next_para_noindent = false;
+                        }
+                    }
+                    doc_append_child(current_para, char_elem);
+                    
+                    // Check for empty curly_group terminator (like \ss{})
+                    if (has_empty_curly_terminator(child_elem, arena)) {
+                        // Output ZWS after the character
+                        DocElement* zws = doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain());
+                        if (zws) {
+                            doc_append_child(current_para, zws);
+                        }
+                    } else {
+                        // Set flag to strip next leading space
+                        strip_next_leading_space = true;
+                    }
+                }
+                continue;
             }
         }
         
