@@ -1849,6 +1849,7 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
     // Check if this is a diacritic command with empty braces: \^{}, \~{}, etc.
     const DiacriticInfo* diacritic = find_diacritic(cmd_name);
     if (diacritic) {
+        log_debug("input-latex-ts: Found diacritic command '%s'", cmd_name);
         // Check if it has an empty curly_group argument
         uint32_t child_count = ts_node_child_count(node);
         bool has_empty_group = false;
@@ -1877,6 +1878,7 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
 
         // If diacritic with empty group, return standalone + ZWSP as string
         if (has_empty_group) {
+            log_debug("input-latex-ts: Diacritic '%s' has empty group - outputting standalone '%s' + ZWS", cmd_name, diacritic->standalone);
             MarkBuilder& builder = ctx.builder;
             StringBuf* sb = ctx.sb;
             stringbuf_reset(sb);
