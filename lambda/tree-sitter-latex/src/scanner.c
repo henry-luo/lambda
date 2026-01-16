@@ -420,7 +420,6 @@ bool tree_sitter_latex_external_scanner_scan(void *payload, TSLexer *lexer, cons
     // Try to match special commands
     int result = scan_backslash_command(lexer);
     if (result >= 0) {
-      // fprintf(stderr, "SCANNER: matched token %d\n", result);
       lexer->result_symbol = result;
       return true;
     }

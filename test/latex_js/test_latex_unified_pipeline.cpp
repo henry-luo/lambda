@@ -334,7 +334,7 @@ TEST_F(UnifiedPipelineTest, NestedFormatting) {
 // Separated into BASELINE (passing) and EXTENDED (failing/in-progress) sets
 // ============================================================================
 
-// Baseline tests - these must all pass (20 fixture tests currently passing)
+// Baseline tests - these must all pass (23 fixture tests currently passing)
 // Format: "filename_id" where filename is without .tex extension
 static const std::set<std::string> BASELINE_FIXTURES = {
     // basic_test.tex - all passing
@@ -352,12 +352,15 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     // text.tex - partial
     "text_1",
     "text_2",
+    "text_3",    // noindent paragraphs - added
     "text_6",
     // environments.tex - partial
     "environments_1",
     "environments_11",
     // whitespace.tex - partial
+    "whitespace_2",   // \par and ~ handling - added
     "whitespace_3",
+    "whitespace_9",   // multiple newlines collapsing - added
     "whitespace_14",
     "whitespace_15",
     "whitespace_16",
