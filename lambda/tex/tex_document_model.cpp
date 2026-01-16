@@ -613,6 +613,47 @@ static bool is_diacritic_tag(const char* tag) {
     return get_diacritic_combining(tag[0]) != 0;
 }
 
+// Check if a tag is a word-forming command that absorbs following space
+// These are single-char commands that produce letters and should consume trailing space
+// unless followed by {} (which acts as a terminator)
+static bool is_word_forming_command(const char* tag) {
+    if (!tag) return false;
+    // Single-char commands for special letters
+    static const char* word_forming[] = {
+        "i", "j",           // Dotless letters
+        "o", "O",           // Scandinavian slashed o
+        "l", "L",           // Polish L with stroke
+        "ae", "AE",         // AE ligature
+        "oe", "OE",         // OE ligature
+        "aa", "AA",         // Double-a ring (Scandinavian)
+        "ss",               // German sharp s (eszett)
+        nullptr
+    };
+    for (int k = 0; word_forming[k]; k++) {
+        if (tag_eq(tag, word_forming[k])) return true;
+    }
+    return false;
+}
+
+// Check if an element has an empty curly_group child (terminator like \ss{})
+static bool has_empty_curly_terminator(const ElementReader& elem, Arena* arena) {
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "group"))) {
+                const char* content = extract_text_content(child, arena);
+                if (!content || content[0] == '\0') {
+                    return true;  // Empty curly_group found
+                }
+            }
+        }
+    }
+    return false;
+}
+
 // ============================================================================
 // HTML Utilities
 // ============================================================================
@@ -4005,7 +4046,45 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                                     continue;
                                 }
                             }
-                        } else if (next_item.isElement()) {
+                        }
+                        // Check if next item is an element
+                        if (next_item.isElement()) {
+                            ElementReader next_elem = next_item.asElement();
+                            const char* next_tag = next_elem.tagName();
+                            
+                            // Check for empty curly_group sibling (e.g., \^{} → ^ + empty curly_group)
+                            // In this case, output diacritic char + ZWS
+                            if (next_tag && (tag_eq(next_tag, "curly_group") || tag_eq(next_tag, "group"))) {
+                                const char* group_text = extract_text_content(next_item, arena);
+                                if (!group_text || group_text[0] == '\0') {
+                                    // Empty curly_group sibling - output diacritic char + ZWS
+                                    if (!current_para) {
+                                        current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                                        if (after_block_element) {
+                                            current_para->flags |= DocElement::FLAG_CONTINUE;
+                                            after_block_element = false;
+                                        }
+                                        if (next_para_noindent) {
+                                            current_para->flags |= DocElement::FLAG_NOINDENT;
+                                            next_para_noindent = false;
+                                        }
+                                    }
+                                    char buf[8];
+                                    buf[0] = diacritic_cmd;
+                                    buf[1] = '\xE2';  // U+200B ZWS
+                                    buf[2] = '\x80';
+                                    buf[3] = '\x8B';
+                                    buf[4] = '\0';
+                                    DocElement* text_elem = doc_create_text_cstr(arena, buf, DocTextStyle::plain());
+                                    if (text_elem) {
+                                        doc_append_child(current_para, text_elem);
+                                    }
+                                    i++;  // Skip the consumed curly_group
+                                    continue;
+                                }
+                            }
+                        }
+                        if (next_item.isElement()) {
                             // Next item is an element - could be \i (dotless i), \j (dotless j), etc.
                             ElementReader next_elem = next_item.asElement();
                             const char* next_tag = next_elem.tagName();
