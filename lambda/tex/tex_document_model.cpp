@@ -496,6 +496,99 @@ static void html_escape_append_transformed(StrBuf* out, const char* text, size_t
 }
 
 // ============================================================================
+// Diacritic Support
+// ============================================================================
+
+// Map diacritic command character to Unicode combining character
+static uint32_t get_diacritic_combining(char cmd) {
+    switch (cmd) {
+    case '\'': return 0x0301;  // combining acute accent
+    case '`':  return 0x0300;  // combining grave accent
+    case '^':  return 0x0302;  // combining circumflex
+    case '"':  return 0x0308;  // combining diaeresis (umlaut)
+    case '~':  return 0x0303;  // combining tilde
+    case '=':  return 0x0304;  // combining macron
+    case '.':  return 0x0307;  // combining dot above
+    case 'u':  return 0x0306;  // combining breve
+    case 'v':  return 0x030C;  // combining caron (háček)
+    case 'H':  return 0x030B;  // combining double acute
+    case 'c':  return 0x0327;  // combining cedilla
+    case 'd':  return 0x0323;  // combining dot below
+    case 'b':  return 0x0331;  // combining macron below
+    case 'r':  return 0x030A;  // combining ring above
+    case 'k':  return 0x0328;  // combining ogonek
+    default:   return 0;
+    }
+}
+
+// Encode UTF-8 codepoint, return number of bytes written
+static int utf8_encode(uint32_t cp, char* out) {
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        return 1;
+    } else if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    } else if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    } else {
+        out[0] = (char)(0xF0 | (cp >> 18));
+        out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+}
+
+// Get UTF-8 character length from first byte
+static int utf8_char_len(unsigned char first_byte) {
+    if (first_byte < 0x80) return 1;
+    if ((first_byte & 0xE0) == 0xC0) return 2;
+    if ((first_byte & 0xF0) == 0xE0) return 3;
+    if ((first_byte & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+// Apply diacritic command to base character, returning combined result
+// Uses NFD form (base + combining character)
+static const char* apply_diacritic(char diacritic_cmd, const char* base_char, Arena* arena) {
+    if (!base_char || base_char[0] == '\0') {
+        return nullptr;
+    }
+    
+    uint32_t combining = get_diacritic_combining(diacritic_cmd);
+    if (combining == 0) {
+        // Unknown diacritic, just return base
+        return base_char;
+    }
+    
+    // Get base character length
+    int base_len = utf8_char_len((unsigned char)base_char[0]);
+    
+    // Allocate buffer: base + combining (up to 4 bytes each) + null
+    char* result = (char*)arena_alloc(arena, base_len + 4 + 1);
+    
+    // Copy base character
+    memcpy(result, base_char, base_len);
+    
+    // Add combining character
+    int comb_len = utf8_encode(combining, result + base_len);
+    result[base_len + comb_len] = '\0';
+    
+    return result;
+}
+
+// Check if a tag is a diacritic command (single character)
+static bool is_diacritic_tag(const char* tag) {
+    if (!tag || strlen(tag) != 1) return false;
+    return get_diacritic_combining(tag[0]) != 0;
+}
+
+// ============================================================================
 // HTML Utilities
 // ============================================================================
 
@@ -2107,6 +2200,46 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         return doc_create_text_cstr(arena, "\xC2\xA0", DocTextStyle::plain());  // &nbsp;
     }
     
+    // Diacritic commands (single character tags like ^, ", ', `, ~, =, ., u, v, H, c, d, b, r, k)
+    // These apply an accent to the following character
+    if (is_diacritic_tag(tag)) {
+        char diacritic_cmd = tag[0];
+        
+        // Get the base character from children
+        const char* base_char = nullptr;
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                const char* text = child.cstring();
+                if (text && text[0] != '\0') {
+                    // Get first character only (may be multi-byte UTF-8)
+                    base_char = text;
+                    break;
+                }
+            } else if (child.isElement()) {
+                // Could be a curly_group containing the character
+                ElementReader ch_elem = child.asElement();
+                const char* ch_tag = ch_elem.tagName();
+                if (ch_tag && (tag_eq(ch_tag, "curly_group") || tag_eq(ch_tag, "group"))) {
+                    // Extract text from group
+                    base_char = extract_text_content(child, arena);
+                    if (base_char && strlen(base_char) > 0) {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (base_char && strlen(base_char) > 0) {
+            const char* result = apply_diacritic(diacritic_cmd, base_char, arena);
+            if (result) {
+                return doc_create_text_cstr(arena, result, DocTextStyle::plain());
+            }
+        }
+        return nullptr;
+    }
+    
     // Generic command - check command_name child
     if (tag_eq(tag, "generic_command") || tag_eq(tag, "command")) {
         auto iter = elem.children();
@@ -2308,7 +2441,69 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
 // Forward declaration for trim_paragraph_whitespace
 static void trim_paragraph_whitespace(DocElement* para, Arena* arena);
 
-// Build a paragraph element
+// Try to apply a diacritic command to the next child in sequence
+// Returns true if diacritic was applied, false otherwise
+// next_child will be advanced if diacritic was consumed
+static bool try_apply_diacritic(char diacritic_cmd, ElementReader::ChildIterator& iter, ItemReader* next_child,
+                                 DocElement* parent, Arena* arena, TexDocumentModel* doc) {
+    // Try to peek at the next child
+    ItemReader peek;
+    if (!iter.next(&peek)) {
+        return false;  // No more children
+    }
+    
+    const char* base_char = nullptr;
+    bool consumed = false;
+    
+    if (peek.isString()) {
+        const char* text = peek.cstring();
+        if (text && text[0] != '\0') {
+            // Apply diacritic to first character, return rest as separate text
+            const char* result = apply_diacritic(diacritic_cmd, text, arena);
+            if (result) {
+                DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
+                if (text_elem) {
+                    doc_append_child(parent, text_elem);
+                }
+                
+                // Check if there are more characters after the first one
+                int char_len = utf8_char_len((unsigned char)text[0]);
+                if (text[char_len] != '\0') {
+                    DocElement* rest = doc_create_text_cstr(arena, text + char_len, DocTextStyle::plain());
+                    if (rest) {
+                        doc_append_child(parent, rest);
+                    }
+                }
+                return true;
+            }
+        }
+    } else if (peek.isElement()) {
+        // Could be a curly_group or other element containing the base character
+        ElementReader peek_elem = peek.asElement();
+        const char* peek_tag = peek_elem.tagName();
+        if (peek_tag && (tag_eq(peek_tag, "curly_group") || tag_eq(peek_tag, "group"))) {
+            // Extract text from the group and apply diacritic
+            const char* text = extract_text_content(peek, arena);
+            if (text && text[0] != '\0') {
+                const char* result = apply_diacritic(diacritic_cmd, text, arena);
+                if (result) {
+                    DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
+                    if (text_elem) {
+                        doc_append_child(parent, text_elem);
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+    
+    // Could not apply diacritic - process the peeked child normally and put current child back
+    // Actually we need to process the peeked item normally
+    *next_child = peek;
+    return false;
+}
+
+// Build a paragraph element with diacritic merging
 static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
                                     TexDocumentModel* doc) {
     DocElement* para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
@@ -2316,6 +2511,45 @@ static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
+        // Check if this is a diacritic command element
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && is_diacritic_tag(tag)) {
+                // Check if diacritic has a child (braced form like \^{o})
+                auto child_iter = child_elem.children();
+                ItemReader diacritic_child;
+                bool has_child = child_iter.next(&diacritic_child);
+                
+                if (has_child) {
+                    // Braced form: apply to the contained text
+                    const char* base_text = nullptr;
+                    if (diacritic_child.isString()) {
+                        base_text = diacritic_child.cstring();
+                    } else {
+                        base_text = extract_text_content(diacritic_child, arena);
+                    }
+                    if (base_text && base_text[0] != '\0') {
+                        const char* result = apply_diacritic(tag[0], base_text, arena);
+                        if (result) {
+                            DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
+                            if (text_elem) {
+                                doc_append_child(para, text_elem);
+                            }
+                            continue;
+                        }
+                    }
+                } else {
+                    // Unbraced form: try to apply to next sibling
+                    if (try_apply_diacritic(tag[0], iter, &child, para, arena, doc)) {
+                        continue;
+                    }
+                    // If try_apply_diacritic returned false, child now holds the peeked item
+                    // Fall through to process it normally
+                }
+            }
+        }
+        
         DocElement* child_elem = build_inline_content(child, arena, doc);
         if (child_elem) {
             doc_append_child(para, child_elem);
@@ -3395,6 +3629,134 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
     int64_t child_count = elem.childCount();
     for (int64_t i = 0; i < child_count; i++) {
         ItemReader child_item = elem.childAt(i);
+        
+        // Check for diacritic command elements (single-char tags like ^, ", ', `, ~, etc.)
+        if (child_item.isElement()) {
+            ElementReader child_elem = child_item.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && is_diacritic_tag(tag)) {
+                char diacritic_cmd = tag[0];
+                
+                // Check if diacritic has its own child (braced form like \^{o})
+                ItemReader diacritic_child;
+                auto diacritic_iter = child_elem.children();
+                bool has_child = diacritic_iter.next(&diacritic_child);
+                
+                const char* result = nullptr;
+                bool consumed_next = false;
+                
+                if (has_child) {
+                    // Braced form: apply to the contained text
+                    const char* base_text = nullptr;
+                    if (diacritic_child.isString()) {
+                        base_text = diacritic_child.cstring();
+                    } else {
+                        base_text = extract_text_content(diacritic_child, arena);
+                    }
+                    if (base_text && base_text[0] != '\0') {
+                        result = apply_diacritic(diacritic_cmd, base_text, arena);
+                    }
+                } else {
+                    // Unbraced form (e.g., \^o) - look at next sibling for base character
+                    if (i + 1 < child_count) {
+                        ItemReader next_item = elem.childAt(i + 1);
+                        if (next_item.isString()) {
+                            const char* next_text = next_item.cstring();
+                            if (next_text && next_text[0] != '\0') {
+                                // Apply diacritic to first character
+                                result = apply_diacritic(diacritic_cmd, next_text, arena);
+                                if (result) {
+                                    consumed_next = true;
+                                    
+                                    // Ensure we have a paragraph
+                                    if (!current_para) {
+                                        current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                                        if (after_block_element) {
+                                            current_para->flags |= DocElement::FLAG_CONTINUE;
+                                            after_block_element = false;
+                                        }
+                                    }
+                                    
+                                    // Add the accented character
+                                    DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
+                                    if (text_elem) {
+                                        doc_append_child(current_para, text_elem);
+                                    }
+                                    
+                                    // Add remaining characters from next_text (if any)
+                                    int char_len = utf8_char_len((unsigned char)next_text[0]);
+                                    if (next_text[char_len] != '\0') {
+                                        DocElement* rest = doc_create_text_cstr(arena, next_text + char_len, DocTextStyle::plain());
+                                        if (rest) {
+                                            doc_append_child(current_para, rest);
+                                        }
+                                    }
+                                    
+                                    i++;  // Skip the consumed next item
+                                    continue;
+                                }
+                            }
+                        } else if (next_item.isElement()) {
+                            // Next item is an element - could be \i (dotless i), \j (dotless j), etc.
+                            ElementReader next_elem = next_item.asElement();
+                            const char* next_tag = next_elem.tagName();
+                            
+                            // Handle dotless i and j for diacritics
+                            const char* base_text = nullptr;
+                            if (next_tag && tag_eq(next_tag, "i")) {
+                                base_text = "\xC4\xB1";  // ı (U+0131 LATIN SMALL LETTER DOTLESS I)
+                            } else if (next_tag && tag_eq(next_tag, "j")) {
+                                base_text = "\xC8\xB7";  // ȷ (U+0237 LATIN SMALL LETTER DOTLESS J)
+                            }
+                            
+                            if (base_text) {
+                                result = apply_diacritic(diacritic_cmd, base_text, arena);
+                                if (result) {
+                                    consumed_next = true;
+                                    
+                                    // Ensure we have a paragraph
+                                    if (!current_para) {
+                                        current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                                        if (after_block_element) {
+                                            current_para->flags |= DocElement::FLAG_CONTINUE;
+                                            after_block_element = false;
+                                        }
+                                    }
+                                    
+                                    // Add the accented character
+                                    DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
+                                    if (text_elem) {
+                                        doc_append_child(current_para, text_elem);
+                                    }
+                                    
+                                    i++;  // Skip the consumed next item
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (result && !consumed_next) {
+                    // Ensure we have a paragraph
+                    if (!current_para) {
+                        current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                        if (after_block_element) {
+                            current_para->flags |= DocElement::FLAG_CONTINUE;
+                            after_block_element = false;
+                        }
+                    }
+                    DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
+                    if (text_elem) {
+                        doc_append_child(current_para, text_elem);
+                    }
+                    continue;
+                }
+                
+                // If we get here, diacritic processing failed - fall through to normal processing
+            }
+        }
+        
         DocElement* child_elem = build_doc_element(child_item, arena, doc);
         
         if (!child_elem) continue;
@@ -3581,6 +3943,53 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     // Non-breaking space
     if (tag_eq(tag, "nobreakspace") || tag_eq(tag, "nbsp")) {
         return doc_create_text_cstr(arena, "\xC2\xA0", DocTextStyle::plain());  // &nbsp;
+    }
+    
+    // Special letter commands (not diacritics, but single-char commands producing specific letters)
+    // Scandinavian slashed o
+    if (tag_eq(tag, "o")) {
+        return doc_create_text_cstr(arena, "\xC3\xB8", DocTextStyle::plain());  // ø
+    }
+    if (tag_eq(tag, "O")) {
+        return doc_create_text_cstr(arena, "\xC3\x98", DocTextStyle::plain());  // Ø
+    }
+    // German sharp s (eszett)
+    if (tag_eq(tag, "ss")) {
+        return doc_create_text_cstr(arena, "\xC3\x9F", DocTextStyle::plain());  // ß
+    }
+    // Dotless i and j (used as base for diacritics)
+    if (tag_eq(tag, "i")) {
+        return doc_create_text_cstr(arena, "\xC4\xB1", DocTextStyle::plain());  // ı
+    }
+    if (tag_eq(tag, "j")) {
+        return doc_create_text_cstr(arena, "\xC8\xB7", DocTextStyle::plain());  // ȷ
+    }
+    // Latin ligatures
+    if (tag_eq(tag, "ae")) {
+        return doc_create_text_cstr(arena, "\xC3\xA6", DocTextStyle::plain());  // æ
+    }
+    if (tag_eq(tag, "AE")) {
+        return doc_create_text_cstr(arena, "\xC3\x86", DocTextStyle::plain());  // Æ
+    }
+    if (tag_eq(tag, "oe")) {
+        return doc_create_text_cstr(arena, "\xC5\x93", DocTextStyle::plain());  // œ
+    }
+    if (tag_eq(tag, "OE")) {
+        return doc_create_text_cstr(arena, "\xC5\x92", DocTextStyle::plain());  // Œ
+    }
+    // Polish L with stroke
+    if (tag_eq(tag, "l")) {
+        return doc_create_text_cstr(arena, "\xC5\x82", DocTextStyle::plain());  // ł
+    }
+    if (tag_eq(tag, "L")) {
+        return doc_create_text_cstr(arena, "\xC5\x81", DocTextStyle::plain());  // Ł
+    }
+    // Inverted punctuation
+    if (tag_eq(tag, "textexclamdown")) {
+        return doc_create_text_cstr(arena, "\xC2\xA1", DocTextStyle::plain());  // ¡
+    }
+    if (tag_eq(tag, "textquestiondown")) {
+        return doc_create_text_cstr(arena, "\xC2\xBF", DocTextStyle::plain());  // ¿
     }
     
     // Paragraph break command (\par)
