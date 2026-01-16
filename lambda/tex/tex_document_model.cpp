@@ -77,6 +77,14 @@ const char* doc_elem_type_name(DocElemType type) {
 }
 
 // ============================================================================
+// Forward Declarations
+// ============================================================================
+
+// Forward declaration needed for build_alignment_environment
+static void build_body_content_with_paragraphs(DocElement* container, const ElementReader& elem,
+                                                Arena* arena, TexDocumentModel* doc);
+
+// ============================================================================
 // Document Model Methods
 // ============================================================================
 
@@ -258,6 +266,233 @@ DocElement* doc_create_text(Arena* arena, const char* text, size_t len, DocTextS
 
 DocElement* doc_create_text_cstr(Arena* arena, const char* text, DocTextStyle style) {
     return doc_create_text(arena, text, strlen(text), style);
+}
+
+// Normalize LaTeX whitespace: collapse consecutive whitespace to single space
+// This preserves leading and trailing whitespace (single space at most) 
+// since inter-element spacing is meaningful in inline context.
+// Returns the normalized string allocated in arena, or nullptr if result is empty
+static const char* normalize_latex_whitespace(const char* text, Arena* arena) {
+    if (!text) return nullptr;
+    
+    size_t len = strlen(text);
+    if (len == 0) return nullptr;
+    
+    // Allocate buffer (can't be larger than original)
+    char* buf = (char*)arena_alloc(arena, len + 1);
+    char* out = buf;
+    
+    bool in_whitespace = false;
+    
+    for (const char* p = text; *p; p++) {
+        if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
+            // Collapse consecutive whitespace to single space
+            if (!in_whitespace) {
+                *out++ = ' ';
+                in_whitespace = true;
+            }
+        } else {
+            *out++ = *p;
+            in_whitespace = false;
+        }
+    }
+    
+    *out = '\0';
+    
+    size_t result_len = out - buf;
+    if (result_len == 0) return nullptr;
+    
+    return buf;
+}
+
+// Create text element with normalized whitespace
+static DocElement* doc_create_text_normalized(Arena* arena, const char* text, DocTextStyle style) {
+    const char* normalized = normalize_latex_whitespace(text, arena);
+    if (!normalized) return nullptr;
+    return doc_create_text_cstr(arena, normalized, style);
+}
+
+// ============================================================================
+// LaTeX Text Transformations
+// ============================================================================
+
+// Transform LaTeX text to typographic text with proper:
+// - Dash ligatures: --- → em-dash (—), -- → en-dash (–), - → hyphen (‐)
+// - Quote ligatures: `` → ", '' → ", ` → ', ' → '
+// - Standard ligatures: fi → ﬁ, fl → ﬂ, ff → ﬀ, ffi → ﬃ, ffl → ﬄ
+//
+// If in_monospace is true, skip all conversions (keep literal ASCII).
+// Returns a dynamically allocated string that must be freed by caller.
+static char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
+    if (!text || len == 0) return nullptr;
+    
+    // Allocate buffer with room for UTF-8 expansion (3x worst case)
+    size_t buf_size = len * 4 + 1;
+    char* result = (char*)malloc(buf_size);
+    if (!result) return nullptr;
+    
+    size_t out_pos = 0;
+    
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)text[i];
+        
+        // Ensure we have room (conservative check)
+        if (out_pos + 8 >= buf_size) {
+            buf_size *= 2;
+            char* new_buf = (char*)realloc(result, buf_size);
+            if (!new_buf) { free(result); return nullptr; }
+            result = new_buf;
+        }
+        
+        if (in_monospace) {
+            // In monospace mode, keep all characters as literal ASCII
+            result[out_pos++] = c;
+            continue;
+        }
+        
+        // Check for dash ligatures
+        if (c == '-') {
+            // Check for --- (em-dash)
+            if (i + 2 < len && text[i+1] == '-' && text[i+2] == '-') {
+                // — (U+2014 = em-dash) = E2 80 94
+                result[out_pos++] = '\xE2';
+                result[out_pos++] = '\x80';
+                result[out_pos++] = '\x94';
+                i += 2;  // Skip two more hyphens
+                continue;
+            }
+            // Check for -- (en-dash)
+            if (i + 1 < len && text[i+1] == '-') {
+                // – (U+2013 = en-dash) = E2 80 93
+                result[out_pos++] = '\xE2';
+                result[out_pos++] = '\x80';
+                result[out_pos++] = '\x93';
+                i += 1;  // Skip one more hyphen
+                continue;
+            }
+            // Single hyphen → typographic hyphen (U+2010)
+            // ‐ = E2 80 90
+            result[out_pos++] = '\xE2';
+            result[out_pos++] = '\x80';
+            result[out_pos++] = '\x90';
+            continue;
+        }
+        
+        // Check for quote ligatures
+        if (c == '`') {
+            // Check for `` (opening double quote)
+            if (i + 1 < len && text[i+1] == '`') {
+                // " (U+201C) = E2 80 9C
+                result[out_pos++] = '\xE2';
+                result[out_pos++] = '\x80';
+                result[out_pos++] = '\x9C';
+                i += 1;
+                continue;
+            }
+            // Single backtick → opening single quote
+            // ' (U+2018) = E2 80 98
+            result[out_pos++] = '\xE2';
+            result[out_pos++] = '\x80';
+            result[out_pos++] = '\x98';
+            continue;
+        }
+        
+        if (c == '\'') {
+            // Check for '' (closing double quote)
+            if (i + 1 < len && text[i+1] == '\'') {
+                // " (U+201D) = E2 80 9D
+                result[out_pos++] = '\xE2';
+                result[out_pos++] = '\x80';
+                result[out_pos++] = '\x9D';
+                i += 1;
+                continue;
+            }
+            // Single apostrophe → closing single quote / apostrophe
+            // ' (U+2019) = E2 80 99
+            result[out_pos++] = '\xE2';
+            result[out_pos++] = '\x80';
+            result[out_pos++] = '\x99';
+            continue;
+        }
+        
+        // Check for f-ligatures
+        if (c == 'f') {
+            // Check for ffi
+            if (i + 2 < len && text[i+1] == 'f' && text[i+2] == 'i') {
+                // ﬃ (U+FB03) = EF AC 83
+                result[out_pos++] = '\xEF';
+                result[out_pos++] = '\xAC';
+                result[out_pos++] = '\x83';
+                i += 2;
+                continue;
+            }
+            // Check for ffl
+            if (i + 2 < len && text[i+1] == 'f' && text[i+2] == 'l') {
+                // ﬄ (U+FB04) = EF AC 84
+                result[out_pos++] = '\xEF';
+                result[out_pos++] = '\xAC';
+                result[out_pos++] = '\x84';
+                i += 2;
+                continue;
+            }
+            // Check for ff
+            if (i + 1 < len && text[i+1] == 'f') {
+                // ﬀ (U+FB00) = EF AC 80
+                result[out_pos++] = '\xEF';
+                result[out_pos++] = '\xAC';
+                result[out_pos++] = '\x80';
+                i += 1;
+                continue;
+            }
+            // Check for fi
+            if (i + 1 < len && text[i+1] == 'i') {
+                // ﬁ (U+FB01) = EF AC 81
+                result[out_pos++] = '\xEF';
+                result[out_pos++] = '\xAC';
+                result[out_pos++] = '\x81';
+                i += 1;
+                continue;
+            }
+            // Check for fl
+            if (i + 1 < len && text[i+1] == 'l') {
+                // ﬂ (U+FB02) = EF AC 82
+                result[out_pos++] = '\xEF';
+                result[out_pos++] = '\xAC';
+                result[out_pos++] = '\x82';
+                i += 1;
+                continue;
+            }
+        }
+        
+        // Default: copy character as-is
+        result[out_pos++] = c;
+    }
+    
+    result[out_pos] = '\0';
+    return result;
+}
+
+// HTML escape and append text with LaTeX transformations
+// Handles dash ligatures, quote ligatures, and f-ligatures
+static void html_escape_append_transformed(StrBuf* out, const char* text, size_t len, bool in_monospace) {
+    if (!text || len == 0) return;
+    
+    char* transformed = transform_latex_text(text, len, in_monospace);
+    if (transformed) {
+        // HTML escape the transformed text
+        for (const char* p = transformed; *p; p++) {
+            char c = *p;
+            switch (c) {
+            case '&':  strbuf_append_str(out, "&amp;"); break;
+            case '<':  strbuf_append_str(out, "&lt;"); break;
+            case '>':  strbuf_append_str(out, "&gt;"); break;
+            case '"':  strbuf_append_str(out, "&quot;"); break;
+            // Note: don't escape single quotes - we want the curly ones to show
+            default:   strbuf_append_char(out, c); break;
+            }
+        }
+        free(transformed);
+    }
 }
 
 // ============================================================================
@@ -618,9 +853,18 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
     if (opts.pretty_print) html_indent(out, depth);
     
     if (opts.legacy_mode) {
-        strbuf_append_str(out, "<p>");
+        // In legacy mode, add class="continue" if flag is set
+        if (elem->flags & DocElement::FLAG_CONTINUE) {
+            strbuf_append_str(out, "<p class=\"continue\">");
+        } else {
+            strbuf_append_str(out, "<p>");
+        }
     } else {
-        strbuf_append_format(out, "<p class=\"%sparagraph\">", opts.css_class_prefix);
+        if (elem->flags & DocElement::FLAG_CONTINUE) {
+            strbuf_append_format(out, "<p class=\"%sparagraph continue\">", opts.css_class_prefix);
+        } else {
+            strbuf_append_format(out, "<p class=\"%sparagraph\">", opts.css_class_prefix);
+        }
     }
     
     render_children_html(elem, out, opts, depth + 1);
@@ -1093,7 +1337,9 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
         
     case DocElemType::TEXT_RUN:
         if (elem->text.text && elem->text.text_len > 0) {
-            html_escape_append(out, elem->text.text, elem->text.text_len);
+            // Check if we're in monospace context (texttt style)
+            bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE);
+            html_escape_append_transformed(out, elem->text.text, elem->text.text_len, in_monospace);
         }
         break;
         
@@ -1158,6 +1404,24 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
         render_code_block_html(elem, out, opts, depth);
         break;
         
+    case DocElemType::ALIGNMENT: {
+        // Determine alignment class from flags
+        const char* align_class = "list";
+        if (elem->flags & DocElement::FLAG_CENTERED) {
+            align_class = "list center";
+        } else if (elem->flags & DocElement::FLAG_FLUSH_LEFT) {
+            align_class = "list flushleft";
+        } else if (elem->flags & DocElement::FLAG_FLUSH_RIGHT) {
+            align_class = "list flushright";
+        }
+        strbuf_append_format(out, "<div class=\"%s\">", align_class);
+        if (opts.pretty_print) strbuf_append_str(out, "\n");
+        render_children_html(elem, out, opts, depth + 1);
+        strbuf_append_str(out, "</div>");
+        if (opts.pretty_print) strbuf_append_str(out, "\n");
+        break;
+    }
+        
     case DocElemType::CROSS_REF:
         render_cross_ref_html(elem, out, opts);
         break;
@@ -1184,7 +1448,7 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
         
     case DocElemType::SPACE:
         if (elem->space.is_linebreak) {
-            strbuf_append_str(out, "<br />");
+            strbuf_append_str(out, "<br>");
             if (opts.pretty_print) strbuf_append_str(out, "\n");
         } else {
             strbuf_append_str(out, " ");
@@ -1411,6 +1675,57 @@ static bool tag_eq(const char* a, const char* b) {
     return strcmp(a, b) == 0;
 }
 
+// Sentinel pointer values for special markers (used internally during tree building)
+static DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break marker
+static DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
+
+// Check if an item is a paragraph break marker (parbreak symbol or \par command)
+static bool is_parbreak_item(const ItemReader& item) {
+    // Symbol "parbreak" (from paragraph_break in grammar)
+    if (item.isSymbol()) {
+        const char* sym = item.cstring();
+        if (sym && strcmp(sym, "parbreak") == 0) {
+            return true;
+        }
+    }
+    
+    // String "parbreak" (symbols may come through as strings in some cases)
+    if (item.isString()) {
+        const char* str = item.cstring();
+        if (str && strcmp(str, "parbreak") == 0) {
+            return true;
+        }
+    }
+    
+    // Element with tag "par" (from \par command)
+    if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        const char* tag = elem.tagName();
+        if (tag && strcmp(tag, "par") == 0) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// Check if an item is a line break command (\\, \newline)
+static bool is_linebreak_item(const ItemReader& item) {
+    if (!item.isElement()) return false;
+    
+    ElementReader elem = item.asElement();
+    const char* tag = elem.tagName();
+    if (!tag) return false;
+    
+    // linebreak_command tag from \\
+    if (strcmp(tag, "linebreak_command") == 0) return true;
+    
+    // \newline command
+    if (strcmp(tag, "newline") == 0) return true;
+    
+    return false;
+}
+
 // Check if a string is a font size command (returns the FontSizeName or INHERIT if not)
 static FontSizeName get_font_size_cmd(const char* text) {
     if (!text || text[0] != '\\') return FontSizeName::INHERIT;
@@ -1482,6 +1797,49 @@ static const char* extract_math_source(const ElementReader& elem, Arena* arena) 
     item.element = elem.element();
     ItemReader item_reader(item);
     return extract_text_content(item_reader, arena);
+}
+
+// Helper to set style flags based on font command name
+static void build_text_command_set_style(const char* cmd_name, DocTextStyle* style) {
+    *style = DocTextStyle::plain();
+    
+    // Style flags
+    if (tag_eq(cmd_name, "textbf") || tag_eq(cmd_name, "bf") || tag_eq(cmd_name, "bfseries")) {
+        style->flags |= DocTextStyle::BOLD;
+    } else if (tag_eq(cmd_name, "textit") || tag_eq(cmd_name, "it") || 
+               tag_eq(cmd_name, "itshape") || tag_eq(cmd_name, "emph")) {
+        style->flags |= DocTextStyle::ITALIC;
+    } else if (tag_eq(cmd_name, "texttt") || tag_eq(cmd_name, "tt") || tag_eq(cmd_name, "ttfamily")) {
+        style->flags |= DocTextStyle::MONOSPACE;
+    } else if (tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "scshape")) {
+        style->flags |= DocTextStyle::SMALLCAPS;
+    } else if (tag_eq(cmd_name, "underline")) {
+        style->flags |= DocTextStyle::UNDERLINE;
+    } else if (tag_eq(cmd_name, "sout") || tag_eq(cmd_name, "st")) {
+        style->flags |= DocTextStyle::STRIKEOUT;
+    }
+    // Font size names
+    else if (tag_eq(cmd_name, "tiny")) {
+        style->font_size_name = FontSizeName::FONT_TINY;
+    } else if (tag_eq(cmd_name, "scriptsize")) {
+        style->font_size_name = FontSizeName::FONT_SCRIPTSIZE;
+    } else if (tag_eq(cmd_name, "footnotesize")) {
+        style->font_size_name = FontSizeName::FONT_FOOTNOTESIZE;
+    } else if (tag_eq(cmd_name, "small")) {
+        style->font_size_name = FontSizeName::FONT_SMALL;
+    } else if (tag_eq(cmd_name, "normalsize")) {
+        style->font_size_name = FontSizeName::FONT_NORMALSIZE;
+    } else if (tag_eq(cmd_name, "large")) {
+        style->font_size_name = FontSizeName::FONT_LARGE;
+    } else if (tag_eq(cmd_name, "Large")) {
+        style->font_size_name = FontSizeName::FONT_LARGE2;
+    } else if (tag_eq(cmd_name, "LARGE")) {
+        style->font_size_name = FontSizeName::FONT_LARGE3;
+    } else if (tag_eq(cmd_name, "huge")) {
+        style->font_size_name = FontSizeName::FONT_HUGE;
+    } else if (tag_eq(cmd_name, "Huge")) {
+        style->font_size_name = FontSizeName::FONT_HUGE2;
+    }
 }
 
 // Build a TEXT_SPAN element with style flags
@@ -1655,7 +2013,7 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (item.isString()) {
         const char* text = item.cstring();
         if (text && strlen(text) > 0) {
-            return doc_create_text_cstr(arena, text, DocTextStyle::plain());
+            return doc_create_text_normalized(arena, text, DocTextStyle::plain());
         }
         return nullptr;
     }
@@ -1673,6 +2031,80 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "textbf") || tag_eq(tag, "textit") || tag_eq(tag, "texttt") ||
         tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline")) {
         return build_text_command(tag, elem, arena, doc);
+    }
+    
+    // Symbol commands parsed directly as element tags (e.g., {"$":"textellipsis"})
+    // Ellipsis
+    if (tag_eq(tag, "textellipsis") || tag_eq(tag, "ldots") || tag_eq(tag, "dots")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\xA6", DocTextStyle::plain());  // …
+    }
+    // En-dash and em-dash
+    if (tag_eq(tag, "textendash")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x93", DocTextStyle::plain());  // –
+    }
+    if (tag_eq(tag, "textemdash")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x94", DocTextStyle::plain());  // —
+    }
+    // LaTeX/TeX logos
+    if (tag_eq(tag, "LaTeX")) {
+        return doc_create_text_cstr(arena, "LaTeX", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "TeX")) {
+        return doc_create_text_cstr(arena, "TeX", DocTextStyle::plain());
+    }
+    // Special characters
+    if (tag_eq(tag, "textbackslash")) {
+        return doc_create_text_cstr(arena, "\\", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textasciitilde")) {
+        return doc_create_text_cstr(arena, "~", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textasciicircum")) {
+        return doc_create_text_cstr(arena, "^", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textbar")) {
+        return doc_create_text_cstr(arena, "|", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textless")) {
+        return doc_create_text_cstr(arena, "<", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textgreater")) {
+        return doc_create_text_cstr(arena, ">", DocTextStyle::plain());
+    }
+    // Quotation marks
+    if (tag_eq(tag, "textquoteleft")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x98", DocTextStyle::plain());  // '
+    }
+    if (tag_eq(tag, "textquoteright")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x99", DocTextStyle::plain());  // '
+    }
+    if (tag_eq(tag, "textquotedblleft")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x9C", DocTextStyle::plain());  // "
+    }
+    if (tag_eq(tag, "textquotedblright")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x9D", DocTextStyle::plain());  // "
+    }
+    // Copyright/trademark
+    if (tag_eq(tag, "copyright") || tag_eq(tag, "textcopyright")) {
+        return doc_create_text_cstr(arena, "\xC2\xA9", DocTextStyle::plain());  // ©
+    }
+    if (tag_eq(tag, "trademark") || tag_eq(tag, "texttrademark")) {
+        return doc_create_text_cstr(arena, "\xE2\x84\xA2", DocTextStyle::plain());  // ™
+    }
+    if (tag_eq(tag, "textregistered")) {
+        return doc_create_text_cstr(arena, "\xC2\xAE", DocTextStyle::plain());  // ®
+    }
+    // Spacing commands that output space
+    if (tag_eq(tag, "quad") || tag_eq(tag, "qquad") || 
+        tag_eq(tag, "enspace") || tag_eq(tag, "enskip") ||
+        tag_eq(tag, "thinspace")) {
+        DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+        space->space.is_linebreak = false;
+        return space;
+    }
+    // Non-breaking space
+    if (tag_eq(tag, "nobreakspace") || tag_eq(tag, "nbsp")) {
+        return doc_create_text_cstr(arena, "\xC2\xA0", DocTextStyle::plain());  // &nbsp;
     }
     
     // Generic command - check command_name child
@@ -1703,6 +2135,82 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
                 tag_eq(cmd_name, "texttt") || tag_eq(cmd_name, "emph") ||
                 tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "underline")) {
                 return build_text_command(cmd_name, elem, arena, doc);
+            }
+            
+            // Text symbol commands - output fixed Unicode characters
+            // Ellipsis
+            if (tag_eq(cmd_name, "textellipsis") || tag_eq(cmd_name, "ldots") || tag_eq(cmd_name, "dots")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\xA6", DocTextStyle::plain());  // …
+            }
+            // En-dash and em-dash
+            if (tag_eq(cmd_name, "textendash")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x93", DocTextStyle::plain());  // –
+            }
+            if (tag_eq(cmd_name, "textemdash")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x94", DocTextStyle::plain());  // —
+            }
+            // LaTeX/TeX logos
+            if (tag_eq(cmd_name, "LaTeX")) {
+                // TODO: proper styled LaTeX logo
+                return doc_create_text_cstr(arena, "LaTeX", DocTextStyle::plain());
+            }
+            if (tag_eq(cmd_name, "TeX")) {
+                // TODO: proper styled TeX logo
+                return doc_create_text_cstr(arena, "TeX", DocTextStyle::plain());
+            }
+            // Special characters
+            if (tag_eq(cmd_name, "textbackslash")) {
+                return doc_create_text_cstr(arena, "\\", DocTextStyle::plain());
+            }
+            if (tag_eq(cmd_name, "textasciitilde")) {
+                return doc_create_text_cstr(arena, "~", DocTextStyle::plain());
+            }
+            if (tag_eq(cmd_name, "textasciicircum")) {
+                return doc_create_text_cstr(arena, "^", DocTextStyle::plain());
+            }
+            if (tag_eq(cmd_name, "textbar")) {
+                return doc_create_text_cstr(arena, "|", DocTextStyle::plain());
+            }
+            if (tag_eq(cmd_name, "textless")) {
+                return doc_create_text_cstr(arena, "<", DocTextStyle::plain());
+            }
+            if (tag_eq(cmd_name, "textgreater")) {
+                return doc_create_text_cstr(arena, ">", DocTextStyle::plain());
+            }
+            // Quotation marks
+            if (tag_eq(cmd_name, "textquoteleft")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x98", DocTextStyle::plain());  // '
+            }
+            if (tag_eq(cmd_name, "textquoteright")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x99", DocTextStyle::plain());  // '
+            }
+            if (tag_eq(cmd_name, "textquotedblleft")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x9C", DocTextStyle::plain());  // "
+            }
+            if (tag_eq(cmd_name, "textquotedblright")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x9D", DocTextStyle::plain());  // "
+            }
+            // Copyright/trademark
+            if (tag_eq(cmd_name, "copyright") || tag_eq(cmd_name, "textcopyright")) {
+                return doc_create_text_cstr(arena, "\xC2\xA9", DocTextStyle::plain());  // ©
+            }
+            if (tag_eq(cmd_name, "trademark") || tag_eq(cmd_name, "texttrademark")) {
+                return doc_create_text_cstr(arena, "\xE2\x84\xA2", DocTextStyle::plain());  // ™
+            }
+            if (tag_eq(cmd_name, "textregistered")) {
+                return doc_create_text_cstr(arena, "\xC2\xAE", DocTextStyle::plain());  // ®
+            }
+            // Spacing commands that output space
+            if (tag_eq(cmd_name, "quad") || tag_eq(cmd_name, "qquad") || 
+                tag_eq(cmd_name, "enspace") || tag_eq(cmd_name, "enskip") ||
+                tag_eq(cmd_name, "thinspace")) {
+                DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+                space->space.is_linebreak = false;
+                return space;
+            }
+            // Non-breaking space
+            if (tag_eq(cmd_name, "nobreakspace") || tag_eq(cmd_name, "nbsp")) {
+                return doc_create_text_cstr(arena, "\xC2\xA0", DocTextStyle::plain());  // &nbsp;
             }
         }
     }
@@ -1747,6 +2255,13 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         math->math.latex_src = extract_math_source(elem, arena);
         math->math.node = nullptr;
         return math;
+    }
+    
+    // Line break commands: \\ (linebreak_command) or \newline
+    if (tag_eq(tag, "linebreak_command") || tag_eq(tag, "newline")) {
+        DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+        space->space.is_linebreak = true;
+        return space;
     }
     
     // Text content
@@ -2129,6 +2644,224 @@ static DocElement* build_blockquote_environment(const ElementReader& elem,
     }
     
     return quote->first_child ? quote : nullptr;
+}
+
+// Helper function to trim leading/trailing whitespace from a string
+static const char* trim_whitespace(const char* str, Arena* arena) {
+    if (!str) return nullptr;
+    
+    // Skip leading whitespace
+    while (*str && (*str == ' ' || *str == '\t' || *str == '\n' || *str == '\r')) {
+        str++;
+    }
+    
+    // Find end, trimming trailing whitespace
+    size_t len = strlen(str);
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) {
+        len--;
+    }
+    
+    if (len == 0) return nullptr;
+    
+    char* result = (char*)arena_alloc(arena, len + 1);
+    memcpy(result, str, len);
+    result[len] = '\0';
+    return result;
+}
+
+// Helper function to trim leading whitespace only from a string
+static const char* trim_leading_whitespace(const char* str, Arena* arena) {
+    if (!str) return nullptr;
+    
+    // Skip leading whitespace
+    const char* start = str;
+    while (*start && (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r')) {
+        start++;
+    }
+    
+    if (*start == '\0') return nullptr;
+    
+    // If no trimming needed, return original
+    if (start == str) return str;
+    
+    // Copy the trimmed string
+    size_t len = strlen(start);
+    char* result = (char*)arena_alloc(arena, len + 1);
+    memcpy(result, start, len + 1);
+    return result;
+}
+
+// Helper function to trim trailing whitespace only from a string  
+static const char* trim_trailing_whitespace(const char* str, Arena* arena) {
+    if (!str) return nullptr;
+    
+    size_t len = strlen(str);
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) {
+        len--;
+    }
+    
+    if (len == 0) return nullptr;
+    
+    // If no trimming needed, return original  
+    if (len == strlen(str)) return str;
+    
+    char* result = (char*)arena_alloc(arena, len + 1);
+    memcpy(result, str, len);
+    result[len] = '\0';
+    return result;
+}
+
+// Trim whitespace at paragraph boundaries:
+// - Leading whitespace from first text element
+// - Trailing whitespace from last text element  
+// - Leading whitespace from text elements that follow SPACE (linebreak)
+static void trim_paragraph_whitespace(DocElement* para, Arena* arena) {
+    if (!para || !para->first_child) return;
+    
+    // Trim leading whitespace from first text element
+    // Skip over whitespace-only TEXT_RUN elements
+    DocElement* first = para->first_child;
+    while (first && first->type == DocElemType::TEXT_RUN && first->text.text) {
+        const char* trimmed = trim_leading_whitespace(first->text.text, arena);
+        if (trimmed) {
+            first->text.text = trimmed;
+            first->text.text_len = strlen(trimmed);
+            break;  // Successfully trimmed leading whitespace
+        } else {
+            // Text was all whitespace - mark as empty and try next element
+            first->text.text = "";
+            first->text.text_len = 0;
+            first = first->next_sibling;
+        }
+    }
+    
+    // Trim trailing whitespace from last text element
+    // Skip over whitespace-only TEXT_RUN elements from the end
+    DocElement* last = para->last_child;
+    while (last && last->type == DocElemType::TEXT_RUN && last->text.text) {
+        const char* trimmed = trim_trailing_whitespace(last->text.text, arena);
+        if (trimmed) {
+            last->text.text = trimmed;
+            last->text.text_len = strlen(trimmed);
+            break;  // Successfully trimmed trailing whitespace
+        } else {
+            // Text was all whitespace - mark as empty and try previous element
+            last->text.text = "";
+            last->text.text_len = 0;
+            // Find previous sibling (inefficient but rare case)
+            DocElement* prev = nullptr;
+            for (DocElement* c = para->first_child; c; c = c->next_sibling) {
+                if (c->next_sibling == last) {
+                    prev = c;
+                    break;
+                }
+            }
+            last = prev;
+        }
+    }
+    
+    // Trim leading whitespace from text elements that follow a linebreak
+    DocElement* prev = nullptr;
+    for (DocElement* child = para->first_child; child; child = child->next_sibling) {
+        if (prev && prev->type == DocElemType::SPACE && prev->space.is_linebreak) {
+            // Need to trim leading whitespace from elements after linebreak
+            DocElement* curr = child;
+            while (curr && curr->type == DocElemType::TEXT_RUN && curr->text.text) {
+                const char* trimmed = trim_leading_whitespace(curr->text.text, arena);
+                if (trimmed) {
+                    curr->text.text = trimmed;
+                    curr->text.text_len = strlen(trimmed);
+                    break;
+                } else {
+                    curr->text.text = "";
+                    curr->text.text_len = 0;
+                    curr = curr->next_sibling;
+                }
+            }
+        }
+        prev = child;
+    }
+}
+
+// Build alignment environment content with proper paragraph splitting
+// Environment structure is: center -> paragraph -> [content with parbreaks]
+static void build_alignment_content(DocElement* container, const ElementReader& elem,
+                                     Arena* arena, TexDocumentModel* doc) {
+    // First, look for paragraph children and process them
+    auto iter = elem.children();
+    ItemReader child;
+    
+    while (iter.next(&child)) {
+        if (!child.isElement()) continue;
+        
+        ElementReader child_elem = child.asElement();
+        const char* tag = child_elem.tagName();
+        
+        // Handle "paragraph" elements by processing their contents with parbreak detection
+        if (tag && tag_eq(tag, "paragraph")) {
+            DocElement* current_para = nullptr;
+            
+            auto para_iter = child_elem.children();
+            ItemReader para_child;
+            
+            while (para_iter.next(&para_child)) {
+                // Check for parbreak
+                if (is_parbreak_item(para_child)) {
+                    if (current_para && current_para->first_child) {
+                        trim_paragraph_whitespace(current_para, arena);
+                        doc_append_child(container, current_para);
+                    }
+                    current_para = nullptr;
+                    continue;
+                }
+                
+                // Start a new paragraph if needed
+                if (!current_para) {
+                    current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                }
+                
+                // Build the inline content
+                DocElement* inline_elem = build_inline_content(para_child, arena, doc);
+                if (inline_elem) {
+                    doc_append_child(current_para, inline_elem);
+                }
+            }
+            
+            // Finalize the last paragraph
+            if (current_para && current_para->first_child) {
+                trim_paragraph_whitespace(current_para, arena);
+                doc_append_child(container, current_para);
+            }
+        } else {
+            // Non-paragraph children - process directly
+            DocElement* child_doc = build_doc_element(child, arena, doc);
+            if (child_doc && child_doc != PARBREAK_MARKER) {
+                doc_append_child(container, child_doc);
+            }
+        }
+    }
+}
+
+// Build alignment environment (center, flushleft, flushright)
+// These produce a div with appropriate alignment class, containing paragraphs
+static DocElement* build_alignment_environment(const char* env_name, const ElementReader& elem,
+                                                Arena* arena, TexDocumentModel* doc) {
+    // Create a container div with the alignment
+    DocElement* container = doc_alloc_element(arena, DocElemType::ALIGNMENT);
+    
+    // Set alignment flag
+    if (tag_eq(env_name, "center")) {
+        container->flags |= DocElement::FLAG_CENTERED;
+    } else if (tag_eq(env_name, "flushleft")) {
+        container->flags |= DocElement::FLAG_FLUSH_LEFT;
+    } else if (tag_eq(env_name, "flushright")) {
+        container->flags |= DocElement::FLAG_FLUSH_RIGHT;
+    }
+    
+    // Process children with paragraph splitting on parbreaks
+    build_alignment_content(container, elem, arena, doc);
+    
+    return container->first_child ? container : nullptr;
 }
 
 // Build code block environment (verbatim, lstlisting)
@@ -2615,14 +3348,94 @@ static DocElement* build_cite_command(const ElementReader& elem, Arena* arena,
     return cite;
 }
 
+// Helper function to check if an element should be collected into a paragraph
+// vs treated as a block element (like sections, lists, etc.)
+// Note: Uses the already-defined is_inline_element() function in the HTML rendering section.
+// This version adds support for PARBREAK_MARKER sentinel.
+static bool is_inline_or_break(DocElement* elem) {
+    if (!elem) return false;
+    if (elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER) return false;
+    return is_inline_element(elem);
+}
+
+// Helper function to process body content with paragraph grouping
+// Collects inline content into paragraphs, respecting parbreak markers
+static void build_body_content_with_paragraphs(DocElement* container, const ElementReader& elem,
+                                                Arena* arena, TexDocumentModel* doc) {
+    DocElement* current_para = nullptr;
+    bool after_block_element = false;  // Track if the previous element was a block
+    
+    int64_t child_count = elem.childCount();
+    for (int64_t i = 0; i < child_count; i++) {
+        ItemReader child_item = elem.childAt(i);
+        DocElement* child_elem = build_doc_element(child_item, arena, doc);
+        
+        if (!child_elem) continue;
+        
+        // Paragraph break marker - finalize current paragraph and start new one
+        if (child_elem == PARBREAK_MARKER) {
+            if (current_para && current_para->first_child) {
+                trim_paragraph_whitespace(current_para, arena);
+                doc_append_child(container, current_para);
+            }
+            current_para = nullptr;
+            // Note: parbreak resets after_block_element since it's a new paragraph context
+            after_block_element = false;
+            continue;
+        }
+        
+        // Check if this is inline content or a block element
+        if (is_inline_or_break(child_elem)) {
+            // Start a new paragraph if needed
+            if (!current_para) {
+                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                // Mark as continue if this paragraph follows a block element
+                if (after_block_element) {
+                    current_para->flags |= DocElement::FLAG_CONTINUE;
+                    after_block_element = false;
+                }
+            }
+            doc_append_child(current_para, child_elem);
+        } else {
+            // Block element - finalize current paragraph first
+            if (current_para && current_para->first_child) {
+                trim_paragraph_whitespace(current_para, arena);
+                doc_append_child(container, current_para);
+                current_para = nullptr;
+            }
+            doc_append_child(container, child_elem);
+            // Mark that we just added a block element
+            after_block_element = true;
+        }
+    }
+    
+    // Finalize any remaining paragraph
+    if (current_para && current_para->first_child) {
+        trim_paragraph_whitespace(current_para, arena);
+        doc_append_child(container, current_para);
+    }
+}
+
 // Main builder - converts LaTeX AST item to DocElement
 static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
                                       TexDocumentModel* doc) {
+    // Check for paragraph break marker (parbreak symbol)
+    if (is_parbreak_item(item)) {
+        return PARBREAK_MARKER;
+    }
+    
+    // Check for line break command (\\ or \newline)
+    if (is_linebreak_item(item)) {
+        DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+        space->space.is_linebreak = true;
+        return space;
+    }
+    
     if (item.isString()) {
         const char* text = item.cstring();
         if (text && strlen(text) > 0) {
-            // Create a text run for bare strings
-            return doc_create_text_cstr(arena, text, DocTextStyle::plain());
+            // Create a text run for bare strings with normalized whitespace
+            return doc_create_text_normalized(arena, text, DocTextStyle::plain());
         }
         return nullptr;
     }
@@ -2636,8 +3449,25 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     
     if (!tag) return nullptr;
     
-    // Text formatting commands
-    if (tag_eq(tag, "textbf") || tag_eq(tag, "textit") || tag_eq(tag, "texttt") ||
+    // Helper lambda to check if element has paragraph children (indicates environment usage)
+    auto has_paragraph_children = [&elem]() -> bool {
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (child_tag && tag_eq(child_tag, "paragraph")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    
+    // Text formatting commands (not environments - those with paragraph children get different handling)
+    // Commands like \textbf{...} vs environments like \begin{bfseries}...\end{bfseries}
+    bool is_font_tag = (tag_eq(tag, "textbf") || tag_eq(tag, "textit") || tag_eq(tag, "texttt") ||
         tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline") ||
         tag_eq(tag, "bf") || tag_eq(tag, "it") || tag_eq(tag, "tt") ||
         tag_eq(tag, "bfseries") || tag_eq(tag, "itshape") || tag_eq(tag, "ttfamily") ||
@@ -2645,8 +3475,97 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         // Font size commands
         tag_eq(tag, "tiny") || tag_eq(tag, "scriptsize") || tag_eq(tag, "footnotesize") ||
         tag_eq(tag, "small") || tag_eq(tag, "normalsize") || tag_eq(tag, "large") ||
-        tag_eq(tag, "Large") || tag_eq(tag, "LARGE") || tag_eq(tag, "huge") || tag_eq(tag, "Huge")) {
+        tag_eq(tag, "Large") || tag_eq(tag, "LARGE") || tag_eq(tag, "huge") || tag_eq(tag, "Huge"));
+    
+    // Use text command handler only if NOT an environment (no paragraph children)
+    if (is_font_tag && !has_paragraph_children()) {
         return build_text_command(tag, elem, arena, doc);
+    }
+    
+    // Symbol commands parsed directly as element tags (e.g., {"$":"textellipsis"})
+    // Ellipsis
+    if (tag_eq(tag, "textellipsis") || tag_eq(tag, "ldots") || tag_eq(tag, "dots")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\xA6", DocTextStyle::plain());  // …
+    }
+    // En-dash and em-dash
+    if (tag_eq(tag, "textendash")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x93", DocTextStyle::plain());  // –
+    }
+    if (tag_eq(tag, "textemdash")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x94", DocTextStyle::plain());  // —
+    }
+    // LaTeX/TeX logos
+    if (tag_eq(tag, "LaTeX")) {
+        return doc_create_text_cstr(arena, "LaTeX", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "TeX")) {
+        return doc_create_text_cstr(arena, "TeX", DocTextStyle::plain());
+    }
+    // Special characters
+    if (tag_eq(tag, "textbackslash")) {
+        return doc_create_text_cstr(arena, "\\", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textasciitilde")) {
+        return doc_create_text_cstr(arena, "~", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textasciicircum")) {
+        return doc_create_text_cstr(arena, "^", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textbar")) {
+        return doc_create_text_cstr(arena, "|", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textless")) {
+        return doc_create_text_cstr(arena, "<", DocTextStyle::plain());
+    }
+    if (tag_eq(tag, "textgreater")) {
+        return doc_create_text_cstr(arena, ">", DocTextStyle::plain());
+    }
+    // Quotation marks
+    if (tag_eq(tag, "textquoteleft")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x98", DocTextStyle::plain());  // '
+    }
+    if (tag_eq(tag, "textquoteright")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x99", DocTextStyle::plain());  // '
+    }
+    if (tag_eq(tag, "textquotedblleft")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x9C", DocTextStyle::plain());  // "
+    }
+    if (tag_eq(tag, "textquotedblright")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x9D", DocTextStyle::plain());  // "
+    }
+    // Copyright/trademark
+    if (tag_eq(tag, "copyright") || tag_eq(tag, "textcopyright")) {
+        return doc_create_text_cstr(arena, "\xC2\xA9", DocTextStyle::plain());  // ©
+    }
+    if (tag_eq(tag, "trademark") || tag_eq(tag, "texttrademark")) {
+        return doc_create_text_cstr(arena, "\xE2\x84\xA2", DocTextStyle::plain());  // ™
+    }
+    if (tag_eq(tag, "textregistered")) {
+        return doc_create_text_cstr(arena, "\xC2\xAE", DocTextStyle::plain());  // ®
+    }
+    // Spacing commands that output space
+    if (tag_eq(tag, "quad") || tag_eq(tag, "qquad") || 
+        tag_eq(tag, "enspace") || tag_eq(tag, "enskip") ||
+        tag_eq(tag, "thinspace")) {
+        DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+        space->space.is_linebreak = false;
+        return space;
+    }
+    // Non-breaking space
+    if (tag_eq(tag, "nobreakspace") || tag_eq(tag, "nbsp")) {
+        return doc_create_text_cstr(arena, "\xC2\xA0", DocTextStyle::plain());  // &nbsp;
+    }
+    
+    // Paragraph break command (\par)
+    if (tag_eq(tag, "par")) {
+        return PARBREAK_MARKER;
+    }
+    
+    // Line break commands (\\ and \newline)
+    if (tag_eq(tag, "linebreak_command") || tag_eq(tag, "newline")) {
+        DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+        space->space.is_linebreak = true;
+        return space;
     }
     
     // Section commands (but not paragraph element containing content)
@@ -2721,6 +3640,11 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return build_code_block_environment(tag, elem, arena, doc);
     }
     
+    // Alignment environments (center, flushleft, flushright)
+    if (tag_eq(tag, "center") || tag_eq(tag, "flushleft") || tag_eq(tag, "flushright")) {
+        return build_alignment_environment(tag, elem, arena, doc);
+    }
+    
     // Phase E: Image, Link, Figure, Cross-Reference Commands
     
     // Image command (\includegraphics)
@@ -2765,94 +3689,297 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "latex_document") || tag_eq(tag, "document")) {
         DocElement* doc_elem = doc_alloc_element(arena, DocElemType::DOCUMENT);
         
-        // Process children with look-ahead using indexed access
-        int64_t child_count = elem.childCount();
-        for (int64_t i = 0; i < child_count; i++) {
-            ItemReader child_item = elem.childAt(i);
-            
-            // Check if this is a font size command followed by a curly_group
-            if (child_item.isString()) {
-                const char* text = child_item.cstring();
-                FontSizeName font_size = get_font_size_cmd(text);
-                if (font_size != FontSizeName::INHERIT && i + 1 < child_count) {
-                    ItemReader next_child = elem.childAt(i + 1);
-                    if (next_child.isElement()) {
-                        ElementReader next_elem = next_child.asElement();
-                        const char* next_tag = next_elem.tagName();
-                        if (next_tag && tag_eq(next_tag, "curly_group")) {
-                            // Create a styled span with the font size
-                            DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
-                            span->text.style = DocTextStyle::plain();
-                            span->text.style.font_size_name = font_size;
-                            
-                            // Process curly_group contents as children
-                            auto group_iter = next_elem.children();
-                            ItemReader group_child;
-                            while (group_iter.next(&group_child)) {
-                                DocElement* group_elem = build_doc_element(group_child, arena, doc);
-                                if (group_elem) {
-                                    doc_append_child(span, group_elem);
-                                }
-                            }
-                            
-                            doc_append_child(doc_elem, span);
-                            i++;  // skip the curly_group
-                            continue;
-                        }
-                    }
-                }
-            }
-            
-            // Normal processing
-            DocElement* child_elem = build_doc_element(child_item, arena, doc);
-            if (child_elem) {
-                doc_append_child(doc_elem, child_elem);
-            }
-        }
+        // Process children with paragraph grouping
+        build_body_content_with_paragraphs(doc_elem, elem, arena, doc);
         
         return doc_elem;
     }
     
     // Document body (between \begin{document} and \end{document})
     if (tag_eq(tag, "document_body") || tag_eq(tag, "body")) {
-        // Process children directly, appending to parent
+        // Process children with paragraph grouping
         DocElement* container = doc_alloc_element(arena, DocElemType::SECTION);
-        
-        auto iter = elem.children();
-        ItemReader child;
-        while (iter.next(&child)) {
-            DocElement* child_elem = build_doc_element(child, arena, doc);
-            if (child_elem) {
-                doc_append_child(container, child_elem);
-            }
-        }
-        
+        build_body_content_with_paragraphs(container, elem, arena, doc);
         return container->first_child ? container : nullptr;
     }
     
-    // Generic element - recurse to children
-    DocElement* container = nullptr;
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        DocElement* child_elem = build_doc_element(child, arena, doc);
-        if (child_elem) {
-            if (!container) {
-                container = child_elem;
-            } else {
-                // Multiple children - need to wrap
-                if (container->type != DocElemType::SECTION) {
-                    DocElement* wrapper = doc_alloc_element(arena, DocElemType::SECTION);
-                    doc_append_child(wrapper, container);
-                    container = wrapper;
-                }
-                doc_append_child(container, child_elem);
-            }
-        }
+    // Comment environment - completely ignored (returns nothing)
+    if (tag_eq(tag, "comment")) {
+        return nullptr;
     }
     
-    return container;
+    // Empty - handles both \empty command and \begin{empty}...\end{empty} environment
+    // - \empty command (no meaningful children): produces no output, consumes trailing space
+    // - \begin{empty}...\end{empty} environment (has children): inline pass-through with ZWSP at end boundary
+    if (tag_eq(tag, "empty")) {
+        // Check if this is the \empty command (no children or only empty group)
+        // vs the \begin{empty}...\end{empty} environment (has actual content children)
+        int64_t child_count = elem.childCount();
+        bool has_content_children = false;
+        for (int64_t i = 0; i < child_count && !has_content_children; i++) {
+            ItemReader ch = elem.childAt(i);
+            if (ch.isElement()) {
+                ElementReader ch_elem = ch.asElement();
+                const char* ch_tag = ch_elem.tagName();
+                // paragraph or text children indicate environment usage
+                if (ch_tag && (tag_eq(ch_tag, "paragraph") || tag_eq(ch_tag, "text"))) {
+                    // Check if paragraph has any actual content
+                    if (ch_elem.childCount() > 0) {
+                        has_content_children = true;
+                    }
+                }
+            } else if (ch.isString()) {
+                const char* s = ch.cstring();
+                if (s && strlen(s) > 0) {
+                    // Non-empty string child - has content
+                    has_content_children = true;
+                }
+            }
+        }
+        
+        if (!has_content_children) {
+            // \empty command - produce no output (just return nullptr to skip)
+            return nullptr;
+        }
+        
+        // \begin{empty}...\end{empty} environment - inline pass-through with ZWSP at end
+        DocElement* container = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        container->text.style = DocTextStyle::plain();
+        
+        // Process children - may be paragraphs or direct content
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                
+                if (child_tag && (tag_eq(child_tag, "paragraph") || tag_eq(child_tag, "text"))) {
+                    // Process paragraph/text content inline
+                    auto para_iter = child_elem.children();
+                    ItemReader para_child;
+                    while (para_iter.next(&para_child)) {
+                        // Recursively process - may contain nested empty environments
+                        DocElement* para_elem = build_doc_element(para_child, arena, doc);
+                        if (para_elem) {
+                            doc_append_child(container, para_elem);
+                        }
+                    }
+                } else {
+                    // Other elements - process directly
+                    DocElement* elem_result = build_doc_element(child, arena, doc);
+                    if (elem_result) {
+                        doc_append_child(container, elem_result);
+                    }
+                }
+            } else if (child.isString()) {
+                const char* text = child.cstring();
+                if (text && strlen(text) > 0) {
+                    DocElement* text_elem = doc_create_text_normalized(arena, text, DocTextStyle::plain());
+                    if (text_elem) {
+                        doc_append_child(container, text_elem);
+                    }
+                }
+            }
+        }
+        
+        // Add zero-width space at the end boundary (where \end{empty} was)
+        DocElement* end_zwsp = doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain());  // U+200B ZWSP
+        doc_append_child(container, end_zwsp);
+        
+        return container;
+    }
+    
+    // Font environments - inline styling with zero-width space boundaries
+    // These are environments like \begin{small}...\end{small} that act like font commands
+    // Expected output pattern:
+    //   <span class="X">​ </span>   (ZWSP at start)
+    //   <span class="X">content</span> (styled content)
+    //   <span class="X">​ </span>   (ZWSP at end)
+    // Nested environments recursively apply the same pattern
+    if (tag_eq(tag, "small") || tag_eq(tag, "normalsize") || tag_eq(tag, "large") ||
+        tag_eq(tag, "Large") || tag_eq(tag, "LARGE") || tag_eq(tag, "huge") || tag_eq(tag, "Huge") ||
+        tag_eq(tag, "tiny") || tag_eq(tag, "scriptsize") || tag_eq(tag, "footnotesize") ||
+        tag_eq(tag, "bfseries") || tag_eq(tag, "itshape") || tag_eq(tag, "ttfamily") ||
+        tag_eq(tag, "scshape") || tag_eq(tag, "upshape") || tag_eq(tag, "rmfamily") ||
+        tag_eq(tag, "sffamily") || tag_eq(tag, "mdseries") || tag_eq(tag, "slshape")) {
+        
+        DocElement* container = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        container->text.style = DocTextStyle::plain();  // Container has no styling
+        
+        // Add ZWSP span at start of environment
+        DocElement* start_zwsp_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        build_text_command_set_style(tag, &start_zwsp_span->text.style);
+        DocElement* start_zwsp = doc_create_text_cstr(arena, "\xE2\x80\x8B ", DocTextStyle::plain());  // ZWSP + space
+        doc_append_child(start_zwsp_span, start_zwsp);
+        doc_append_child(container, start_zwsp_span);
+        
+        // Accumulate text into a single span, then flush when encountering nested env or end
+        StrBuf* text_accum = strbuf_new();
+        
+        // Helper to flush accumulated text into a styled span
+        // Normalizes to: strip leading ws, collapse internal ws, ensure trailing space separator
+        auto flush_text = [&]() {
+            if (text_accum->length > 0) {
+                const char* accumulated = text_accum->str;
+                size_t len = text_accum->length;
+                
+                // Normalize: strip leading ws, collapse internal ws
+                char* buf = (char*)arena_alloc(arena, len + 2);  // +2 for potential trailing space + null
+                char* out = buf;
+                
+                bool in_ws = false;
+                bool content_started = false;
+                
+                for (size_t i = 0; i < len; i++) {
+                    char c = accumulated[i];
+                    bool is_ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
+                    
+                    if (is_ws) {
+                        if (content_started && !in_ws) {
+                            // Internal whitespace - collapse to single space
+                            *out++ = ' ';
+                        }
+                        in_ws = true;
+                    } else {
+                        content_started = true;
+                        in_ws = false;
+                        *out++ = c;
+                    }
+                }
+                
+                // If we have content and it doesn't already end with space, add trailing space
+                // (This ensures proper word separation when adjacent to other elements)
+                if (out > buf && out[-1] != ' ') {
+                    *out++ = ' ';
+                }
+                *out = '\0';
+                
+                size_t result_len = out - buf;
+                if (result_len > 0) {
+                    DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                    build_text_command_set_style(tag, &styled_span->text.style);
+                    DocElement* text_elem = doc_create_text_cstr(arena, buf, DocTextStyle::plain());
+                    doc_append_child(styled_span, text_elem);
+                    doc_append_child(container, styled_span);
+                }
+                strbuf_reset(text_accum);
+            }
+        };
+        
+        // Helper to check if tag is a font environment
+        auto is_font_env_tag = [](const char* t) -> bool {
+            return t && (
+                tag_eq(t, "small") || tag_eq(t, "normalsize") || 
+                tag_eq(t, "large") || tag_eq(t, "Large") || 
+                tag_eq(t, "LARGE") || tag_eq(t, "huge") || 
+                tag_eq(t, "Huge") || tag_eq(t, "tiny") || 
+                tag_eq(t, "scriptsize") || tag_eq(t, "footnotesize") ||
+                tag_eq(t, "bfseries") || tag_eq(t, "itshape") || 
+                tag_eq(t, "ttfamily") || tag_eq(t, "scshape") || 
+                tag_eq(t, "upshape") || tag_eq(t, "rmfamily") ||
+                tag_eq(t, "sffamily") || tag_eq(t, "mdseries") || 
+                tag_eq(t, "slshape"));
+        };
+        
+        // Process children - unwrap paragraphs and handle content inline
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                
+                // Unwrap paragraph/text elements - process their children
+                if (child_tag && (tag_eq(child_tag, "paragraph") || tag_eq(child_tag, "text"))) {
+                    auto para_iter = child_elem.children();
+                    ItemReader para_child;
+                    while (para_iter.next(&para_child)) {
+                        if (para_child.isElement()) {
+                            ElementReader nested_elem = para_child.asElement();
+                            const char* nested_tag = nested_elem.tagName();
+                            
+                            if (is_font_env_tag(nested_tag)) {
+                                // Flush accumulated text before nested font env
+                                flush_text();
+                                // Recurse - this creates the nested font env's ZWSP structure
+                                DocElement* nested_result = build_doc_element(para_child, arena, doc);
+                                if (nested_result) {
+                                    doc_append_child(container, nested_result);
+                                }
+                            } else {
+                                // Other elements - flush text and process
+                                flush_text();
+                                DocElement* elem_result = build_doc_element(para_child, arena, doc);
+                                if (elem_result) {
+                                    DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                                    build_text_command_set_style(tag, &styled_span->text.style);
+                                    doc_append_child(styled_span, elem_result);
+                                    doc_append_child(container, styled_span);
+                                }
+                            }
+                        } else if (para_child.isString()) {
+                            // Accumulate text
+                            const char* text = para_child.cstring();
+                            if (text) {
+                                strbuf_append_str(text_accum, text);
+                            }
+                        }
+                    }
+                } else if (is_font_env_tag(child_tag)) {
+                    // Font environment as direct child
+                    flush_text();
+                    DocElement* nested_result = build_doc_element(child, arena, doc);
+                    if (nested_result) {
+                        doc_append_child(container, nested_result);
+                    }
+                } else {
+                    // Non-paragraph element - process directly with style
+                    flush_text();
+                    DocElement* elem_result = build_doc_element(child, arena, doc);
+                    if (elem_result) {
+                        DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                        build_text_command_set_style(tag, &styled_span->text.style);
+                        doc_append_child(styled_span, elem_result);
+                        doc_append_child(container, styled_span);
+                    }
+                }
+            } else if (child.isString()) {
+                // Accumulate text
+                const char* text = child.cstring();
+                if (text) {
+                    strbuf_append_str(text_accum, text);
+                }
+            }
+        }
+        
+        // Flush any remaining accumulated text
+        flush_text();
+        strbuf_free(text_accum);
+        
+        // Add ZWSP span at end of environment
+        DocElement* end_zwsp_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        build_text_command_set_style(tag, &end_zwsp_span->text.style);
+        DocElement* end_zwsp = doc_create_text_cstr(arena, "\xE2\x80\x8B ", DocTextStyle::plain());  // ZWSP + space
+        doc_append_child(end_zwsp_span, end_zwsp);
+        doc_append_child(container, end_zwsp_span);
+        
+        return container;
+    }
+    
+    // Generic element - recurse to children with paragraph grouping
+    DocElement* container = doc_alloc_element(arena, DocElemType::SECTION);
+    build_body_content_with_paragraphs(container, elem, arena, doc);
+    
+    // If only one child element, return it directly instead of wrapped in SECTION
+    if (container->first_child && container->first_child == container->last_child) {
+        DocElement* only_child = container->first_child;
+        only_child->parent = nullptr;
+        only_child->next_sibling = nullptr;
+        return only_child;
+    }
+    
+    return container->first_child ? container : nullptr;
 }
 
 // ============================================================================

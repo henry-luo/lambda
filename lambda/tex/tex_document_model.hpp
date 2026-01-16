@@ -193,6 +193,7 @@ struct DocElement {
     static constexpr uint8_t FLAG_CENTERED = 0x04;  // center environment
     static constexpr uint8_t FLAG_FLUSH_LEFT  = 0x08;
     static constexpr uint8_t FLAG_FLUSH_RIGHT = 0x10;
+    static constexpr uint8_t FLAG_CONTINUE = 0x20;  // paragraph continues after block element
     
     // Content (type-dependent union)
     union {
