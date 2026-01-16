@@ -330,14 +330,97 @@ TEST_F(UnifiedPipelineTest, NestedFormatting) {
 }
 
 // ============================================================================
-// Parameterized Tests for latex_js Fixtures (Content Verification Only)
+// Parameterized Tests for latex_js Fixtures
+// Separated into BASELINE (passing) and EXTENDED (failing/in-progress) sets
 // ============================================================================
 
-class UnifiedPipelineFixtureTest : public UnifiedPipelineTest,
-                                   public ::testing::WithParamInterface<LatexHtmlFixture> {
+// Baseline tests - these must all pass (20 fixture tests currently passing)
+// Format: "filename_id" where filename is without .tex extension
+static const std::set<std::string> BASELINE_FIXTURES = {
+    // basic_test.tex - all passing
+    "basic_test_1",
+    "basic_test_2",
+    // formatting.tex - all passing
+    "formatting_1",
+    "formatting_2",
+    "formatting_3",
+    "formatting_4",
+    "formatting_5",
+    "formatting_6",
+    // symbols.tex - partial
+    "symbols_4",  // predefined symbols
+    // text.tex - partial
+    "text_1",
+    "text_2",
+    "text_6",
+    // environments.tex - partial
+    "environments_1",
+    "environments_11",
+    // whitespace.tex - partial
+    "whitespace_3",
+    "whitespace_14",
+    "whitespace_15",
+    "whitespace_16",
+    "whitespace_18",
+    "whitespace_19",
 };
 
-TEST_P(UnifiedPipelineFixtureTest, FixtureContent) {
+// Helper to generate fixture key for lookup
+static std::string get_fixture_key(const LatexHtmlFixture& fixture) {
+    std::string filename = fixture.filename;
+    // Remove .tex extension if present
+    if (filename.size() > 4 && filename.substr(filename.size() - 4) == ".tex") {
+        filename = filename.substr(0, filename.size() - 4);
+    }
+    return filename + "_" + std::to_string(fixture.id);
+}
+
+// Check if fixture is in baseline set
+static bool is_baseline_fixture(const LatexHtmlFixture& fixture) {
+    return BASELINE_FIXTURES.count(get_fixture_key(fixture)) > 0;
+}
+
+// Normalize HTML for comparison
+static std::string normalize_html(const std::string& s) {
+    std::string result;
+    bool in_whitespace = false;
+    for (char c : s) {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            if (!in_whitespace && !result.empty()) {
+                result += ' ';
+                in_whitespace = true;
+            }
+        } else {
+            result += c;
+            in_whitespace = false;
+        }
+    }
+    // Trim trailing whitespace
+    while (!result.empty() && result.back() == ' ') {
+        result.pop_back();
+    }
+    // Remove whitespace between > and < (between tags)
+    std::string final_result;
+    for (size_t i = 0; i < result.size(); i++) {
+        if (result[i] == ' ' && i > 0 && i + 1 < result.size() &&
+            result[i - 1] == '>' && result[i + 1] == '<') {
+            // skip this space
+            continue;
+        }
+        final_result += result[i];
+    }
+    return final_result;
+}
+
+// ============================================================================
+// BASELINE Test Suite - Must all pass, run as part of make test-latex-baseline
+// ============================================================================
+
+class BaselineFixtureTest : public UnifiedPipelineTest,
+                            public ::testing::WithParamInterface<LatexHtmlFixture> {
+};
+
+TEST_P(BaselineFixtureTest, FixtureContent) {
     const LatexHtmlFixture& fixture = GetParam();
     
     if (fixture.skip_test) {
@@ -347,52 +430,50 @@ TEST_P(UnifiedPipelineFixtureTest, FixtureContent) {
     // Use legacy mode for fixture comparison
     std::string html = renderLegacy(fixture.latex_source);
     
-    // Normalize whitespace for comparison
-    // - Collapse consecutive whitespace into single space
-    // - Remove whitespace between tags (><)
-    auto normalize = [](const std::string& s) {
-        std::string result;
-        bool in_whitespace = false;
-        for (char c : s) {
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-                if (!in_whitespace && !result.empty()) {
-                    result += ' ';
-                    in_whitespace = true;
-                }
-            } else {
-                result += c;
-                in_whitespace = false;
-            }
-        }
-        // Trim trailing whitespace
-        while (!result.empty() && result.back() == ' ') {
-            result.pop_back();
-        }
-        // Remove whitespace between > and < (between tags)
-        std::string final_result;
-        for (size_t i = 0; i < result.size(); i++) {
-            if (result[i] == ' ' && i > 0 && i + 1 < result.size() &&
-                result[i - 1] == '>' && result[i + 1] == '<') {
-                // skip this space
-                continue;
-            }
-            final_result += result[i];
-        }
-        return final_result;
-    };
-    
-    std::string expected_normalized = normalize(fixture.expected_html);
-    std::string actual_normalized = normalize(html);
+    std::string expected_normalized = normalize_html(fixture.expected_html);
+    std::string actual_normalized = normalize_html(html);
     
     EXPECT_EQ(expected_normalized, actual_normalized)
-        << "\n=== Fixture: " << fixture.header << " ==="
+        << "\n=== BASELINE Fixture: " << fixture.header << " ==="
         << "\n=== LaTeX Input ===\n" << fixture.latex_source
         << "\n=== Expected HTML ===\n" << fixture.expected_html
         << "\n=== Actual HTML ===\n" << html;
 }
 
-// Load fixtures for content verification
-std::vector<LatexHtmlFixture> load_unified_fixtures() {
+// ============================================================================
+// EXTENDED Test Suite - In-progress tests, failures expected
+// ============================================================================
+
+class ExtendedFixtureTest : public UnifiedPipelineTest,
+                            public ::testing::WithParamInterface<LatexHtmlFixture> {
+};
+
+TEST_P(ExtendedFixtureTest, FixtureContent) {
+    const LatexHtmlFixture& fixture = GetParam();
+    
+    if (fixture.skip_test) {
+        GTEST_SKIP() << "Skipped: " << fixture.header;
+    }
+    
+    // Use legacy mode for fixture comparison
+    std::string html = renderLegacy(fixture.latex_source);
+    
+    std::string expected_normalized = normalize_html(fixture.expected_html);
+    std::string actual_normalized = normalize_html(html);
+    
+    EXPECT_EQ(expected_normalized, actual_normalized)
+        << "\n=== EXTENDED Fixture: " << fixture.header << " ==="
+        << "\n=== LaTeX Input ===\n" << fixture.latex_source
+        << "\n=== Expected HTML ===\n" << fixture.expected_html
+        << "\n=== Actual HTML ===\n" << html;
+}
+
+// ============================================================================
+// Fixture Loaders
+// ============================================================================
+
+// Load all fixtures from directory
+std::vector<LatexHtmlFixture> load_all_fixtures() {
     std::vector<LatexHtmlFixture> fixtures;
     std::string fixtures_dir = "test/latex_js/fixtures";
     
@@ -423,11 +504,36 @@ std::vector<LatexHtmlFixture> load_unified_fixtures() {
         }
     }
     
-    std::cout << "Loaded " << fixtures.size() << " unified pipeline fixtures" << std::endl;
     return fixtures;
 }
 
-std::string generate_unified_test_name(const ::testing::TestParamInfo<LatexHtmlFixture>& info) {
+// Load only baseline fixtures
+std::vector<LatexHtmlFixture> load_baseline_fixtures() {
+    std::vector<LatexHtmlFixture> all = load_all_fixtures();
+    std::vector<LatexHtmlFixture> baseline;
+    for (const auto& f : all) {
+        if (is_baseline_fixture(f)) {
+            baseline.push_back(f);
+        }
+    }
+    std::cout << "Loaded " << baseline.size() << " BASELINE fixtures" << std::endl;
+    return baseline;
+}
+
+// Load only extended (non-baseline) fixtures
+std::vector<LatexHtmlFixture> load_extended_fixtures() {
+    std::vector<LatexHtmlFixture> all = load_all_fixtures();
+    std::vector<LatexHtmlFixture> extended;
+    for (const auto& f : all) {
+        if (!is_baseline_fixture(f)) {
+            extended.push_back(f);
+        }
+    }
+    std::cout << "Loaded " << extended.size() << " EXTENDED fixtures" << std::endl;
+    return extended;
+}
+
+std::string generate_baseline_test_name(const ::testing::TestParamInfo<LatexHtmlFixture>& info) {
     std::string name = info.param.filename + "_" + std::to_string(info.param.id);
     std::replace_if(name.begin(), name.end(), [](char c) {
         return !std::isalnum(c);
@@ -435,10 +541,27 @@ std::string generate_unified_test_name(const ::testing::TestParamInfo<LatexHtmlF
     return name;
 }
 
+std::string generate_extended_test_name(const ::testing::TestParamInfo<LatexHtmlFixture>& info) {
+    std::string name = info.param.filename + "_" + std::to_string(info.param.id);
+    std::replace_if(name.begin(), name.end(), [](char c) {
+        return !std::isalnum(c);
+    }, '_');
+    return name;
+}
+
+// Register BASELINE test suite - these must all pass
 INSTANTIATE_TEST_SUITE_P(
-    UnifiedPipelineFixtures,
-    UnifiedPipelineFixtureTest,
-    ::testing::ValuesIn(load_unified_fixtures()),
-    generate_unified_test_name
+    LatexBaseline,
+    BaselineFixtureTest,
+    ::testing::ValuesIn(load_baseline_fixtures()),
+    generate_baseline_test_name
+);
+
+// Register EXTENDED test suite - in-progress, failures expected
+INSTANTIATE_TEST_SUITE_P(
+    LatexExtended,
+    ExtendedFixtureTest,
+    ::testing::ValuesIn(load_extended_fixtures()),
+    generate_extended_test_name
 );
 
