@@ -2264,6 +2264,14 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         return space;
     }
     
+    // Space command - handles \<space>, \<tab>, and \<newline>
+    // All produce ZWSP (as boundary marker) + space
+    if (tag_eq(tag, "space_cmd")) {
+        // All space commands produce ZWSP followed by space
+        // The ZWSP marks a boundary/break point, the space is the visible character
+        return doc_create_text_cstr(arena, "\xE2\x80\x8B ", DocTextStyle::plain());
+    }
+    
     // Text content
     if (tag_eq(tag, "text") || tag_eq(tag, "word") || tag_eq(tag, "TEXT")) {
         const char* text = extract_text_content(item, arena);
@@ -2297,6 +2305,9 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     return result;
 }
 
+// Forward declaration for trim_paragraph_whitespace
+static void trim_paragraph_whitespace(DocElement* para, Arena* arena);
+
 // Build a paragraph element
 static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
                                     TexDocumentModel* doc) {
@@ -2309,6 +2320,11 @@ static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
         if (child_elem) {
             doc_append_child(para, child_elem);
         }
+    }
+    
+    // Trim leading/trailing whitespace from paragraph
+    if (para->first_child) {
+        trim_paragraph_whitespace(para, arena);
     }
     
     return para->first_child ? para : nullptr;
@@ -2691,12 +2707,23 @@ static const char* trim_leading_whitespace(const char* str, Arena* arena) {
     return result;
 }
 
-// Helper function to trim trailing whitespace only from a string  
+// Helper function to trim trailing whitespace only from a string
+// Preserves space after ZWSP (U+200B = E2 80 8B) as it's meaningful output from space_cmd  
 static const char* trim_trailing_whitespace(const char* str, Arena* arena) {
     if (!str) return nullptr;
     
     size_t len = strlen(str);
     while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) {
+        // Check if trimming would leave a ZWSP at the end - if so, keep the space
+        // ZWSP in UTF-8 is E2 80 8B (3 bytes)
+        if (len >= 4 && 
+            (unsigned char)str[len-4] == 0xE2 &&
+            (unsigned char)str[len-3] == 0x80 &&
+            (unsigned char)str[len-2] == 0x8B &&
+            str[len-1] == ' ') {
+            // This is "ZWSP + space" pattern - don't trim the space
+            break;
+        }
         len--;
     }
     
@@ -3568,6 +3595,14 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return space;
     }
     
+    // Space command - handles \<space>, \<tab>, and \<newline>
+    // All produce ZWSP (as boundary marker) + space
+    if (tag_eq(tag, "space_cmd")) {
+        // All space commands produce ZWSP followed by space
+        // The ZWSP marks a boundary/break point, the space is the visible character
+        return doc_create_text_cstr(arena, "\xE2\x80\x8B ", DocTextStyle::plain());
+    }
+    
     // Section commands (but not paragraph element containing content)
     if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || 
         tag_eq(tag, "subsubsection") || tag_eq(tag, "chapter") || tag_eq(tag, "part")) {
@@ -3738,7 +3773,27 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         }
         
         if (!has_content_children) {
-            // \empty command - produce no output (just return nullptr to skip)
+            // Check if this is \empty{} (with braces) or plain \empty (no braces)
+            // \empty{} should produce ZWSP to mark boundary (force space after macro)
+            // \empty should produce nothing (consumes trailing space)
+            bool has_braces = false;
+            for (int64_t i = 0; i < child_count; i++) {
+                ItemReader ch = elem.childAt(i);
+                if (ch.isElement()) {
+                    ElementReader ch_elem = ch.asElement();
+                    const char* ch_tag = ch_elem.tagName();
+                    if (ch_tag && tag_eq(ch_tag, "curly_group")) {
+                        has_braces = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (has_braces) {
+                // \empty{} - produce ZWSP to mark boundary
+                return doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain());  // ZWSP only
+            }
+            // Plain \empty - produce nothing (consumes trailing space)
             return nullptr;
         }
         
