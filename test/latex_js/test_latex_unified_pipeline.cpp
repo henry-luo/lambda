@@ -347,20 +347,30 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "formatting_4",
     "formatting_5",
     "formatting_6",
-    // symbols.tex - partial
+    // symbols.tex - all passing
+    "symbols_1",
+    "symbols_2",
+    "symbols_3",
     "symbols_4",  // predefined symbols
+    // sectioning.tex - partial
+    "sectioning_1",
+    "sectioning_2",
     // text.tex - partial
     "text_1",
     "text_2",
-    "text_3",    // noindent paragraphs - added
+    "text_3",    // noindent paragraphs
+    "text_4",    // UTF-8, punctuation, TeX symbols
+    "text_5",    // empty diacritics
     "text_6",
+    "text_9",    // French quotes
     // environments.tex - partial
     "environments_1",
     "environments_11",
     // whitespace.tex - partial
-    "whitespace_2",   // \par and ~ handling - added
+    "whitespace_2",   // \par and ~ handling
     "whitespace_3",
-    "whitespace_9",   // multiple newlines collapsing - added
+    "whitespace_9",   // multiple newlines collapsing
+    "whitespace_10",  // spaces between environments
     "whitespace_14",
     "whitespace_15",
     "whitespace_16",
