@@ -194,6 +194,7 @@ struct DocElement {
     static constexpr uint8_t FLAG_FLUSH_LEFT  = 0x08;
     static constexpr uint8_t FLAG_FLUSH_RIGHT = 0x10;
     static constexpr uint8_t FLAG_CONTINUE = 0x20;  // paragraph continues after block element
+    static constexpr uint8_t FLAG_NOINDENT = 0x40;  // \noindent - no paragraph indentation
     
     // Content (type-dependent union)
     union {
@@ -371,6 +372,7 @@ struct TexDocumentModel {
     int table_num;
     int footnote_num;
     int page_num;
+    int section_id_counter;  // Global counter for sequential section IDs
     
     // Methods
     void add_label(const char* label, const char* ref_text, int page);
