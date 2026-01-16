@@ -2416,6 +2416,7 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         
         // Get the base character from children
         const char* base_char = nullptr;
+        bool has_empty_curly_group = false;
         auto iter = elem.children();
         ItemReader child;
         while (iter.next(&child)) {
@@ -2436,6 +2437,8 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
                     if (base_char && strlen(base_char) > 0) {
                         break;
                     }
+                    // Empty curly_group (like \^{})
+                    has_empty_curly_group = true;
                 }
             }
         }
@@ -2445,6 +2448,16 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             if (result) {
                 return doc_create_text_cstr(arena, result, DocTextStyle::plain());
             }
+        }
+        // Empty curly group: output diacritic char + ZWS (e.g., \^{} → ^​)
+        if (has_empty_curly_group) {
+            char buf[8];
+            buf[0] = diacritic_cmd;
+            buf[1] = '\xE2';  // U+200B ZWS
+            buf[2] = '\x80';
+            buf[3] = '\x8B';
+            buf[4] = '\0';
+            return doc_create_text_cstr(arena, buf, DocTextStyle::plain());
         }
         return nullptr;
     }
@@ -3921,6 +3934,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                 
                 const char* result = nullptr;
                 bool consumed_next = false;
+                bool is_empty_curly_group = false;
                 
                 if (has_child) {
                     // Braced form: apply to the contained text
@@ -3928,7 +3942,21 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                     if (diacritic_child.isString()) {
                         base_text = diacritic_child.cstring();
                     } else {
-                        base_text = extract_text_content(diacritic_child, arena);
+                        // Check if this is an empty curly_group element
+                        if (diacritic_child.isElement()) {
+                            ElementReader dc_elem = diacritic_child.asElement();
+                            const char* dc_tag = dc_elem.tagName();
+                            if (dc_tag && (tag_eq(dc_tag, "curly_group") || tag_eq(dc_tag, "group"))) {
+                                base_text = extract_text_content(diacritic_child, arena);
+                                if (!base_text || base_text[0] == '\0') {
+                                    is_empty_curly_group = true;
+                                }
+                            } else {
+                                base_text = extract_text_content(diacritic_child, arena);
+                            }
+                        } else {
+                            base_text = extract_text_content(diacritic_child, arena);
+                        }
                     }
                     if (base_text && base_text[0] != '\0') {
                         result = apply_diacritic(diacritic_cmd, base_text, arena);
@@ -4036,6 +4064,32 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                         }
                     }
                     DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
+                    if (text_elem) {
+                        doc_append_child(current_para, text_elem);
+                    }
+                    continue;
+                }
+                
+                // Empty curly group: output diacritic char + ZWS (e.g., \^{} → ^​)
+                if (is_empty_curly_group) {
+                    if (!current_para) {
+                        current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                        if (after_block_element) {
+                            current_para->flags |= DocElement::FLAG_CONTINUE;
+                            after_block_element = false;
+                        }
+                        if (next_para_noindent) {
+                            current_para->flags |= DocElement::FLAG_NOINDENT;
+                            next_para_noindent = false;
+                        }
+                    }
+                    char buf[8];
+                    buf[0] = diacritic_cmd;
+                    buf[1] = '\xE2';  // U+200B ZWS
+                    buf[2] = '\x80';
+                    buf[3] = '\x8B';
+                    buf[4] = '\0';
+                    DocElement* text_elem = doc_create_text_cstr(arena, buf, DocTextStyle::plain());
                     if (text_elem) {
                         doc_append_child(current_para, text_elem);
                     }
@@ -4361,7 +4415,46 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return nullptr;
     }
     // Special characters
+    // Helper to check for empty curly_group child (e.g., \textbackslash{})
+    auto has_empty_curly_group_child = [&elem]() -> bool {
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader ch_elem = child.asElement();
+                const char* ch_tag = ch_elem.tagName();
+                if (ch_tag && (tag_eq(ch_tag, "curly_group") || tag_eq(ch_tag, "group"))) {
+                    // Check if the group is empty
+                    auto group_iter = ch_elem.children();
+                    ItemReader group_child;
+                    if (!group_iter.next(&group_child)) {
+                        return true;  // empty curly group
+                    }
+                    // Check if the child is whitespace-only string
+                    if (group_child.isString()) {
+                        const char* text = group_child.cstring();
+                        if (!text || text[0] == '\0') return true;
+                        // Check if all whitespace
+                        bool all_ws = true;
+                        for (const char* p = text; *p; p++) {
+                            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                                all_ws = false;
+                                break;
+                            }
+                        }
+                        if (all_ws) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    
     if (tag_eq(tag, "textbackslash")) {
+        // If followed by empty {}, add ZWS for word separation
+        if (has_empty_curly_group_child()) {
+            return doc_create_text_cstr(arena, "\\\xE2\x80\x8B", DocTextStyle::plain());  // \ + ZWS
+        }
         return doc_create_text_cstr(arena, "\\", DocTextStyle::plain());
     }
     if (tag_eq(tag, "textasciitilde")) {
