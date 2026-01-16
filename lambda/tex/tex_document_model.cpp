@@ -1858,6 +1858,37 @@ static DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break m
 static DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
 static DocElement* const NOINDENT_MARKER = (DocElement*)3;  // \noindent command marker
 
+// Helper to check if an element contains paragraph break markers (parbreak symbol or \par command)
+static bool contains_parbreak_markers(const ElementReader& elem) {
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        // Check for "parbreak" symbol
+        if (child.isSymbol()) {
+            const char* sym = child.cstring();
+            if (sym && strcmp(sym, "parbreak") == 0) {
+                return true;
+            }
+        }
+        // Check for "parbreak" as string (symbols may come through as strings)
+        if (child.isString()) {
+            const char* str = child.cstring();
+            if (str && strcmp(str, "parbreak") == 0) {
+                return true;
+            }
+        }
+        // Check for \par command element
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && strcmp(tag, "par") == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Check if an item is a paragraph break marker (parbreak symbol or \par command)
 static bool is_parbreak_item(const ItemReader& item) {
     // Symbol "parbreak" (from paragraph_break in grammar)
@@ -4283,6 +4314,68 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
             }
         }
         
+        // Check if this is a "paragraph" element with parbreak markers
+        // In this case, we need to process its children directly instead of treating it as a unit
+        if (child_item.isElement()) {
+            ElementReader para_elem = child_item.asElement();
+            const char* para_tag = para_elem.tagName();
+            if (para_tag && tag_eq(para_tag, "paragraph") && contains_parbreak_markers(para_elem)) {
+                // Process the paragraph element's children as if they were direct children here
+                // This handles \par and parbreak markers properly
+                int64_t para_child_count = para_elem.childCount();
+                for (int64_t j = 0; j < para_child_count; j++) {
+                    ItemReader para_child = para_elem.childAt(j);
+                    DocElement* para_child_elem = build_doc_element(para_child, arena, doc);
+                    
+                    if (!para_child_elem) continue;
+                    
+                    if (para_child_elem == PARBREAK_MARKER) {
+                        if (current_para && current_para->first_child) {
+                            trim_paragraph_whitespace(current_para, arena);
+                            if (paragraph_has_visible_content(current_para)) {
+                                doc_append_child(container, current_para);
+                            }
+                        }
+                        current_para = nullptr;
+                        after_block_element = false;
+                        next_para_noindent = false;
+                        continue;
+                    }
+                    
+                    if (para_child_elem == NOINDENT_MARKER) {
+                        next_para_noindent = true;
+                        continue;
+                    }
+                    
+                    if (is_inline_or_break(para_child_elem)) {
+                        if (!current_para) {
+                            current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                            if (after_block_element) {
+                                current_para->flags |= DocElement::FLAG_CONTINUE;
+                                after_block_element = false;
+                            }
+                            if (next_para_noindent) {
+                                current_para->flags |= DocElement::FLAG_NOINDENT;
+                                next_para_noindent = false;
+                            }
+                        }
+                        doc_append_child(current_para, para_child_elem);
+                    } else {
+                        if (current_para && current_para->first_child) {
+                            trim_paragraph_whitespace(current_para, arena);
+                            if (paragraph_has_visible_content(current_para)) {
+                                doc_append_child(container, current_para);
+                            }
+                            current_para = nullptr;
+                        }
+                        doc_append_child(container, para_child_elem);
+                        after_block_element = true;
+                    }
+                }
+                continue;
+            }
+        }
+        
         DocElement* child_elem = build_doc_element(child_item, arena, doc);
         
         if (!child_elem) continue;
@@ -4337,8 +4430,11 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                 current_para = nullptr;
             }
             doc_append_child(container, child_elem);
-            // Mark that we just added a block element
-            after_block_element = true;
+            // Mark that we just added a block element (for continue flag)
+            // But NOT for headings - paragraphs after headings are normal, not "continue"
+            if (child_elem->type != DocElemType::HEADING) {
+                after_block_element = true;
+            }
         }
     }
     
@@ -4840,8 +4936,16 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
             // \paragraph{Title} sectioning command
             return build_section_command(tag, elem, arena, doc);
         } else {
-            // Content paragraph - process as paragraph
-            return build_paragraph(elem, arena, doc);
+            // Content paragraph - check if it contains paragraph breaks
+            if (contains_parbreak_markers(elem)) {
+                // Contains \par or parbreak - need to split into multiple paragraphs
+                // Return nullptr - caller (build_body_content_with_paragraphs) will handle this
+                // by processing children directly
+                return nullptr;
+            } else {
+                // Simple paragraph - process inline content only
+                return build_paragraph(elem, arena, doc);
+            }
         }
     }
     
@@ -5279,6 +5383,32 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         doc_append_child(container, end_zwsp_span);
         
         return container;
+    }
+    
+    // Curly/brack groups - inline transparent containers
+    // These should NOT be block elements - just process their children inline
+    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group")) {
+        DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        span->text.style = DocTextStyle::plain();
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            DocElement* child_elem = build_doc_element(child, arena, doc);
+            if (child_elem && child_elem != PARBREAK_MARKER && child_elem != NOINDENT_MARKER) {
+                doc_append_child(span, child_elem);
+            }
+        }
+        
+        // If only one child, return it directly
+        if (span->first_child && span->first_child == span->last_child) {
+            DocElement* only_child = span->first_child;
+            only_child->parent = nullptr;
+            only_child->next_sibling = nullptr;
+            return only_child;
+        }
+        
+        return span->first_child ? span : nullptr;
     }
     
     // Generic element - recurse to children with paragraph grouping

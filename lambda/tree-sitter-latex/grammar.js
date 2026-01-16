@@ -66,6 +66,7 @@ module.exports = grammar({
       $.text,
       $.paragraph_break,  // Blank lines are allowed in preamble
       $.nbsp,           // Non-breaking space ~
+      $.line_comment,   // Comments can appear at top level (in preamble or fragments)
     ),
 
     document: $ => seq(
