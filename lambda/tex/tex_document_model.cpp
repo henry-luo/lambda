@@ -268,6 +268,25 @@ DocElement* doc_create_text_cstr(Arena* arena, const char* text, DocTextStyle st
     return doc_create_text(arena, text, strlen(text), style);
 }
 
+// Create a RAW_HTML element with pre-rendered HTML content
+static DocElement* doc_create_raw_html(Arena* arena, const char* html, size_t len) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::RAW_HTML);
+    
+    // Copy HTML to arena
+    char* html_copy = (char*)arena_alloc(arena, len + 1);
+    memcpy(html_copy, html, len);
+    html_copy[len] = '\0';
+    
+    elem->raw.raw_content = html_copy;
+    elem->raw.raw_len = len;
+    
+    return elem;
+}
+
+static DocElement* doc_create_raw_html_cstr(Arena* arena, const char* html) {
+    return doc_create_raw_html(arena, html, strlen(html));
+}
+
 // Normalize LaTeX whitespace: collapse consecutive whitespace to single space
 // This preserves leading and trailing whitespace (single space at most) 
 // since inter-element spacing is meaningful in inline context.
@@ -481,14 +500,20 @@ static void html_escape_append_transformed(StrBuf* out, const char* text, size_t
     if (transformed) {
         // HTML escape the transformed text
         for (const char* p = transformed; *p; p++) {
-            char c = *p;
+            unsigned char c = (unsigned char)*p;
+            // Check for UTF-8 non-breaking space (U+00A0 = 0xC2 0xA0)
+            if (c == 0xC2 && *(p + 1) == (char)0xA0) {
+                strbuf_append_str(out, "&nbsp;");
+                p++;  // Skip the second byte
+                continue;
+            }
             switch (c) {
             case '&':  strbuf_append_str(out, "&amp;"); break;
             case '<':  strbuf_append_str(out, "&lt;"); break;
             case '>':  strbuf_append_str(out, "&gt;"); break;
             case '"':  strbuf_append_str(out, "&quot;"); break;
             // Note: don't escape single quotes - we want the curly ones to show
-            default:   strbuf_append_char(out, c); break;
+            default:   strbuf_append_char(out, (char)c); break;
             }
         }
         free(transformed);
@@ -594,14 +619,20 @@ static bool is_diacritic_tag(const char* tag) {
 
 void html_escape_append(StrBuf* out, const char* text, size_t len) {
     for (size_t i = 0; i < len; i++) {
-        char c = text[i];
+        unsigned char c = (unsigned char)text[i];
+        // Check for UTF-8 non-breaking space (U+00A0 = 0xC2 0xA0)
+        if (c == 0xC2 && i + 1 < len && (unsigned char)text[i + 1] == 0xA0) {
+            strbuf_append_str(out, "&nbsp;");
+            i++;  // Skip the second byte
+            continue;
+        }
         switch (c) {
         case '&':  strbuf_append_str(out, "&amp;"); break;
         case '<':  strbuf_append_str(out, "&lt;"); break;
         case '>':  strbuf_append_str(out, "&gt;"); break;
         case '"':  strbuf_append_str(out, "&quot;"); break;
         case '\'': strbuf_append_str(out, "&#39;"); break;
-        default:   strbuf_append_char(out, c); break;
+        default:   strbuf_append_char(out, (char)c); break;
         }
     }
 }
@@ -899,8 +930,17 @@ static void render_heading_html(DocElement* elem, StrBuf* out,
     
     if (opts.legacy_mode) {
         // Legacy mode: <h1 id="sec-N">
-        if (elem->heading.label) {
-            strbuf_append_format(out, "<h%d id=\"%s\">", h_level, elem->heading.label);
+        // Use explicit label if set, otherwise auto-generate from section number
+        const char* id_str = elem->heading.label;
+        char auto_id[64] = {0};
+        if (!id_str && elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
+            // Auto-generate ID as "sec-N" from section number
+            snprintf(auto_id, sizeof(auto_id), "sec-%s", elem->heading.number);
+            id_str = auto_id;
+        }
+        
+        if (id_str) {
+            strbuf_append_format(out, "<h%d id=\"%s\">", h_level, id_str);
         } else {
             strbuf_append_format(out, "<h%d>", h_level);
         }
@@ -911,8 +951,8 @@ static void render_heading_html(DocElement* elem, StrBuf* out,
                 // Chapter: <div>Chapter N</div>
                 strbuf_append_format(out, "<div>Chapter %s</div>", elem->heading.number);
             } else {
-                // Section: number before title with quad space
-                strbuf_append_format(out, "%s ", elem->heading.number);
+                // Section: number before title with em quad space (U+2003)
+                strbuf_append_format(out, "%s\xE2\x80\x83", elem->heading.number);
             }
         }
     } else {
@@ -945,16 +985,28 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
                                    const HtmlOutputOptions& opts, int depth) {
     if (opts.pretty_print) html_indent(out, depth);
     
+    // Build up the class string based on flags
+    bool has_continue = (elem->flags & DocElement::FLAG_CONTINUE) != 0;
+    bool has_noindent = (elem->flags & DocElement::FLAG_NOINDENT) != 0;
+    
     if (opts.legacy_mode) {
-        // In legacy mode, add class="continue" if flag is set
-        if (elem->flags & DocElement::FLAG_CONTINUE) {
+        // In legacy mode, add class attributes for flags
+        if (has_continue && has_noindent) {
+            strbuf_append_str(out, "<p class=\"continue noindent\">");
+        } else if (has_continue) {
             strbuf_append_str(out, "<p class=\"continue\">");
+        } else if (has_noindent) {
+            strbuf_append_str(out, "<p class=\"noindent\">");
         } else {
             strbuf_append_str(out, "<p>");
         }
     } else {
-        if (elem->flags & DocElement::FLAG_CONTINUE) {
+        if (has_continue && has_noindent) {
+            strbuf_append_format(out, "<p class=\"%sparagraph continue noindent\">", opts.css_class_prefix);
+        } else if (has_continue) {
             strbuf_append_format(out, "<p class=\"%sparagraph continue\">", opts.css_class_prefix);
+        } else if (has_noindent) {
+            strbuf_append_format(out, "<p class=\"%sparagraph noindent\">", opts.css_class_prefix);
         } else {
             strbuf_append_format(out, "<p class=\"%sparagraph\">", opts.css_class_prefix);
         }
@@ -1364,6 +1416,7 @@ static bool is_inline_element(DocElement* elem) {
     case DocElemType::TEXT_RUN:
     case DocElemType::TEXT_SPAN:
     case DocElemType::SPACE:
+    case DocElemType::RAW_HTML:  // inline HTML like logos
         return true;
     default:
         return false;
@@ -1771,6 +1824,7 @@ static bool tag_eq(const char* a, const char* b) {
 // Sentinel pointer values for special markers (used internally during tree building)
 static DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break marker
 static DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
+static DocElement* const NOINDENT_MARKER = (DocElement*)3;  // \noindent command marker
 
 // Check if an item is a paragraph break marker (parbreak symbol or \par command)
 static bool is_parbreak_item(const ItemReader& item) {
@@ -2016,7 +2070,13 @@ static DocElement* build_section_command(const char* cmd_name, const ElementRead
         heading->heading.level = 2; // default to section
     }
     
-    // Check for starred version (no numbering)
+    // Check for title attribute first (parser may output as attribute)
+    if (elem.has_attr("title")) {
+        ItemReader title_item = elem.get_attr("title");
+        heading->heading.title = extract_text_content(title_item, arena);
+    }
+    
+    // Check for starred version (no numbering) and title in children
     // Look for "star" child element
     auto iter = elem.children();
     ItemReader child;
@@ -2028,10 +2088,11 @@ static DocElement* build_section_command(const char* cmd_name, const ElementRead
             const char* tag = child_elem.tagName();
             if (tag_eq(tag, "star") || tag_eq(tag, "*")) {
                 has_star = true;
-            } else if (tag_eq(tag, "curly_group") || tag_eq(tag, "title") || 
-                       tag_eq(tag, "brack_group") || tag_eq(tag, "text") || 
-                       tag_eq(tag, "arg")) {
-                // Extract title text
+            } else if (!heading->heading.title &&
+                       (tag_eq(tag, "curly_group") || tag_eq(tag, "title") || 
+                        tag_eq(tag, "brack_group") || tag_eq(tag, "text") || 
+                        tag_eq(tag, "arg"))) {
+                // Extract title text (only if not already set from attribute)
                 heading->heading.title = extract_text_content(child, arena);
             }
         } else if (child.isString() && !heading->heading.title) {
@@ -2051,7 +2112,16 @@ static DocElement* build_section_command(const char* cmd_name, const ElementRead
     } else {
         heading->flags |= DocElement::FLAG_NUMBERED;
         
-        // Generate section number
+        // Generate global section ID (sec-1, sec-2, sec-3, etc.)
+        doc->section_id_counter++;
+        char id_buf[32];
+        snprintf(id_buf, sizeof(id_buf), "sec-%d", doc->section_id_counter);
+        size_t id_len = strlen(id_buf);
+        char* id_str = (char*)arena_alloc(arena, id_len + 1);
+        memcpy(id_str, id_buf, id_len + 1);
+        heading->heading.label = id_str;  // Store as label so render uses it as id
+        
+        // Generate section number for display
         switch (heading->heading.level) {
             case 1: doc->chapter_num++; 
                     doc->section_num = 0; 
@@ -2126,6 +2196,143 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         return build_text_command(tag, elem, arena, doc);
     }
     
+    // \char command - character by code point
+    // Formats: \char98 (decimal), \char"A0 (hex), \char'141 (octal)
+    if (tag_eq(tag, "char_command")) {
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* cmd_text = child.cstring();
+            // cmd_text is like "\\char98" or "\\char\"A0" or "\\char'141"
+            if (cmd_text && strncmp(cmd_text, "\\char", 5) == 0) {
+                const char* num_part = cmd_text + 5;  // skip "\\char"
+                long code_point = 0;
+                if (*num_part == '"') {
+                    // hex: \char"A0
+                    code_point = strtol(num_part + 1, nullptr, 16);
+                } else if (*num_part == '\'') {
+                    // octal: \char'141
+                    code_point = strtol(num_part + 1, nullptr, 8);
+                } else {
+                    // decimal: \char98
+                    code_point = strtol(num_part, nullptr, 10);
+                }
+                // Convert code point to UTF-8
+                if (code_point > 0 && code_point <= 0x10FFFF) {
+                    char utf8_buf[8];
+                    int len = 0;
+                    if (code_point <= 0x7F) {
+                        utf8_buf[len++] = (char)code_point;
+                    } else if (code_point <= 0x7FF) {
+                        utf8_buf[len++] = (char)(0xC0 | (code_point >> 6));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else if (code_point <= 0xFFFF) {
+                        utf8_buf[len++] = (char)(0xE0 | (code_point >> 12));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else {
+                        utf8_buf[len++] = (char)(0xF0 | (code_point >> 18));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    }
+                    utf8_buf[len] = '\0';
+                    return doc_create_text_cstr(arena, utf8_buf, DocTextStyle::plain());
+                }
+            }
+        }
+        return nullptr;  // failed to parse
+    }
+    // TeX caret notation: ^^XX (2 hex digits) or ^^^^XXXX (4 hex digits) or ^^c (char XOR 64)
+    if (tag_eq(tag, "caret_char")) {
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* caret_text = child.cstring();
+            if (caret_text && strncmp(caret_text, "^^", 2) == 0) {
+                const char* after_caret = caret_text + 2;
+                long code_point = 0;
+                if (strncmp(after_caret, "^^", 2) == 0) {
+                    code_point = strtol(after_caret + 2, nullptr, 16);
+                } else {
+                    size_t len = strlen(after_caret);
+                    if (len == 2 && isxdigit(after_caret[0]) && isxdigit(after_caret[1])) {
+                        code_point = strtol(after_caret, nullptr, 16);
+                    } else if (len == 1) {
+                        code_point = (unsigned char)after_caret[0] ^ 64;
+                    } else {
+                        code_point = strtol(after_caret, nullptr, 16);
+                    }
+                }
+                if (code_point > 0 && code_point <= 0x10FFFF) {
+                    char utf8_buf[8];
+                    int len = 0;
+                    if (code_point <= 0x7F) {
+                        utf8_buf[len++] = (char)code_point;
+                    } else if (code_point <= 0x7FF) {
+                        utf8_buf[len++] = (char)(0xC0 | (code_point >> 6));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else if (code_point <= 0xFFFF) {
+                        utf8_buf[len++] = (char)(0xE0 | (code_point >> 12));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else {
+                        utf8_buf[len++] = (char)(0xF0 | (code_point >> 18));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    }
+                    utf8_buf[len] = '\0';
+                    return doc_create_text_cstr(arena, utf8_buf, DocTextStyle::plain());
+                }
+            }
+        }
+        return nullptr;
+    }
+    // \symbol{} command - character by code point
+    if (tag_eq(tag, "symbol")) {
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* arg = child.cstring();
+            if (arg) {
+                while (*arg && (*arg == ' ' || *arg == '\t')) arg++;
+                long code_point = 0;
+                if (*arg == '"') {
+                    code_point = strtol(arg + 1, nullptr, 16);
+                } else if (*arg == '\'') {
+                    code_point = strtol(arg + 1, nullptr, 8);
+                } else if (*arg == '`') {
+                    if (arg[1]) code_point = (unsigned char)arg[1];
+                } else {
+                    code_point = strtol(arg, nullptr, 10);
+                }
+                if (code_point > 0 && code_point <= 0x10FFFF) {
+                    char utf8_buf[8];
+                    int len = 0;
+                    if (code_point <= 0x7F) {
+                        utf8_buf[len++] = (char)code_point;
+                    } else if (code_point <= 0x7FF) {
+                        utf8_buf[len++] = (char)(0xC0 | (code_point >> 6));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else if (code_point <= 0xFFFF) {
+                        utf8_buf[len++] = (char)(0xE0 | (code_point >> 12));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else {
+                        utf8_buf[len++] = (char)(0xF0 | (code_point >> 18));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    }
+                    utf8_buf[len] = '\0';
+                    return doc_create_text_cstr(arena, utf8_buf, DocTextStyle::plain());
+                }
+            }
+        }
+        return nullptr;
+    }
+
     // Symbol commands parsed directly as element tags (e.g., {"$":"textellipsis"})
     // Ellipsis
     if (tag_eq(tag, "textellipsis") || tag_eq(tag, "ldots") || tag_eq(tag, "dots")) {
@@ -2138,12 +2345,14 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "textemdash")) {
         return doc_create_text_cstr(arena, "\xE2\x80\x94", DocTextStyle::plain());  // —
     }
-    // LaTeX/TeX logos
+    // LaTeX/TeX logos - styled HTML spans
     if (tag_eq(tag, "LaTeX")) {
-        return doc_create_text_cstr(arena, "LaTeX", DocTextStyle::plain());
+        return doc_create_raw_html_cstr(arena,
+            "<span class=\"latex\">L<span class=\"a\">a</span>T<span class=\"e\">e</span>X</span>");
     }
     if (tag_eq(tag, "TeX")) {
-        return doc_create_text_cstr(arena, "TeX", DocTextStyle::plain());
+        return doc_create_raw_html_cstr(arena,
+            "<span class=\"tex\">T<span class=\"e\">e</span>X</span>");
     }
     // Special characters
     if (tag_eq(tag, "textbackslash")) {
@@ -2282,14 +2491,14 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             if (tag_eq(cmd_name, "textemdash")) {
                 return doc_create_text_cstr(arena, "\xE2\x80\x94", DocTextStyle::plain());  // —
             }
-            // LaTeX/TeX logos
+            // LaTeX/TeX logos - styled HTML spans
             if (tag_eq(cmd_name, "LaTeX")) {
-                // TODO: proper styled LaTeX logo
-                return doc_create_text_cstr(arena, "LaTeX", DocTextStyle::plain());
+                return doc_create_raw_html_cstr(arena,
+                    "<span class=\"latex\">L<span class=\"a\">a</span>T<span class=\"e\">e</span>X</span>");
             }
             if (tag_eq(cmd_name, "TeX")) {
-                // TODO: proper styled TeX logo
-                return doc_create_text_cstr(arena, "TeX", DocTextStyle::plain());
+                return doc_create_raw_html_cstr(arena,
+                    "<span class=\"tex\">T<span class=\"e\">e</span>X</span>");
             }
             // Special characters
             if (tag_eq(cmd_name, "textbackslash")) {
@@ -2397,11 +2606,38 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         return space;
     }
     
-    // Space command - handles \<space>, \<tab>, and \<newline>
-    // All produce ZWSP (as boundary marker) + space
+    // Space command - handles various spacing commands
+    // \<space>, \<tab>, \<newline> → ZWSP + space (boundary marker)
+    // \, → thin space (U+2009)
+    // \- → soft hyphen (U+00AD)
+    // \; → thick space (like \enspace)
+    // \! → negative thin space (nothing in HTML)
     if (tag_eq(tag, "space_cmd")) {
-        // All space commands produce ZWSP followed by space
-        // The ZWSP marks a boundary/break point, the space is the visible character
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* cmd = child.cstring();
+            if (cmd && strlen(cmd) >= 2) {
+                char space_char = cmd[1];
+                if (space_char == ',') {
+                    // Thin space U+2009
+                    return doc_create_text_cstr(arena, "\xE2\x80\x89", DocTextStyle::plain());
+                } else if (space_char == '-') {
+                    // Soft hyphen U+00AD (discretionary hyphen)
+                    return doc_create_text_cstr(arena, "\xC2\xAD", DocTextStyle::plain());
+                } else if (space_char == ';') {
+                    // Thick space - use space element
+                    DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+                    space->space.is_linebreak = false;
+                    return space;
+                } else if (space_char == '!') {
+                    // Negative thin space - absorbs space, output nothing
+                    return nullptr;
+                }
+            }
+        }
+        // Default: ZWSP + space (for \ <space>, \<tab>, \<newline>)
+        // ZWSP marks boundary, space is visible
         return doc_create_text_cstr(arena, "\xE2\x80\x8B ", DocTextStyle::plain());
     }
     
@@ -2561,7 +2797,20 @@ static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
         trim_paragraph_whitespace(para, arena);
     }
     
-    return para->first_child ? para : nullptr;
+    // Check if paragraph has any actual content (not just empty text)
+    bool has_content = false;
+    for (DocElement* ch = para->first_child; ch && !has_content; ch = ch->next_sibling) {
+        if (ch->type == DocElemType::TEXT_RUN) {
+            if (ch->text.text && ch->text.text_len > 0) {
+                has_content = true;
+            }
+        } else {
+            // Non-text elements count as content
+            has_content = true;
+        }
+    }
+    
+    return has_content ? para : nullptr;
 }
 
 // ============================================================================
@@ -2970,6 +3219,33 @@ static const char* trim_trailing_whitespace(const char* str, Arena* arena) {
     memcpy(result, str, len);
     result[len] = '\0';
     return result;
+}
+
+// Check if a paragraph has any visible content after trimming
+// Returns true if any child is non-empty (TEXT_RUN with content, or non-TEXT_RUN element)
+static bool paragraph_has_visible_content(DocElement* para) {
+    if (!para || !para->first_child) return false;
+    
+    for (DocElement* child = para->first_child; child; child = child->next_sibling) {
+        if (child->type == DocElemType::TEXT_RUN) {
+            if (child->text.text && child->text.text_len > 0) {
+                return true;
+            }
+        } else if (child->type == DocElemType::TEXT_SPAN) {
+            // Check if span has content
+            if (child->text.text && child->text.text_len > 0) {
+                return true;
+            }
+            // Check if span has children with content
+            if (child->first_child) {
+                return true;  // Assume spans with children have content
+            }
+        } else if (child->type != DocElemType::SPACE || child->space.is_linebreak) {
+            // Non-space element (or linebreak) counts as content
+            return true;
+        }
+    }
+    return false;
 }
 
 // Trim whitespace at paragraph boundaries:
@@ -3612,10 +3888,10 @@ static DocElement* build_cite_command(const ElementReader& elem, Arena* arena,
 // Helper function to check if an element should be collected into a paragraph
 // vs treated as a block element (like sections, lists, etc.)
 // Note: Uses the already-defined is_inline_element() function in the HTML rendering section.
-// This version adds support for PARBREAK_MARKER sentinel.
+// This version adds support for PARBREAK_MARKER and NOINDENT_MARKER sentinels.
 static bool is_inline_or_break(DocElement* elem) {
     if (!elem) return false;
-    if (elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER) return false;
+    if (elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER || elem == NOINDENT_MARKER) return false;
     return is_inline_element(elem);
 }
 
@@ -3625,6 +3901,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                                                 Arena* arena, TexDocumentModel* doc) {
     DocElement* current_para = nullptr;
     bool after_block_element = false;  // Track if the previous element was a block
+    bool next_para_noindent = false;   // Track if next paragraph should have noindent class
     
     int64_t child_count = elem.childCount();
     for (int64_t i = 0; i < child_count; i++) {
@@ -3675,6 +3952,10 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                                             current_para->flags |= DocElement::FLAG_CONTINUE;
                                             after_block_element = false;
                                         }
+                                        if (next_para_noindent) {
+                                            current_para->flags |= DocElement::FLAG_NOINDENT;
+                                            next_para_noindent = false;
+                                        }
                                     }
                                     
                                     // Add the accented character
@@ -3721,6 +4002,10 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                                             current_para->flags |= DocElement::FLAG_CONTINUE;
                                             after_block_element = false;
                                         }
+                                        if (next_para_noindent) {
+                                            current_para->flags |= DocElement::FLAG_NOINDENT;
+                                            next_para_noindent = false;
+                                        }
                                     }
                                     
                                     // Add the accented character
@@ -3745,6 +4030,10 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                             current_para->flags |= DocElement::FLAG_CONTINUE;
                             after_block_element = false;
                         }
+                        if (next_para_noindent) {
+                            current_para->flags |= DocElement::FLAG_NOINDENT;
+                            next_para_noindent = false;
+                        }
                     }
                     DocElement* text_elem = doc_create_text_cstr(arena, result, DocTextStyle::plain());
                     if (text_elem) {
@@ -3765,11 +4054,22 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
         if (child_elem == PARBREAK_MARKER) {
             if (current_para && current_para->first_child) {
                 trim_paragraph_whitespace(current_para, arena);
-                doc_append_child(container, current_para);
+                // Only append if paragraph has visible content after trimming
+                if (paragraph_has_visible_content(current_para)) {
+                    doc_append_child(container, current_para);
+                }
             }
             current_para = nullptr;
             // Note: parbreak resets after_block_element since it's a new paragraph context
             after_block_element = false;
+            // Reset noindent flag - \noindent followed by blank line does NOT affect next paragraph
+            next_para_noindent = false;
+            continue;
+        }
+        
+        // Noindent marker - set flag for next paragraph
+        if (child_elem == NOINDENT_MARKER) {
+            next_para_noindent = true;
             continue;
         }
         
@@ -3783,13 +4083,20 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                     current_para->flags |= DocElement::FLAG_CONTINUE;
                     after_block_element = false;
                 }
+                // Apply noindent flag if set
+                if (next_para_noindent) {
+                    current_para->flags |= DocElement::FLAG_NOINDENT;
+                    next_para_noindent = false;
+                }
             }
             doc_append_child(current_para, child_elem);
         } else {
             // Block element - finalize current paragraph first
             if (current_para && current_para->first_child) {
                 trim_paragraph_whitespace(current_para, arena);
-                doc_append_child(container, current_para);
+                if (paragraph_has_visible_content(current_para)) {
+                    doc_append_child(container, current_para);
+                }
                 current_para = nullptr;
             }
             doc_append_child(container, child_elem);
@@ -3801,7 +4108,9 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
     // Finalize any remaining paragraph
     if (current_para && current_para->first_child) {
         trim_paragraph_whitespace(current_para, arena);
-        doc_append_child(container, current_para);
+        if (paragraph_has_visible_content(current_para)) {
+            doc_append_child(container, current_para);
+        }
     }
 }
 
@@ -3883,12 +4192,173 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "textemdash")) {
         return doc_create_text_cstr(arena, "\xE2\x80\x94", DocTextStyle::plain());  // —
     }
-    // LaTeX/TeX logos
+    // LaTeX/TeX logos - styled HTML spans
     if (tag_eq(tag, "LaTeX")) {
-        return doc_create_text_cstr(arena, "LaTeX", DocTextStyle::plain());
+        return doc_create_raw_html_cstr(arena,
+            "<span class=\"latex\">L<span class=\"a\">a</span>T<span class=\"e\">e</span>X</span>");
     }
     if (tag_eq(tag, "TeX")) {
-        return doc_create_text_cstr(arena, "TeX", DocTextStyle::plain());
+        return doc_create_raw_html_cstr(arena,
+            "<span class=\"tex\">T<span class=\"e\">e</span>X</span>");
+    }
+    // \char command - character by code point
+    // Formats: \char98 (decimal), \char"A0 (hex), \char'141 (octal)
+    if (tag_eq(tag, "char_command")) {
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* cmd_text = child.cstring();
+            // cmd_text is like "\\char98" or "\\char\"A0" or "\\char'141"
+            if (cmd_text && strncmp(cmd_text, "\\char", 5) == 0) {
+                const char* num_part = cmd_text + 5;  // skip "\\char"
+                long code_point = 0;
+                if (*num_part == '"') {
+                    // hex: \char"A0
+                    code_point = strtol(num_part + 1, nullptr, 16);
+                } else if (*num_part == '\'') {
+                    // octal: \char'141
+                    code_point = strtol(num_part + 1, nullptr, 8);
+                } else {
+                    // decimal: \char98
+                    code_point = strtol(num_part, nullptr, 10);
+                }
+                // Convert code point to UTF-8
+                if (code_point > 0 && code_point <= 0x10FFFF) {
+                    char utf8_buf[8];
+                    int len = 0;
+                    if (code_point <= 0x7F) {
+                        utf8_buf[len++] = (char)code_point;
+                    } else if (code_point <= 0x7FF) {
+                        utf8_buf[len++] = (char)(0xC0 | (code_point >> 6));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else if (code_point <= 0xFFFF) {
+                        utf8_buf[len++] = (char)(0xE0 | (code_point >> 12));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else {
+                        utf8_buf[len++] = (char)(0xF0 | (code_point >> 18));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    }
+                    utf8_buf[len] = '\0';
+                    return doc_create_text_cstr(arena, utf8_buf, DocTextStyle::plain());
+                }
+            }
+        }
+        return nullptr;  // failed to parse
+    }
+    // TeX caret notation: ^^XX (2 hex digits) or ^^^^XXXX (4 hex digits) or ^^c (char XOR 64)
+    // Examples: ^^A0 → U+00A0 (nbsp), ^^^^2103 → U+2103 (℃), ^^7 → char(55 XOR 64) = w
+    if (tag_eq(tag, "caret_char")) {
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* caret_text = child.cstring();
+            // caret_text is like "^^A0" or "^^^^2103" or "^^7"
+            if (caret_text && strncmp(caret_text, "^^", 2) == 0) {
+                const char* after_caret = caret_text + 2;
+                long code_point = 0;
+                if (strncmp(after_caret, "^^", 2) == 0) {
+                    // ^^^^XXXX - 4 hex digits
+                    code_point = strtol(after_caret + 2, nullptr, 16);
+                } else {
+                    // ^^XX or ^^c
+                    // Check if it's 2 hex digits
+                    size_t len = strlen(after_caret);
+                    if (len == 2 && isxdigit(after_caret[0]) && isxdigit(after_caret[1])) {
+                        // 2 hex digits: ^^A0
+                        code_point = strtol(after_caret, nullptr, 16);
+                    } else if (len == 1) {
+                        // Single char: ^^c means char XOR 64
+                        // ^^7 = '7' (55) XOR 64 = 'w' (119) - wait, that's wrong
+                        // Actually in TeX: ^^c means char(c) XOR 64 for printable, OR char+64 for control
+                        // For ^^7: '7' is ASCII 55, 55 XOR 64 = 119 = 'w'
+                        // For ^^+: '+' is ASCII 43, 43 XOR 64 = 107 = 'k'
+                        code_point = (unsigned char)after_caret[0] ^ 64;
+                    } else {
+                        // Other formats - just try hex
+                        code_point = strtol(after_caret, nullptr, 16);
+                    }
+                }
+                // Convert code point to UTF-8
+                if (code_point > 0 && code_point <= 0x10FFFF) {
+                    char utf8_buf[8];
+                    int len = 0;
+                    if (code_point <= 0x7F) {
+                        utf8_buf[len++] = (char)code_point;
+                    } else if (code_point <= 0x7FF) {
+                        utf8_buf[len++] = (char)(0xC0 | (code_point >> 6));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else if (code_point <= 0xFFFF) {
+                        utf8_buf[len++] = (char)(0xE0 | (code_point >> 12));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else {
+                        utf8_buf[len++] = (char)(0xF0 | (code_point >> 18));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    }
+                    utf8_buf[len] = '\0';
+                    return doc_create_text_cstr(arena, utf8_buf, DocTextStyle::plain());
+                }
+            }
+        }
+        return nullptr;  // failed to parse
+    }
+    // \symbol{} command - character by code point (LaTeX fontenc)
+    // Formats: \symbol{98} (decimal), \symbol{"00A9} (hex with "), \symbol{'141} (octal with ')
+    if (tag_eq(tag, "symbol")) {
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* arg = child.cstring();
+            // arg is the content inside braces, may have leading space
+            if (arg) {
+                // Skip leading whitespace
+                while (*arg && (*arg == ' ' || *arg == '\t')) arg++;
+                long code_point = 0;
+                if (*arg == '"') {
+                    // hex: "00A9
+                    code_point = strtol(arg + 1, nullptr, 16);
+                } else if (*arg == '\'') {
+                    // octal: '141
+                    code_point = strtol(arg + 1, nullptr, 8);
+                } else if (*arg == '`') {
+                    // Character: `a means ASCII value of 'a'
+                    if (arg[1]) {
+                        code_point = (unsigned char)arg[1];
+                    }
+                } else {
+                    // decimal: 98
+                    code_point = strtol(arg, nullptr, 10);
+                }
+                // Convert code point to UTF-8
+                if (code_point > 0 && code_point <= 0x10FFFF) {
+                    char utf8_buf[8];
+                    int len = 0;
+                    if (code_point <= 0x7F) {
+                        utf8_buf[len++] = (char)code_point;
+                    } else if (code_point <= 0x7FF) {
+                        utf8_buf[len++] = (char)(0xC0 | (code_point >> 6));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else if (code_point <= 0xFFFF) {
+                        utf8_buf[len++] = (char)(0xE0 | (code_point >> 12));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    } else {
+                        utf8_buf[len++] = (char)(0xF0 | (code_point >> 18));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 12) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | ((code_point >> 6) & 0x3F));
+                        utf8_buf[len++] = (char)(0x80 | (code_point & 0x3F));
+                    }
+                    utf8_buf[len] = '\0';
+                    return doc_create_text_cstr(arena, utf8_buf, DocTextStyle::plain());
+                }
+            }
+        }
+        return nullptr;
     }
     // Special characters
     if (tag_eq(tag, "textbackslash")) {
@@ -3997,6 +4467,11 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return PARBREAK_MARKER;
     }
     
+    // Noindent command (\noindent)
+    if (tag_eq(tag, "noindent")) {
+        return NOINDENT_MARKER;
+    }
+    
     // Line break commands (\\ and \newline)
     if (tag_eq(tag, "linebreak_command") || tag_eq(tag, "newline")) {
         DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
@@ -4004,11 +4479,32 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return space;
     }
     
-    // Space command - handles \<space>, \<tab>, and \<newline>
-    // All produce ZWSP (as boundary marker) + space
+    // Space command - handles various spacing commands
     if (tag_eq(tag, "space_cmd")) {
-        // All space commands produce ZWSP followed by space
-        // The ZWSP marks a boundary/break point, the space is the visible character
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* cmd = child.cstring();
+            if (cmd && strlen(cmd) >= 2) {
+                char space_char = cmd[1];
+                if (space_char == ',') {
+                    // Thin space U+2009
+                    return doc_create_text_cstr(arena, "\xE2\x80\x89", DocTextStyle::plain());
+                } else if (space_char == '-') {
+                    // Soft hyphen U+00AD (discretionary hyphen)
+                    return doc_create_text_cstr(arena, "\xC2\xAD", DocTextStyle::plain());
+                } else if (space_char == ';') {
+                    // Thick space - use space element
+                    DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
+                    space->space.is_linebreak = false;
+                    return space;
+                } else if (space_char == '!') {
+                    // Negative thin space - absorbs space, output nothing
+                    return nullptr;
+                }
+            }
+        }
+        // Default: ZWSP + space (for \ <space>, \<tab>, \<newline>)
         return doc_create_text_cstr(arena, "\xE2\x80\x8B ", DocTextStyle::plain());
     }
     
@@ -4019,26 +4515,57 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     }
     
     // Handle "paragraph" tag - could be \paragraph{} command or content paragraph
-    // \paragraph{} command: children are text for title
-    // Content paragraph: children include elements like display_math, inline_math, etc.
+    // \paragraph{} command: has a "title" attribute or child curly_group
+    // Content paragraph: children include text content, parbreak, etc.
     if (tag_eq(tag, "paragraph")) {
-        // Check if any child is an element (not just text)
-        bool has_element_children = false;
+        // Check for title attribute (indicates \paragraph{Title} command)
+        if (elem.has_attr("title")) {
+            // \paragraph{Title} sectioning command
+            return build_section_command(tag, elem, arena, doc);
+        }
+        
+        // Check if this is a sectioning command vs content paragraph
+        // Sectioning command: typically has curly_group child as title
+        // Content paragraph: has text strings, parbreak, etc.
+        bool is_sectioning_cmd = false;
+        bool has_text_content = false;
+        
         auto check_iter = elem.children();
         ItemReader check_child;
         while (check_iter.next(&check_child)) {
             if (check_child.isElement()) {
-                has_element_children = true;
-                break;
+                ElementReader child_elem = check_child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (child_tag && (tag_eq(child_tag, "curly_group") || 
+                                  tag_eq(child_tag, "brack_group"))) {
+                    is_sectioning_cmd = true;
+                    break;
+                }
+            } else if (check_child.isString()) {
+                const char* text = check_child.cstring();
+                // Check if there's meaningful text (not just whitespace or parbreak)
+                if (text && strlen(text) > 0) {
+                    // Check for content that isn't just whitespace
+                    bool all_whitespace = true;
+                    for (const char* p = text; *p; p++) {
+                        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                            all_whitespace = false;
+                            break;
+                        }
+                    }
+                    if (!all_whitespace && strcmp(text, "parbreak") != 0) {
+                        has_text_content = true;
+                    }
+                }
             }
         }
         
-        if (has_element_children) {
-            // Content paragraph - process like paragraph_content
-            return build_paragraph(elem, arena, doc);
-        } else {
-            // \paragraph{} sectioning command
+        if (is_sectioning_cmd) {
+            // \paragraph{Title} sectioning command
             return build_section_command(tag, elem, arena, doc);
+        } else {
+            // Content paragraph - process as paragraph
+            return build_paragraph(elem, arena, doc);
         }
     }
     
@@ -4150,6 +4677,53 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     // Comment environment - completely ignored (returns nothing)
     if (tag_eq(tag, "comment")) {
         return nullptr;
+    }
+    
+    // Preamble commands - these set document metadata but produce no output
+    if (tag_eq(tag, "documentclass")) {
+        // Extract document class name from first child (text or curly_group)
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                const char* text = child.cstring();
+                if (text && strlen(text) > 0 && text[0] != '\n') {
+                    // Copy and store document class
+                    size_t len = strlen(text);
+                    char* class_name = (char*)arena_alloc(arena, len + 1);
+                    memcpy(class_name, text, len + 1);
+                    doc->document_class = class_name;
+                    break;
+                }
+            } else if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                    const char* text = extract_text_content(child, arena);
+                    if (text && strlen(text) > 0) {
+                        doc->document_class = text;
+                        break;
+                    }
+                }
+            }
+        }
+        return nullptr;  // No output
+    }
+    
+    // Package imports and other preamble commands - ignored in output
+    if (tag_eq(tag, "usepackage") || tag_eq(tag, "RequirePackage") ||
+        tag_eq(tag, "input") || tag_eq(tag, "include") ||
+        tag_eq(tag, "author") || tag_eq(tag, "title") || tag_eq(tag, "date") ||
+        tag_eq(tag, "newcommand") || tag_eq(tag, "renewcommand") ||
+        tag_eq(tag, "providecommand") || tag_eq(tag, "newenvironment") ||
+        tag_eq(tag, "renewenvironment") || tag_eq(tag, "newtheorem") ||
+        tag_eq(tag, "DeclareMathOperator") || tag_eq(tag, "setlength") ||
+        tag_eq(tag, "setcounter") || tag_eq(tag, "pagestyle") ||
+        tag_eq(tag, "pagenumbering") || tag_eq(tag, "thispagestyle") ||
+        tag_eq(tag, "makeatletter") || tag_eq(tag, "makeatother") ||
+        tag_eq(tag, "bibliography") || tag_eq(tag, "bibliographystyle") ||
+        tag_eq(tag, "graphicspath") || tag_eq(tag, "hypersetup")) {
+        return nullptr;  // No visible output
     }
     
     // Empty - handles both \empty command and \begin{empty}...\end{empty} environment
