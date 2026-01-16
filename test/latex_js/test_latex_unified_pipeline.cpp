@@ -367,10 +367,13 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "environments_1",
     "environments_11",
     // whitespace.tex - partial
+    "whitespace_1",   // \par command paragraph breaks
     "whitespace_2",   // \par and ~ handling
     "whitespace_3",
     "whitespace_9",   // multiple newlines collapsing
     "whitespace_10",  // spaces between environments
+    "whitespace_11",  // comment line joining (Supercal%ifragilist)
+    "whitespace_12",  // comments preventing paragraph breaks
     "whitespace_14",
     "whitespace_15",
     "whitespace_16",

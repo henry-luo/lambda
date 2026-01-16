@@ -1,0 +1,645 @@
+{
+  "module": "latex-typeset-pipeline",
+  "description": "LaTeX to HTML conversion pipeline - parses LaTeX AST and converts to semantic HTML",
+  "main_code_file": "lambda/tex/tex_document_model.cpp",
+  "test_file": "test/latex_js/test_latex_unified_pipeline.cpp",
+  "features": [
+    {
+      "feature": "text-processing",
+      "sub_features": [
+        {
+          "feature": "basic-text",
+          "description": "Simple text in paragraphs, paragraph separation via double-newline",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Handles paragraph splitting and text content accumulation",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_1", "note": "Simple text paragraphs", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_2", "note": "Paragraphs and newlines with \\\\, \\newline, \\par", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_3", "note": "Paragraphs with \\noindent", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "utf8-punctuation-symbols",
+          "description": "UTF-8 characters, punctuation marks, German quotes, umlauts, thin spaces",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "transform_latex_text",
+          "coding_note": "Transforms LaTeX text encoding to proper Unicode output",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "UTF-8, punctuation, TeX symbols", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "diacritics",
+          "description": "Diacritic marks: \\', \\\", \\^, \\~, \\`, \\=, \\., \\u, \\v, \\H, \\c, \\d, \\b, \\t",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs, build_inline_content",
+          "coding_note": "Handles combining diacritical marks and precomposed characters. Empty diacritics like \\^{} output char + ZWS",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "Diacritics in context: Hôtel, naïve, élève, smørrebrød, Señorita, Schloß", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_5", "note": "Empty diacritics: \\^{}, \\~{}", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "word-forming-commands",
+          "description": "Word-forming commands: \\i, \\j, \\o, \\O, \\l, \\L, \\ss, \\ae, \\AE, \\oe, \\OE, \\aa, \\AA",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "is_word_forming_command, has_empty_curly_terminator",
+          "coding_note": "Word-forming commands consume trailing space unless terminated with {}. \\ss{} outputs ß + ZWS",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "\\o in smørrebrød, \\ss in Schloß/Straße", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_5", "note": "\\ss{} with ZWS marker", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "special-characters",
+          "description": "Escaped special characters: \\#, \\$, \\%, \\&, \\_, \\{, \\}, \\textbackslash",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Maps LaTeX escape sequences to HTML entities or Unicode",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_5", "note": "Special characters: # $ ^ & _ { } ~ \\ %", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "ligatures",
+          "description": "Typographic ligatures: ff→ﬀ, fi→ﬁ, fl→ﬂ, ffi→ﬃ, ffl→ﬄ, <<→«, >>→», !´→¡, ?´→¿",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "transform_latex_text, transform_text_ligatures",
+          "coding_note": "Text ligatures applied during text transformation. Inverted punctuation ligatures in transform_text_ligatures",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "Inverted punctuation: !´Señorita! → ¡Señorita!", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_9", "note": "ff, ffi, ffl, fi, fl ligatures and <<, >>", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "dashes-dots",
+          "description": "Dashes: - (hyphen), -- (en-dash), --- (em-dash). Dots: ... (ellipsis)",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "transform_latex_text",
+          "coding_note": "Maps dash sequences to Unicode dash characters",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_6", "note": "Dashes: daughter-in-law, pages 13–67, yes—or no?", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "verbatim-text",
+          "description": "Verbatim text: \\verb|...|, \\verb*|...|",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Verbatim preserves literal text. Starred version shows spaces as ␣",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_8", "note": "\\verb|verbatim|, \\verb/Any{thing/, \\verb*-spaces-", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "tex-logos",
+          "description": "TeX logos: \\TeX, \\LaTeX, \\LaTeXe",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Generates styled span structure for logos",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_10", "note": "\\TeX and \\LaTeX logos with proper styling", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "alignment-commands",
+          "description": "Text alignment: \\centering, \\raggedright, \\raggedleft",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Alignment commands affect current and subsequent paragraphs until scope ends",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_7", "note": "\\centering, \\raggedright within paragraphs", "status": "failed"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "formatting",
+      "sub_features": [
+        {
+          "feature": "text-style-commands",
+          "description": "Style commands: \\textbf, \\textit, \\texttt, \\textsc, \\textsf, \\textrm, \\emph",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_text_command, build_text_command_set_style",
+          "coding_note": "Maps LaTeX font commands to CSS classes",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_1", "note": "\\textbf, \\textit, \\texttt basic usage", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_2", "note": "\\emph emphasis", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_3", "note": "Nested formatting", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "underline-strikethrough",
+          "description": "Decorations: \\underline, \\sout (strikethrough)",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_text_command",
+          "coding_note": "Maps to underline and sout CSS classes",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_4", "note": "\\underline and \\sout", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "font-size-commands",
+          "description": "Size commands: \\tiny, \\small, \\normalsize, \\large, \\Large, \\LARGE, \\huge, \\Huge",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_text_command",
+          "coding_note": "Maps to size CSS classes",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_5", "note": "Font size commands", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "alignment-environments",
+          "description": "Alignment environments: center, flushleft, flushright",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_alignment_environment",
+          "coding_note": "Creates div containers with alignment CSS classes",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_6", "note": "center, flushleft, flushright environments", "status": "passed"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "symbols",
+      "sub_features": [
+        {
+          "feature": "char-commands",
+          "description": "Character by code: \\char98, \\char\"A0",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Converts TeX char codes to Unicode",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_1", "note": "\\char with decimal and hex values", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "caret-notation",
+          "description": "TeX caret notation: ^^A0, ^^^^2103",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Parses ^^ and ^^^^ notation for Unicode codepoints",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_2", "note": "^^78 (x), ^^^^2103 (℃)", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "symbol-command",
+          "description": "LaTeX symbol: \\symbol{\"00A9}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Converts \\symbol command to Unicode",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_3", "note": "\\symbol{\"00A9} → ©", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "predefined-symbols",
+          "description": "Predefined symbols: \\textellipsis, \\textendash, \\textemdash, etc.",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Maps common symbol commands to Unicode",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_4", "note": "\\textellipsis → …", "status": "passed"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "sectioning",
+      "sub_features": [
+        {
+          "feature": "chapter-section",
+          "description": "Sectioning commands: \\chapter, \\section, \\subsection, etc.",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_section_command",
+          "coding_note": "Generates h1-h6 elements with appropriate numbering",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "sectioning_tex_1", "note": "\\chapter with numbering", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "sectioning_tex_2", "note": "\\chapter and \\section together", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "nested-sectioning",
+          "description": "Section inside other elements (macros, groups)",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_section_command",
+          "coding_note": "Sections inside macros need special handling for paragraph ending",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "sectioning_tex_3", "note": "\\section inside \\emph{}", "status": "failed"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "environments",
+      "sub_features": [
+        {
+          "feature": "nested-horizontal-envs",
+          "description": "Nested horizontal environments like \\begin{empty}...\\end{empty}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Empty/horizontal environments insert ZWS markers at boundaries",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_1", "note": "Nested empty environments", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "itemize-list",
+          "description": "Unordered lists: \\begin{itemize} \\item ... \\end{itemize}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_list_environment, build_list_item, process_list_content",
+          "coding_note": "Creates ul elements with li items and bullet markers",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_2", "note": "itemize with paragraphs in items", "status": "failed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_3", "note": "Empty and consecutive itemize", "status": "failed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_4", "note": "Nested itemize", "status": "failed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_5", "note": "Nested itemize (II)", "status": "failed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_6", "note": "Custom item labels", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "enumerate-list",
+          "description": "Ordered lists: \\begin{enumerate} \\item ... \\end{enumerate}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_list_environment, build_list_item",
+          "coding_note": "Creates ol elements with numbered items",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_7", "note": "enumerate with custom labels", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "description-list",
+          "description": "Description lists: \\begin{description} \\item[term] ... \\end{description}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_list_environment, build_list_item",
+          "coding_note": "Creates dl elements with dt/dd pairs",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_8", "note": "description list with terms", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "quote-environments",
+          "description": "Block quotes: quote, quotation, verse environments",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_blockquote_environment",
+          "coding_note": "Creates div containers with appropriate CSS classes",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_9", "note": "quote, quotation, verse", "status": "failed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_10", "note": "font environments nested in quote", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "comment-environment",
+          "description": "Comment environment: \\begin{comment}...\\end{comment}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Comment environment content should be completely discarded",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_11", "note": "Comment environment removes content", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "alignment-in-lists",
+          "description": "Alignment environments containing lists, alignment commands in lists",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_alignment_environment, build_list_environment",
+          "coding_note": "center environment should not center list content, but \\centering should",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_12", "note": "center env with itemize, \\centering in itemize", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "abstract-environment",
+          "description": "Abstract environment: \\begin{abstract}...\\end{abstract}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_blockquote_environment",
+          "coding_note": "Creates abstract title and quotation-style body",
+          "coding_status": "skipped",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_13", "note": "abstract with font styles", "status": "skipped"}
+          ]
+        },
+        {
+          "feature": "table-environment",
+          "description": "Tables: tabular, table environments",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_table_environment",
+          "coding_note": "Creates HTML table structure from LaTeX tabular",
+          "coding_status": "todo",
+          "tests": []
+        },
+        {
+          "feature": "figure-environment",
+          "description": "Figures: figure environment with \\includegraphics, \\caption",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_figure_environment, build_image_command",
+          "coding_note": "Creates figure/figcaption HTML structure",
+          "coding_status": "todo",
+          "tests": []
+        },
+        {
+          "feature": "code-block-environment",
+          "description": "Code blocks: verbatim, lstlisting environments",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_code_block_environment",
+          "coding_note": "Preserves whitespace and literal text",
+          "coding_status": "todo",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "feature": "whitespace",
+      "sub_features": [
+        {
+          "feature": "par-command",
+          "description": "Paragraph separation via \\par command",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "\\par ends current paragraph and starts a new one. Multiple \\par should create multiple paragraphs",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_1", "note": "Multiple \\par commands", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "forced-paragraphs",
+          "description": "Force empty paragraphs with \\par~\\par",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "~ (non-breaking space) creates content to prevent empty paragraph elimination",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_2", "note": "\\par ~ \\par creates three paragraphs", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "double-newline-paragraphs",
+          "description": "Standard paragraph separation via double newline",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Two or more consecutive newlines start new paragraph",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_3", "note": "Double newline paragraph separation", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "linebreak-commands",
+          "description": "Line breaks: \\\\, \\newline (should \\unskip)",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "\\\\ and \\newline create <br> and should not add space",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_4", "note": "\\\\ and \\newline without extra spaces", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "mbox-restricted-mode",
+          "description": "\\mbox creates restricted horizontal mode (no line breaks)",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_text_command",
+          "coding_note": "mbox creates hbox span, content is processed in restricted mode",
+          "coding_status": "skipped",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_5", "note": "\\mbox with various content", "status": "skipped"}
+          ]
+        },
+        {
+          "feature": "unskip-ignorespaces",
+          "description": "\\unskip removes preceding space, \\ignorespaces ignores following space",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "\\unskip breaks out of groups, \\ignorespaces does not",
+          "coding_status": "skipped",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_6", "note": "\\unskip vs \\ignorespaces behavior", "status": "skipped"}
+          ]
+        },
+        {
+          "feature": "macro-space-after-args",
+          "description": "Space added after macros that take arguments",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Macros with arguments add boundary space after ]or }",
+          "coding_status": "skipped",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_7", "note": "Space after \\macro[] and \\macro{}", "status": "skipped"}
+          ]
+        },
+        {
+          "feature": "space-hack-macros",
+          "description": "Space-eating macros: \\pagebreak, \\label, etc.",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Some macros should not leave spaces",
+          "coding_status": "skipped",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_8", "note": "\\pagebreak, \\label, etc. don't add spaces", "status": "skipped"}
+          ]
+        },
+        {
+          "feature": "newline-compression",
+          "description": "More than two newlines equal two newlines",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Multiple blank lines should not create multiple paragraphs",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_9", "note": "Many newlines collapsed to paragraph break", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "comment-paragraph-handling",
+          "description": "Comments don't add or prevent paragraphs",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Comments are discarded but shouldn't affect paragraph structure",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_10", "note": "Comments between paragraphs", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "comment-line-joining",
+          "description": "Comments at end of line join lines (remove linebreak)",
+          "code_file": "lambda/input/input-latex-ts.cpp",
+          "code_function": "should_skip_comment_and_space",
+          "coding_note": "% at end of line removes the newline, joining with next line. Fixed by adding line_comment to _top_level_item in grammar.js",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_11", "note": "Supercal%ifragilist%icexpialidocious", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_12", "note": "Comments preventing paragraph breaks", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "curly-group-spaces",
+          "description": "Space handling inside and after curly groups",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_doc_element (curly_group handler)",
+          "coding_note": "Groups {text} should insert ZWS at boundaries, preserve one space inside. Fixed curly_group as inline element; ZWS boundaries still needed",
+          "coding_status": "partial",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_13", "note": "Curly group space handling", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "macro-space-consumption",
+          "description": "Macros without arguments ignore trailing spaces",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs, is_word_forming_command",
+          "coding_note": "\\empty followed by spaces ignores them. \\empty{} forces a space (ZWS)",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_14", "note": "\\empty consumes trailing space", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_15", "note": "\\empty{} forces ZWS", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_16", "note": "\\empty\\ forces ZWS", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "escaped-space-variants",
+          "description": "Escaped space: \\ followed by tab, space, or newline",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "\\ followed by whitespace creates a space (ZWS)",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_17", "note": "\\<tab>, \\<newline> as spaces", "status": "failed"}
+          ]
+        },
+        {
+          "feature": "escaped-newline-edge-cases",
+          "description": "Escaped newlines in empty/edge positions",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Escaped newlines at document start/end, paragraph start",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_18", "note": "\\<newline> in empty document", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_19", "note": "\\<newline> at paragraph start", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "env-boundary-spaces",
+          "description": "Spaces before and after horizontal environments",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Horizontal environments should have ZWS at boundaries",
+          "coding_status": "failed",
+          "tests": [
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_20", "note": "\\begin{empty}...\\end{empty} boundary spaces", "status": "failed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_21", "note": "Escaped newline after environment", "status": "failed"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "references",
+      "sub_features": [
+        {
+          "feature": "label-ref",
+          "description": "Cross-references: \\label, \\ref, \\pageref",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "process_label_command, build_ref_command",
+          "coding_note": "Labels register targets, refs create hyperlinks",
+          "coding_status": "todo",
+          "tests": []
+        },
+        {
+          "feature": "footnotes",
+          "description": "Footnotes: \\footnote{...}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_footnote_command",
+          "coding_note": "Creates footnote markers and footnote content",
+          "coding_status": "todo",
+          "tests": []
+        },
+        {
+          "feature": "citations",
+          "description": "Citations: \\cite{...}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_cite_command",
+          "coding_note": "Creates citation references",
+          "coding_status": "todo",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "feature": "links",
+      "sub_features": [
+        {
+          "feature": "hyperlinks",
+          "description": "Hyperlinks: \\href{url}{text}, \\url{...}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_href_command, build_url_command",
+          "coding_note": "Creates anchor elements for external links",
+          "coding_status": "todo",
+          "tests": []
+        }
+      ]
+    },
+    {
+      "feature": "math",
+      "sub_features": [
+        {
+          "feature": "inline-math",
+          "description": "Inline math: $...$, \\(...\\)",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Inline math rendering (requires math engine integration)",
+          "coding_status": "todo",
+          "tests": []
+        },
+        {
+          "feature": "display-math",
+          "description": "Display math: $$...$$, \\[...\\], equation environment",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_doc_element",
+          "coding_note": "Block-level math rendering",
+          "coding_status": "todo",
+          "tests": []
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_baseline_tests": 32,
+    "total_extended_tests": 28,
+    "baseline_passed": 32,
+    "extended_passed": 0,
+    "extended_failed": 23,
+    "extended_skipped": 5
+  },
+  "last_updated": "2026-01-16"
+}
