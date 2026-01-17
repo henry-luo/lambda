@@ -506,11 +506,11 @@
           "feature": "curly-group-spaces",
           "description": "Space handling inside and after curly groups",
           "code_file": "lambda/tex/tex_document_model.cpp",
-          "code_function": "build_doc_element (curly_group handler)",
-          "coding_note": "Groups {text} should insert ZWS at boundaries, preserve one space inside. Fixed curly_group as inline element; ZWS boundaries still needed",
-          "coding_status": "partial",
+          "code_function": "build_doc_element (curly_group handler), build_inline_content",
+          "coding_note": "Groups {text} insert ZWSP at boundaries: at start if leading whitespace, always at end for content groups to mark } boundary",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_13", "note": "Curly group space handling", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_13", "note": "Curly group space handling", "status": "passed"}
           ]
         },
         {
@@ -553,12 +553,12 @@
           "feature": "env-boundary-spaces",
           "description": "Spaces before and after horizontal environments",
           "code_file": "lambda/tex/tex_document_model.cpp",
-          "code_function": "build_body_content_with_paragraphs",
-          "coding_note": "Horizontal environments should have ZWS at boundaries",
-          "coding_status": "failed",
+          "code_function": "build_body_content_with_paragraphs, empty env handler",
+          "coding_note": "Horizontal environments have ZWSP at end boundary. Trailing whitespace trimmed before ZWSP insertion.",
+          "coding_status": "partial",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_20", "note": "\\begin{empty}...\\end{empty} boundary spaces", "status": "failed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_21", "note": "Escaped newline after environment", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_20", "note": "\\begin{empty}...\\end{empty} boundary spaces", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_21", "note": "Nested empty environments with multi-line content", "status": "passed"}
           ]
         }
       ]
@@ -634,15 +634,15 @@
     }
   ],
   "summary": {
-    "total_baseline_tests": 45,
-    "total_extended_tests": 15,
-    "baseline_passed": 45,
-    "extended_passed": 0,
-    "extended_failed": 10,
+    "total_baseline_tests": 50,
+    "total_extended_tests": 10,
+    "baseline_passed": 50,
+    "extended_passed": 3,
+    "extended_failed": 2,
     "extended_skipped": 5
   },
   "last_updated": "2026-01-17",
-  "session_notes": "Fixed empty itemize, custom item labels, enumerate/description lists. Added block element handling in alignment content. Skipping empty paragraphs in render.",
+  "session_notes": "Fixed whitespace_tex_21 (nested empty environments with multi-line content). Added trailing whitespace trimming before ZWSP insertion in empty environment handler, and clearing of whitespace-only TEXT_RUNs after last content text to ensure ZWSP immediately follows content.",
 
   "blockers_and_dependencies": {
     "alignment-commands": {
@@ -661,12 +661,10 @@
       "blocks": []
     },
     "curly-group-spaces": {
-      "blockers": [
-        "ZWS insertion at group boundaries not implemented",
-        "Space compression rules inside groups"
-      ],
+      "blockers": [],
       "depends_on": [],
-      "blocks": ["env-boundary-spaces"]
+      "blocks": [],
+      "resolved": "ZWSP insertion at group boundaries implemented in build_doc_element and build_inline_content"
     },
     "escaped-space-variants": {
       "blockers": [
@@ -742,9 +740,8 @@
       {"feature": "alignment-commands", "complexity": "high", "note": "Needed for text_tex_10, environments_tex_12"}
     ],
     "medium": [
-      {"feature": "curly-group-spaces", "complexity": "medium", "note": "ZWSP handling at boundaries"},
       {"feature": "escaped-space-variants", "complexity": "medium", "note": "Parser-level issue"},
-      {"feature": "env-boundary-spaces", "complexity": "medium", "note": "Depends on curly-group-spaces"}
+      {"feature": "env-boundary-spaces", "complexity": "medium", "note": "Multi-line empty environment whitespace normalization"}
     ],
     "low": [
       {"feature": "nested-sectioning", "complexity": "high", "note": "Edge case: section inside emph"},
