@@ -1047,15 +1047,28 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
     // Build up the class string based on flags
     bool has_continue = (elem->flags & DocElement::FLAG_CONTINUE) != 0;
     bool has_noindent = (elem->flags & DocElement::FLAG_NOINDENT) != 0;
+    bool has_centered = (elem->flags & DocElement::FLAG_CENTERED) != 0;
     
     if (opts.legacy_mode) {
         // In legacy mode, add class attributes for flags
-        if (has_continue && has_noindent) {
-            strbuf_append_str(out, "<p class=\"continue noindent\">");
-        } else if (has_continue) {
-            strbuf_append_str(out, "<p class=\"continue\">");
-        } else if (has_noindent) {
-            strbuf_append_str(out, "<p class=\"noindent\">");
+        // Build class string dynamically
+        if (has_continue || has_noindent || has_centered) {
+            strbuf_append_str(out, "<p class=\"");
+            bool first = true;
+            if (has_continue) {
+                strbuf_append_str(out, "continue");
+                first = false;
+            }
+            if (has_noindent) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "noindent");
+                first = false;
+            }
+            if (has_centered) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "centering");
+            }
+            strbuf_append_str(out, "\">");
         } else {
             strbuf_append_str(out, "<p>");
         }
@@ -1089,10 +1102,13 @@ static void render_list_html(DocElement* elem, StrBuf* out,
     
     if (opts.pretty_print) html_indent(out, depth);
     
+    // Build class list - add "centering" if centered
+    const char* centering = (elem->flags & DocElement::FLAG_CENTERED) ? " centering" : "";
+    
     if (opts.legacy_mode) {
-        strbuf_append_format(out, "<%s class=\"list\">", tag);
+        strbuf_append_format(out, "<%s class=\"list%s\">", tag, centering);
     } else {
-        strbuf_append_format(out, "<%s class=\"%slist\">", tag, opts.css_class_prefix);
+        strbuf_append_format(out, "<%s class=\"%slist%s\">", tag, opts.css_class_prefix, centering);
     }
     if (opts.pretty_print) strbuf_append_str(out, "\n");
     
@@ -1125,18 +1141,21 @@ static void render_list_item_html(DocElement* elem, StrBuf* out,
                                    ListType parent_type) {
     if (opts.pretty_print) html_indent(out, depth);
     
+    // Check if item is centered
+    const char* centering_class = (elem->flags & DocElement::FLAG_CENTERED) ? " class=\"centering\"" : "";
+    
     if (parent_type == ListType::DESCRIPTION) {
         // Description list: <dt>term</dt><dd>content</dd>
         if (elem->list_item.label) {
-            strbuf_append_str(out, "<dt>");
+            strbuf_append_format(out, "<dt%s>", centering_class);
             html_escape_append(out, elem->list_item.label, strlen(elem->list_item.label));
             strbuf_append_str(out, "</dt>");
             if (opts.pretty_print) strbuf_append_str(out, "\n");
             if (opts.pretty_print) html_indent(out, depth);
         }
-        strbuf_append_str(out, "<dd>");
+        strbuf_append_format(out, "<dd%s>", centering_class);
     } else {
-        strbuf_append_str(out, "<li>");
+        strbuf_append_format(out, "<li%s>", centering_class);
         
         // In legacy mode, add item label (bullet or number)
         if (opts.legacy_mode) {
@@ -3263,6 +3282,7 @@ static void process_list_content(DocElement* list, const ItemReader& container,
                                   Arena* arena, TexDocumentModel* doc, int& item_number) {
     if (!container.isElement()) return;
     
+    bool list_centered = (list->flags & DocElement::FLAG_CENTERED) != 0;
     ElementReader elem = container.asElement();
     DocElement* current_item = nullptr;
     DocElement* current_para = nullptr;  // Current paragraph within item
@@ -3274,6 +3294,13 @@ static void process_list_content(DocElement* list, const ItemReader& container,
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* child_tag = child_elem.tagName();
+            
+            // Handle centering command - set list flag for subsequent items
+            if (child_tag && tag_eq(child_tag, "centering")) {
+                list->flags |= DocElement::FLAG_CENTERED;
+                list_centered = true;
+                continue;
+            }
             
             if (child_tag && tag_eq(child_tag, "item")) {
                 // Finalize current paragraph if exists
@@ -3287,8 +3314,14 @@ static void process_list_content(DocElement* list, const ItemReader& container,
                 }
                 // Start new item
                 current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
+                if (list_centered) {
+                    current_item->flags |= DocElement::FLAG_CENTERED;
+                }
                 // Start first paragraph in item
                 current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                if (list_centered) {
+                    current_para->flags |= DocElement::FLAG_CENTERED;
+                }
                 at_item_start = true;
                 
                 // First, check if item has custom label (brack_group)
@@ -3418,6 +3451,7 @@ static DocElement* build_list_environment(const char* env_name, const ElementRea
     }
     
     int item_number = list->list.start_num;
+    bool list_centered = false;  // Track if \centering command was encountered
     
     // Process children, looking for \item commands
     // Items may be directly under the environment or nested inside paragraph elements
@@ -3446,8 +3480,14 @@ static DocElement* build_list_environment(const char* env_name, const ElementRea
                 }
                 // Start new item
                 current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
+                if (list_centered) {
+                    current_item->flags |= DocElement::FLAG_CENTERED;
+                }
                 // Start first paragraph in item
                 current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                if (list_centered) {
+                    current_para->flags |= DocElement::FLAG_CENTERED;
+                }
                 at_item_start = true;
                 
                 // First, check if item has custom label (brack_group)
@@ -3495,6 +3535,10 @@ static DocElement* build_list_environment(const char* env_name, const ElementRea
                        tag_eq(child_tag, "content")) {
                 // Items may be inside paragraph - process recursively
                 process_list_content(list, child, arena, doc, item_number);
+            } else if (tag_eq(child_tag, "centering")) {
+                // \centering command inside list - set flag to center all subsequent items
+                list_centered = true;
+                list->flags |= DocElement::FLAG_CENTERED;
             } else if (is_block_element_tag(child_tag) && current_item) {
                 // Block element (nested list, etc.) - close current paragraph first
                 if (current_para && current_para->first_child) {
