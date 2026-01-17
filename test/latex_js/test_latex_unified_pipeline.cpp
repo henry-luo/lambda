@@ -389,6 +389,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "whitespace_14",
     "whitespace_15",
     "whitespace_16",
+    "whitespace_17",  // backslash-newline as space (inline document continuation)
     "whitespace_18",
     "whitespace_19",
     "whitespace_20",  // continue class after environment (nested document handling)
