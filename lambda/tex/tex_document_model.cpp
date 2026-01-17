@@ -2029,6 +2029,12 @@ static bool is_alignment_marker(DocElement* elem) {
     return elem == CENTERING_MARKER || elem == RAGGEDRIGHT_MARKER || elem == RAGGEDLEFT_MARKER;
 }
 
+// Check if a pointer is any special marker (not a real DocElement pointer)
+static bool is_special_marker(DocElement* elem) {
+    return elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER || elem == NOINDENT_MARKER || 
+           is_alignment_marker(elem);
+}
+
 // Get alignment from marker
 static ParagraphAlignment marker_to_alignment(DocElement* elem) {
     if (elem == CENTERING_MARKER) return ParagraphAlignment::CENTERING;
@@ -2728,8 +2734,67 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
                 }
             }
         }
-        return nullptr;  // failed to parse
+        return nullptr;  // failed to parse char_command
     }
+    
+    // \verb|text| - inline verbatim with arbitrary delimiter
+    // Format: \verb<delim>content<delim> or \verb*<delim>content<delim>
+    // Expected output: <code class="tt">content</code>
+    // For \verb*, spaces are shown as ␣ (U+2423)
+    if (tag_eq(tag, "verb_command")) {
+        auto iter = elem.children();
+        ItemReader child;
+        if (iter.next(&child) && child.isString()) {
+            const char* verb_text = child.cstring();
+            // verb_text is like "\\verb|text|" or "\\verb*|text|"
+            if (verb_text && strncmp(verb_text, "\\verb", 5) == 0) {
+                const char* content_start = verb_text + 5;  // skip "\\verb"
+                bool is_starred = false;
+                if (*content_start == '*') {
+                    is_starred = true;
+                    content_start++;
+                }
+                // The next character is the delimiter
+                if (*content_start) {
+                    char delim = *content_start;
+                    content_start++;  // skip delimiter
+                    // Find the closing delimiter
+                    const char* content_end = strchr(content_start, delim);
+                    if (content_end) {
+                        size_t content_len = content_end - content_start;
+                        // Build the output
+                        StrBuf* out = strbuf_new_cap(content_len * 4 + 64);
+                        strbuf_append_str(out, "<code class=\"tt\">");
+                        // Process content - escape HTML entities, handle spaces for verb*
+                        for (size_t i = 0; i < content_len; i++) {
+                            char c = content_start[i];
+                            if (c == ' ' && is_starred) {
+                                // For \verb*, show visible space ␣ (U+2423)
+                                strbuf_append_str(out, "\xE2\x90\xA3");
+                            } else if (c == '<') {
+                                strbuf_append_str(out, "&lt;");
+                            } else if (c == '>') {
+                                strbuf_append_str(out, "&gt;");
+                            } else if (c == '&') {
+                                strbuf_append_str(out, "&amp;");
+                            } else {
+                                strbuf_append_char(out, c);
+                            }
+                        }
+                        strbuf_append_str(out, "</code>");
+                        
+                        char* html_copy = (char*)arena_alloc(arena, out->length + 1);
+                        memcpy(html_copy, out->str, out->length + 1);
+                        strbuf_free(out);
+                        
+                        return doc_create_raw_html_cstr(arena, html_copy);
+                    }
+                }
+            }
+        }
+        return nullptr;  // failed to parse verb_command
+    }
+    
     // TeX caret notation: ^^XX (2 hex digits) or ^^^^XXXX (4 hex digits) or ^^c (char XOR 64)
     if (tag_eq(tag, "caret_char")) {
         auto iter = elem.children();
@@ -3059,9 +3124,43 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     
     // Curly group - process children, adding ZWSP at whitespace boundaries
     // ZWSP is always added at the end to mark the } boundary
-    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group")) {
+    // sequence is a pseudo-element from error recovery that just groups inline_math children
+    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group") ||
+        tag_eq(tag, "sequence")) {
+        
+        // Check if curly_group contains only an environment name (from broken \begin{...} or \end{...})
+        // If so, skip it entirely to avoid spurious text output
+        int64_t child_count = elem.childCount();
+        if (child_count == 1) {
+            ItemReader only_child = elem.childAt(0);
+            if (only_child.isString()) {
+                const char* content = only_child.cstring();
+                if (content) {
+                    // List of environment names that should be filtered out
+                    static const char* env_names[] = {
+                        "center", "itshape", "document", "bfseries", "mdseries",
+                        "slshape", "upshape", "scshape", "rmfamily", "sffamily",
+                        "ttfamily", "tiny", "scriptsize", "footnotesize", "small",
+                        "normalsize", "large", "Large", "LARGE", "huge", "Huge",
+                        "abstract", "itemize", "enumerate", "description",
+                        "quote", "quotation", "verse", "flushleft", "flushright",
+                        "verbatim", "picture", "minipage", "tabular", "table",
+                        "figure", "multicols", "equation", "align", "gather"
+                    };
+                    for (size_t i = 0; i < sizeof(env_names)/sizeof(env_names[0]); i++) {
+                        if (tag_eq(content, env_names[i])) {
+                            return nullptr;  // Skip this curly_group - it's a spurious env name
+                        }
+                    }
+                }
+            }
+        }
+        
         DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
         span->text.style = DocTextStyle::plain();
+        
+        // sequence elements from error recovery don't need ZWSP boundaries
+        bool is_sequence = tag_eq(tag, "sequence");
         
         // Check if group starts with whitespace - add ZWSP
         bool starts_with_space = false;
@@ -3103,8 +3202,8 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             }
         }
         
-        // Add ZWSP at start if group has leading whitespace
-        if (starts_with_space) {
+        // Add ZWSP at start if group has leading whitespace (not for sequence)
+        if (starts_with_space && !is_sequence) {
             doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
         }
         
@@ -3117,10 +3216,10 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             }
         }
         
-        // Add ZWSP at end of curly_group/brack_group/group:
+        // Add ZWSP at end of curly_group/brack_group/group (not for sequence):
         // - If trailing whitespace inside: marks the boundary
         // - If content but no trailing whitespace: marks the } boundary for word-break
-        if (ends_with_space || has_content) {
+        if (!is_sequence && (ends_with_space || has_content)) {
             doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
         }
         
@@ -3200,6 +3299,12 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || tag_eq(tag, "subsubsection") ||
         tag_eq(tag, "chapter") || tag_eq(tag, "part") || tag_eq(tag, "paragraph") || tag_eq(tag, "subparagraph")) {
         return build_section_command(tag, elem, arena, doc);
+    }
+    
+    // Block-level elements that can appear inside paragraphs - delegate to build_doc_element
+    // This handles cases like \begin{itemize}...\end{itemize} inside a paragraph
+    if (is_block_element_tag(tag)) {
+        return build_doc_element(item, arena, doc);
     }
     
     // Default: process children
@@ -3421,6 +3526,25 @@ static bool is_block_element_tag(const char* tag) {
            tag_eq(tag, "verse") || tag_eq(tag, "flushleft") || tag_eq(tag, "flushright");
 }
 
+// Helper to check if a tag is a document-level block (section, environment, etc.)
+// These should not be wrapped in TEXT_SPAN
+static bool is_document_block_tag(const char* tag) {
+    if (!tag) return false;
+    // Sectioning
+    if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || tag_eq(tag, "subsubsection") ||
+        tag_eq(tag, "paragraph") || tag_eq(tag, "subparagraph") ||
+        tag_eq(tag, "chapter") || tag_eq(tag, "part")) {
+        return true;
+    }
+    // Document structure
+    if (tag_eq(tag, "latex_document") || tag_eq(tag, "document") || tag_eq(tag, "document_body") ||
+        tag_eq(tag, "body") || tag_eq(tag, "preamble")) {
+        return true;
+    }
+    // Other block-level
+    return is_block_element_tag(tag);
+}
+
 // Helper to process items from a content container
 // Each list item can contain multiple paragraphs separated by parbreaks
 static void process_list_content(DocElement* list, const ItemReader& container,
@@ -3523,7 +3647,7 @@ static void process_list_content(DocElement* list, const ItemReader& container,
                 }
                 // Add block element directly to item (not to paragraph)
                 DocElement* content = build_doc_element(child, arena, doc);
-                if (content) {
+                if (content && !is_special_marker(content)) {
                     doc_append_child(current_item, content);
                 }
                 // Start new paragraph for any following content
@@ -3532,9 +3656,15 @@ static void process_list_content(DocElement* list, const ItemReader& container,
             } else if (current_item && current_para) {
                 // Add content to current paragraph
                 DocElement* content = build_doc_element(child, arena, doc);
-                if (content) {
+                if (content && !is_special_marker(content)) {
                     doc_append_child(current_para, content);
                     at_item_start = false;
+                } else if (content == NOINDENT_MARKER) {
+                    // Apply noindent to current paragraph
+                    current_para->flags |= DocElement::FLAG_NOINDENT;
+                } else if (is_alignment_marker(content)) {
+                    // Apply alignment to current paragraph
+                    apply_alignment_to_paragraph(current_para, marker_to_alignment(content));
                 }
             }
         } else if (child.isSymbol()) {
@@ -6272,6 +6402,13 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return nullptr;  // No visible output
     }
     
+    // Standalone begin/end elements (from error recovery) - ignored
+    // These are orphaned \begin{...} or \end{...} without matching environment
+    if (tag_eq(tag, "begin") || tag_eq(tag, "end") ||
+        tag_eq(tag, "begin_env") || tag_eq(tag, "end_env")) {
+        return nullptr;
+    }
+    
     // Empty - handles both \empty command and \begin{empty}...\end{empty} environment
     // - \empty command (no meaningful children): produces no output, consumes trailing space
     // - \begin{empty}...\end{empty} environment (has children): inline pass-through with ZWSP at end boundary
@@ -6607,7 +6744,76 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     // These should NOT be block elements - just process their children inline
     // For curly_group and brack_group, add ZWSP at whitespace boundaries to preserve spacing
     // ZWSP is always added at the end to mark the } boundary
-    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group") || tag_eq(tag, "_seq")) {
+    // sequence is a pseudo-element from error recovery that just groups inline_math children
+    // EXCEPTION: _seq with document-level block children should be processed as block container
+    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group") || 
+        tag_eq(tag, "_seq") || tag_eq(tag, "sequence")) {
+        
+        bool is_seq = tag_eq(tag, "_seq") || tag_eq(tag, "sequence");
+        
+        // Check if curly_group/brack_group contains only an environment name (from broken \begin{...} or \end{...})
+        // If so, skip it entirely to avoid spurious text output
+        if (!is_seq) {
+            int64_t child_count = elem.childCount();
+            if (child_count == 1) {
+                ItemReader only_child = elem.childAt(0);
+                if (only_child.isString()) {
+                    const char* content = only_child.cstring();
+                    if (content) {
+                        // List of environment names that should be filtered out
+                        static const char* env_names[] = {
+                            "center", "itshape", "document", "bfseries", "mdseries",
+                            "slshape", "upshape", "scshape", "rmfamily", "sffamily",
+                            "ttfamily", "tiny", "scriptsize", "footnotesize", "small",
+                            "normalsize", "large", "Large", "LARGE", "huge", "Huge",
+                            "abstract", "itemize", "enumerate", "description",
+                            "quote", "quotation", "verse", "flushleft", "flushright",
+                            "verbatim", "picture", "minipage", "tabular", "table",
+                            "figure", "multicols", "equation", "align", "gather"
+                        };
+                        for (size_t i = 0; i < sizeof(env_names)/sizeof(env_names[0]); i++) {
+                            if (tag_eq(content, env_names[i])) {
+                                return nullptr;  // Skip this curly_group - it's a spurious env name
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // For _seq, check if it contains document-level blocks (sections, environments)
+        // If so, process like a document body instead of inline container
+        if (is_seq) {
+            bool has_document_blocks = false;
+            auto check_iter = elem.children();
+            ItemReader check_child;
+            while (check_iter.next(&check_child)) {
+                if (check_child.isElement()) {
+                    ElementReader check_elem = check_child.asElement();
+                    const char* check_tag = check_elem.tagName();
+                    if (check_tag && is_document_block_tag(check_tag)) {
+                        has_document_blocks = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (has_document_blocks) {
+                // Process like document body - use build_body_content_with_paragraphs
+                DocElement* block_container = doc_alloc_element(arena, DocElemType::SECTION);
+                build_body_content_with_paragraphs(block_container, elem, arena, doc);
+                
+                // If only one child, return it directly (unwrap the section)
+                if (block_container->first_child && block_container->first_child == block_container->last_child) {
+                    DocElement* only_child = block_container->first_child;
+                    only_child->parent = nullptr;
+                    only_child->next_sibling = nullptr;
+                    return only_child;
+                }
+                return block_container->first_child ? block_container : nullptr;
+            }
+        }
+        
         DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
         span->text.style = DocTextStyle::plain();
         
@@ -6615,7 +6821,6 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         bool starts_with_space = false;
         bool ends_with_space = false;
         bool has_content = false;
-        bool is_seq = tag_eq(tag, "_seq");  // _seq doesn't need ZWSP boundaries
         
         auto scan_iter = elem.children();
         ItemReader scan_child;
