@@ -586,6 +586,35 @@ struct HtmlOptions {
 
 ---
 
+## Quick Commands
+
+Common commands for development and testing:
+
+```bash
+# Build
+make build                    # Incremental build
+make build-test               # Build test executables
+make clean-all && make build  # Full rebuild
+
+# Run specific test
+./test/test_latex_unified_pipeline.exe '--gtest_filter=*environments_tex_3'
+
+# Run all baseline tests (must pass 100%)
+./test/test_latex_unified_pipeline.exe '--gtest_filter=LatexBaseline*'
+
+# Run extended tests (work in progress)
+./test/test_latex_unified_pipeline.exe '--gtest_filter=LatexExtended*'
+
+# Check test summary
+./test/test_latex_unified_pipeline.exe '--gtest_filter=LatexBaseline*' 2>&1 | tail -5
+./test/test_latex_unified_pipeline.exe '--gtest_filter=LatexExtended*' 2>&1 | tail -25
+
+# Feature tracking
+cat vibe/latex-feature-tracking.json | python3 -m json.tool | head -100
+```
+
+---
+
 ## Conclusion
 
 The LaTeX.js-style approach is the clear choice for Lambda/Radiant:
