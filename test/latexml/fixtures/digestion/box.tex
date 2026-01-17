@@ -1,0 +1,72 @@
+\documentclass{article}
+\def\testbox#1{%
+ \ifvoid#1 Box \string#1 is void
+ \else\ifhbox#1 Box \string#1 is horizontal
+ \else\ifvbox#1 Box \string#1 is vertical
+ \fi\fi\fi
+ \par}
+\begin{document}
+\newbox\myboxA
+\newbox\myboxB
+\newbox\myboxC
+\newbox\myboxD
+\newbox\myboxE
+Not yet set:\testbox{\myboxA}
+\setbox\myboxA=\hbox{}
+Set empty:\testbox{\myboxA}
+\setbox\myboxA=\hbox{Goodbye}
+\testbox{\myboxA}
+\setbox\myboxB=\hbox{Hello}
+\testbox{\myboxB}
+\setbox\myboxC=\vbox{\box\myboxB,\box\myboxA}
+\testbox{\myboxC}
+
+Combined: \box\myboxC
+And now: \testbox{\myboxA}.
+
+Curious unsetting behavior:
+\setbox\myboxA=\hbox{Once}
+Once? \box\myboxA \box\myboxA.
+
+\setbox\myboxA=\hbox{Once}
+Once? {\box\myboxA\box\myboxA}\box\myboxA\box\myboxA.
+
+\setbox\myboxA=\hbox{ and Again}
+Once? {\setbox\myboxA=\hbox{Once}\box\myboxA\box\myboxA}\box\myboxA\box\myboxA.
+
+\[ a + \hbox{a}\]
+\[ a + \vbox{a}\]
+
+\[ a + \vbox{\hbox{a}\hbox{a}} \]
+\[ a + \vtop{\hbox{a}\hbox{a}} \]
+
+\[ a - \lower1ex\vtop{\hbox{a}} \]
+\[ a - \lower1ex\vbox{\hbox{a}} \]
+
+\[ a - \lower1ex\hbox{a} \]
+
+\def\mybox#1{\hbox{#1}}
+\[ a - \lower1ex\mybox{a} \]
+
+
+\setbox\myboxA=\vbox spread 1cm{1cm Box}
+\setbox\myboxB=\vbox spread 2cm{2cm Box}
+\setbox\myboxC=\vbox{\unvbox\myboxA\unvbox\myboxB}
+\setbox\myboxD=\copy\myboxC
+\setbox\myboxE=\vbox{\unvbox\myboxC\unvbox\myboxD}
+
+combined vbox: \fbox{\box\myboxE}
+
+First line
+\vskip0.01em
+second line
+
+\noindent
+\hrule
+\vskip 8 pt
+Some text between two hrules.
+\vskip 8 pt
+\noindent
+\hrule
+
+\end{document}

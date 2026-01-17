@@ -1,0 +1,203 @@
+\documentclass{article}
+\begin{document}
+\section{Version}
+Running eTeX version \the\eTeXversion\eTeXrevision.
+
+\section{Old style}
+\def\baz{BAZ!}
+baz \expandafter\ifx\csname baz\endcsname\relax IS \else is NOT \fi relax;
+baz \ifx\baz\undefined IS equal \else is NOT equal \fi undefined;
+baz \ifdefined\baz IS \else is NOT \fi defined.
+
+foo \expandafter\ifx\csname foo\endcsname\relax IS \else is NOT \fi relax;
+foo \ifx\foo\undefined IS equal \else is NOT equal \fi undefined;
+foo \ifdefined\foo IS \else is NOT \fi defined.
+
+\section{New style}
+\def\ebaz{BAZ!}
+ebaz \ifcsname ebaz\endcsname IS \else is NOT \fi bound;
+ebaz \ifx\ebaz\undefined IS equal \else is NOT equal \fi undefined;
+ebaz \ifdefined\ebaz IS \else is NOT \fi defined.
+
+efoo \ifcsname efoo\endcsname IS \else is NOT \fi bound;
+efoo \ifx\efoo\undefined IS equal \else is NOT equal \fi undefined;
+efoo \ifdefined\efoo IS \else is NOT \fi defined.
+
+\section{Expansion}
+Regular form:
+\def\When{Now}%
+\edef\Expanded{Was expanded \When}%
+\def\When{Later}%
+Got \Expanded.
+
+With noexpand inserted:
+\def\When{Now}%
+\edef\Expanded{Was expanded \noexpand\When}%
+\def\When{Later}%
+Got \Expanded.
+
+Using the new protected primitive:
+\protected\def\eWhen{Now}%
+\edef\Expanded{Was expanded \eWhen}%
+\protected\def\eWhen{Later}%
+Got \Expanded.
+
+\section{Tokens}
+\detokenize{This_and^that}.
+
+\catcode`*=\active
+\def*{STAR}
+A Shooting *.
+
+\def\Stuff{\unexpanded{A Falling *}.}
+\Stuff
+\def*{from grace}
+\Stuff
+
+\section{Unless}
+\newcount\one\one=1\relax
+\newcount\two\two=2\relax
+\newcount\many\many=99\relax
+
+\newif\ifalwaystrue\alwaystruetrue
+\newif\ifalwaysfalse\alwaysfalsefalse
+
+\ifnum\one>\two 1 greather than 2 \else not 1 greater than 2\fi.
+\ifnum\many>\two many greater than 2 \else not many greater than 2\fi.
+
+True \ifalwaystrue is always true \else should never be false\fi.
+False \ifalwaysfalse should never be true \else is always false\fi.
+
+\ifodd\one one is odd\else one is not odd\fi.
+\ifodd\two two is odd\else two is not odd\fi.
+
+one is \ifcase\one zero \or one \or two \or three \else many\fi.
+two is \ifcase\two zero \or one\or two\or three \else many\fi.
+many is \ifcase\many zero \or one\or two\or three \else many\fi.
+
+
+INVERT \unless\ifnum\one>\two 1 greater than 2 \else not 1 greater than 2\fi.
+INVERT \unless\ifnum\many>\two many greater than 2 \else not many greater than 2\fi.
+
+INVERT \unless\ifodd\one one is odd\else one is not odd\fi.
+INVERT \unless\ifodd\two two is odd\else two is not odd\fi.
+
+INVERT True \unless\ifalwaystrue is always true \else should never be false\fi.
+INVERT False \unless\ifalwaysfalse should never be true \else is always false\fi.
+
+% You cannot use \unless before \ifcase!
+% You cannot use \unless before a macro (even if it expands to \if...)
+
+\section{Registers}
+\newbox\mybox
+\newdimen\mydima
+\newdimen\mydimb
+\def\mywidth{\wd\mybox}
+\protected\def\protectedmywidth{\wd\mybox}
+\setbox\mybox\hbox{Some Text}
+\the\mywidth
+
+\mydima\mywidth
+Width:\the\mydima
+
+\mydimb\protectedmywidth
+Width:\the\mydimb
+
+%\input{etex-mydim}\mywidth
+%Width:\the\mydima
+
+\def\mypts{pt}
+\def\myminus{-}
+\def\myone{1}
+\def\mytwo{2}
+\mydima\myminus\myone\mytwo\mypts\relax
+Width:\the\mydima
+
+\protected\def\protectedmypts{pt}
+\protected\def\protectedmyminus{-}
+\protected\def\protectedmyone{1}
+\protected\def\protectedmytwo{2}
+\mydima\protectedmyminus\protectedmyone\protectedmytwo\protectedmypts\relax
+Width:\the\mydima
+
+\subsection{Parshape}
+Parshape is sorta like a register
+\newcount\mynum
+\parshape 2 1pt 2pt 3pt 4pt
+\mynum=\parshape\relax \the\mynum lines:
+Indents:\the\parshapeindent-1\relax,
+\the\parshapeindent1\relax,
+\the\parshapeindent2\relax,
+\the\parshapeindent3\relax;
+Lengths:\the\parshapelength-1\relax,
+\the\parshapelength1\relax,
+\the\parshapelength2\relax,
+\the\parshapelength3\relax;
+Dimens:
+\the\parshapedimen-2\relax,
+\the\parshapedimen-1\relax,
+\the\parshapedimen1\relax,
+\the\parshapedimen2\relax,
+\the\parshapedimen3\relax,
+\the\parshapedimen4\relax;
+\the\parshapedimen5\relax;
+\the\parshapedimen6\relax;
+
+\subsection{Penalties}
+\interlinepenalties 2 10 20
+Interline penalties:
+ \mynum=\interlinepenalties 1\relax \the\mynum,
+ \mynum=\interlinepenalties 2\relax \the\mynum,
+ \mynum=\interlinepenalties 3\relax \the\mynum.
+
+Interline penalties:
+ \mynum=\interlinepenalties 1\relax \the\mynum.
+
+\interlinepenalties 2 10 20
+\interlinepenalties 0
+Interline penalties:
+ \mynum=\interlinepenalties 1\relax \the\mynum.
+
+ \clubpenalties 2 10 20
+Club penalties:
+ \mynum=\clubpenalties 1\relax \the\mynum,
+ \mynum=\clubpenalties 2\relax \the\mynum,
+ \mynum=\clubpenalties 3\relax \the\mynum.
+ 
+ Club penalties:
+ \mynum=\clubpenalties 1\relax \the\mynum.
+
+\clubpenalties 0
+Club penalties:
+ \mynum=\clubpenalties 1\relax \the\mynum.
+
+widowpenalties, displaywidowpenalties should behave the similarly.
+
+\section{Glue}
+\def\showskip#1{
+  \the#1 : stretch \the\gluestretch#1\ \the\gluestretchorder#1 ;
+ shrink \the\glueshrink#1\ \the\glueshrinkorder#1.}
+\newskip\myskip
+
+\myskip=10pt plus 1fil\relax
+\showskip\myskip
+
+\myskip=10pt minus 2fill\relax
+\showskip\myskip
+
+\myskip=10pt plus 1pt minus 2pt\relax
+\showskip\myskip
+
+
+\section{Char sizes}
+\def\charsize#1#2{
+  \the\fontcharwd#1 `#2
+\ x \the\fontcharht#1 `#2
+\ + \the\fontchardp#1 `#2
+\ c \the\fontcharic#1 `#2}
+
+\font\tenrm=cmr10
+Size of x: \charsize\tenrm x.
+Size of X: \charsize\tenrm X.
+
+\end{document}
