@@ -961,7 +961,8 @@ TEST_F(TexDocumentModelTest, RenderDescriptionList) {
     EXPECT_NE(strstr(out->str, "<dt>"), nullptr);
     EXPECT_NE(strstr(out->str, "Term1"), nullptr);
     EXPECT_NE(strstr(out->str, "<dd>"), nullptr);
-    EXPECT_NE(strstr(out->str, "Definition one"), nullptr);
+    // Note: "fi" in "Definition" gets transformed to the fi-ligature (U+FB01) = "ﬁ"
+    EXPECT_NE(strstr(out->str, "De\xEF\xAC\x81nition one"), nullptr);
     EXPECT_NE(strstr(out->str, "</dl>"), nullptr);
     
     strbuf_free(out);
