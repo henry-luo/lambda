@@ -4590,19 +4590,8 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
             ElementReader child_elem = child_item.asElement();
             const char* tag = child_elem.tagName();
             if (tag && tag_eq(tag, "document")) {
-                // Finalize any current paragraph first, restoring after_block_element if it wasn't added
-                if (current_para && current_para->first_child) {
-                    trim_paragraph_whitespace(current_para, arena);
-                    if (paragraph_has_visible_content(current_para)) {
-                        doc_append_child(container, current_para);
-                    } else if (current_para->flags & DocElement::FLAG_CONTINUE) {
-                        // Paragraph consumed the flag but wasn't added - restore it
-                        after_block_element = true;
-                    }
-                    current_para = nullptr;
-                }
-                
-                // Recursively process the document's children in the current context
+                // Process the document's children inline, carrying forward the current paragraph
+                // Don't finalize paragraph here - let content processing handle breaks naturally
                 int64_t doc_child_count = child_elem.childCount();
                 for (int64_t j = 0; j < doc_child_count; j++) {
                     // Create a temporary sub-call context by processing each child inline
