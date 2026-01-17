@@ -59,16 +59,24 @@ DocumentContext DocumentContext::create(Arena* arena, TFMFontManager* fonts,
     ctx.bold_font = FontSpec("cmbx10", ctx.base_size_pt, nullptr, 0);
     ctx.mono_font = FontSpec("cmtt10", ctx.base_size_pt, nullptr, 0);
 
-    // Get TFM fonts
-    ctx.roman_tfm = fonts->get_font("cmr10");
-    ctx.italic_tfm = fonts->get_font("cmti10");
-    ctx.bold_tfm = fonts->get_font("cmbx10");
-    ctx.mono_tfm = fonts->get_font("cmtt10");
+    // Get TFM fonts (only if font manager is available)
+    // fonts may be null for HTML-only document model generation
+    if (fonts) {
+        ctx.roman_tfm = fonts->get_font("cmr10");
+        ctx.italic_tfm = fonts->get_font("cmti10");
+        ctx.bold_tfm = fonts->get_font("cmbx10");
+        ctx.mono_tfm = fonts->get_font("cmtt10");
 
-    // Use roman as fallback
-    if (!ctx.italic_tfm) ctx.italic_tfm = ctx.roman_tfm;
-    if (!ctx.bold_tfm) ctx.bold_tfm = ctx.roman_tfm;
-    if (!ctx.mono_tfm) ctx.mono_tfm = ctx.roman_tfm;
+        // Use roman as fallback
+        if (!ctx.italic_tfm) ctx.italic_tfm = ctx.roman_tfm;
+        if (!ctx.bold_tfm) ctx.bold_tfm = ctx.roman_tfm;
+        if (!ctx.mono_tfm) ctx.mono_tfm = ctx.roman_tfm;
+    } else {
+        ctx.roman_tfm = nullptr;
+        ctx.italic_tfm = nullptr;
+        ctx.bold_tfm = nullptr;
+        ctx.mono_tfm = nullptr;
+    }
 
     // Initialize hyphenation
     ctx.hyphenator = get_us_english_hyphenator(arena);

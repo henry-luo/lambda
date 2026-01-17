@@ -30,13 +30,6 @@
 #include "network/network_resource_manager.h"
 #include "network/network_thread_pool.h"
 
-// Forward declaration for LaTeX HTML v2 formatter
-namespace lambda {
-    Item format_latex_html_v2(Input* input, bool text_mode);
-    std::string format_latex_html_v2_document(Input* input, const char* doc_class,
-                                               const char* asset_base_url, bool embed_css);
-}
-
 #ifdef _WIN32
 // Windows compatibility shim for __intrinsic_setjmpex
 // In MinGW, we'll use regular setjmp instead of the Microsoft intrinsic
@@ -533,14 +526,10 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "xml") == 0) {
             formatted_output = format_xml(input->pool, input->root);
         } else if (strcmp(to_format, "html") == 0) {
-            // Check if input is LaTeX and route to appropriate converter
+            // Check if input is LaTeX and route to unified converter
             if (is_latex_input) {
-                // Check if unified pipeline is requested
-                bool use_unified = (pipeline && strcmp(pipeline, "unified") == 0);
-                
-                if (use_unified) {
-                    // Use unified pipeline (doc model based)
-                    printf("Using unified LaTeX pipeline\n");
+                // Always use unified pipeline (doc model based) for LaTeX to HTML
+                printf("Using unified LaTeX pipeline\n");
                     
                     // Read the source file content
                     char* source_content = read_text_file(input_file);
@@ -585,25 +574,6 @@ int exec_convert(int argc, char* argv[]) {
                     strbuf_free(html_buf);
                     arena_destroy(doc_arena);
                     pool_destroy(doc_pool);
-                } else {
-                    // Use legacy LaTeX to HTML v2 converter (hybrid grammar support)
-                    printf("Using LaTeX to HTML v2 converter (legacy)\n");
-                    if (full_document) {
-                        // Generate complete HTML document with external CSS links
-                        printf("Generating full HTML document with external CSS links\n");
-                        full_doc_output = lambda::format_latex_html_v2_document(input, "article", nullptr, false);
-                        if (full_doc_output.empty()) {
-                            printf("Error: LaTeX to HTML v2 full document conversion failed\n");
-                        }
-                    } else {
-                        Item result = lambda::format_latex_html_v2(input, true);  // text mode for HTML string output
-                        if (result.item != 0 && get_type_id(result) == LMD_TYPE_STRING) {
-                            formatted_output = (String*)result.string_ptr;
-                        } else {
-                            printf("Error: LaTeX to HTML v2 conversion failed\n");
-                        }
-                    }
-                }
             } else {
                 // Use regular HTML formatter
                 formatted_output = format_html(input->pool, input->root);
