@@ -1048,14 +1048,32 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
     bool has_continue = (elem->flags & DocElement::FLAG_CONTINUE) != 0;
     bool has_noindent = (elem->flags & DocElement::FLAG_NOINDENT) != 0;
     bool has_centered = (elem->flags & DocElement::FLAG_CENTERED) != 0;
+    bool has_raggedright = (elem->flags & DocElement::FLAG_FLUSH_LEFT) != 0;
+    bool has_raggedleft = (elem->flags & DocElement::FLAG_FLUSH_RIGHT) != 0;
     
     if (opts.legacy_mode) {
         // In legacy mode, add class attributes for flags
         // Build class string dynamically
-        if (has_continue || has_noindent || has_centered) {
+        if (has_continue || has_noindent || has_centered || has_raggedright || has_raggedleft) {
             strbuf_append_str(out, "<p class=\"");
             bool first = true;
+            if (has_raggedright) {
+                // \raggedright comes first as it's the primary alignment
+                strbuf_append_str(out, "raggedright");
+                first = false;
+            }
+            if (has_raggedleft) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "raggedleft");
+                first = false;
+            }
+            if (has_centered) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "centering");
+                first = false;
+            }
             if (has_continue) {
+                if (!first) strbuf_append_str(out, " ");
                 strbuf_append_str(out, "continue");
                 first = false;
             }
@@ -1063,10 +1081,6 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
                 if (!first) strbuf_append_str(out, " ");
                 strbuf_append_str(out, "noindent");
                 first = false;
-            }
-            if (has_centered) {
-                if (!first) strbuf_append_str(out, " ");
-                strbuf_append_str(out, "centering");
             }
             strbuf_append_str(out, "\">");
         } else {
@@ -1997,6 +2011,52 @@ static DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break m
 static DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
 static DocElement* const NOINDENT_MARKER = (DocElement*)3;  // \noindent command marker
 
+// Alignment markers for paragraph alignment scoping (\centering, \raggedright, \raggedleft)
+static DocElement* const CENTERING_MARKER = (DocElement*)4;    // \centering command marker
+static DocElement* const RAGGEDRIGHT_MARKER = (DocElement*)5;  // \raggedright command marker
+static DocElement* const RAGGEDLEFT_MARKER = (DocElement*)6;   // \raggedleft command marker
+
+// Alignment state enumeration for paragraph building
+enum class ParagraphAlignment : uint8_t {
+    NONE = 0,       // No explicit alignment (default)
+    CENTERING,      // \centering - center alignment
+    RAGGEDRIGHT,    // \raggedright - left alignment (ragged right)
+    RAGGEDLEFT      // \raggedleft - right alignment (ragged left)
+};
+
+// Check if a marker is an alignment marker
+static bool is_alignment_marker(DocElement* elem) {
+    return elem == CENTERING_MARKER || elem == RAGGEDRIGHT_MARKER || elem == RAGGEDLEFT_MARKER;
+}
+
+// Get alignment from marker
+static ParagraphAlignment marker_to_alignment(DocElement* elem) {
+    if (elem == CENTERING_MARKER) return ParagraphAlignment::CENTERING;
+    if (elem == RAGGEDRIGHT_MARKER) return ParagraphAlignment::RAGGEDRIGHT;
+    if (elem == RAGGEDLEFT_MARKER) return ParagraphAlignment::RAGGEDLEFT;
+    return ParagraphAlignment::NONE;
+}
+
+// Apply alignment to paragraph flags
+static void apply_alignment_to_paragraph(DocElement* para, ParagraphAlignment align) {
+    if (!para) return;
+    // Clear existing alignment flags
+    para->flags &= ~(DocElement::FLAG_CENTERED | DocElement::FLAG_FLUSH_LEFT | DocElement::FLAG_FLUSH_RIGHT);
+    switch (align) {
+        case ParagraphAlignment::CENTERING:
+            para->flags |= DocElement::FLAG_CENTERED;
+            break;
+        case ParagraphAlignment::RAGGEDRIGHT:
+            para->flags |= DocElement::FLAG_FLUSH_LEFT;
+            break;
+        case ParagraphAlignment::RAGGEDLEFT:
+            para->flags |= DocElement::FLAG_FLUSH_RIGHT;
+            break;
+        case ParagraphAlignment::NONE:
+            break;
+    }
+}
+
 // Forward declaration for is_block_element_tag (defined later)
 static bool is_block_element_tag(const char* tag);
 
@@ -2041,6 +2101,22 @@ static bool contains_parbreak_markers(const ElementReader& elem) {
             ElementReader child_elem = child.asElement();
             const char* tag = child_elem.tagName();
             if (tag && strcmp(tag, "par") == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Check if an element contains alignment commands (centering, raggedright, raggedleft)
+static bool contains_alignment_commands(const ElementReader& elem) {
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && (tag_eq(tag, "centering") || tag_eq(tag, "raggedright") || tag_eq(tag, "raggedleft"))) {
                 return true;
             }
         }
@@ -2430,10 +2506,27 @@ static DocElement* build_text_command(const char* cmd_name, const ElementReader&
     // Process children
     auto iter = elem.children();
     ItemReader child;
+    DocElement* last_text_child = nullptr;  // track last text run for trailing space trimming
     while (iter.next(&child)) {
         DocElement* child_elem = build_inline_content(child, arena, doc);
         if (child_elem) {
+            // If this is a heading and previous was a text run, trim trailing space
+            if (child_elem->type == DocElemType::HEADING && last_text_child &&
+                last_text_child->type == DocElemType::TEXT_RUN && last_text_child->text.text) {
+                char* text_content = (char*)last_text_child->text.text;
+                size_t len = strlen(text_content);
+                // Trim trailing whitespace
+                while (len > 0 && (text_content[len-1] == ' ' || text_content[len-1] == '\t' || text_content[len-1] == '\n')) {
+                    text_content[--len] = '\0';
+                }
+            }
             doc_append_child(span, child_elem);
+            // Track text elements for trailing space trimming
+            if (child_elem->type == DocElemType::TEXT_RUN || child_elem->type == DocElemType::TEXT_SPAN) {
+                last_text_child = child_elem;
+            } else {
+                last_text_child = nullptr;
+            }
         }
     }
     
@@ -2964,10 +3057,56 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         }
     }
     
-    // Curly group - process children
+    // Curly group - process children, adding ZWSP at whitespace boundaries
+    // ZWSP is always added at the end to mark the } boundary
     if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group")) {
         DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
         span->text.style = DocTextStyle::plain();
+        
+        // Check if group starts with whitespace - add ZWSP
+        bool starts_with_space = false;
+        bool ends_with_space = false;
+        bool has_content = false;
+        
+        // Scan children to detect whitespace at boundaries
+        auto scan_iter = elem.children();
+        ItemReader scan_child;
+        bool first = true;
+        while (scan_iter.next(&scan_child)) {
+            if (scan_child.isString()) {
+                const char* text = scan_child.cstring();
+                if (text && strlen(text) > 0) {
+                    if (first && (text[0] == ' ' || text[0] == '\t' || text[0] == '\n')) {
+                        starts_with_space = true;
+                    }
+                    // Check last char for ends_with_space
+                    size_t len = strlen(text);
+                    char last = text[len - 1];
+                    if (last == ' ' || last == '\t' || last == '\n') {
+                        ends_with_space = true;
+                    } else {
+                        ends_with_space = false;
+                    }
+                    // Check if this string has non-whitespace content
+                    for (const char* p = text; *p; p++) {
+                        if (*p != ' ' && *p != '\t' && *p != '\n') {
+                            has_content = true;
+                            break;
+                        }
+                    }
+                    first = false;
+                }
+            } else if (scan_child.isElement()) {
+                has_content = true;
+                first = false;
+                ends_with_space = false;  // Element at end means no trailing space
+            }
+        }
+        
+        // Add ZWSP at start if group has leading whitespace
+        if (starts_with_space) {
+            doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
+        }
         
         auto iter = elem.children();
         ItemReader child;
@@ -2978,12 +3117,11 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             }
         }
         
-        // If only one child, return it directly
-        if (span->first_child && span->first_child == span->last_child) {
-            DocElement* only_child = span->first_child;
-            only_child->parent = nullptr;
-            only_child->next_sibling = nullptr;
-            return only_child;
+        // Add ZWSP at end of curly_group/brack_group/group:
+        // - If trailing whitespace inside: marks the boundary
+        // - If content but no trailing whitespace: marks the } boundary for word-break
+        if (ends_with_space || has_content) {
+            doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
         }
         
         return span->first_child ? span : nullptr;
@@ -3055,6 +3193,13 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             return doc_create_text_cstr(arena, text, DocTextStyle::plain());
         }
         return nullptr;
+    }
+    
+    // Sectioning commands (unusual but possible: \section inside \emph{})
+    // Output as heading element - will be rendered inline (technically invalid HTML but expected)
+    if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || tag_eq(tag, "subsubsection") ||
+        tag_eq(tag, "chapter") || tag_eq(tag, "part") || tag_eq(tag, "paragraph") || tag_eq(tag, "subparagraph")) {
+        return build_section_command(tag, elem, arena, doc);
     }
     
     // Default: process children
@@ -4574,21 +4719,24 @@ static DocElement* build_cite_command(const ElementReader& elem, Arena* arena,
 // Helper function to check if an element should be collected into a paragraph
 // vs treated as a block element (like sections, lists, etc.)
 // Note: Uses the already-defined is_inline_element() function in the HTML rendering section.
-// This version adds support for PARBREAK_MARKER and NOINDENT_MARKER sentinels.
+// This version adds support for PARBREAK_MARKER, NOINDENT_MARKER, and alignment markers.
 static bool is_inline_or_break(DocElement* elem) {
     if (!elem) return false;
     if (elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER || elem == NOINDENT_MARKER) return false;
+    if (is_alignment_marker(elem)) return false;  // alignment markers are not inline content
     return is_inline_element(elem);
 }
 
 // Helper function to process body content with paragraph grouping
 // Collects inline content into paragraphs, respecting parbreak markers
+// Also tracks paragraph alignment (\centering, \raggedright, \raggedleft)
 static void build_body_content_with_paragraphs(DocElement* container, const ElementReader& elem,
                                                 Arena* arena, TexDocumentModel* doc) {
     DocElement* current_para = nullptr;
     bool after_block_element = false;  // Track if the previous element was a block
     bool next_para_noindent = false;   // Track if next paragraph should have noindent class
     bool strip_next_leading_space = false;  // Track if next text should have leading space stripped
+    ParagraphAlignment current_alignment = ParagraphAlignment::NONE;  // Track current alignment
     
     int64_t child_count = elem.childCount();
     for (int64_t i = 0; i < child_count; i++) {
@@ -4620,7 +4768,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                         next_para_noindent = false;
                     }
                 }
-                DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                DocElement* text_elem = doc_create_text_normalized(arena, text, DocTextStyle::plain());
                 if (text_elem) {
                     doc_append_child(current_para, text_elem);
                 }
@@ -4657,7 +4805,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                                     next_para_noindent = false;
                                 }
                             }
-                            DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                            DocElement* text_elem = doc_create_text_normalized(arena, text, DocTextStyle::plain());
                             if (text_elem) {
                                 doc_append_child(current_para, text_elem);
                             }
@@ -5062,6 +5210,95 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
             }
         }
         
+        // Check if this is a curly_group that contains alignment commands and parbreaks
+        // These need special processing to preserve alignment scoping:
+        // The alignment inside the group should only affect paragraphs until the group ends
+        if (child_item.isElement()) {
+            ElementReader group_elem = child_item.asElement();
+            const char* group_tag = group_elem.tagName();
+            if (group_tag && (tag_eq(group_tag, "curly_group") || tag_eq(group_tag, "group")) &&
+                contains_alignment_commands(group_elem) && contains_parbreak_markers(group_elem)) {
+                // Save current alignment to restore after the group
+                ParagraphAlignment saved_alignment = current_alignment;
+                
+                // Process the group's children inline, tracking alignment within the group scope
+                int64_t group_child_count = group_elem.childCount();
+                for (int64_t j = 0; j < group_child_count; j++) {
+                    ItemReader group_child = group_elem.childAt(j);
+                    DocElement* group_child_elem = build_doc_element(group_child, arena, doc);
+                    
+                    if (!group_child_elem) continue;
+                    
+                    // Handle paragraph breaks within the group
+                    if (group_child_elem == PARBREAK_MARKER) {
+                        if (current_para && current_para->first_child) {
+                            apply_alignment_to_paragraph(current_para, current_alignment);
+                            trim_paragraph_whitespace(current_para, arena);
+                            if (paragraph_has_visible_content(current_para)) {
+                                doc_append_child(container, current_para);
+                            }
+                        }
+                        current_para = nullptr;
+                        after_block_element = false;
+                        next_para_noindent = false;
+                        continue;
+                    }
+                    
+                    // Handle alignment markers within the group
+                    if (is_alignment_marker(group_child_elem)) {
+                        current_alignment = marker_to_alignment(group_child_elem);
+                        continue;
+                    }
+                    
+                    // Handle noindent markers
+                    if (group_child_elem == NOINDENT_MARKER) {
+                        next_para_noindent = true;
+                        continue;
+                    }
+                    
+                    // Add inline content to current paragraph
+                    if (is_inline_or_break(group_child_elem)) {
+                        if (!current_para) {
+                            current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                            if (after_block_element) {
+                                current_para->flags |= DocElement::FLAG_CONTINUE;
+                                after_block_element = false;
+                            }
+                            if (next_para_noindent) {
+                                current_para->flags |= DocElement::FLAG_NOINDENT;
+                                next_para_noindent = false;
+                            }
+                        }
+                        doc_append_child(current_para, group_child_elem);
+                    } else {
+                        // Block element within group - finalize paragraph first
+                        if (current_para && current_para->first_child) {
+                            apply_alignment_to_paragraph(current_para, current_alignment);
+                            trim_paragraph_whitespace(current_para, arena);
+                            if (paragraph_has_visible_content(current_para)) {
+                                doc_append_child(container, current_para);
+                            }
+                            current_para = nullptr;
+                        }
+                        doc_append_child(container, group_child_elem);
+                        after_block_element = true;
+                    }
+                }
+                
+                // Add ZWSP at end of group to preserve word boundary
+                if (current_para) {
+                    DocElement* zwsp = doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain());
+                    if (zwsp) {
+                        doc_append_child(current_para, zwsp);
+                    }
+                }
+                
+                // Restore alignment after group ends
+                current_alignment = saved_alignment;
+                continue;
+            }
+        }
+        
         // Check if this is a "paragraph" element that needs special handling:
         // - Contains parbreak markers (\par or blank lines)
         // - Contains block elements (center, lists, etc.)
@@ -5139,6 +5376,8 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
         // Paragraph break marker - finalize current paragraph and start new one
         if (child_elem == PARBREAK_MARKER) {
             if (current_para && current_para->first_child) {
+                // Apply current alignment to paragraph before finalizing
+                apply_alignment_to_paragraph(current_para, current_alignment);
                 trim_paragraph_whitespace(current_para, arena);
                 // Only append if paragraph has visible content after trimming
                 if (paragraph_has_visible_content(current_para)) {
@@ -5156,6 +5395,12 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
         // Noindent marker - set flag for next paragraph
         if (child_elem == NOINDENT_MARKER) {
             next_para_noindent = true;
+            continue;
+        }
+        
+        // Alignment markers - update current alignment state
+        if (is_alignment_marker(child_elem)) {
+            current_alignment = marker_to_alignment(child_elem);
             continue;
         }
         
@@ -5179,6 +5424,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
         } else {
             // Block element - finalize current paragraph first
             if (current_para && current_para->first_child) {
+                apply_alignment_to_paragraph(current_para, current_alignment);
                 trim_paragraph_whitespace(current_para, arena);
                 if (paragraph_has_visible_content(current_para)) {
                     doc_append_child(container, current_para);
@@ -5251,6 +5497,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
     
     // Finalize any remaining paragraph
     if (current_para && current_para->first_child) {
+        apply_alignment_to_paragraph(current_para, current_alignment);
         trim_paragraph_whitespace(current_para, arena);
         if (paragraph_has_visible_content(current_para)) {
             doc_append_child(container, current_para);
@@ -5322,6 +5569,18 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     // Use text command handler only if NOT an environment (no paragraph children)
     if (is_font_tag && !has_paragraph_children()) {
         return build_text_command(tag, elem, arena, doc);
+    }
+    
+    // Paragraph alignment commands - return markers for alignment tracking
+    // These affect the alignment of the current and subsequent paragraphs in the scope
+    if (tag_eq(tag, "centering")) {
+        return CENTERING_MARKER;
+    }
+    if (tag_eq(tag, "raggedright")) {
+        return RAGGEDRIGHT_MARKER;
+    }
+    if (tag_eq(tag, "raggedleft")) {
+        return RAGGEDLEFT_MARKER;
     }
     
     // Symbol commands parsed directly as element tags (e.g., {"$":"textellipsis"})
@@ -6067,7 +6326,7 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
             return nullptr;
         }
         
-        // \begin{empty}...\end{empty} environment - inline pass-through with ZWSP at end
+        // \begin{empty}...\end{empty} environment - inline pass-through with ZWSP at end boundary only
         DocElement* container = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
         container->text.style = DocTextStyle::plain();
         
@@ -6104,6 +6363,58 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
                     if (text_elem) {
                         doc_append_child(container, text_elem);
                     }
+                }
+            }
+        }
+        
+        // Trim trailing whitespace from last content text element (so ZWSP immediately follows content)
+        // Find the last text element that has non-whitespace content
+        DocElement* last_content_text = nullptr;
+        for (DocElement* child = container->first_child; child; child = child->next_sibling) {
+            if (child->type == DocElemType::TEXT_RUN && child->text.text && child->text.text_len > 0) {
+                // Check if this text has any non-whitespace content
+                const char* p = child->text.text;
+                while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
+                if (*p) last_content_text = child;  // Has non-whitespace content
+            } else if (child->type == DocElemType::TEXT_SPAN) {
+                // Check inside span for text elements with content
+                for (DocElement* inner = child->first_child; inner; inner = inner->next_sibling) {
+                    if (inner->type == DocElemType::TEXT_RUN && inner->text.text && inner->text.text_len > 0) {
+                        const char* p = inner->text.text;
+                        while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
+                        if (*p) last_content_text = inner;  // Has non-whitespace content
+                    }
+                }
+            }
+        }
+        if (last_content_text) {
+            // Trim trailing whitespace from the last content text element
+            char* text = (char*)last_content_text->text.text;
+            size_t len = last_content_text->text.text_len;
+            while (len > 0 && (text[len-1] == ' ' || text[len-1] == '\t' || text[len-1] == '\n')) {
+                len--;
+            }
+            text[len] = '\0';
+            last_content_text->text.text_len = len;
+        }
+        
+        // Clear any whitespace-only TEXT_RUNs that appear after last_content_text
+        // These would create space before the ZWSP
+        bool found_last = false;
+        for (DocElement* child = container->first_child; child; child = child->next_sibling) {
+            if (child == last_content_text) {
+                found_last = true;
+            } else if (found_last && child->type == DocElemType::TEXT_RUN) {
+                // Check if whitespace-only
+                bool ws_only = true;
+                if (child->text.text) {
+                    for (const char* p = child->text.text; *p && ws_only; p++) {
+                        if (*p != ' ' && *p != '\t' && *p != '\n') ws_only = false;
+                    }
+                }
+                if (ws_only) {
+                    // Clear this text run
+                    child->text.text_len = 0;
                 }
             }
         }
@@ -6294,9 +6605,56 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     
     // Curly/brack groups and _seq - inline transparent containers
     // These should NOT be block elements - just process their children inline
+    // For curly_group and brack_group, add ZWSP at whitespace boundaries to preserve spacing
+    // ZWSP is always added at the end to mark the } boundary
     if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group") || tag_eq(tag, "_seq")) {
         DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
         span->text.style = DocTextStyle::plain();
+        
+        // Scan children to detect whitespace at boundaries (for ZWSP insertion)
+        bool starts_with_space = false;
+        bool ends_with_space = false;
+        bool has_content = false;
+        bool is_seq = tag_eq(tag, "_seq");  // _seq doesn't need ZWSP boundaries
+        
+        auto scan_iter = elem.children();
+        ItemReader scan_child;
+        bool first = true;
+        while (scan_iter.next(&scan_child)) {
+            if (scan_child.isString()) {
+                const char* text = scan_child.cstring();
+                if (text && strlen(text) > 0) {
+                    if (first && (text[0] == ' ' || text[0] == '\t' || text[0] == '\n')) {
+                        starts_with_space = true;
+                    }
+                    // Check last char for ends_with_space
+                    size_t len = strlen(text);
+                    char last = text[len - 1];
+                    if (last == ' ' || last == '\t' || last == '\n') {
+                        ends_with_space = true;
+                    } else {
+                        ends_with_space = false;
+                    }
+                    // Check if this string has non-whitespace content
+                    for (const char* p = text; *p; p++) {
+                        if (*p != ' ' && *p != '\t' && *p != '\n') {
+                            has_content = true;
+                            break;
+                        }
+                    }
+                    first = false;
+                }
+            } else if (scan_child.isElement()) {
+                has_content = true;
+                first = false;
+                ends_with_space = false;  // Element at end means no trailing space
+            }
+        }
+        
+        // Add ZWSP at start if group has leading whitespace (and not _seq)
+        if (starts_with_space && !is_seq) {
+            doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
+        }
         
         auto iter = elem.children();
         ItemReader child;
@@ -6307,8 +6665,15 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
             }
         }
         
-        // If only one child, return it directly
-        if (span->first_child && span->first_child == span->last_child) {
+        // Add ZWSP at end of curly_group/brack_group/group (not _seq):
+        // - If trailing whitespace inside: marks the boundary
+        // - If content but no trailing whitespace: marks the } boundary for word-break
+        if (!is_seq && (ends_with_space || has_content)) {
+            doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
+        }
+        
+        // If only one child (and no ZWSP added), return it directly
+        if (is_seq && span->first_child && span->first_child == span->last_child) {
             DocElement* only_child = span->first_child;
             only_child->parent = nullptr;
             only_child->next_sibling = nullptr;
