@@ -374,6 +374,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "environments_6",  // custom item labels \item[label]
     "environments_7",  // enumerate with custom labels
     "environments_8",  // description lists
+    "environments_9",  // quote, quotation, verse
     "environments_11",
     // whitespace.tex - partial
     "whitespace_1",   // \par command paragraph breaks
