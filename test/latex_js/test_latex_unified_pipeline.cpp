@@ -376,6 +376,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "environments_8",  // description lists
     "environments_9",  // quote, quotation, verse
     "environments_11",
+    "environments_12",  // \centering inside list items
     "environments_14",  // comment environment (inline _seq handling)
     // whitespace.tex - partial
     "whitespace_1",   // \par command paragraph breaks
