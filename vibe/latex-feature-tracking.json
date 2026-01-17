@@ -642,5 +642,113 @@
     "extended_skipped": 5
   },
   "last_updated": "2026-01-17",
-  "session_notes": "Fixed empty itemize, custom item labels, enumerate/description lists. Added block element handling in alignment content. Skipping empty paragraphs in render."
+  "session_notes": "Fixed empty itemize, custom item labels, enumerate/description lists. Added block element handling in alignment content. Skipping empty paragraphs in render.",
+
+  "blockers_and_dependencies": {
+    "alignment-commands": {
+      "blockers": [
+        "Need alignment state tracking across paragraphs",
+        "\\centering/\\raggedright affect all subsequent content until scope ends"
+      ],
+      "depends_on": ["basic-text"],
+      "blocks": ["alignment-in-lists"]
+    },
+    "quote-environments": {
+      "blockers": [
+        "Verse whitespace after <br> being trimmed incorrectly"
+      ],
+      "depends_on": ["basic-text", "linebreak-commands"],
+      "blocks": []
+    },
+    "curly-group-spaces": {
+      "blockers": [
+        "ZWS insertion at group boundaries not implemented",
+        "Space compression rules inside groups"
+      ],
+      "depends_on": [],
+      "blocks": ["env-boundary-spaces"]
+    },
+    "escaped-space-variants": {
+      "blockers": [
+        "Parser treats \\<newline> as paragraph break instead of space"
+      ],
+      "depends_on": [],
+      "blocks": []
+    },
+    "comment-environment": {
+      "blockers": [
+        "Comment environment creates paragraph break when it shouldn't"
+      ],
+      "depends_on": [],
+      "blocks": []
+    },
+    "nested-sectioning": {
+      "blockers": [
+        "Section inside inline elements (\\emph{}) not rendered as <h2>"
+      ],
+      "depends_on": ["chapter-section"],
+      "blocks": []
+    }
+  },
+
+  "code_hotspots": {
+    "build_body_content_with_paragraphs": {
+      "file": "lambda/tex/tex_document_model.cpp",
+      "line_range": "4450-4920",
+      "responsibility": "Main paragraph/content builder, handles parbreaks, block elements, text accumulation",
+      "complexity": "high",
+      "recent_changes": "Added after_block_element tracking, FLAG_CONTINUE handling"
+    },
+    "build_list_environment": {
+      "file": "lambda/tex/tex_document_model.cpp",
+      "line_range": "3363-3520",
+      "responsibility": "Build itemize/enumerate/description lists with items",
+      "complexity": "high",
+      "recent_changes": "Added custom label support, empty list handling, html_label field"
+    },
+    "build_alignment_content": {
+      "file": "lambda/tex/tex_document_model.cpp",
+      "line_range": "3862-3945",
+      "responsibility": "Process content inside center/flushleft/flushright",
+      "complexity": "medium",
+      "recent_changes": "Added block element detection for nested lists"
+    },
+    "render_paragraph_html": {
+      "file": "lambda/tex/tex_document_model.cpp",
+      "line_range": "1020-1070",
+      "responsibility": "Render paragraph with class flags",
+      "complexity": "low",
+      "recent_changes": "Added empty paragraph skip"
+    },
+    "trim_paragraph_whitespace": {
+      "file": "lambda/tex/tex_document_model.cpp",
+      "line_range": "3775-3860",
+      "responsibility": "Trim leading/trailing whitespace, handle linebreak whitespace",
+      "complexity": "medium",
+      "recent_changes": "Core of whitespace handling issues"
+    },
+    "render_brack_group_to_html": {
+      "file": "lambda/tex/tex_document_model.cpp",
+      "line_range": "2156-2210",
+      "responsibility": "Render \\item[label] content with font styling",
+      "complexity": "medium",
+      "recent_changes": "New function for custom item labels"
+    }
+  },
+
+  "feature_priorities": {
+    "high": [
+      {"feature": "quote-environments", "complexity": "low", "note": "Very close to passing, just whitespace issue"},
+      {"feature": "alignment-commands", "complexity": "high", "note": "Needed for text_tex_10, environments_tex_12"}
+    ],
+    "medium": [
+      {"feature": "curly-group-spaces", "complexity": "medium", "note": "ZWSP handling at boundaries"},
+      {"feature": "escaped-space-variants", "complexity": "medium", "note": "Parser-level issue"},
+      {"feature": "env-boundary-spaces", "complexity": "medium", "note": "Depends on curly-group-spaces"}
+    ],
+    "low": [
+      {"feature": "nested-sectioning", "complexity": "high", "note": "Edge case: section inside emph"},
+      {"feature": "comment-environment", "complexity": "medium", "note": "Should not create paragraph break"}
+    ]
+  }
 }

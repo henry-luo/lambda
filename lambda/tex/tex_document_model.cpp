@@ -3792,8 +3792,10 @@ static bool paragraph_has_visible_content(DocElement* para) {
 // Trim whitespace at paragraph boundaries:
 // - Leading whitespace from first text element
 // - Trailing whitespace from last text element  
-// - Leading whitespace from text elements that follow SPACE (linebreak)
-static void trim_paragraph_whitespace(DocElement* para, Arena* arena) {
+// - Optionally: trim/collapse leading whitespace from text elements that follow SPACE (linebreak)
+// If preserve_linebreak_space is true, multiple whitespace after linebreak is collapsed to one space
+// If false, all leading whitespace after linebreak is trimmed (like quote/quotation)
+static void trim_paragraph_whitespace_ex(DocElement* para, Arena* arena, bool preserve_linebreak_space) {
     if (!para || !para->first_child) return;
     
     // Trim leading whitespace from first text element
@@ -3838,23 +3840,48 @@ static void trim_paragraph_whitespace(DocElement* para, Arena* arena) {
         }
     }
     
-    // Trim leading whitespace from text elements that follow a linebreak
-    // AND trim trailing whitespace from text elements that precede a linebreak (\unskip behavior)
+    // Handle whitespace around linebreaks
+    // - Trim trailing whitespace from elements that precede a linebreak (\unskip behavior)
+    // - Handle leading whitespace after linebreaks based on preserve_linebreak_space flag
     DocElement* prev = nullptr;
     for (DocElement* child = para->first_child; child; child = child->next_sibling) {
+        // Handle leading whitespace after linebreak
         if (prev && prev->type == DocElemType::SPACE && prev->space.is_linebreak) {
-            // Need to trim leading whitespace from elements after linebreak
+            // Process leading whitespace from elements after linebreak
             DocElement* curr = child;
-            while (curr && curr->type == DocElemType::TEXT_RUN && curr->text.text) {
-                const char* trimmed = trim_leading_whitespace(curr->text.text, arena);
-                if (trimmed) {
-                    curr->text.text = trimmed;
-                    curr->text.text_len = strlen(trimmed);
+            while (curr && curr->type == DocElemType::TEXT_RUN && curr->text.text && curr->text.text_len > 0) {
+                if (preserve_linebreak_space) {
+                    // Collapse multiple whitespace to a single space (verse behavior)
+                    const char* text = curr->text.text;
+                    size_t len = curr->text.text_len;
+                    
+                    // Count leading whitespace
+                    size_t ws_count = 0;
+                    while (ws_count < len && (text[ws_count] == ' ' || text[ws_count] == '\t' || text[ws_count] == '\n' || text[ws_count] == '\r')) {
+                        ws_count++;
+                    }
+                    
+                    if (ws_count > 1) {
+                        // Replace multiple whitespace with single space
+                        char* new_text = (char*)arena_alloc(arena, len - ws_count + 2);
+                        new_text[0] = ' ';  // Single space
+                        memcpy(new_text + 1, text + ws_count, len - ws_count + 1);
+                        curr->text.text = new_text;
+                        curr->text.text_len = len - ws_count + 1;
+                    }
                     break;
                 } else {
-                    curr->text.text = "";
-                    curr->text.text_len = 0;
-                    curr = curr->next_sibling;
+                    // Trim all leading whitespace (quote/quotation behavior)
+                    const char* trimmed = trim_leading_whitespace(curr->text.text, arena);
+                    if (trimmed) {
+                        curr->text.text = trimmed;
+                        curr->text.text_len = strlen(trimmed);
+                        break;
+                    } else {
+                        curr->text.text = "";
+                        curr->text.text_len = 0;
+                        curr = curr->next_sibling;
+                    }
                 }
             }
         }
@@ -3880,10 +3907,19 @@ static void trim_paragraph_whitespace(DocElement* para, Arena* arena) {
     }
 }
 
+// Wrapper for the common case (default: trim all leading whitespace after linebreak)
+static void trim_paragraph_whitespace(DocElement* para, Arena* arena) {
+    trim_paragraph_whitespace_ex(para, arena, false);
+}
+
 // Build alignment environment content with proper paragraph splitting
 // Environment structure is: center -> paragraph -> [content with parbreaks]
+// env_name is used to determine whitespace behavior (verse preserves leading space after \\)
 static void build_alignment_content(DocElement* container, const ElementReader& elem,
-                                     Arena* arena, TexDocumentModel* doc) {
+                                     Arena* arena, TexDocumentModel* doc, const char* env_name) {
+    // Verse environment preserves leading space after linebreak, others don't
+    bool preserve_linebreak_space = env_name && tag_eq(env_name, "verse");
+    
     // First, look for paragraph children and process them
     auto iter = elem.children();
     ItemReader child;
@@ -3905,7 +3941,7 @@ static void build_alignment_content(DocElement* container, const ElementReader& 
                 // Check for parbreak
                 if (is_parbreak_item(para_child)) {
                     if (current_para && current_para->first_child) {
-                        trim_paragraph_whitespace(current_para, arena);
+                        trim_paragraph_whitespace_ex(current_para, arena, preserve_linebreak_space);
                         doc_append_child(container, current_para);
                     }
                     current_para = nullptr;
@@ -3919,7 +3955,7 @@ static void build_alignment_content(DocElement* container, const ElementReader& 
                     if (para_child_tag && is_block_element_tag(para_child_tag)) {
                         // Finalize current paragraph before block element
                         if (current_para && current_para->first_child) {
-                            trim_paragraph_whitespace(current_para, arena);
+                            trim_paragraph_whitespace_ex(current_para, arena, preserve_linebreak_space);
                             doc_append_child(container, current_para);
                             current_para = nullptr;
                         }
@@ -3946,7 +3982,7 @@ static void build_alignment_content(DocElement* container, const ElementReader& 
             
             // Finalize the last paragraph
             if (current_para && current_para->first_child) {
-                trim_paragraph_whitespace(current_para, arena);
+                trim_paragraph_whitespace_ex(current_para, arena, preserve_linebreak_space);
                 doc_append_child(container, current_para);
             }
         } else {
@@ -3982,7 +4018,7 @@ static DocElement* build_alignment_environment(const char* env_name, const Eleme
     }
     
     // Process children with paragraph splitting on parbreaks
-    build_alignment_content(container, elem, arena, doc);
+    build_alignment_content(container, elem, arena, doc, env_name);
     
     return container->first_child ? container : nullptr;
 }
