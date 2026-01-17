@@ -1978,6 +1978,26 @@ static DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break m
 static DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
 static DocElement* const NOINDENT_MARKER = (DocElement*)3;  // \noindent command marker
 
+// Forward declaration for is_block_element_tag (defined later)
+static bool is_block_element_tag(const char* tag);
+
+// Helper to check if an element contains block elements (center, lists, etc.)
+// This is used to detect when a paragraph element needs special handling
+static bool contains_block_elements(const ElementReader& elem) {
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && is_block_element_tag(tag)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Helper to check if an element contains paragraph break markers (parbreak symbol or \par command)
 static bool contains_parbreak_markers(const ElementReader& elem) {
     auto iter = elem.children();
@@ -4564,6 +4584,196 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
             continue;
         }
         
+        // Special case: nested "document" elements - process their children inline instead of creating a DOCUMENT
+        // This preserves the after_block_element context across document boundaries
+        if (child_item.isElement()) {
+            ElementReader child_elem = child_item.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && tag_eq(tag, "document")) {
+                // Finalize any current paragraph first, restoring after_block_element if it wasn't added
+                if (current_para && current_para->first_child) {
+                    trim_paragraph_whitespace(current_para, arena);
+                    if (paragraph_has_visible_content(current_para)) {
+                        doc_append_child(container, current_para);
+                    } else if (current_para->flags & DocElement::FLAG_CONTINUE) {
+                        // Paragraph consumed the flag but wasn't added - restore it
+                        after_block_element = true;
+                    }
+                    current_para = nullptr;
+                }
+                
+                // Recursively process the document's children in the current context
+                int64_t doc_child_count = child_elem.childCount();
+                for (int64_t j = 0; j < doc_child_count; j++) {
+                    // Create a temporary sub-call context by processing each child inline
+                    ItemReader doc_child_item = child_elem.childAt(j);
+                    
+                    // Handle string children
+                    if (doc_child_item.isString()) {
+                        const char* text = doc_child_item.cstring();
+                        if (text && text[0] != '\0') {
+                            // Ensure we have a paragraph
+                            if (!current_para) {
+                                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                                if (after_block_element) {
+                                    current_para->flags |= DocElement::FLAG_CONTINUE;
+                                    after_block_element = false;
+                                }
+                                if (next_para_noindent) {
+                                    current_para->flags |= DocElement::FLAG_NOINDENT;
+                                    next_para_noindent = false;
+                                }
+                            }
+                            DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                            if (text_elem) {
+                                doc_append_child(current_para, text_elem);
+                            }
+                        }
+                        continue;
+                    }
+                    
+                    // Handle element children
+                    // Special case: paragraph with parbreaks returns nullptr - process its children directly
+                    if (doc_child_item.isElement()) {
+                        ElementReader child_elem = doc_child_item.asElement();
+                        const char* child_tag = child_elem.tagName();
+                        if (child_tag && tag_eq(child_tag, "paragraph")) {
+                            // Check if this paragraph has parbreaks
+                            if (contains_parbreak_markers(child_elem)) {
+                                // Process the paragraph's children directly (same as build_body_content_with_paragraphs does)
+                                int64_t para_child_count = child_elem.childCount();
+                                for (int64_t k = 0; k < para_child_count; k++) {
+                                    ItemReader para_child_item = child_elem.childAt(k);
+                                    DocElement* para_child_elem = build_doc_element(para_child_item, arena, doc);
+                                    
+                                    if (!para_child_elem) continue;
+                                    
+                                    if (para_child_elem == PARBREAK_MARKER) {
+                                        if (current_para && current_para->first_child) {
+                                            trim_paragraph_whitespace(current_para, arena);
+                                            if (paragraph_has_visible_content(current_para)) {
+                                                doc_append_child(container, current_para);
+                                            }
+                                        }
+                                        current_para = nullptr;
+                                        after_block_element = false;
+                                        continue;
+                                    }
+                                    
+                                    if (para_child_elem == NOINDENT_MARKER) {
+                                        next_para_noindent = true;
+                                        continue;
+                                    }
+                                    
+                                    if (is_inline_or_break(para_child_elem)) {
+                                        if (!current_para) {
+                                            current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                                            if (after_block_element) {
+                                                current_para->flags |= DocElement::FLAG_CONTINUE;
+                                                after_block_element = false;
+                                            }
+                                            if (next_para_noindent) {
+                                                current_para->flags |= DocElement::FLAG_NOINDENT;
+                                                next_para_noindent = false;
+                                            }
+                                        }
+                                        doc_append_child(current_para, para_child_elem);
+                                    } else {
+                                        if (current_para && current_para->first_child) {
+                                            trim_paragraph_whitespace(current_para, arena);
+                                            if (paragraph_has_visible_content(current_para)) {
+                                                doc_append_child(container, current_para);
+                                            } else if (current_para->flags & DocElement::FLAG_CONTINUE) {
+                                                after_block_element = true;
+                                            }
+                                            current_para = nullptr;
+                                        }
+                                        doc_append_child(container, para_child_elem);
+                                        if (para_child_elem->type != DocElemType::HEADING) {
+                                            after_block_element = true;
+                                        }
+                                    }
+                                }
+                                continue;  // Done processing paragraph with parbreaks
+                            }
+                        }
+                    }
+                    
+                    DocElement* doc_child_elem = build_doc_element(doc_child_item, arena, doc);
+                    if (!doc_child_elem) continue;
+                    
+                    if (doc_child_elem == PARBREAK_MARKER) {
+                        if (current_para && current_para->first_child) {
+                            trim_paragraph_whitespace(current_para, arena);
+                            if (paragraph_has_visible_content(current_para)) {
+                                doc_append_child(container, current_para);
+                            }
+                        }
+                        current_para = nullptr;
+                        after_block_element = false;
+                        continue;
+                    }
+                    
+                    if (doc_child_elem == NOINDENT_MARKER) {
+                        next_para_noindent = true;
+                        continue;
+                    }
+                    
+                    if (is_inline_or_break(doc_child_elem)) {
+                        if (!current_para) {
+                            current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                            if (after_block_element) {
+                                current_para->flags |= DocElement::FLAG_CONTINUE;
+                                after_block_element = false;
+                            }
+                            if (next_para_noindent) {
+                                current_para->flags |= DocElement::FLAG_NOINDENT;
+                                next_para_noindent = false;
+                            }
+                        }
+                        doc_append_child(current_para, doc_child_elem);
+                    } else if (doc_child_elem->type == DocElemType::PARAGRAPH) {
+                        // Special case: unwrap PARAGRAPH from the nested document
+                        // Move its inline children to our current paragraph
+                        if (!current_para) {
+                            current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                            if (after_block_element) {
+                                current_para->flags |= DocElement::FLAG_CONTINUE;
+                                after_block_element = false;
+                            }
+                            if (next_para_noindent) {
+                                current_para->flags |= DocElement::FLAG_NOINDENT;
+                                next_para_noindent = false;
+                            }
+                        }
+                        // Move children from the nested paragraph to current
+                        for (DocElement* para_child = doc_child_elem->first_child; para_child; ) {
+                            DocElement* next = para_child->next_sibling;
+                            para_child->parent = nullptr;
+                            para_child->next_sibling = nullptr;
+                            doc_append_child(current_para, para_child);
+                            para_child = next;
+                        }
+                    } else {
+                        if (current_para && current_para->first_child) {
+                            trim_paragraph_whitespace(current_para, arena);
+                            if (paragraph_has_visible_content(current_para)) {
+                                doc_append_child(container, current_para);
+                            } else if (current_para->flags & DocElement::FLAG_CONTINUE) {
+                                after_block_element = true;
+                            }
+                            current_para = nullptr;
+                        }
+                        doc_append_child(container, doc_child_elem);
+                        if (doc_child_elem->type != DocElemType::HEADING) {
+                            after_block_element = true;
+                        }
+                    }
+                }
+                continue;  // Done processing document element inline
+            }
+        }
+        
         // Check for diacritic command elements (single-char tags like ^, ", ', `, ~, etc.)
         if (child_item.isElement()) {
             ElementReader child_elem = child_item.asElement();
@@ -4819,14 +5029,17 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
             }
         }
         
-        // Check if this is a "paragraph" element with parbreak markers
-        // In this case, we need to process its children directly instead of treating it as a unit
+        // Check if this is a "paragraph" element that needs special handling:
+        // - Contains parbreak markers (\par or blank lines)
+        // - Contains block elements (center, lists, etc.)
+        // In these cases, we need to process its children directly instead of treating it as a unit
         if (child_item.isElement()) {
             ElementReader para_elem = child_item.asElement();
             const char* para_tag = para_elem.tagName();
-            if (para_tag && tag_eq(para_tag, "paragraph") && contains_parbreak_markers(para_elem)) {
+            if (para_tag && tag_eq(para_tag, "paragraph") && 
+                (contains_parbreak_markers(para_elem) || contains_block_elements(para_elem))) {
                 // Process the paragraph element's children as if they were direct children here
-                // This handles \par and parbreak markers properly
+                // This handles \par, parbreak markers, and block elements properly
                 int64_t para_child_count = para_elem.childCount();
                 for (int64_t j = 0; j < para_child_count; j++) {
                     ItemReader para_child = para_elem.childAt(j);
@@ -4870,6 +5083,11 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                             trim_paragraph_whitespace(current_para, arena);
                             if (paragraph_has_visible_content(current_para)) {
                                 doc_append_child(container, current_para);
+                            } else {
+                                // Paragraph was not added - restore after_block_element if this para consumed it
+                                if (current_para->flags & DocElement::FLAG_CONTINUE) {
+                                    after_block_element = true;
+                                }
                             }
                             current_para = nullptr;
                         }
@@ -4931,9 +5149,64 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                 trim_paragraph_whitespace(current_para, arena);
                 if (paragraph_has_visible_content(current_para)) {
                     doc_append_child(container, current_para);
+                } else {
+                    // Paragraph was not added - restore after_block_element if this para consumed it
+                    if (current_para->flags & DocElement::FLAG_CONTINUE) {
+                        
+                        after_block_element = true;
+                    }
                 }
                 current_para = nullptr;
             }
+            
+            // Special case: if child_elem is a DOCUMENT element, unwrap its children
+            // This handles nested document elements that occur in certain parse tree structures
+            if (child_elem->type == DocElemType::DOCUMENT && child_elem->first_child) {
+                
+                // Move children from nested DOCUMENT to current container
+                for (DocElement* doc_child = child_elem->first_child; doc_child; ) {
+                    DocElement* next = doc_child->next_sibling;
+                    doc_child->parent = nullptr;
+                    doc_child->next_sibling = nullptr;
+                    
+                    // Process each child with current after_block_element state
+                    if (is_inline_or_break(doc_child)) {
+                        if (!current_para) {
+                            current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+                            if (after_block_element) {
+                                current_para->flags |= DocElement::FLAG_CONTINUE;
+                                after_block_element = false;
+                            }
+                            if (next_para_noindent) {
+                                current_para->flags |= DocElement::FLAG_NOINDENT;
+                                next_para_noindent = false;
+                            }
+                        }
+                        doc_append_child(current_para, doc_child);
+                    } else {
+                        if (current_para && current_para->first_child) {
+                            trim_paragraph_whitespace(current_para, arena);
+                            if (paragraph_has_visible_content(current_para)) {
+                                doc_append_child(container, current_para);
+                            } else {
+                                // Paragraph was not added - restore after_block_element if this para consumed it
+                                if (current_para->flags & DocElement::FLAG_CONTINUE) {
+                                    after_block_element = true;
+                                }
+                            }
+                            current_para = nullptr;
+                        }
+                        doc_append_child(container, doc_child);
+                        if (doc_child->type != DocElemType::HEADING) {
+                            after_block_element = true;
+                        }
+                    }
+                    
+                    doc_child = next;
+                }
+                continue;  // Don't add the empty DOCUMENT element
+            }
+            
             doc_append_child(container, child_elem);
             // Mark that we just added a block element (for continue flag)
             // But NOT for headings - paragraphs after headings are normal, not "continue"
