@@ -390,6 +390,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "whitespace_16",
     "whitespace_18",
     "whitespace_19",
+    "whitespace_20",  // continue class after environment (nested document handling)
 };
 
 // Helper to generate fixture key for lookup
