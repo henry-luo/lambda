@@ -6259,9 +6259,9 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return container;
     }
     
-    // Curly/brack groups - inline transparent containers
+    // Curly/brack groups and _seq - inline transparent containers
     // These should NOT be block elements - just process their children inline
-    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group")) {
+    if (tag_eq(tag, "curly_group") || tag_eq(tag, "brack_group") || tag_eq(tag, "group") || tag_eq(tag, "_seq")) {
         DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
         span->text.style = DocTextStyle::plain();
         
