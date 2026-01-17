@@ -1038,6 +1038,71 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             const char* text = source + start;
             size_t len = end - start;
 
+            // If ERROR node is very large (>2000 bytes), it's likely a structural parse error
+            // that consumed a large portion of the document. Try to process children instead.
+            if (len > 2000) {
+                log_debug("latex_ts: ERROR node is large (%zu bytes) - processing children instead", len);
+                
+                // Process children of the ERROR node - they may still be valid parse tree nodes
+                uint32_t child_count = ts_node_child_count(node);
+                if (child_count > 0) {
+                    MarkBuilder& builder = ctx.builder;
+                    ElementBuilder container = builder.element("_seq");  // Use _seq as transparent container
+                    bool found_content = false;
+                    
+                    for (uint32_t i = 0; i < child_count; i++) {
+                        TSNode child = ts_node_child(node, i);
+                        const char* child_type = ts_node_type(child);
+                        
+                        // Skip noise nodes that don't contribute meaningful content
+                        if (strcmp(child_type, "math_text") == 0 ||
+                            strcmp(child_type, "alignment_tab") == 0 ||
+                            strcmp(child_type, "$$") == 0) {
+                            continue;
+                        }
+                        
+                        // Skip 'text' nodes that are just environment names (spurious from error recovery)
+                        if (strcmp(child_type, "text") == 0) {
+                            uint32_t child_start = ts_node_start_byte(child);
+                            uint32_t child_end = ts_node_end_byte(child);
+                            size_t child_len = child_end - child_start;
+                            const char* child_text = source + child_start;
+                            
+                            // List of environment names that should be filtered when appearing standalone
+                            static const char* env_names[] = {
+                                "center", "itshape", "document", "bfseries", "mdseries",
+                                "slshape", "upshape", "scshape", "rmfamily", "sffamily",
+                                "ttfamily", "tiny", "scriptsize", "footnotesize", "small",
+                                "normalsize", "large", "Large", "LARGE", "huge", "Huge"
+                            };
+                            bool is_env_name = false;
+                            for (size_t j = 0; j < sizeof(env_names)/sizeof(env_names[0]); j++) {
+                                size_t env_len = strlen(env_names[j]);
+                                if (child_len == env_len && strncmp(child_text, env_names[j], env_len) == 0) {
+                                    is_env_name = true;
+                                    break;
+                                }
+                            }
+                            if (is_env_name) {
+                                continue;
+                            }
+                        }
+                        
+                        Item child_result = convert_latex_node(ctx, child, source);
+                        if (child_result.item != ITEM_NULL) {
+                            container.child(child_result);
+                            found_content = true;
+                        }
+                    }
+                    
+                    if (found_content) {
+                        return container.final();
+                    }
+                }
+                // No valid children found
+                return {.item = ITEM_NULL};
+            }
+
             // Check if parent is inline_math or display_math
             TSNode parent = ts_node_parent(node);
             const char* parent_type = ts_node_is_null(parent) ? "" : ts_node_type(parent);
@@ -1075,21 +1140,46 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
 
             // Check if ERROR contains document body with $...$
             // Extract all inline math expressions as a sequence
+            // Be conservative: skip escaped $ (\$) and limit math size
             if (memmem(text, len, "$", 1) != nullptr) {
                 MarkBuilder& builder = ctx.builder;
                 ElementBuilder seq = builder.element("sequence");
+                bool found_any_math = false;
 
                 size_t i = 0;
                 while (i < len) {
-                    // Find next $
-                    while (i < len && text[i] != '$') i++;
+                    // Find next $ that's not escaped
+                    while (i < len) {
+                        if (text[i] == '$') {
+                            // Check if escaped: preceded by odd number of backslashes
+                            size_t backslash_count = 0;
+                            size_t j = i;
+                            while (j > 0 && text[j-1] == '\\') {
+                                backslash_count++;
+                                j--;
+                            }
+                            if (backslash_count % 2 == 0) break;  // Not escaped
+                        }
+                        i++;
+                    }
                     if (i >= len) break;
 
                     size_t math_start = i;
                     i++;  // Skip opening $
 
-                    // Find closing $
-                    while (i < len && text[i] != '$') i++;
+                    // Find closing $ (not escaped)
+                    while (i < len) {
+                        if (text[i] == '$') {
+                            size_t backslash_count = 0;
+                            size_t j = i;
+                            while (j > 0 && text[j-1] == '\\') {
+                                backslash_count++;
+                                j--;
+                            }
+                            if (backslash_count % 2 == 0) break;  // Not escaped
+                        }
+                        i++;
+                    }
                     if (i >= len) break;
 
                     size_t math_end = i + 1;  // Include closing $
@@ -1099,25 +1189,38 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     const char* math_src = text + math_start + 1;
                     size_t math_len = math_end - math_start - 2;
 
-                    if (math_len > 0) {
-                        log_debug("latex_ts: ERROR recovery - found inline math at %zu-%zu", math_start, math_end);
+                    // Only accept reasonably-sized inline math (avoid false positives from malformed content)
+                    // Real inline math is typically short (a few hundred chars at most)
+                    if (math_len > 0 && math_len <= 500) {
+                        // Additional validation: check that content doesn't contain multiple \section, \begin, etc.
+                        // which would indicate this is not really inline math
+                        const char* section_marker = (const char*)memmem(math_src, math_len, "\\section", 8);
+                        const char* begin_marker = (const char*)memmem(math_src, math_len, "\\begin{", 7);
+                        if (!section_marker && !begin_marker) {
+                            log_debug("latex_ts: ERROR recovery - found inline math at %zu-%zu (len=%zu)", 
+                                      math_start, math_end, math_len);
 
-                        ElementBuilder elem = builder.element("inline_math");
-                        String* src_str = builder.createString(math_src, math_len);
-                        Item src_item = {.item = s2it(src_str)};
-                        elem.attr("source", src_item);
+                            ElementBuilder elem = builder.element("inline_math");
+                            String* src_str = builder.createString(math_src, math_len);
+                            Item src_item = {.item = s2it(src_str)};
+                            elem.attr("source", src_item);
 
-                        // Deep parse the math content using tree-sitter-latex-math
-                        Item math_ast = parse_math_to_ast(ctx, math_src, math_len);
-                        if (math_ast.item != ITEM_NULL) {
-                            elem.attr("ast", math_ast);
+                            // Deep parse the math content using tree-sitter-latex-math
+                            Item math_ast = parse_math_to_ast(ctx, math_src, math_len);
+                            if (math_ast.item != ITEM_NULL) {
+                                elem.attr("ast", math_ast);
+                            }
+
+                            seq.child(elem.final());
+                            found_any_math = true;
                         }
-
-                        seq.child(elem.final());
                     }
                 }
 
-                return seq.final();
+                if (found_any_math) {
+                    return seq.final();
+                }
+                // If no valid math found, fall through to other error recovery
             }
 
             // Check if this ERROR contains comment-related content
