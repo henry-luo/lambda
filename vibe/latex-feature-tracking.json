@@ -95,9 +95,9 @@
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_inline_content",
           "coding_note": "Verbatim preserves literal text. Starred version shows spaces as ␣",
-          "coding_status": "failed",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_8", "note": "\\verb|verbatim|, \\verb/Any{thing/, \\verb*-spaces-", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_8", "note": "\\verb|verbatim|, \\verb/Any{thing/, \\verb*-spaces-", "status": "passed"}
           ]
         },
         {
@@ -271,14 +271,14 @@
           "description": "Unordered lists: \\begin{itemize} \\item ... \\end{itemize}",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_list_environment, build_list_item, process_list_content",
-          "coding_note": "Creates ul elements with li items and bullet markers",
-          "coding_status": "failed",
+          "coding_note": "Creates ul elements with li items and bullet markers. Empty lists now render correctly.",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_2", "note": "itemize with paragraphs in items", "status": "failed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_3", "note": "Empty and consecutive itemize", "status": "failed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_4", "note": "Nested itemize", "status": "failed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_5", "note": "Nested itemize (II)", "status": "failed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_6", "note": "Custom item labels", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_2", "note": "itemize with paragraphs in items", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_3", "note": "Empty and consecutive itemize", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_4", "note": "Nested itemize", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_5", "note": "Nested itemize (II)", "status": "passed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_6", "note": "Custom item labels \\item[label]", "status": "passed"}
           ]
         },
         {
@@ -286,10 +286,10 @@
           "description": "Ordered lists: \\begin{enumerate} \\item ... \\end{enumerate}",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_list_environment, build_list_item",
-          "coding_note": "Creates ol elements with numbered items",
-          "coding_status": "failed",
+          "coding_note": "Creates ol elements with numbered items. Custom labels via \\item[label] supported with font styling.",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_7", "note": "enumerate with custom labels", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_7", "note": "enumerate with custom labels and font styling", "status": "passed"}
           ]
         },
         {
@@ -297,22 +297,22 @@
           "description": "Description lists: \\begin{description} \\item[term] ... \\end{description}",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_list_environment, build_list_item",
-          "coding_note": "Creates dl elements with dt/dd pairs",
-          "coding_status": "failed",
+          "coding_note": "Creates ul with bold term labels rendered via html_label field",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_8", "note": "description list with terms", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_8", "note": "description list with terms", "status": "passed"}
           ]
         },
         {
           "feature": "quote-environments",
           "description": "Block quotes: quote, quotation, verse environments",
           "code_file": "lambda/tex/tex_document_model.cpp",
-          "code_function": "build_blockquote_environment",
-          "coding_note": "Creates div containers with appropriate CSS classes",
-          "coding_status": "failed",
+          "code_function": "build_alignment_environment",
+          "coding_note": "Uses ALIGNMENT element with env_name for rendering as <div class='list quote/quotation/verse'>. Verse whitespace after <br> still needs work.",
+          "coding_status": "partial",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_9", "note": "quote, quotation, verse", "status": "failed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_10", "note": "font environments nested in quote", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_9", "note": "quote, quotation, verse - verse whitespace after br failing", "status": "failed"},
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_10", "note": "font environments - leading/trailing whitespace issue", "status": "failed"}
           ]
         },
         {
@@ -330,11 +330,11 @@
           "feature": "alignment-in-lists",
           "description": "Alignment environments containing lists, alignment commands in lists",
           "code_file": "lambda/tex/tex_document_model.cpp",
-          "code_function": "build_alignment_environment, build_list_environment",
-          "coding_note": "center environment should not center list content, but \\centering should",
-          "coding_status": "failed",
+          "code_function": "build_alignment_environment, build_alignment_content, build_list_environment",
+          "coding_note": "Nested lists inside center now render correctly. \\centering inside itemize still needs alignment propagation.",
+          "coding_status": "partial",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_12", "note": "center env with itemize, \\centering in itemize", "status": "failed"}
+            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_12", "note": "center with nested itemize works, \\centering in items needs work", "status": "failed"}
           ]
         },
         {
@@ -634,12 +634,13 @@
     }
   ],
   "summary": {
-    "total_baseline_tests": 32,
-    "total_extended_tests": 28,
-    "baseline_passed": 32,
+    "total_baseline_tests": 45,
+    "total_extended_tests": 15,
+    "baseline_passed": 45,
     "extended_passed": 0,
-    "extended_failed": 23,
+    "extended_failed": 10,
     "extended_skipped": 5
   },
-  "last_updated": "2026-01-16"
+  "last_updated": "2026-01-17",
+  "session_notes": "Fixed empty itemize, custom item labels, enumerate/description lists. Added block element handling in alignment content. Skipping empty paragraphs in render."
 }
