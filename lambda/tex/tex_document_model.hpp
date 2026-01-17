@@ -222,8 +222,10 @@ struct DocElement {
         
         // For LIST_ITEM
         struct {
-            const char* label;      // For description items
+            const char* label;      // For description items (plain text)
+            const char* html_label; // Pre-rendered HTML label (for custom labels like \item[\itshape text])
             int item_number;        // For enumerate items
+            bool has_custom_label;  // True if \item[...] was used (even if empty)
         } list_item;
         
         // For TABLE
@@ -253,6 +255,11 @@ struct DocElement {
             const char* href;
             const char* link_text;  // Renamed from 'text' to avoid conflict
         } link;
+        
+        // For ALIGNMENT (center, flushleft, flushright, quote, quotation, verse)
+        struct {
+            const char* env_name;   // "center", "quote", etc.
+        } alignment;
         
         // For MATH_* types - pre-typeset TexNode
         struct {

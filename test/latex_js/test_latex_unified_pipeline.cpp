@@ -362,14 +362,24 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "text_4",    // UTF-8, punctuation, TeX symbols
     "text_5",    // empty diacritics
     "text_6",
+    "text_7",    // ligatures and ligature prevention
+    "text_8",    // verbatim text
     "text_9",    // French quotes
     // environments.tex - partial
     "environments_1",
+    "environments_2",  // itemize with parbreaks in items
+    "environments_3",  // empty and consecutive itemize environments
+    "environments_4",  // nested itemize
+    "environments_5",  // nested itemize II
+    "environments_6",  // custom item labels \item[label]
+    "environments_7",  // enumerate with custom labels
+    "environments_8",  // description lists
     "environments_11",
     // whitespace.tex - partial
     "whitespace_1",   // \par command paragraph breaks
     "whitespace_2",   // \par and ~ handling
     "whitespace_3",
+    "whitespace_4",   // linebreaks \unskip trailing space
     "whitespace_9",   // multiple newlines collapsing
     "whitespace_10",  // spaces between environments
     "whitespace_11",  // comment line joining (Supercal%ifragilist)
