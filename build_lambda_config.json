@@ -23,7 +23,8 @@
     "source_files": [],
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
-        "radiant/radiant.cpp"
+        "radiant/radiant.cpp",
+        "lambda/format/format_latex_html_v2.cpp"
     ],
     "includes": [
         ".",
@@ -255,6 +256,10 @@
             "source_patterns": [
                 "lambda/input/input*.cpp",
                 "lambda/format/format*.cpp"
+            ],
+            "exclude_patterns": [
+                "lambda/format/format_latex_html.cpp",
+                "lambda/format/format_latex_html_v2.cpp"
             ],
             "source_files": [
                 "lambda/print.cpp",
@@ -2151,29 +2156,6 @@
                         "icon": "🔒"
                     },
                     {
-                        "source": "test/latex/test_latex_html_v2_baseline.cpp",
-                        "name": "LaTeX to HTML V2 Baseline Tests",
-                        "category": "extended",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_html_v2_baseline.exe",
-                        "additional_sources": [
-                            "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp"
-                        ],
-                        "includes": [
-                            "test/latex"
-                        ],
-                        "special_flags": "-std=c++17 -I/opt/homebrew/include",
-                        "icon": "✨"
-                    },
-                    {
                         "source": "test/latex_js/test_latex_unified_pipeline.cpp",
                         "name": "Unified LaTeX Pipeline Tests",
                         "category": "extended",
@@ -2199,110 +2181,6 @@
                         ],
                         "special_flags": "-std=c++17 -I/opt/homebrew/include",
                         "icon": "🔄"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_lists_envs.cpp",
-                        "name": "LaTeX-to-HTML V2: Lists & Environments Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_lists_envs.exe",
-                        "icon": "📋"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_tables.cpp",
-                        "name": "LaTeX-to-HTML V2: Tables Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_tables.exe",
-                        "icon": "📊"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_floats.cpp",
-                        "name": "LaTeX HTML V2 Floats Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_floats.exe",
-                        "icon": "🖼️"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_special_chars.cpp",
-                        "name": "LaTeX HTML V2 Special Characters Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_special_chars.exe",
-                        "icon": "🔣"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_bibliography.cpp",
-                        "name": "LaTeX HTML V2 Bibliography Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_bibliography.exe",
-                        "icon": "📚"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_graphics_color.cpp",
-                        "name": "LaTeX HTML V2 Graphics & Color Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_graphics_color.exe",
-                        "icon": "🎨"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_macros.cpp",
-                        "name": "LaTeX HTML V2 Macros Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_macros.exe",
-                        "icon": "🔧"
-                    },
-                    {
-                        "source": "test/test_latex_html_v2_new_commands.cpp",
-                        "name": "LaTeX HTML V2 New Commands Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_latex_html_v2_new_commands.exe",
-                        "icon": "✨"
                     }
                 ],
                 "type": "input",
@@ -3016,29 +2894,6 @@
                             "gtest_main"
                         ],
                         "icon": "🐑"
-                    },
-                    {
-                        "source": "test/test_html_parity.cpp",
-                        "name": "HTML Parity Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_html_parity.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_document_model.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "defines": [
-                            "DOC_MODEL_NO_SVG"
-                        ],
-                        "icon": "🔄"
                     }
                 ],
                 "type": "extended",
