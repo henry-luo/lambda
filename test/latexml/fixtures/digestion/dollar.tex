@@ -1,0 +1,52 @@
+\documentclass{article}
+\begin{document}
+
+\hbox{t $m$ t}
+
+\hbox{t $$t$$ t}
+
+Footnote\footnote{t $m$ t}
+Another\footnote{t $$m$$ t}
+
+\begin{minipage}{3in}
+t $$m$$ t
+\end{minipage}
+
+\hbox{\begin{minipage}{3in}
+t $$m$$ t
+\end{minipage}}
+
+\parbox{3in}{t $$m$$ t}
+
+\hbox{\parbox{3in}{t $$m$$ t}}
+
+Note that dollar inside equation, etc.~fails.
+% \[ m {\rm $t$ } m \]
+
+% \[ m $$m$$ m \]
+
+\mbox{t $m$ t}
+
+\mbox{t $$t$$ t}
+
+\[ a + \mbox{t $m$ t}  + c \]
+
+\[ a + \mbox{t $$t$$ t}  + c \]
+
+\[ a + \makebox{t $m$ t}  + c \]
+
+\[ a + \makebox{t $$t$$ t}  + c \]
+
+Base\raisebox{1em}{t $m$ t}
+
+Base\raisebox{1em}{t $$t$$ t}
+
+Base\shortstack{t\\ $m$\\ t}
+
+Base\shortstack{t\\$$t$$\\ t}
+
+
+\end{document}
+
+
+
