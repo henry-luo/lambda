@@ -1,0 +1,127 @@
+\documentclass{article}
+\def\assigned{[Assigned!]}
+\def\alsoassigned{[Also Assigned!]}
+\def\grouped{[Grouped!]}
+\def\alsogrouped{[Also Grouped!]}
+\def\one{[One]}
+\def\two{[Two]}
+\def\three{[Three]}
+
+\newbox\ABox
+\newcount\mycounter\mycounter=0
+\begin{document}
+\section{AfterAssignment}
+
+def:\afterassignment\assigned
+\def\foo{[foo]}
+
+let:\afterassignment\assigned
+\let\bax\foo
+
+futurelet:\afterassignment\assigned
+\futurelet\bax\one\two\three\bax
+
+chardef:\afterassignment\assigned
+\chardef\beep=10
+
+mathchardef:\afterassignment\assigned
+\mathchardef\bah=1000
+
+\makeatletter
+@ifundefined:
+\afterassignment\assigned
+\@ifundefined{quirks}{No quirks}{Have quirks}
+\makeatother
+
+csname:\afterassignment\assigned
+\csname nothingatall \endcsname
+
+{{{\afterassignment\assigned}}}
+counter:\mycounter=1\relax\the\mycounter
+counter:\mycounter=2\relax\the\mycounter
+
+
+{
+\afterassignment\assigned
+counter:\mycounter=3\relax\the\mycounter
+counter:\mycounter=4\relax\the\mycounter
+}
+
+
+{
+\afterassignment\assigned
+\afterassignment\alsoassigned
+counter:\mycounter=5\relax\the\mycounter
+counter:\mycounter=6\relax\the\mycounter
+}
+
+
+\afterassignment\assigned
+\setbox\ABox=\hbox{inside}
+setbox Before \copy\ABox After
+
+\setbox\ABox=\hbox{inside}
+Again setbox Before \copy\ABox After
+
+
+\afterassignment\alsoassigned
+Before \hbox{inside} After\mycounter=99
+
+\section{AfterGroup}
+before { middle } after
+
+before { \aftergroup\grouped middle } after
+
+not {\em emphasized} not
+
+\subsection{AfterGroup in Environments}
+\begin{quote}
+before \em  after
+\end{quote}
+
+\begin{quote}
+before \aftergroup\grouped after
+\end{quote}
+
+\section{vadjust}
+Paragraph\vadjust{X}, More.
+
+Another paragraph.
+
+\section{Every Box}
+
+\def\HBox{ HBOX }
+\def\VBox{ VBOX }
+
+\vbox{\hbox{An Hbox}\hbox{Another Hbox}}
+
+\everyhbox={\HBox}
+\everyvbox={\VBox}
+\vbox{\hbox{An Hbox}\hbox{Another Hbox}}
+
+\everyhbox={}
+\everyvbox={}
+
+\section{Every Math/Display}
+{
+ \everymath={\rightarrow}
+ $a+b$
+ \begin{math} a + b \end{math}
+ $$a+b$$
+\[a+b\]
+ \begin{displaymath} a + b \end{displaymath}
+ \begin{equation} a + b \end{equation}
+}
+{
+ \everydisplay={\rightarrow}
+ $a+b$
+ \begin{math} a + b \end{math}
+ $$a+b$$
+\[a+b\]
+ \begin{displaymath} a + b \end{displaymath}
+ \begin{equation} a + b \end{equation}
+}
+
+% $ a + \everymath={} b$
+
+\end{document}
