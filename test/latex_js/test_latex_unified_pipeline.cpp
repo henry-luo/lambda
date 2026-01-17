@@ -369,8 +369,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "text_7",    // ligatures and ligature prevention
     "text_8",    // verbatim text
     "text_9",    // French quotes
-    // Note: text_10 (alignment) requires paragraph alignment scoping (\centering,
-    // \raggedright) with complex group and paragraph boundary tracking - not yet implemented
+    "text_10",   // paragraph alignment (\centering, \raggedright, \raggedleft)
     // environments.tex - partial
     "environments_1",
     "environments_2",  // itemize with parbreaks in items
@@ -381,8 +380,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "environments_7",  // enumerate with custom labels
     "environments_8",  // description lists
     "environments_9",  // quote, quotation, verse
-    // Note: environments_10 (font environments) has cosmetic whitespace differences
-    // due to latex.js pretty-printing inside <p> tags - demoted to extended
+    "environments_10", // font environments (small, bfseries nesting)
     "environments_11",
     "environments_12",  // \centering inside list items
     "environments_14",  // comment environment (inline _seq handling)
@@ -451,7 +449,29 @@ static std::string normalize_html(const std::string& s) {
         }
         final_result += result[i];
     }
-    return final_result;
+    // Strip leading/trailing whitespace inside <p> tags
+    // Pattern: "<p>" followed by space, or space followed by "</p>"
+    std::string cleaned;
+    for (size_t i = 0; i < final_result.size(); i++) {
+        // Check for "<p> " pattern - skip the space after <p>
+        if (i + 3 < final_result.size() &&
+            final_result[i] == '<' && final_result[i+1] == 'p' && final_result[i+2] == '>' &&
+            final_result[i+3] == ' ') {
+            cleaned += "<p>";
+            i += 3;  // skip the space (loop will increment i again)
+            continue;
+        }
+        // Check for " </p>" pattern - skip the space before </p>
+        if (i + 4 < final_result.size() &&
+            final_result[i] == ' ' &&
+            final_result[i+1] == '<' && final_result[i+2] == '/' && 
+            final_result[i+3] == 'p' && final_result[i+4] == '>') {
+            // skip this space, next iteration will add </p>
+            continue;
+        }
+        cleaned += final_result[i];
+    }
+    return cleaned;
 }
 
 // ============================================================================
