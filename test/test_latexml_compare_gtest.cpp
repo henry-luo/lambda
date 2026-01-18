@@ -939,6 +939,344 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 // ============================================================================
+// Hybrid Mode Test Suite
+// Tests Lambda's hybrid HTML output against .html reference files
+// Hybrid mode uses semantic HTML5 elements without CSS class prefixes
+// ============================================================================
+
+class HybridFixturesTest : public LaTeXMLCompareTest {
+public:
+    static fs::path hybrid_fixtures_dir;
+    static fs::path hybrid_expected_dir;
+    static std::vector<std::string> hybrid_test_files;
+    
+    // Get list of hybrid test files (latexjs fixtures that have .html refs)
+    static std::vector<std::string> get_hybrid_test_files() {
+        std::vector<std::string> files;
+        fs::path fixtures_dir = "test/latexml/fixtures/latexjs";
+        fs::path expected_dir = "test/latexml/expected/latexjs";
+        
+        if (!fs::exists(fixtures_dir)) {
+            return files;
+        }
+        
+        for (const auto& entry : fs::recursive_directory_iterator(fixtures_dir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".tex") {
+                fs::path rel = fs::relative(entry.path(), fixtures_dir);
+                // Check if hybrid reference exists
+                fs::path ref_path = expected_dir / rel;
+                ref_path.replace_extension(".html");
+                if (fs::exists(ref_path)) {
+                    files.push_back(rel.string());
+                }
+            }
+        }
+        
+        std::sort(files.begin(), files.end());
+        return files;
+    }
+};
+
+// Static member initialization
+fs::path HybridFixturesTest::hybrid_fixtures_dir = "test/latexml/fixtures/latexjs";
+fs::path HybridFixturesTest::hybrid_expected_dir = "test/latexml/expected/latexjs";
+std::vector<std::string> HybridFixturesTest::hybrid_test_files;
+
+// Baseline hybrid tests - same fixtures as latexjs baseline, except sectioning (different heading format)
+static bool is_hybrid_baseline(const std::string& rel_path) {
+    // Exclude sectioning tests from hybrid baseline - heading format differs by design
+    if (rel_path.find("sectioning/") == 0) {
+        return false;
+    }
+    return is_latexjs_baseline(rel_path);  // Reuse the same baseline list otherwise
+}
+
+// Helper to normalize HTML for hybrid comparison
+static std::string normalize_for_hybrid(const std::string& s) {
+    std::string result;
+    bool in_whitespace = false;
+    for (char c : s) {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            if (!in_whitespace && !result.empty()) {
+                result += ' ';
+                in_whitespace = true;
+            }
+        } else {
+            result += c;
+            in_whitespace = false;
+        }
+    }
+    
+    // Trim trailing whitespace
+    while (!result.empty() && result.back() == ' ') {
+        result.pop_back();
+    }
+    
+    // Remove whitespace between tags
+    std::string no_tag_space;
+    for (size_t i = 0; i < result.size(); i++) {
+        if (result[i] == ' ' && i > 0 && i + 1 < result.size() &&
+            result[i - 1] == '>' && result[i + 1] == '<') {
+            continue;  // skip space between tags
+        }
+        no_tag_space += result[i];
+    }
+    
+    // Strip whitespace inside paragraph tags
+    std::string cleaned;
+    for (size_t i = 0; i < no_tag_space.size(); i++) {
+        // Skip space after <p> or <p class="...">
+        if (i + 3 < no_tag_space.size() &&
+            no_tag_space[i] == '<' && no_tag_space[i+1] == 'p' && no_tag_space[i+2] == '>' &&
+            no_tag_space[i+3] == ' ') {
+            cleaned += "<p>";
+            i += 3;
+            continue;
+        }
+        if (i + 2 < no_tag_space.size() &&
+            no_tag_space[i] == '>' && no_tag_space[i+1] == ' ' && i > 0) {
+            size_t tag_start = no_tag_space.rfind('<', i);
+            if (tag_start != std::string::npos && i - tag_start < 50) {
+                std::string tag_content = no_tag_space.substr(tag_start, i - tag_start + 1);
+                if (tag_content.find("<p") == 0 || tag_content.find("<p ") == 0) {
+                    cleaned += '>';
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+        // Skip space before </p>
+        if (i + 4 < no_tag_space.size() &&
+            no_tag_space[i] == ' ' &&
+            no_tag_space[i+1] == '<' && no_tag_space[i+2] == '/' && 
+            no_tag_space[i+3] == 'p' && no_tag_space[i+4] == '>') {
+            continue;
+        }
+        cleaned += no_tag_space[i];
+    }
+    
+    // Remove empty hbox/mbox spans (Lambda outputs these but they're semantically empty)
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<span class="hbox"><span></span></span>)"), "");
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<span class="hbox llap"><span></span></span>)"), "");
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<span class="mbox"><span></span></span>)"), "");
+    
+    // Normalize code tags: <code class="tt"> -> <code> for hybrid comparison
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<code class="tt">)"), "<code>");
+    
+    return cleaned;
+}
+
+// Generate parameter values for hybrid baseline fixtures
+std::vector<std::string> GetHybridBaselineFiles() {
+    std::vector<std::string> all = HybridFixturesTest::get_hybrid_test_files();
+    std::vector<std::string> baseline;
+    for (const auto& f : all) {
+        if (is_hybrid_baseline(f)) {
+            baseline.push_back(f);
+        }
+    }
+    return baseline;
+}
+
+// Generate parameter values for hybrid extended fixtures
+std::vector<std::string> GetHybridExtendedFiles() {
+    std::vector<std::string> all = HybridFixturesTest::get_hybrid_test_files();
+    std::vector<std::string> extended;
+    for (const auto& f : all) {
+        if (!is_hybrid_baseline(f)) {
+            extended.push_back(f);
+        }
+    }
+    return extended;
+}
+
+// Baseline hybrid test suite - must all pass
+class HybridBaselineParamTest : public HybridFixturesTest,
+                                 public ::testing::WithParamInterface<std::string> {
+};
+
+TEST_P(HybridBaselineParamTest, CompareAgainstHybridRef) {
+    std::string rel_path = GetParam();
+    
+    // Build paths
+    fs::path tex_path = hybrid_fixtures_dir / rel_path;
+    fs::path expected_path = hybrid_expected_dir / rel_path;
+    expected_path.replace_extension(".html");  // Hybrid refs use .html
+    
+    // Check if files exist
+    ASSERT_TRUE(fs::exists(tex_path)) << "Fixture not found: " << tex_path;
+    
+    // Read LaTeX source
+    std::string latex_content = read_file(tex_path);
+    ASSERT_FALSE(latex_content.empty()) << "Empty LaTeX file: " << tex_path;
+    
+    // Check for SKIP marker in source
+    if (latex_content.find("% SKIP:") != std::string::npos) {
+        GTEST_SKIP() << "Marked as SKIP in fixture";
+    }
+    
+    // Convert using Lambda pipeline in HYBRID mode
+    Pool* doc_pool = pool_create();
+    Arena* doc_arena = arena_create_default(doc_pool);
+    
+    tex::TexDocumentModel* doc = tex::doc_model_from_string(
+        latex_content.c_str(), latex_content.size(), doc_arena, nullptr);
+    
+    std::string lambda_html;
+    if (doc && doc->root) {
+        StrBuf* html_buf = strbuf_new_cap(8192);
+        tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::hybrid();
+        opts.standalone = false;
+        opts.pretty_print = false;
+        
+        bool success = tex::doc_model_to_html(doc, html_buf, opts);
+        if (success && html_buf->length > 0) {
+            lambda_html = std::string(html_buf->str, html_buf->length);
+        }
+        strbuf_free(html_buf);
+    }
+    
+    arena_destroy(doc_arena);
+    pool_destroy(doc_pool);
+    
+    // If we got no output, that's a failure
+    if (lambda_html.empty()) {
+        fs::path lambda_out = "test_output/hybrid/" + rel_path;
+        lambda_out.replace_extension(".lambda.html");
+        write_file(lambda_out, "<!-- Lambda conversion failed -->\n");
+        FAIL() << "Lambda failed to convert: " << rel_path;
+    }
+    
+    // Save Lambda output for debugging
+    fs::path lambda_out = "test_output/hybrid/" + rel_path;
+    lambda_out.replace_extension(".lambda.html");
+    write_file(lambda_out, lambda_html);
+    
+    // Check if expected file exists
+    if (!fs::exists(expected_path)) {
+        GTEST_SKIP() << "Expected output not found: " << expected_path;
+    }
+    
+    // Read expected HTML
+    std::string expected_html = read_file(expected_path);
+    
+    // Normalize both for comparison
+    std::string norm_lambda = normalize_for_hybrid(lambda_html);
+    std::string norm_expected = normalize_for_hybrid(expected_html);
+    
+    EXPECT_EQ(norm_expected, norm_lambda)
+        << "\n=== HYBRID BASELINE Fixture: " << rel_path << " ==="
+        << "\n=== Expected HTML ===\n" << expected_html
+        << "\n=== Actual HTML ===\n" << lambda_html;
+}
+
+// Extended hybrid test suite - work in progress
+class HybridExtendedParamTest : public HybridFixturesTest,
+                                 public ::testing::WithParamInterface<std::string> {
+};
+
+TEST_P(HybridExtendedParamTest, CompareAgainstHybridRef) {
+    std::string rel_path = GetParam();
+    
+    // Build paths
+    fs::path tex_path = hybrid_fixtures_dir / rel_path;
+    fs::path expected_path = hybrid_expected_dir / rel_path;
+    expected_path.replace_extension(".html");
+    
+    // Check if files exist
+    ASSERT_TRUE(fs::exists(tex_path)) << "Fixture not found: " << tex_path;
+    
+    // Read LaTeX source
+    std::string latex_content = read_file(tex_path);
+    ASSERT_FALSE(latex_content.empty()) << "Empty LaTeX file: " << tex_path;
+    
+    // Check for SKIP marker in source
+    if (latex_content.find("% SKIP:") != std::string::npos) {
+        GTEST_SKIP() << "Marked as SKIP in fixture";
+    }
+    
+    // Convert using Lambda pipeline in HYBRID mode
+    Pool* doc_pool = pool_create();
+    Arena* doc_arena = arena_create_default(doc_pool);
+    
+    tex::TexDocumentModel* doc = tex::doc_model_from_string(
+        latex_content.c_str(), latex_content.size(), doc_arena, nullptr);
+    
+    std::string lambda_html;
+    if (doc && doc->root) {
+        StrBuf* html_buf = strbuf_new_cap(8192);
+        tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::hybrid();
+        opts.standalone = false;
+        opts.pretty_print = false;
+        
+        bool success = tex::doc_model_to_html(doc, html_buf, opts);
+        if (success && html_buf->length > 0) {
+            lambda_html = std::string(html_buf->str, html_buf->length);
+        }
+        strbuf_free(html_buf);
+    }
+    
+    arena_destroy(doc_arena);
+    pool_destroy(doc_pool);
+    
+    // If we got no output, that's a failure
+    if (lambda_html.empty()) {
+        fs::path lambda_out = "test_output/hybrid/" + rel_path;
+        lambda_out.replace_extension(".lambda.html");
+        write_file(lambda_out, "<!-- Lambda conversion failed -->\n");
+        FAIL() << "Lambda failed to convert: " << rel_path;
+    }
+    
+    // Save Lambda output for debugging
+    fs::path lambda_out = "test_output/hybrid/" + rel_path;
+    lambda_out.replace_extension(".lambda.html");
+    write_file(lambda_out, lambda_html);
+    
+    // Check if expected file exists
+    if (!fs::exists(expected_path)) {
+        GTEST_SKIP() << "Expected output not found: " << expected_path;
+    }
+    
+    // Read expected HTML
+    std::string expected_html = read_file(expected_path);
+    
+    // Normalize both for comparison
+    std::string norm_lambda = normalize_for_hybrid(lambda_html);
+    std::string norm_expected = normalize_for_hybrid(expected_html);
+    
+    EXPECT_EQ(norm_expected, norm_lambda)
+        << "\n=== HYBRID EXTENDED Fixture: " << rel_path << " ==="
+        << "\n=== Expected HTML ===\n" << expected_html
+        << "\n=== Actual HTML ===\n" << lambda_html;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    HybridBaseline,
+    HybridBaselineParamTest,
+    ::testing::ValuesIn(GetHybridBaselineFiles()),
+    [](const ::testing::TestParamInfo<std::string>& info) {
+        std::string name = info.param;
+        std::replace(name.begin(), name.end(), '/', '_');
+        std::replace(name.begin(), name.end(), '.', '_');
+        std::replace(name.begin(), name.end(), '-', '_');
+        return name;
+    }
+);
+
+INSTANTIATE_TEST_SUITE_P(
+    HybridExtended,
+    HybridExtendedParamTest,
+    ::testing::ValuesIn(GetHybridExtendedFiles()),
+    [](const ::testing::TestParamInfo<std::string>& info) {
+        std::string name = info.param;
+        std::replace(name.begin(), name.end(), '/', '_');
+        std::replace(name.begin(), name.end(), '.', '_');
+        std::replace(name.begin(), name.end(), '-', '_');
+        return name;
+    }
+);
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -948,6 +1286,7 @@ int main(int argc, char** argv) {
     // Initialize test file lists
     LaTeXMLCompareTest::test_files = LaTeXMLCompareTest::get_test_files();
     LatexJsFixturesTest::latexjs_test_files = LatexJsFixturesTest::get_latexjs_test_files();
+    HybridFixturesTest::hybrid_test_files = HybridFixturesTest::get_hybrid_test_files();
     
     std::cout << "LaTeXML Comparison Tests" << std::endl;
     std::cout << "========================" << std::endl;
@@ -960,6 +1299,12 @@ int main(int argc, char** argv) {
     std::cout << "Fixtures: " << LatexJsFixturesTest::latexjs_fixtures_dir << std::endl;
     std::cout << "Expected: " << LatexJsFixturesTest::latexjs_expected_dir << std::endl;
     std::cout << "Test files: " << LatexJsFixturesTest::latexjs_test_files.size() << std::endl;
+    std::cout << std::endl;
+    std::cout << "Hybrid Mode Fixtures" << std::endl;
+    std::cout << "--------------------" << std::endl;
+    std::cout << "Fixtures: " << HybridFixturesTest::hybrid_fixtures_dir << std::endl;
+    std::cout << "Expected: " << HybridFixturesTest::hybrid_expected_dir << std::endl;
+    std::cout << "Test files: " << HybridFixturesTest::hybrid_test_files.size() << std::endl;
     std::cout << std::endl;
     
     return RUN_ALL_TESTS();
