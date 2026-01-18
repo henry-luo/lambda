@@ -1,0 +1,19 @@
+% counters
+\newcounter{c}
+\stepcounter{c}
+\thec: \roman{c}
+
+\addtocounter{c}{3 * -(2+1)}    % 1 - 9
+\arabic{c}
+
+\setcounter{c}{ 3*\real{1.6} * \real{1.7 } + -- 2 }
+\thec: \Roman{c}
+
+\the\value{c}
+
+\newcounter{a}[c]
+\setcounter{a}{\value{c}}
+
+\stepcounter{c}
+\arabic{a}          % should be reset now due to stepcounter
+\fnsymbol{c}

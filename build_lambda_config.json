@@ -2935,6 +2935,52 @@
                             "."
                         ],
                         "icon": "🔗"
+                    },
+                    {
+                        "source": "test/test_latexml_compare_gtest.cpp",
+                        "name": "LaTeXML Comparison Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "rpmalloc",
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
+                        ],
+                        "binary": "test_latexml_compare_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_document_model.cpp",
+                            "lambda/tex/tex_latex_bridge.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp",
+                            "lambda/tex/tex_catcode.cpp",
+                            "lambda/tex/tex_token.cpp",
+                            "lambda/tex/tex_tokenizer.cpp",
+                            "lambda/tex/tex_expander.cpp",
+                            "lambda/tex/tex_digester.cpp",
+                            "lambda/tex/tex_macro.cpp",
+                            "lambda/tex/tex_conditional.cpp",
+                            "lambda/tex/tex_package_json.cpp",
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_glue.hpp",
+                            "lambda/tex/tex_math_ts.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_font_adapter.cpp",
+                            "lambda/tex/tex_event.cpp",
+                            "lambda/tex/tex_align.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔬"
                     }
                 ],
                 "type": "tex",

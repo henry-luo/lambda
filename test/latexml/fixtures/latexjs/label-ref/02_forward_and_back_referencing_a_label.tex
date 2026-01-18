@@ -1,0 +1,8 @@
+% forward- and back-referencing a label
+\newcounter{c}
+
+Here is some text with two forward references: \ref{test} and \ref{test}.
+\refstepcounter{c}
+Now there is more.
+
+This \label{test} is counter c:~\ref{test}. And another~\ref{test}.
