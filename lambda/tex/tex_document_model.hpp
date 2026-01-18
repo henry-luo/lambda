@@ -366,6 +366,7 @@ struct TexDocumentModel {
         const char* name;
         int num_args;
         const char* replacement;
+        const char* params;  // Parameter format string e.g. "[]{}[]"
     };
     MacroDef* macros;
     int macro_count;
@@ -387,7 +388,7 @@ struct TexDocumentModel {
     // Methods
     void add_label(const char* label, const char* ref_text, int page);
     const char* resolve_ref(const char* label) const;
-    void add_macro(const char* name, int num_args, const char* replacement);
+    void add_macro(const char* name, int num_args, const char* replacement, const char* params = nullptr);
     const MacroDef* find_macro(const char* name) const;
     void add_bib_entry(const char* key, const char* formatted);
     const char* resolve_cite(const char* key) const;
