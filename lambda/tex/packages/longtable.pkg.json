@@ -1,0 +1,143 @@
+{
+  "name": "longtable",
+  "version": "4.17",
+  "description": "Allow tables to flow over page boundaries",
+  "requires": ["latex_base", "array"],
+  
+  "commands": {
+    "endhead": {
+      "type": "primitive",
+      "params": "",
+      "description": "End header (repeated on each page)",
+      "pattern": ""
+    },
+    "endfirsthead": {
+      "type": "primitive",
+      "params": "",
+      "description": "End first page header",
+      "pattern": ""
+    },
+    "endfoot": {
+      "type": "primitive",
+      "params": "",
+      "description": "End footer (repeated on each page)",
+      "pattern": ""
+    },
+    "endlastfoot": {
+      "type": "primitive",
+      "params": "",
+      "description": "End last page footer",
+      "pattern": ""
+    },
+    "kill": {
+      "type": "primitive",
+      "params": "",
+      "description": "Use row for width calculation only",
+      "pattern": ""
+    },
+    "caption": {
+      "type": "constructor",
+      "params": "*[]{}",
+      "description": "Table caption",
+      "pattern": "<caption starred=\"#1\" short=\"#2\">#3</caption>"
+    },
+    "tabularnewline": {
+      "type": "primitive",
+      "params": "[]",
+      "description": "End row (alternative to \\\\)",
+      "pattern": ""
+    },
+    "LTleft": {
+      "type": "primitive",
+      "params": "",
+      "description": "Left skip for table",
+      "pattern": ""
+    },
+    "LTright": {
+      "type": "primitive",
+      "params": "",
+      "description": "Right skip for table",
+      "pattern": ""
+    },
+    "LTpre": {
+      "type": "primitive",
+      "params": "",
+      "description": "Space before table",
+      "pattern": ""
+    },
+    "LTpost": {
+      "type": "primitive",
+      "params": "",
+      "description": "Space after table",
+      "pattern": ""
+    },
+    "LTcapwidth": {
+      "type": "primitive",
+      "params": "",
+      "description": "Caption width",
+      "pattern": ""
+    },
+    "LTchunksize": {
+      "type": "primitive",
+      "params": "",
+      "description": "Number of rows per chunk",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "longtable": {
+      "description": "Multi-page table",
+      "begin": "<longtable cols=\"#1\">",
+      "end": "</longtable>",
+      "params": "[]{}",
+      "structure": {
+        "first_head": "Rows before \\endfirsthead (first page only)",
+        "head": "Rows before \\endhead (continued pages)",
+        "body": "Main table content",
+        "foot": "Rows before \\endfoot (continued pages)",
+        "last_foot": "Rows before \\endlastfoot (last page only)"
+      }
+    },
+    "longtable*": {
+      "description": "Multi-page table, starred",
+      "begin": "<longtable starred=\"true\">",
+      "end": "</longtable>"
+    }
+  },
+  
+  "counters": {
+    "LTchunksize": {
+      "default": "20",
+      "description": "Rows processed per pass"
+    }
+  },
+  
+  "lengths": {
+    "LTleft": {
+      "default": "\\fill",
+      "description": "Space to left of table"
+    },
+    "LTright": {
+      "default": "\\fill",
+      "description": "Space to right of table"
+    },
+    "LTpre": {
+      "default": "\\bigskipamount",
+      "description": "Space before first chunk"
+    },
+    "LTpost": {
+      "default": "\\bigskipamount",
+      "description": "Space after last chunk"
+    },
+    "LTcapwidth": {
+      "default": "4in",
+      "description": "Width of caption"
+    }
+  },
+  
+  "notes": {
+    "compilation": "May require multiple LaTeX runs",
+    "floats": "Not a float environment - prints where placed"
+  }
+}

@@ -1,0 +1,1129 @@
+{
+  "name": "latex_base",
+  "version": "1.0",
+  "description": "LaTeX base commands",
+  "requires": ["tex_base"],
+  
+  "commands": {
+    "documentclass": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Document class declaration",
+      "callback": "latex_documentclass"
+    },
+    
+    "usepackage": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Load package",
+      "callback": "latex_usepackage"
+    },
+    
+    "part": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Part heading",
+      "pattern": "<part><title>#2</title>",
+      "counter": "part",
+      "properties": {
+        "level": -1,
+        "toc": true
+      }
+    },
+    "part*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Unnumbered part heading",
+      "pattern": "<part class=\"unnumbered\"><title>#1</title>",
+      "properties": {
+        "level": -1,
+        "numbered": false
+      }
+    },
+    
+    "chapter": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Chapter heading",
+      "pattern": "<chapter><title>#2</title>",
+      "counter": "chapter",
+      "properties": {
+        "level": 0,
+        "toc": true
+      }
+    },
+    "chapter*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Unnumbered chapter heading",
+      "pattern": "<chapter class=\"unnumbered\"><title>#1</title>",
+      "properties": {
+        "level": 0,
+        "numbered": false
+      }
+    },
+    
+    "section": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Section heading",
+      "pattern": "<section><title>#2</title>",
+      "counter": "section",
+      "properties": {
+        "level": 1,
+        "toc": true
+      }
+    },
+    "section*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Unnumbered section heading",
+      "pattern": "<section class=\"unnumbered\"><title>#1</title>",
+      "properties": {
+        "level": 1,
+        "numbered": false
+      }
+    },
+    
+    "subsection": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Subsection heading",
+      "pattern": "<subsection><title>#2</title>",
+      "counter": "subsection",
+      "properties": {
+        "level": 2,
+        "toc": true
+      }
+    },
+    "subsection*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Unnumbered subsection heading",
+      "pattern": "<subsection class=\"unnumbered\"><title>#1</title>",
+      "properties": {
+        "level": 2,
+        "numbered": false
+      }
+    },
+    
+    "subsubsection": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Subsubsection heading",
+      "pattern": "<subsubsection><title>#2</title>",
+      "counter": "subsubsection",
+      "properties": {
+        "level": 3,
+        "toc": true
+      }
+    },
+    "subsubsection*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Unnumbered subsubsection heading",
+      "pattern": "<subsubsection class=\"unnumbered\"><title>#1</title>",
+      "properties": {
+        "level": 3,
+        "numbered": false
+      }
+    },
+    
+    "paragraph": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Paragraph heading",
+      "pattern": "<paragraph><title>#2</title>",
+      "properties": {
+        "level": 4
+      }
+    },
+    
+    "subparagraph": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Subparagraph heading",
+      "pattern": "<subparagraph><title>#2</title>",
+      "properties": {
+        "level": 5
+      }
+    },
+    
+    "textbf": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Bold text",
+      "pattern": "<b>#1</b>"
+    },
+    "textit": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Italic text",
+      "pattern": "<i>#1</i>"
+    },
+    "texttt": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Monospace text",
+      "pattern": "<code>#1</code>"
+    },
+    "textrm": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Roman text",
+      "pattern": "<span class=\"rm\">#1</span>"
+    },
+    "textsf": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Sans-serif text",
+      "pattern": "<span class=\"sf\">#1</span>"
+    },
+    "textsc": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Small caps text",
+      "pattern": "<span class=\"sc\">#1</span>"
+    },
+    "textsl": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Slanted text",
+      "pattern": "<span class=\"sl\">#1</span>"
+    },
+    "textup": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Upright text",
+      "pattern": "<span class=\"up\">#1</span>"
+    },
+    "textnormal": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Normal text",
+      "pattern": "<span class=\"normal\">#1</span>"
+    },
+    "emph": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Emphasized text",
+      "pattern": "<em>#1</em>"
+    },
+    "underline": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Underlined text",
+      "pattern": "<u>#1</u>"
+    },
+    
+    "bfseries": {
+      "type": "primitive",
+      "description": "Switch to bold",
+      "callback": "latex_bfseries",
+      "font_style": "bold"
+    },
+    "mdseries": {
+      "type": "primitive",
+      "description": "Switch to medium weight",
+      "callback": "latex_mdseries",
+      "font_style": "medium"
+    },
+    "itshape": {
+      "type": "primitive",
+      "description": "Switch to italic",
+      "callback": "latex_itshape",
+      "font_style": "italic"
+    },
+    "upshape": {
+      "type": "primitive",
+      "description": "Switch to upright",
+      "callback": "latex_upshape",
+      "font_style": "upright"
+    },
+    "slshape": {
+      "type": "primitive",
+      "description": "Switch to slanted",
+      "callback": "latex_slshape",
+      "font_style": "slanted"
+    },
+    "scshape": {
+      "type": "primitive",
+      "description": "Switch to small caps",
+      "callback": "latex_scshape",
+      "font_style": "smallcaps"
+    },
+    "ttfamily": {
+      "type": "primitive",
+      "description": "Switch to monospace",
+      "callback": "latex_ttfamily",
+      "font_family": "monospace"
+    },
+    "rmfamily": {
+      "type": "primitive",
+      "description": "Switch to roman",
+      "callback": "latex_rmfamily",
+      "font_family": "roman"
+    },
+    "sffamily": {
+      "type": "primitive",
+      "description": "Switch to sans-serif",
+      "callback": "latex_sffamily",
+      "font_family": "sans-serif"
+    },
+    "normalfont": {
+      "type": "primitive",
+      "description": "Switch to normal font",
+      "callback": "latex_normalfont"
+    },
+    
+    "tiny": {
+      "type": "primitive",
+      "description": "Tiny font size",
+      "callback": "latex_fontsize",
+      "font_size": 5
+    },
+    "scriptsize": {
+      "type": "primitive",
+      "description": "Script font size",
+      "callback": "latex_fontsize",
+      "font_size": 7
+    },
+    "footnotesize": {
+      "type": "primitive",
+      "description": "Footnote font size",
+      "callback": "latex_fontsize",
+      "font_size": 8
+    },
+    "small": {
+      "type": "primitive",
+      "description": "Small font size",
+      "callback": "latex_fontsize",
+      "font_size": 9
+    },
+    "normalsize": {
+      "type": "primitive",
+      "description": "Normal font size",
+      "callback": "latex_fontsize",
+      "font_size": 10
+    },
+    "large": {
+      "type": "primitive",
+      "description": "Large font size",
+      "callback": "latex_fontsize",
+      "font_size": 12
+    },
+    "Large": {
+      "type": "primitive",
+      "description": "Larger font size",
+      "callback": "latex_fontsize",
+      "font_size": 14
+    },
+    "LARGE": {
+      "type": "primitive",
+      "description": "Very large font size",
+      "callback": "latex_fontsize",
+      "font_size": 17
+    },
+    "huge": {
+      "type": "primitive",
+      "description": "Huge font size",
+      "callback": "latex_fontsize",
+      "font_size": 20
+    },
+    "Huge": {
+      "type": "primitive",
+      "description": "Very huge font size",
+      "callback": "latex_fontsize",
+      "font_size": 25
+    },
+    
+    "label": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Set label for cross-reference",
+      "callback": "latex_label"
+    },
+    "ref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Reference to label",
+      "pattern": "<ref target=\"#1\"/>",
+      "callback": "latex_ref"
+    },
+    "pageref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Page reference to label",
+      "pattern": "<pageref target=\"#1\"/>"
+    },
+    "eqref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Equation reference (with parentheses)",
+      "pattern": "(<ref target=\"#1\"/>)"
+    },
+    
+    "footnote": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Footnote",
+      "pattern": "^<footnote>#1</footnote>",
+      "callback": "latex_footnote",
+      "counter": "footnote"
+    },
+    "footnotemark": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Footnote mark only",
+      "pattern": "<footnote-mark/>"
+    },
+    "footnotetext": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Footnote text only",
+      "pattern": "^<footnote-text>#2</footnote-text>"
+    },
+    
+    "item": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "List item",
+      "pattern": "?#1(<dt>#1</dt><dd>)(<li>)",
+      "callback": "latex_item"
+    },
+    
+    "caption": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Float caption",
+      "pattern": "<caption>#2</caption>",
+      "callback": "latex_caption"
+    },
+    
+    "title": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Document title",
+      "callback": "latex_store_title"
+    },
+    "author": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Document author",
+      "callback": "latex_store_author"
+    },
+    "date": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Document date",
+      "callback": "latex_store_date"
+    },
+    "thanks": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Author thanks",
+      "pattern": "<thanks>#1</thanks>"
+    },
+    "maketitle": {
+      "type": "constructor",
+      "description": "Generate title block",
+      "pattern": "<titlepage/>",
+      "callback": "latex_maketitle"
+    },
+    
+    "tableofcontents": {
+      "type": "constructor",
+      "description": "Table of contents",
+      "pattern": "<toc/>"
+    },
+    "listoffigures": {
+      "type": "constructor",
+      "description": "List of figures",
+      "pattern": "<lof/>"
+    },
+    "listoftables": {
+      "type": "constructor",
+      "description": "List of tables",
+      "pattern": "<lot/>"
+    },
+    
+    "hspace": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Horizontal space",
+      "pattern": "<hspace width=\"#1\"/>"
+    },
+    "hspace*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Horizontal space (not removed at line start)",
+      "pattern": "<hspace width=\"#1\" preserve=\"true\"/>"
+    },
+    "vspace": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Vertical space",
+      "pattern": "<vspace height=\"#1\"/>"
+    },
+    "vspace*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Vertical space (not removed at page start)",
+      "pattern": "<vspace height=\"#1\" preserve=\"true\"/>"
+    },
+    
+    "newline": {
+      "type": "constructor",
+      "description": "New line",
+      "pattern": "<br/>"
+    },
+    "linebreak": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Line break with optional penalty",
+      "pattern": "<linebreak/>"
+    },
+    "nolinebreak": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Prevent line break",
+      "pattern": "<nolinebreak/>"
+    },
+    "pagebreak": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Page break",
+      "pattern": "<pagebreak/>"
+    },
+    "nopagebreak": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Prevent page break",
+      "pattern": "<nopagebreak/>"
+    },
+    "newpage": {
+      "type": "constructor",
+      "description": "New page",
+      "pattern": "<newpage/>"
+    },
+    "clearpage": {
+      "type": "constructor",
+      "description": "Clear page and flush floats",
+      "pattern": "<clearpage/>"
+    },
+    "cleardoublepage": {
+      "type": "constructor",
+      "description": "Clear to next odd page",
+      "pattern": "<cleardoublepage/>"
+    },
+    
+    "centering": {
+      "type": "primitive",
+      "description": "Center text in environment",
+      "callback": "latex_centering"
+    },
+    "raggedright": {
+      "type": "primitive",
+      "description": "Left-align text",
+      "callback": "latex_raggedright"
+    },
+    "raggedleft": {
+      "type": "primitive",
+      "description": "Right-align text",
+      "callback": "latex_raggedleft"
+    },
+    
+    "quad": {
+      "type": "macro",
+      "description": "Em space",
+      "replacement": " "
+    },
+    "qquad": {
+      "type": "macro",
+      "description": "Two em spaces",
+      "replacement": "  "
+    },
+    "enspace": {
+      "type": "macro",
+      "description": "En space (0.5em)",
+      "replacement": " "
+    },
+    "thinspace": {
+      "type": "macro",
+      "description": "Thin space",
+      "replacement": " "
+    },
+    ",": {
+      "type": "macro",
+      "description": "Thin space (math)",
+      "replacement": " "
+    },
+    ":": {
+      "type": "macro",
+      "description": "Medium space (math)",
+      "replacement": " "
+    },
+    ";": {
+      "type": "macro",
+      "description": "Thick space (math)",
+      "replacement": " "
+    },
+    "!": {
+      "type": "macro",
+      "description": "Negative thin space",
+      "replacement": ""
+    },
+    " ": {
+      "type": "macro",
+      "description": "Control space",
+      "replacement": " "
+    },
+    "~": {
+      "type": "macro",
+      "description": "Non-breaking space",
+      "replacement": " "
+    },
+    
+    "%": {
+      "type": "macro",
+      "description": "Percent character",
+      "replacement": "%"
+    },
+    "&": {
+      "type": "macro",
+      "description": "Ampersand character",
+      "replacement": "&"
+    },
+    "#": {
+      "type": "macro",
+      "description": "Hash character",
+      "replacement": "#"
+    },
+    "$": {
+      "type": "macro",
+      "description": "Dollar character",
+      "replacement": "$"
+    },
+    "_": {
+      "type": "macro",
+      "description": "Underscore character",
+      "replacement": "_"
+    },
+    "{": {
+      "type": "macro",
+      "description": "Left brace character",
+      "replacement": "{"
+    },
+    "}": {
+      "type": "macro",
+      "description": "Right brace character",
+      "replacement": "}"
+    },
+    "\\": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Line break",
+      "pattern": "<br/>"
+    },
+    
+    "today": {
+      "type": "macro",
+      "description": "Current date",
+      "callback": "latex_today"
+    },
+    
+    "TeX": {
+      "type": "macro",
+      "description": "TeX logo",
+      "replacement": "TeX"
+    },
+    "LaTeX": {
+      "type": "macro",
+      "description": "LaTeX logo",
+      "replacement": "LaTeX"
+    },
+    "LaTeXe": {
+      "type": "macro",
+      "description": "LaTeX2e logo",
+      "replacement": "LaTeX2ε"
+    },
+    
+    "ldots": {
+      "type": "macro",
+      "description": "Ellipsis",
+      "replacement": "…"
+    },
+    "dots": {
+      "type": "macro",
+      "description": "Ellipsis (alias)",
+      "replacement": "…"
+    },
+    "textellipsis": {
+      "type": "macro",
+      "description": "Text ellipsis",
+      "replacement": "…"
+    },
+    
+    "dag": {
+      "type": "macro",
+      "description": "Dagger",
+      "replacement": "†"
+    },
+    "ddag": {
+      "type": "macro",
+      "description": "Double dagger",
+      "replacement": "‡"
+    },
+    "S": {
+      "type": "macro",
+      "description": "Section sign",
+      "replacement": "§"
+    },
+    "P": {
+      "type": "macro",
+      "description": "Pilcrow (paragraph sign)",
+      "replacement": "¶"
+    },
+    "copyright": {
+      "type": "macro",
+      "description": "Copyright symbol",
+      "replacement": "©"
+    },
+    "textregistered": {
+      "type": "macro",
+      "description": "Registered trademark",
+      "replacement": "®"
+    },
+    "texttrademark": {
+      "type": "macro",
+      "description": "Trademark symbol",
+      "replacement": "™"
+    },
+    "pounds": {
+      "type": "macro",
+      "description": "Pound sign",
+      "replacement": "£"
+    },
+    
+    "`": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Grave accent",
+      "callback": "latex_accent_grave"
+    },
+    "'": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Acute accent",
+      "callback": "latex_accent_acute"
+    },
+    "^": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Circumflex accent",
+      "callback": "latex_accent_circumflex"
+    },
+    "\"": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Umlaut accent",
+      "callback": "latex_accent_umlaut"
+    },
+    "~": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Tilde accent",
+      "callback": "latex_accent_tilde"
+    },
+    "=": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Macron accent",
+      "callback": "latex_accent_macron"
+    },
+    ".": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Dot accent",
+      "callback": "latex_accent_dot"
+    },
+    "c": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Cedilla accent",
+      "callback": "latex_accent_cedilla"
+    },
+    "v": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Háček accent",
+      "callback": "latex_accent_hacek"
+    },
+    "u": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Breve accent",
+      "callback": "latex_accent_breve"
+    },
+    "H": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Hungarian umlaut",
+      "callback": "latex_accent_hungarian"
+    },
+    "r": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Ring accent",
+      "callback": "latex_accent_ring"
+    },
+    "t": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Tie accent",
+      "callback": "latex_accent_tie"
+    },
+    "d": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Dot below",
+      "callback": "latex_accent_dotbelow"
+    },
+    "b": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Bar below",
+      "callback": "latex_accent_barunder"
+    },
+    
+    "verb": {
+      "type": "constructor",
+      "description": "Verbatim text",
+      "callback": "latex_verb",
+      "verbatim": true
+    },
+    "verb*": {
+      "type": "constructor",
+      "description": "Verbatim text with visible spaces",
+      "callback": "latex_verb_star",
+      "verbatim": true
+    },
+    
+    "newcommand": {
+      "type": "primitive",
+      "description": "Define new command",
+      "callback": "latex_newcommand"
+    },
+    "renewcommand": {
+      "type": "primitive",
+      "description": "Redefine command",
+      "callback": "latex_renewcommand"
+    },
+    "providecommand": {
+      "type": "primitive",
+      "description": "Define if not exists",
+      "callback": "latex_providecommand"
+    },
+    "newenvironment": {
+      "type": "primitive",
+      "description": "Define new environment",
+      "callback": "latex_newenvironment"
+    },
+    "renewenvironment": {
+      "type": "primitive",
+      "description": "Redefine environment",
+      "callback": "latex_renewenvironment"
+    },
+    "newcounter": {
+      "type": "primitive",
+      "params": "{}[]",
+      "description": "Define new counter",
+      "callback": "latex_newcounter"
+    },
+    "setcounter": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set counter value",
+      "callback": "latex_setcounter"
+    },
+    "addtocounter": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add to counter",
+      "callback": "latex_addtocounter"
+    },
+    "stepcounter": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Increment counter",
+      "callback": "latex_stepcounter"
+    },
+    "refstepcounter": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Increment counter and set ref",
+      "callback": "latex_refstepcounter"
+    },
+    "arabic": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Counter as arabic number",
+      "callback": "latex_arabic"
+    },
+    "roman": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Counter as lowercase roman",
+      "callback": "latex_roman"
+    },
+    "Roman": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Counter as uppercase roman",
+      "callback": "latex_Roman"
+    },
+    "alph": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Counter as lowercase letter",
+      "callback": "latex_alph"
+    },
+    "Alph": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Counter as uppercase letter",
+      "callback": "latex_Alph"
+    },
+    "fnsymbol": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Counter as footnote symbol",
+      "callback": "latex_fnsymbol"
+    }
+  },
+  
+  "environments": {
+    "document": {
+      "begin": "<document>",
+      "end": "</document>"
+    },
+    
+    "abstract": {
+      "begin": "<abstract>",
+      "end": "</abstract>"
+    },
+    
+    "itemize": {
+      "begin": "<ul>",
+      "end": "</ul>"
+    },
+    "enumerate": {
+      "begin": "<ol>",
+      "end": "</ol>"
+    },
+    "description": {
+      "begin": "<dl>",
+      "end": "</dl>"
+    },
+    
+    "quote": {
+      "begin": "<blockquote class=\"quote\">",
+      "end": "</blockquote>"
+    },
+    "quotation": {
+      "begin": "<blockquote class=\"quotation\">",
+      "end": "</blockquote>"
+    },
+    "verse": {
+      "begin": "<div class=\"verse\">",
+      "end": "</div>"
+    },
+    
+    "center": {
+      "begin": "<div class=\"center\">",
+      "end": "</div>"
+    },
+    "flushleft": {
+      "begin": "<div class=\"left\">",
+      "end": "</div>"
+    },
+    "flushright": {
+      "begin": "<div class=\"right\">",
+      "end": "</div>"
+    },
+    
+    "verbatim": {
+      "begin": "<pre>",
+      "end": "</pre>",
+      "verbatim": true
+    },
+    "verbatim*": {
+      "begin": "<pre class=\"visible-spaces\">",
+      "end": "</pre>",
+      "verbatim": true
+    },
+    
+    "tabbing": {
+      "begin": "<tabbing>",
+      "end": "</tabbing>"
+    },
+    "tabular": {
+      "params": "[]{}",
+      "begin": "<table>",
+      "end": "</table>",
+      "callback": "latex_tabular"
+    },
+    "tabular*": {
+      "params": "{}[]{}",
+      "begin": "<table>",
+      "end": "</table>",
+      "callback": "latex_tabular_star"
+    },
+    "array": {
+      "params": "[]{}",
+      "begin": "<array>",
+      "end": "</array>",
+      "mode": "math"
+    },
+    
+    "equation": {
+      "begin": "<math-block numbered=\"true\">",
+      "end": "</math-block>",
+      "mode": "math",
+      "counter": "equation"
+    },
+    "equation*": {
+      "begin": "<math-block>",
+      "end": "</math-block>",
+      "mode": "math"
+    },
+    "displaymath": {
+      "begin": "<math-block>",
+      "end": "</math-block>",
+      "mode": "math"
+    },
+    "math": {
+      "begin": "<math>",
+      "end": "</math>",
+      "mode": "math"
+    },
+    
+    "eqnarray": {
+      "begin": "<eqnarray numbered=\"true\">",
+      "end": "</eqnarray>",
+      "mode": "math"
+    },
+    "eqnarray*": {
+      "begin": "<eqnarray>",
+      "end": "</eqnarray>",
+      "mode": "math"
+    },
+    
+    "figure": {
+      "params": "[]",
+      "begin": "<figure>",
+      "end": "</figure>",
+      "float": true
+    },
+    "figure*": {
+      "params": "[]",
+      "begin": "<figure class=\"wide\">",
+      "end": "</figure>",
+      "float": true
+    },
+    "table": {
+      "params": "[]",
+      "begin": "<table-float>",
+      "end": "</table-float>",
+      "float": true
+    },
+    "table*": {
+      "params": "[]",
+      "begin": "<table-float class=\"wide\">",
+      "end": "</table-float>",
+      "float": true
+    },
+    
+    "minipage": {
+      "params": "[][]{}",
+      "begin": "<minipage>",
+      "end": "</minipage>"
+    },
+    "parbox": {
+      "params": "[][]{}{}",
+      "begin": "<parbox>",
+      "end": "</parbox>"
+    },
+    
+    "titlepage": {
+      "begin": "<titlepage>",
+      "end": "</titlepage>"
+    },
+    
+    "thebibliography": {
+      "params": "{}",
+      "begin": "<bibliography>",
+      "end": "</bibliography>"
+    }
+  },
+  
+  "counters": {
+    "part": {
+      "format": "Roman",
+      "resets": ["chapter"]
+    },
+    "chapter": {
+      "format": "arabic",
+      "resets": ["section", "figure", "table", "equation", "footnote"]
+    },
+    "section": {
+      "format": "arabic",
+      "resets": ["subsection"]
+    },
+    "subsection": {
+      "format": "arabic",
+      "resets": ["subsubsection"]
+    },
+    "subsubsection": {
+      "format": "arabic",
+      "resets": ["paragraph"]
+    },
+    "paragraph": {
+      "format": "arabic",
+      "resets": ["subparagraph"]
+    },
+    "subparagraph": {
+      "format": "arabic"
+    },
+    "page": {
+      "format": "arabic"
+    },
+    "equation": {
+      "format": "arabic"
+    },
+    "figure": {
+      "format": "arabic"
+    },
+    "table": {
+      "format": "arabic"
+    },
+    "footnote": {
+      "format": "arabic"
+    },
+    "mpfootnote": {
+      "format": "alph"
+    },
+    "enumi": {
+      "format": "arabic"
+    },
+    "enumii": {
+      "format": "alph"
+    },
+    "enumiii": {
+      "format": "roman"
+    },
+    "enumiv": {
+      "format": "Alph"
+    }
+  }
+}

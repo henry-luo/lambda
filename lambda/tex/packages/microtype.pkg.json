@@ -1,0 +1,141 @@
+{
+  "name": "microtype",
+  "version": "3.0",
+  "description": "Subliminal refinements towards typographical perfection",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Enable microtypographic features: protrusion, expansion, tracking, kerning, spacing",
+    "engines": "Works with pdfTeX, LuaTeX, XeTeX (limited)",
+    "effect": "Better paragraph justification, fewer overfull boxes"
+  },
+  
+  "commands": {
+    "textls": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Letter-space text",
+      "pattern": "<letterspace amount=\"#1\">#2</letterspace>"
+    },
+    "lsstyle": {
+      "type": "primitive",
+      "params": "",
+      "description": "Switch to letter-spaced font",
+      "pattern": ""
+    },
+    "lslig": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Allow ligature in letter-spaced text"
+    },
+    "microtypesetup": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Configure microtype options",
+      "pattern": ""
+    },
+    "SetProtrusion": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Set character protrusion",
+      "pattern": ""
+    },
+    "SetExpansion": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Set font expansion",
+      "pattern": ""
+    },
+    "SetTracking": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Set letter tracking",
+      "pattern": ""
+    },
+    "SetExtraKerning": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Set extra kerning",
+      "pattern": ""
+    },
+    "SetExtraSpacing": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Set extra inter-word spacing",
+      "pattern": ""
+    },
+    "DisableLigatures": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Disable specific ligatures",
+      "pattern": ""
+    },
+    "DeclareMicrotypeSet": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Define a microtype set",
+      "pattern": ""
+    },
+    "DeclareMicrotypeSetDefault": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Set default microtype set",
+      "pattern": ""
+    },
+    "UseMicrotypeSet": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Activate a microtype set",
+      "pattern": ""
+    }
+  },
+  
+  "options": {
+    "features": {
+      "protrusion": "Character protrusion (margin kerning) - true/false/compatibility",
+      "expansion": "Font expansion (hz) - true/false",
+      "tracking": "Letter spacing adjustments - true/false",
+      "kerning": "Extra kerning - true/false/alltext",
+      "spacing": "Extra word spacing - true/false"
+    },
+    "configuration": {
+      "activate": "Comma-list of features to activate",
+      "config": "Load configuration file",
+      "DVIoutput": "DVI mode",
+      "babel": "Enable babel language support",
+      "auto": "Automatically set options",
+      "final": "Enable all features (default)",
+      "draft": "Disable all features"
+    },
+    "protrusion_options": {
+      "factor": "Scale protrusion (default 1000 = 100%)",
+      "unit": "Protrusion unit (default 1em)",
+      "context": "Apply in context"
+    },
+    "expansion_options": {
+      "stretch": "Maximum stretch (default 20)",
+      "shrink": "Maximum shrink (default 20)",
+      "step": "Step size (default 5)",
+      "auto": "Automatic expansion"
+    },
+    "tracking_options": {
+      "letterspace": "Default letter-spacing"
+    }
+  },
+  
+  "effects": {
+    "protrusion": {
+      "description": "Characters extend slightly into margins",
+      "benefit": "More even-looking margins, especially with punctuation"
+    },
+    "expansion": {
+      "description": "Fonts stretched/compressed slightly for better line breaks",
+      "benefit": "Fewer overfull/underfull hboxes, better justification"
+    },
+    "tracking": {
+      "description": "Adjust spacing between letters",
+      "benefit": "Better appearance for small caps, headings"
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "name": "multicol",
+  "version": "1.9",
+  "description": "Intermix single and multiple columns",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "columnbreak": {
+      "type": "constructor",
+      "params": "",
+      "description": "Force column break",
+      "pattern": "<columnbreak/>"
+    },
+    "premulticols": {
+      "type": "primitive",
+      "params": "",
+      "description": "Minimum space before multicols (length)",
+      "pattern": ""
+    },
+    "postmulticols": {
+      "type": "primitive",
+      "params": "",
+      "description": "Minimum space after multicols (length)",
+      "pattern": ""
+    },
+    "multicolsep": {
+      "type": "primitive",
+      "params": "",
+      "description": "Space before and after multicols (length)",
+      "pattern": ""
+    },
+    "columnsep": {
+      "type": "primitive",
+      "params": "",
+      "description": "Space between columns (length)",
+      "pattern": ""
+    },
+    "columnseprule": {
+      "type": "primitive",
+      "params": "",
+      "description": "Width of rule between columns (length)",
+      "pattern": ""
+    },
+    "columnseprulecolor": {
+      "type": "primitive",
+      "params": "",
+      "description": "Color of rule between columns",
+      "pattern": ""
+    },
+    "raggedcolumns": {
+      "type": "primitive",
+      "params": "",
+      "description": "Don't balance columns at bottom",
+      "pattern": ""
+    },
+    "flushcolumns": {
+      "type": "primitive",
+      "params": "",
+      "description": "Balance columns at bottom (default)",
+      "pattern": ""
+    },
+    "setlength": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length parameter",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "multicols": {
+      "description": "Multiple column environment",
+      "begin": "<multicols cols=\"#1\">",
+      "end": "</multicols>",
+      "params": "{}"
+    },
+    "multicols*": {
+      "description": "Multiple columns, unbalanced",
+      "begin": "<multicols cols=\"#1\" balanced=\"false\">",
+      "end": "</multicols>",
+      "params": "{}"
+    }
+  },
+  
+  "lengths": {
+    "premulticols": {
+      "default": "50pt",
+      "description": "Minimum space needed before multicols"
+    },
+    "postmulticols": {
+      "default": "20pt",
+      "description": "Minimum space needed after multicols"
+    },
+    "multicolsep": {
+      "default": "12pt plus 4pt minus 3pt",
+      "description": "Space inserted before and after"
+    },
+    "columnsep": {
+      "default": "10pt",
+      "description": "Space between columns"
+    },
+    "columnseprule": {
+      "default": "0pt",
+      "description": "Width of vertical rule"
+    },
+    "multicolbaselineskip": {
+      "default": "0pt",
+      "description": "Additional baseline skip"
+    },
+    "multicolundershoot": {
+      "default": "2pt",
+      "description": "Allowed undershoot"
+    },
+    "multicolovershoot": {
+      "default": "0pt",
+      "description": "Allowed overshoot"
+    }
+  },
+  
+  "counters": {
+    "collectmore": {
+      "default": "0",
+      "description": "Additional lines to collect"
+    },
+    "unbalance": {
+      "default": "0",
+      "description": "Lines to add to last column"
+    },
+    "minrows": {
+      "default": "1",
+      "description": "Minimum rows before balancing"
+    }
+  }
+}
