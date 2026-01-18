@@ -1,0 +1,95 @@
+<article class="latex-document">
+<p>Testing low-level <span style="letter-spacing:-0.2em; margin-right:0.2em;">T<span style="position:relative; bottom:-0.2ex;font-variant:small-caps;font-size:120%;;">e</span>X</span> font manipulations.</p>
+</div>
+<p>Stock plain fonts:</p>
+</div>
+<p>– Font “font(fontname not implementedXX; hyphen=45.</p>
+</div>
+<p>– Font “fiverm(fontname not implemented<span style="font-size:50%;">; select font cmr5):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “tenrm(fontname not implemented</span>; select font cmr10):X0.0ptXX; hyphen=45.</p>
+</div>
+<p>New 5pt fonts, new default <code>hyphenchar=99</code>.
+<strong>All</strong> shared; <code>scaled</code> mapped to <code>at</code>:</p>
+</div>
+<p>– Font “myrmfiveA(fontname not implemented<span style="font-size:50%;">; select font cmr10 at 5pt):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveB(fontname not implemented; select font cmr10 at 5pt):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveC(fontname not implemented; select font cmr10):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">Bump <code>hyphenchar=100</code> on myrmfiveA:</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveA(fontname not implemented; “myrmfiveA):X0.0ptXX; hyphen=100.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveB(fontname not implemented; “myrmfiveB):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveC(fontname not implemented; “myrmfiveC):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">Bump <code>hyphenchar=101</code> on myrmfiveA, <em>as if</em> grouped:</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveA(fontname not implemented; “myrmfiveA):X0.0ptXX; hyphen=101.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveB(fontname not implemented; “myrmfiveB):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “myrmfiveC(fontname not implemented; “myrmfiveC):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">While stock fonts should be unchanged</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “fiverm(fontname not implemented; “fiverm):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “tenrm(fontname not implemented; “tenrm):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">“font is weird;
+it snapshots of the current font;
+but compare meanings:</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “font(fontname not implementedXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “fiverm(fontname not implemented; “fiverm):X0.0ptXX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">– Font “textfont2(fontname not implemented “textfont2):X;XX; hyphen=45.</span></p>
+</div>
+<p><span style="font-size:50%;">Testing plain math fonts:</span></p>
+</div>
+<p><span style="font-size:50%;">“noop:  abc123 and <math alttext="{abc123}" display="inline"><mrow><mi>a</mi><mo>⁢</mo><mi>b</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mn>123</mn></mrow></math></span></p>
+</div>
+<p><span style="font-size:50%;">“rm:  abc123 and <math alttext="{\rm abc123}" display="inline"><mi>abc123</mi></math></span></p>
+</div>
+<p><span style="font-size:50%;">“mit: <em> abc123</em> and <math alttext="{\mit abc123}" display="inline"><mrow><mi mathvariant="normal">a</mi><mo>⁢</mo><mi mathvariant="normal">b</mi><mo>⁢</mo><mi mathvariant="normal">c</mi><mo>⁢</mo><mn>123</mn></mrow></math></span></p>
+</div>
+<p><span style="font-size:50%;">“cal: <span> abc123</span> and <math alttext="{\cal abc123}" display="inline"><mrow><mi>𝒶</mi><mo>⁢</mo><mi>𝒷</mi><mo>⁢</mo><mi>𝒸</mi><mo>⁢</mo><mn mathvariant="script">123</mn></mrow></math></span></p>
+</div>
+<p><span style="font-size:50%;">“it: <em> abc123</em> and <math alttext="{\it abc123}" display="inline"><mi mathvariant="italic">abc123</mi></math></span></p>
+</div>
+<p><span style="font-size:50%;">“sl: <span> abc123</span> and <math alttext="{\sl abc123}" display="inline"><mi mathvariant="italic">abc123</mi></math></span></p>
+</div>
+<p><span style="font-size:50%;">“bf: <strong> abc123</strong> and <math alttext="{\bf abc123}" display="inline"><mi>𝐚𝐛𝐜𝟏𝟐𝟑</mi></math></span></p>
+</div>
+<p><span style="font-size:50%;">“tt: <code> abc123</code> and <math alttext="{\tt abc123}" display="inline"><mi>𝚊𝚋𝚌𝟷𝟸𝟹</mi></math></span></p>
+</div>
+<p><span style="font-size:50%;">Testing Text glyph lookup.</span></p>
+</div>
+<p><span style="font-size:50%;">Normal:
+ı;A.
+</span><span>ζ</span><span style="font-size:50%;">;</span><span>A</span><span style="font-size:50%;">.
+</span><strong>ı</strong><span style="font-size:50%;">;</span><strong>A</strong><span style="font-size:50%;">.
+</span><code>ı</code><span style="font-size:50%;">;</span><code>A</code><span style="font-size:50%;">.
+</span><span>ı</span><span style="font-size:50%;">;</span><span>A</span><span style="font-size:50%;">.
+</span><code>ı</code><span style="font-size:50%;">;</span><code>A</code><span style="font-size:50%;">.</span></p>
+</div>
+<p><span style="font-size:50%;">Symbol:
+</span><span>≍</span><span style="font-size:50%;">;</span><span>𝒜</span><span style="font-size:50%;">.
+</span><span>ı</span><span style="font-size:50%;">;</span><span>A</span><span style="font-size:50%;">.
+</span><span>(</span><span style="font-size:50%;">;</span><span>⎠</span><span style="font-size:50%;">.</span></p>
+</div>
+<p><span style="font-size:50%;">AMS:
+</span><span>↠</span><span style="font-size:50%;">;</span><span>⊐</span><span style="font-size:50%;">.
+</span><span>⋨</span><span style="font-size:50%;">;</span><span>𝔸</span><span style="font-size:50%;">.</span></p>
+</div>
+</article>
+</div>
+<footer>
+<div>Generated  on Sun Jan 18 10:54:29 2026 by <a href="http://dlmf.nist.gov/LaTeXML/"><span style="letter-spacing:-0.2em; margin-right:0.1em;">L<span style="position:relative; bottom:2.2pt;">a</span>T<span style="font-size:120%;position:relative; bottom:-0.2ex;">e</span></span><span style="font-size:90%; position:relative; bottom:-0.2ex;">XML</span><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAOCAYAAAD5YeaVAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9wKExQZLWTEaOUAAAAddEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIFRoZSBHSU1Q72QlbgAAAdpJREFUKM9tkL+L2nAARz9fPZNCKFapUn8kyI0e4iRHSR1Kb8ng0lJw6FYHFwv2LwhOpcWxTjeUunYqOmqd6hEoRDhtDWdA8ApRYsSUCDHNt5ul13vz4w0vWCgUnnEc975arX6ORqN3VqtVZbfbTQC4uEHANM3jSqXymFI6yWazP2KxWAXAL9zCUa1Wy2tXVxheKA9YNoR8Pt+aTqe4FVVVvz05O6MBhqUIBGk8Hn8HAOVy+T+XLJfLS4ZhTiRJgqIoVBRFIoric47jPnmeB1mW/9rr9ZpSSn3Lsmir1fJZlqWlUonKsvwWwD8ymc/nXwVBeLjf7xEKhdBut9Hr9WgmkyGEkJwsy5eHG5vN5g0AKIoCAEgkEkin0wQAfN9/cXPdheu6P33fBwB4ngcAcByHJpPJl+fn54mD3Gg0NrquXxeLRQAAwzAYj8cwTZPwPH9/sVg8PXweDAauqqr2cDjEer1GJBLBZDJBs9mE4zjwfZ85lAGg2+06hmGgXq+j3+/DsixYlgVN03a9Xu8jgCNCyIegIAgx13Vfd7vdu+FweG8YRkjXdWy329+dTgeSJD3ieZ7RNO0VAXAPwDEAO5VKndi2fWrb9jWl9Esul6PZbDY9Go1OZ7PZ9z/lyuD3OozU2wAAAABJRU5ErkJggg==" alt="Mascot Sammy"></a>
+</div></footer>
+</div>
