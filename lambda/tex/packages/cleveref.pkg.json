@@ -1,0 +1,238 @@
+{
+  "name": "cleveref",
+  "version": "0.21",
+  "description": "Intelligent cross-referencing",
+  "requires": ["latex_base", "hyperref"],
+  
+  "notes": {
+    "load_order": "cleveref should be loaded AFTER hyperref and amsmath",
+    "key_feature": "Automatically determines reference type (figure, table, equation, etc.)"
+  },
+  
+  "commands": {
+    "cref": {
+      "type": "constructor",
+      "params": "*[]{}",
+      "description": "Clever reference (lowercase)",
+      "pattern": "<cref starred=\"#1\" options=\"#2\">#3</cref>"
+    },
+    "Cref": {
+      "type": "constructor",
+      "params": "*[]{}",
+      "description": "Clever reference (capitalized)",
+      "pattern": "<Cref starred=\"#1\" options=\"#2\">#3</Cref>"
+    },
+    "crefrange": {
+      "type": "constructor",
+      "params": "*[]{}{}",
+      "description": "Reference range (lowercase)",
+      "pattern": "<crefrange starred=\"#1\" options=\"#2\"><from>#3</from><to>#4</to></crefrange>"
+    },
+    "Crefrange": {
+      "type": "constructor",
+      "params": "*[]{}{}",
+      "description": "Reference range (capitalized)",
+      "pattern": "<Crefrange starred=\"#1\" options=\"#2\"><from>#3</from><to>#4</to></Crefrange>"
+    },
+    "cpageref": {
+      "type": "constructor",
+      "params": "*[]{}",
+      "description": "Page reference (lowercase)",
+      "pattern": "<cpageref starred=\"#1\" options=\"#2\">#3</cpageref>"
+    },
+    "Cpageref": {
+      "type": "constructor",
+      "params": "*[]{}",
+      "description": "Page reference (capitalized)",
+      "pattern": "<Cpageref starred=\"#1\" options=\"#2\">#3</Cpageref>"
+    },
+    "cpagerefrange": {
+      "type": "constructor",
+      "params": "*[]{}{}",
+      "description": "Page range reference (lowercase)",
+      "pattern": "<cpagerefrange starred=\"#1\" options=\"#2\"><from>#3</from><to>#4</to></cpagerefrange>"
+    },
+    "Cpagerefrange": {
+      "type": "constructor",
+      "params": "*[]{}{}",
+      "description": "Page range reference (capitalized)",
+      "pattern": "<Cpagerefrange starred=\"#1\" options=\"#2\"><from>#3</from><to>#4</to></Cpagerefrange>"
+    },
+    "namecref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Name only (lowercase)",
+      "pattern": "<namecref>#1</namecref>"
+    },
+    "nameCref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Name only (capitalized)",
+      "pattern": "<nameCref>#1</nameCref>"
+    },
+    "namecrefs": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Plural name only (lowercase)",
+      "pattern": "<namecrefs>#1</namecrefs>"
+    },
+    "nameCrefs": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Plural name only (capitalized)",
+      "pattern": "<nameCrefs>#1</nameCrefs>"
+    },
+    "lcnamecref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Name only (forced lowercase)",
+      "pattern": "<lcnamecref>#1</lcnamecref>"
+    },
+    "lcnamecrefs": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Plural name only (forced lowercase)",
+      "pattern": "<lcnamecrefs>#1</lcnamecrefs>"
+    },
+    "labelcref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Just the label (number)",
+      "pattern": "<labelcref>#1</labelcref>"
+    },
+    "labelcpageref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Just the page number",
+      "pattern": "<labelcpageref>#1</labelcpageref>"
+    },
+    "crefname": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define name for type (singular, plural)",
+      "pattern": ""
+    },
+    "Crefname": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define capitalized name (singular, plural)",
+      "pattern": ""
+    },
+    "creflabelformat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define label format for type",
+      "pattern": ""
+    },
+    "crefrangelabelformat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define range label format",
+      "pattern": ""
+    },
+    "crefdefaultlabelformat": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Default label format",
+      "pattern": ""
+    },
+    "crefformat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Full format for type",
+      "pattern": ""
+    },
+    "Crefformat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Full capitalized format",
+      "pattern": ""
+    },
+    "crefrangeformat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Range format for type",
+      "pattern": ""
+    },
+    "Crefrangeformat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Capitalized range format",
+      "pattern": ""
+    },
+    "crefmultiformat": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}",
+      "description": "Multi-reference format",
+      "pattern": ""
+    },
+    "Crefmultiformat": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}",
+      "description": "Capitalized multi-reference format",
+      "pattern": ""
+    },
+    "crefalias": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Create type alias",
+      "pattern": ""
+    },
+    "label": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Enhanced label with optional type",
+      "pattern": "<label type=\"#1\">#2</label>"
+    }
+  },
+  
+  "default_names": {
+    "equation": ["eq.", "eqs."],
+    "figure": ["figure", "figures"],
+    "table": ["table", "tables"],
+    "page": ["page", "pages"],
+    "part": ["part", "parts"],
+    "chapter": ["chapter", "chapters"],
+    "section": ["section", "sections"],
+    "subsection": ["subsection", "subsections"],
+    "subsubsection": ["subsubsection", "subsubsections"],
+    "appendix": ["appendix", "appendices"],
+    "enumi": ["item", "items"],
+    "footnote": ["footnote", "footnotes"],
+    "theorem": ["theorem", "theorems"],
+    "lemma": ["lemma", "lemmas"],
+    "corollary": ["corollary", "corollaries"],
+    "proposition": ["proposition", "propositions"],
+    "definition": ["definition", "definitions"],
+    "result": ["result", "results"],
+    "example": ["example", "examples"],
+    "remark": ["remark", "remarks"],
+    "note": ["note", "notes"],
+    "algorithm": ["algorithm", "algorithms"],
+    "listing": ["listing", "listings"],
+    "line": ["line", "lines"]
+  },
+  
+  "options": {
+    "formatting": {
+      "nameinlink": "include name in hyperlink",
+      "noabbrev": "use full names (Figure instead of Fig.)",
+      "capitalize": "capitalize all names",
+      "sort": "sort multiple references",
+      "compress": "compress consecutive references"
+    },
+    "language": {
+      "english": "English names",
+      "german": "German names (ngerman)",
+      "french": "French names",
+      "spanish": "Spanish names",
+      "italian": "Italian names",
+      "dutch": "Dutch names",
+      "russian": "Russian names"
+    },
+    "hyperref": {
+      "hyperref": "enable hyperref integration (auto-detected)",
+      "colorlinks": "inherit hyperref colorlinks"
+    }
+  }
+}

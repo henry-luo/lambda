@@ -1,0 +1,69 @@
+{
+  "name": "tabularx",
+  "version": "2.11",
+  "description": "Tabulars with adjustable-width columns",
+  "requires": ["latex_base", "array"],
+  
+  "notes": {
+    "purpose": "Create tables with automatic width calculation for X columns",
+    "key_feature": "X column type expands to fill available width"
+  },
+  
+  "commands": {
+    "tabularxcolumn": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Redefine X column base type (default: p)",
+      "pattern": ""
+    },
+    "tracingtabularx": {
+      "type": "primitive",
+      "params": "",
+      "description": "Enable debug output",
+      "pattern": ""
+    },
+    "arraybackslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Restore \\\\ in paragraph columns"
+    }
+  },
+  
+  "environments": {
+    "tabularx": {
+      "description": "Table with automatic width calculation",
+      "begin": "<tabularx width=\"#1\" cols=\"#2\">",
+      "end": "</tabularx>",
+      "params": "{}{}"
+    },
+    "tabularx*": {
+      "description": "Starred variant (internal use)",
+      "begin": "<tabularx starred=\"true\">",
+      "end": "</tabularx>"
+    }
+  },
+  
+  "column_types": {
+    "X": {
+      "description": "Expands to fill available width",
+      "base": "p{width}",
+      "behavior": "Width calculated automatically to make total equal specified width"
+    }
+  },
+  
+  "common_patterns": {
+    "equal_three_column": {
+      "preamble": "\\begin{tabularx}{\\textwidth}{|X|X|X|}",
+      "description": "Three equal-width columns"
+    },
+    "centered_x": {
+      "definition": ">{\\centering\\arraybackslash}X",
+      "description": "Centered X column"
+    },
+    "ragged_right_x": {
+      "definition": ">{\\raggedright\\arraybackslash}X",
+      "description": "Ragged right X column"
+    }
+  }
+}

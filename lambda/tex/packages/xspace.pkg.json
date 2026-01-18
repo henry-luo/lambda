@@ -1,0 +1,44 @@
+{
+  "name": "xspace",
+  "version": "1.13",
+  "description": "Define commands that appear not to eat spaces",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "xspace": {
+      "type": "macro",
+      "params": "",
+      "replacement": " ",
+      "description": "Smart space - adds space unless followed by punctuation"
+    },
+    "xspaceaddexceptions": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Add tokens to exception list",
+      "pattern": ""
+    },
+    "xspaceremoveexception": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Remove token from exception list",
+      "pattern": ""
+    }
+  },
+  
+  "exception_list": [
+    ".", ",", "!", "?", ":", ";", "'", "\"",
+    "/", "-", ")", "]", "}", "~",
+    "\\", "\\@", "\\xspace",
+    "\\footnote", "\\footnotemark"
+  ],
+  
+  "usage": {
+    "example": "\\newcommand{\\LaTeX}{\\LaTeXe\\xspace}",
+    "benefit": "Write '\\LaTeX is great' instead of '\\LaTeX{} is great'"
+  },
+  
+  "notes": {
+    "caution": "Can sometimes add unwanted spaces before punctuation",
+    "alternative": "Some prefer explicit {} or \\ control"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "booktabs",
+  "version": "1.6",
+  "description": "Publication quality tables in LaTeX",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "toprule": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Top rule of a table",
+      "pattern": "<rule class=\"toprule\" width=\"#1\"/>"
+    },
+    "midrule": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Middle rule of a table",
+      "pattern": "<rule class=\"midrule\" width=\"#1\"/>"
+    },
+    "bottomrule": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Bottom rule of a table",
+      "pattern": "<rule class=\"bottomrule\" width=\"#1\"/>"
+    },
+    "cmidrule": {
+      "type": "constructor",
+      "params": "()[]{-}",
+      "description": "Partial rule spanning columns",
+      "pattern": "<rule class=\"cmidrule\" trim=\"#1\" width=\"#2\" span=\"#3\"/>"
+    },
+    "addlinespace": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Add extra space between rows",
+      "pattern": "<vspace height=\"#1\"/>"
+    },
+    "morecmidrules": {
+      "type": "constructor",
+      "params": "",
+      "description": "Add space between consecutive cmidrules",
+      "pattern": "<vspace class=\"morecmidrules\"/>"
+    },
+    "specialrule": {
+      "type": "constructor",
+      "params": "{}{}{}",
+      "description": "Rule with specified width and surrounding space",
+      "pattern": "<rule class=\"specialrule\" width=\"#1\" above=\"#2\" below=\"#3\"/>"
+    }
+  },
+  
+  "lengths": {
+    "heavyrulewidth": { "default": "0.08em", "description": "Width of top and bottom rules" },
+    "lightrulewidth": { "default": "0.05em", "description": "Width of mid rules" },
+    "cmidrulewidth": { "default": "0.03em", "description": "Width of cmidrules" },
+    "belowrulesep": { "default": "0.65ex", "description": "Space below rules" },
+    "aboverulesep": { "default": "0.4ex", "description": "Space above rules" },
+    "defaultaddspace": { "default": "0.5em", "description": "Default addlinespace amount" },
+    "cmidrulekern": { "default": "0.5em", "description": "Trimming for cmidrule ends" },
+    "abovetopsep": { "default": "0pt", "description": "Space above toprule" },
+    "belowbottomsep": { "default": "0pt", "description": "Space below bottomrule" }
+  },
+  
+  "usage_notes": {
+    "description": "booktabs provides commands for creating publication-quality tables",
+    "guidelines": [
+      "Never use vertical rules",
+      "Never use double rules",
+      "Put units in column heading, not body",
+      "Use toprule, midrule, and bottomrule instead of hline"
+    ]
+  }
+}

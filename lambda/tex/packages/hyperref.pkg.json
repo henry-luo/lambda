@@ -1,0 +1,280 @@
+{
+  "name": "hyperref",
+  "version": "1.0",
+  "description": "Hypertext links and PDF metadata",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "hypersetup": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Configure hyperref options",
+      "callback": "hyperref_setup"
+    },
+    
+    "href": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Hyperlink with text",
+      "pattern": "<a href=\"#2\" options=\"#1\">#3</a>"
+    },
+    "url": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "URL in typewriter font",
+      "pattern": "<url>#1</url>"
+    },
+    "nolinkurl": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "URL without hyperlink",
+      "pattern": "<url link=\"false\">#1</url>"
+    },
+    
+    "hyperref": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Internal reference with custom text",
+      "pattern": "<ref target=\"#1\" type=\"hyperref\">#2</ref>"
+    },
+    "hyperlink": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Create link to anchor",
+      "pattern": "<a href=\"##1\">#2</a>"
+    },
+    "hypertarget": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Create anchor",
+      "pattern": "<anchor id=\"#1\">#2</anchor>"
+    },
+    
+    "autoref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Reference with auto-generated name",
+      "pattern": "<ref target=\"#1\" type=\"auto\"/>",
+      "callback": "hyperref_autoref"
+    },
+    "autopageref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Page reference with auto-generated name",
+      "pattern": "<pageref target=\"#1\" type=\"auto\"/>",
+      "callback": "hyperref_autopageref"
+    },
+    "nameref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Reference by section name",
+      "pattern": "<ref target=\"#1\" type=\"name\"/>",
+      "callback": "hyperref_nameref"
+    },
+    
+    "texorpdfstring": {
+      "type": "macro",
+      "params": "{}{}",
+      "description": "Different text for TeX and PDF",
+      "pattern": "#1"
+    },
+    "pdfstringdef": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define PDF string",
+      "callback": "hyperref_pdfstringdef"
+    },
+    
+    "phantomsection": {
+      "type": "constructor",
+      "description": "Invisible anchor for hyperref",
+      "pattern": "<phantom-section/>"
+    },
+    
+    "bookmark": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Add PDF bookmark",
+      "callback": "hyperref_bookmark"
+    },
+    "currentpdfbookmark": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add bookmark at current level",
+      "callback": "hyperref_currentbookmark"
+    },
+    "subpdfbookmark": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add sub-bookmark",
+      "callback": "hyperref_subbookmark"
+    },
+    "belowpdfbookmark": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add bookmark below current",
+      "callback": "hyperref_belowbookmark"
+    },
+    
+    "pdfbookmark": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Add PDF bookmark with level",
+      "callback": "hyperref_pdfbookmark"
+    },
+    
+    "Acrobatmenu": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Acrobat menu action",
+      "pattern": "<acrobat-menu action=\"#1\">#2</acrobat-menu>"
+    },
+    
+    "pdfinfo": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set PDF info dictionary",
+      "callback": "hyperref_pdfinfo"
+    }
+  },
+  
+  "options": {
+    "colorlinks": {
+      "description": "Color links instead of boxes",
+      "type": "boolean",
+      "default": false
+    },
+    "linkcolor": {
+      "description": "Color for internal links",
+      "type": "color",
+      "default": "red"
+    },
+    "citecolor": {
+      "description": "Color for citation links",
+      "type": "color",
+      "default": "green"
+    },
+    "urlcolor": {
+      "description": "Color for URL links",
+      "type": "color",
+      "default": "magenta"
+    },
+    "filecolor": {
+      "description": "Color for file links",
+      "type": "color",
+      "default": "cyan"
+    },
+    "menucolor": {
+      "description": "Color for menu links",
+      "type": "color",
+      "default": "red"
+    },
+    "runcolor": {
+      "description": "Color for run links",
+      "type": "color",
+      "default": "filecolor"
+    },
+    "allcolors": {
+      "description": "Set all link colors",
+      "type": "color"
+    },
+    
+    "hidelinks": {
+      "description": "Hide all link formatting",
+      "type": "boolean",
+      "default": false
+    },
+    
+    "linktoc": {
+      "description": "What to link in TOC",
+      "type": "string",
+      "values": ["none", "section", "page", "all"],
+      "default": "section"
+    },
+    
+    "bookmarks": {
+      "description": "Create PDF bookmarks",
+      "type": "boolean",
+      "default": true
+    },
+    "bookmarksnumbered": {
+      "description": "Include section numbers in bookmarks",
+      "type": "boolean",
+      "default": false
+    },
+    "bookmarksopen": {
+      "description": "Open bookmark tree by default",
+      "type": "boolean",
+      "default": false
+    },
+    "bookmarksopenlevel": {
+      "description": "Level to which bookmarks are open",
+      "type": "integer",
+      "default": 1
+    },
+    
+    "pdfauthor": {
+      "description": "PDF author metadata",
+      "type": "string"
+    },
+    "pdftitle": {
+      "description": "PDF title metadata",
+      "type": "string"
+    },
+    "pdfsubject": {
+      "description": "PDF subject metadata",
+      "type": "string"
+    },
+    "pdfkeywords": {
+      "description": "PDF keywords metadata",
+      "type": "string"
+    },
+    "pdfcreator": {
+      "description": "PDF creator metadata",
+      "type": "string"
+    },
+    "pdfproducer": {
+      "description": "PDF producer metadata",
+      "type": "string"
+    },
+    
+    "unicode": {
+      "description": "Allow Unicode in PDF strings",
+      "type": "boolean",
+      "default": true
+    },
+    "breaklinks": {
+      "description": "Allow links to break across lines",
+      "type": "boolean",
+      "default": false
+    },
+    
+    "pdfpagemode": {
+      "description": "PDF viewer initial page mode",
+      "type": "string",
+      "values": ["UseNone", "UseOutlines", "UseThumbs", "FullScreen", "UseOC", "UseAttachments"],
+      "default": "UseNone"
+    },
+    "pdfstartview": {
+      "description": "PDF viewer initial view",
+      "type": "string",
+      "values": ["Fit", "FitH", "FitV", "FitB", "FitBH", "FitBV"],
+      "default": "Fit"
+    }
+  },
+  
+  "redefines": {
+    "ref": {
+      "description": "Redefine \\ref to create hyperlinks",
+      "pattern": "<ref target=\"#1\" type=\"hyperref\"/>"
+    },
+    "pageref": {
+      "description": "Redefine \\pageref to create hyperlinks",
+      "pattern": "<pageref target=\"#1\" type=\"hyperref\"/>"
+    },
+    "cite": {
+      "description": "Redefine \\cite to create hyperlinks",
+      "pattern": "<cite keys=\"#1\" type=\"hyperref\"/>"
+    }
+  }
+}

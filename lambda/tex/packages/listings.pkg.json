@@ -1,0 +1,175 @@
+{
+  "name": "listings",
+  "version": "1.9",
+  "description": "Typeset source code listings",
+  "requires": ["latex_base", "xcolor"],
+  
+  "commands": {
+    "lstset": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set default listing options",
+      "pattern": ""
+    },
+    "lstinline": {
+      "type": "constructor",
+      "params": "[]!{}!",
+      "description": "Inline code",
+      "pattern": "<code class=\"inline\">#2</code>"
+    },
+    "lstinputlisting": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Input listing from file",
+      "pattern": "<listing file=\"#2\" options=\"#1\"/>"
+    },
+    "lstdefinestyle": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define a named style",
+      "pattern": ""
+    },
+    "lstdefinelanguage": {
+      "type": "primitive",
+      "params": "[]{}[]{}",
+      "description": "Define a new language",
+      "pattern": ""
+    },
+    "lstloadlanguages": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Load language definitions",
+      "pattern": ""
+    },
+    "lstnewenvironment": {
+      "type": "primitive",
+      "params": "{}[][]{}{}",
+      "description": "Define new listing environment",
+      "pattern": ""
+    },
+    "lstname": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Current listing name"
+    },
+    "lstlistoflistings": {
+      "type": "constructor",
+      "params": "",
+      "pattern": "<list-of-listings/>",
+      "description": "List of listings"
+    },
+    "lstlistlistingname": {
+      "type": "macro",
+      "params": "",
+      "replacement": "Listings",
+      "description": "Name for list of listings"
+    },
+    "lstlistingname": {
+      "type": "macro",
+      "params": "",
+      "replacement": "Listing",
+      "description": "Name for listing caption"
+    },
+    "thelstnumber": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Current line number"
+    }
+  },
+  
+  "environments": {
+    "lstlisting": {
+      "begin": "<listing>",
+      "end": "</listing>",
+      "verbatim": true,
+      "description": "Code listing environment"
+    }
+  },
+  
+  "options": {
+    "appearance": {
+      "basicstyle": "font style for code",
+      "keywordstyle": "style for keywords",
+      "identifierstyle": "style for identifiers",
+      "commentstyle": "style for comments",
+      "stringstyle": "style for strings",
+      "emphstyle": "style for emphasized items",
+      "numberstyle": "style for line numbers",
+      "backgroundcolor": "background color",
+      "rulecolor": "frame rule color",
+      "fillcolor": "fill color for frames"
+    },
+    "language": {
+      "language": "programming language",
+      "alsolanguage": "additional language",
+      "defaultdialect": "default dialect",
+      "morekeywords": "additional keywords",
+      "deletekeywords": "remove keywords",
+      "moretexcs": "additional TeX control sequences",
+      "morestring": "string delimiters",
+      "morecomment": "comment styles"
+    },
+    "line_numbers": {
+      "numbers": "none|left|right",
+      "numbersep": "space between numbers and code",
+      "stepnumber": "line number interval",
+      "firstnumber": "first line number",
+      "numberfirstline": "number first line specifically"
+    },
+    "frames": {
+      "frame": "none|leftline|topline|bottomline|lines|single|shadowbox",
+      "frameround": "corner rounding (fftt = top round, bottom square)",
+      "framerule": "frame rule width",
+      "framesep": "space between frame and code",
+      "rulesep": "space between frame rules"
+    },
+    "spacing": {
+      "xleftmargin": "extra left margin",
+      "xrightmargin": "extra right margin",
+      "aboveskip": "space above listing",
+      "belowskip": "space below listing"
+    },
+    "captions": {
+      "caption": "caption text",
+      "title": "title (no entry in list)",
+      "label": "label for cross-reference",
+      "captionpos": "t|b - caption position",
+      "abovecaptionskip": "space above caption",
+      "belowcaptionskip": "space below caption"
+    },
+    "behavior": {
+      "breaklines": "break long lines",
+      "breakatwhitespace": "break only at whitespace",
+      "breakautoindent": "auto-indent continuation",
+      "breakindent": "continuation indentation",
+      "prebreak": "marker before break",
+      "postbreak": "marker after break",
+      "showspaces": "show spaces as visible",
+      "showtabs": "show tabs as visible",
+      "showstringspaces": "show spaces in strings",
+      "tabsize": "tab width in spaces",
+      "gobble": "number of characters to gobble",
+      "mathescape": "enable math mode escaping",
+      "escapechar": "character for escaping to LaTeX",
+      "escapeinside": "characters for escape range",
+      "texcl": "TeX comment lines"
+    }
+  },
+  
+  "languages": [
+    "ABAP", "ACM", "ACMscript", "ACSL", "Ada", "Algol", "Ant", "Assembler",
+    "Awk", "bash", "Basic", "C", "Caml", "CIL", "Clean", "Cobol", "Comal",
+    "command.com", "Comsol", "csh", "Delphi", "Eiffel", "Elan", "elisp",
+    "erlang", "Euphoria", "Fortran", "GCL", "Gnuplot", "Go", "hansl",
+    "Haskell", "HTML", "IDL", "inform", "Java", "JVMIS", "ksh", "Lingo",
+    "Lisp", "LLVM", "Logo", "Lua", "make", "Mathematica", "Matlab", "Mercury",
+    "MetaPost", "Miranda", "Mizar", "ML", "Modula-2", "MuPAD", "NASTRAN",
+    "Oberon-2", "OCL", "Octave", "Oz", "Pascal", "Perl", "PHP", "PL/I",
+    "Plasm", "PostScript", "POV", "Prolog", "Promela", "PSTricks", "Python",
+    "R", "Reduce", "Rexx", "RSL", "Ruby", "S", "SAS", "Scala", "Scilab",
+    "sh", "SHELXL", "Simula", "SPARQL", "SQL", "Swift", "tcl", "TeX",
+    "VBScript", "Verilog", "VHDL", "VRML", "XML", "XSLT"
+  ]
+}

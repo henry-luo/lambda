@@ -1,0 +1,240 @@
+{
+  "name": "tex_base",
+  "version": "1.0",
+  "description": "TeX primitive commands",
+  "requires": [],
+  
+  "commands": {
+    "relax": {
+      "type": "primitive",
+      "description": "Do nothing",
+      "callback": "prim_relax"
+    },
+    "ignorespaces": {
+      "type": "primitive",
+      "description": "Ignore following spaces",
+      "callback": "prim_ignorespaces"
+    },
+    
+    "begingroup": {
+      "type": "primitive",
+      "description": "Begin a group",
+      "callback": "prim_begingroup"
+    },
+    "endgroup": {
+      "type": "primitive",
+      "description": "End a group",
+      "callback": "prim_endgroup"
+    },
+    "bgroup": {
+      "type": "primitive",
+      "description": "Begin group (alias)",
+      "callback": "prim_begingroup"
+    },
+    "egroup": {
+      "type": "primitive",
+      "description": "End group (alias)",
+      "callback": "prim_endgroup"
+    },
+    
+    "par": {
+      "type": "primitive",
+      "description": "End paragraph",
+      "callback": "prim_par"
+    },
+    "indent": {
+      "type": "primitive",
+      "description": "Begin paragraph with indentation",
+      "callback": "prim_indent"
+    },
+    "noindent": {
+      "type": "primitive",
+      "description": "Begin paragraph without indentation",
+      "callback": "prim_noindent"
+    },
+    
+    "hskip": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Horizontal skip",
+      "callback": "prim_hskip"
+    },
+    "vskip": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Vertical skip",
+      "callback": "prim_vskip"
+    },
+    "kern": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Insert kern (fixed space)",
+      "callback": "prim_kern"
+    },
+    "hfil": {
+      "type": "primitive",
+      "description": "Horizontal fill (order 1)",
+      "callback": "prim_hfil"
+    },
+    "hfill": {
+      "type": "primitive",
+      "description": "Horizontal fill (order 2)",
+      "callback": "prim_hfill"
+    },
+    "hss": {
+      "type": "primitive",
+      "description": "Horizontal stretch and shrink",
+      "callback": "prim_hss"
+    },
+    "vfil": {
+      "type": "primitive",
+      "description": "Vertical fill (order 1)",
+      "callback": "prim_vfil"
+    },
+    "vfill": {
+      "type": "primitive",
+      "description": "Vertical fill (order 2)",
+      "callback": "prim_vfill"
+    },
+    "vss": {
+      "type": "primitive",
+      "description": "Vertical stretch and shrink",
+      "callback": "prim_vss"
+    },
+    
+    "hrule": {
+      "type": "primitive",
+      "description": "Horizontal rule",
+      "callback": "prim_hrule"
+    },
+    "vrule": {
+      "type": "primitive",
+      "description": "Vertical rule",
+      "callback": "prim_vrule"
+    },
+    
+    "penalty": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Insert penalty",
+      "callback": "prim_penalty"
+    },
+    "break": {
+      "type": "primitive",
+      "description": "Force break (penalty -10000)",
+      "callback": "prim_break"
+    },
+    "nobreak": {
+      "type": "primitive",
+      "description": "Prevent break (penalty 10000)",
+      "callback": "prim_nobreak"
+    },
+    "allowbreak": {
+      "type": "primitive",
+      "description": "Allow break (penalty 0)",
+      "callback": "prim_allowbreak"
+    },
+    
+    "hbox": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Horizontal box",
+      "callback": "prim_hbox"
+    },
+    "vbox": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Vertical box",
+      "callback": "prim_vbox"
+    },
+    "vtop": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Vertical box aligned at top",
+      "callback": "prim_vtop"
+    },
+    
+    "special": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Pass special command to output",
+      "callback": "prim_special"
+    },
+    "write": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Write to file",
+      "callback": "prim_write"
+    },
+    "message": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Print message to terminal",
+      "callback": "prim_message"
+    },
+    
+    "mark": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Insert mark (for headers/footers)",
+      "callback": "prim_mark"
+    },
+    "insert": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Insert floating material",
+      "callback": "prim_insert"
+    },
+    
+    "char": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Insert character by code",
+      "callback": "prim_char"
+    },
+    "accent": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Put accent over character",
+      "callback": "prim_accent"
+    },
+    
+    "raise": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Raise box",
+      "callback": "prim_raise"
+    },
+    "lower": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Lower box",
+      "callback": "prim_lower"
+    },
+    "moveleft": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Move box left",
+      "callback": "prim_moveleft"
+    },
+    "moveright": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Move box right",
+      "callback": "prim_moveright"
+    },
+    
+    "rlap": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Right overlap (zero-width)",
+      "callback": "prim_rlap"
+    },
+    "llap": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Left overlap (zero-width)",
+      "callback": "prim_llap"
+    }
+  }
+}
