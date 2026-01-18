@@ -301,7 +301,7 @@ protected:
     }
     
     // Convert LaTeX to HTML using Lambda's unified pipeline (doc model based)
-    std::string latex_to_html(const std::string& latex_content, const std::string& filename, bool legacy_mode = false) {
+    std::string latex_to_html(const std::string& latex_content, const std::string& filename) {
         // Create pool and arena for document model
         Pool* doc_pool = pool_create();
         Arena* doc_arena = arena_create_default(doc_pool);
@@ -316,9 +316,9 @@ protected:
             return "";
         }
         
-        // Render to HTML
+        // Render to HTML using hybrid mode
         StrBuf* html_buf = strbuf_new_cap(8192);
-        tex::HtmlOutputOptions opts = legacy_mode ? tex::HtmlOutputOptions::legacy() : tex::HtmlOutputOptions::defaults();
+        tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::hybrid();
         opts.standalone = false;  // No DOCTYPE/head/body wrapper for comparison
         opts.pretty_print = false;  // Compact output for comparison
         
@@ -573,390 +573,6 @@ TEST(HtmlNormalizeTest, Similarity) {
 }
 
 // ============================================================================
-// LaTeX.js Fixtures Test Suite
-// Uses legacy mode to match latex.js HTML output format
-// ============================================================================
-
-// Baseline fixtures that should pass - matches BASELINE_FIXTURES from test_latex_unified_pipeline.cpp
-// Format: "category/##_slug" where ## is the fixture number
-static const std::set<std::string> LATEXJS_BASELINE_FIXTURES = {
-    // basic_test - all passing
-    "basic_test/01_simple_text_test",
-    "basic_test/02_bold_text_test",
-    // formatting - all passing
-    "formatting/01_basic_text_formatting",
-    "formatting/02_emphasis_command",
-    "formatting/03_nested_formatting",
-    "formatting/04_underline_and_strikethrough",
-    "formatting/05_font_size_commands",
-    "formatting/06_text_alignment",
-    // symbols - all passing
-    "symbols/01_tex_char",
-    "symbols/02_tex_and",
-    "symbols/03_latex_symbol",
-    "symbols/04_predefined_symbols",
-    // sectioning - all passing
-    "sectioning/01_a_chapter",
-    "sectioning/02_a_chapter_and_a_section",
-    "sectioning/03_section_inside_a_macro_correct_visual_ap",
-    // text - all passing
-    "text/01_simple_text_in_paragraphs",
-    "text/02_paragraphs_and_newlines",
-    "text/03_paragraphs_and_indentation",
-    "text/04_utf_8_text_punctuation_tex_symbols",
-    "text/05_special_characters",
-    "text/06_dashes_dots_no_math",
-    "text/07_ligatures_and_ligature_prevention",
-    "text/08_verbatim_text",
-    "text/09_tex_and_latex_logos",
-    "text/10_alignment",
-    // environments - partial
-    "environments/01_nested_horizontal_environments",
-    "environments/02_itemize_environment",
-    "environments/03_empty_and_consecutive_itemize_environmen",
-    "environments/04_nested_itemize_environments",
-    "environments/05_nested_itemize_environments_ii",
-    "environments/06_single_itemize_environment_custom_labels",
-    "environments/07_enumerate_environment",
-    "environments/08_description_environment",
-    "environments/09_quote_quotation_verse",
-    "environments/10_font_environments",
-    "environments/11_alignment",
-    "environments/12_alignment_of_lists",
-    // environments/13 is skipped (marked SKIP)
-    "environments/14_comment_environment",
-    // whitespace - partial
-    "whitespace/01_whitespaces_are_compressed_comments_are_",
-    "whitespace/02_how_to_force_two_paragraphs",
-    "whitespace/03_standard_double_newline_paragraph_separa",
-    "whitespace/04_and_newline_do_not_add_spaces_they_unski",
-    // whitespace/05-08 are marked SKIP
-    "whitespace/09_more_than_two_newlines_including_spaces_",
-    "whitespace/10_comments_are_disregarded_and_won_t_add_a",
-    "whitespace/11_comments_are_disregarded_and_won_t_preve",
-    "whitespace/12_comments_can_remove_a_linebreak_i_e_spac",
-    "whitespace/13_one_space_inside_as_well_as_after_a_grou",
-    "whitespace/14_macros_without_arguments_ignore_spaces_a",
-    "whitespace/15_force_a_space_after_a_macro_with",
-    "whitespace/16_force_a_space_after_a_macro_with",
-    "whitespace/17_followed_by_tab_or_linebreak_is_also_a_s",
-    "whitespace/18_escaped_newlines_in_an_empty_document_or",
-    "whitespace/19_escaped_newlines_at_the_start_of_a_parag",
-    "whitespace/20_escaped_newlines_after_an_environment",
-    // whitespace/21 is complex - excluded from baseline
-    // fonts - partial
-    "fonts/01_bfseries_declaration",
-    "fonts/02_em_and_emph",
-    "fonts/03_emph_command_and_nesting",
-    // groups - partial
-    "groups/01_groups_need_to_be_balanced",
-    "groups/02_brackets_do_not_need_to_be_balanced_they",
-    // macros - partial
-    "macros/01_custom_macros_without_arguments",
-    // preamble - partial
-    "preamble/01_document_with_a_preamble",
-    // Extended tests (not in baseline): boxes, counters, fonts/04+, groups/03+, label-ref, layout-marginpar, macros/02+, spacing
-};
-
-// Check if a fixture is in the baseline set
-static bool is_latexjs_baseline(const std::string& rel_path) {
-    // Remove .tex extension
-    std::string path = rel_path;
-    if (path.size() > 4 && path.substr(path.size() - 4) == ".tex") {
-        path = path.substr(0, path.size() - 4);
-    }
-    return LATEXJS_BASELINE_FIXTURES.count(path) > 0;
-}
-
-class LatexJsFixturesTest : public LaTeXMLCompareTest {
-public:
-    static fs::path latexjs_fixtures_dir;
-    static fs::path latexjs_expected_dir;
-    static std::vector<std::string> latexjs_test_files;
-    
-    // Get list of latexjs test files
-    static std::vector<std::string> get_latexjs_test_files() {
-        std::vector<std::string> files;
-        
-        if (!fs::exists(latexjs_fixtures_dir)) {
-            return files;
-        }
-        
-        for (const auto& entry : fs::recursive_directory_iterator(latexjs_fixtures_dir)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".tex") {
-                // Get relative path from fixtures_dir
-                fs::path rel = fs::relative(entry.path(), latexjs_fixtures_dir);
-                files.push_back(rel.string());
-            }
-        }
-        
-        std::sort(files.begin(), files.end());
-        return files;
-    }
-};
-
-// Static member initialization
-fs::path LatexJsFixturesTest::latexjs_fixtures_dir = "test/latexml/fixtures/latexjs";
-fs::path LatexJsFixturesTest::latexjs_expected_dir = "test/latexml/expected/latexjs";
-std::vector<std::string> LatexJsFixturesTest::latexjs_test_files;
-
-// Parameterized test base class for latex.js fixtures
-class LatexJsFixturesParamTest : public LatexJsFixturesTest,
-                                  public ::testing::WithParamInterface<std::string> {
-};
-
-// Helper to normalize HTML for latex.js comparison
-// Matches normalization from test_latex_unified_pipeline.cpp
-static std::string normalize_for_latexjs(const std::string& s) {
-    // Step 1: Collapse whitespace
-    std::string result;
-    bool in_whitespace = false;
-    for (size_t i = 0; i < s.size(); i++) {
-        char c = s[i];
-        // Skip ZWSP (U+200B) - 3-byte UTF-8 sequence E2 80 8B
-        if ((unsigned char)c == 0xE2 && i + 2 < s.size() && 
-            (unsigned char)s[i+1] == 0x80 && (unsigned char)s[i+2] == 0x8B) {
-            i += 2;  // skip the 3-byte sequence
-            continue;
-        }
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            if (!in_whitespace && !result.empty()) {
-                result += ' ';
-                in_whitespace = true;
-            }
-        } else {
-            result += c;
-            in_whitespace = false;
-        }
-    }
-    
-    // Trim trailing whitespace
-    while (!result.empty() && result.back() == ' ') {
-        result.pop_back();
-    }
-    
-    // Step 2: Remove whitespace between > and < (between tags)
-    std::string no_tag_space;
-    for (size_t i = 0; i < result.size(); i++) {
-        if (result[i] == ' ' && i > 0 && i + 1 < result.size() &&
-            result[i - 1] == '>' && result[i + 1] == '<') {
-            // skip this space
-            continue;
-        }
-        no_tag_space += result[i];
-    }
-    
-    // Step 3: Strip leading/trailing whitespace inside <p> tags
-    std::string cleaned;
-    for (size_t i = 0; i < no_tag_space.size(); i++) {
-        // Check for "<p>" followed by space - skip the space after <p>
-        if (i + 3 < no_tag_space.size() &&
-            no_tag_space[i] == '<' && no_tag_space[i+1] == 'p' && no_tag_space[i+2] == '>' &&
-            no_tag_space[i+3] == ' ') {
-            cleaned += "<p>";
-            i += 3;  // skip the space (loop will increment i again)
-            continue;
-        }
-        // Also handle <p class="..."> followed by space
-        if (i + 2 < no_tag_space.size() &&
-            no_tag_space[i] == '>' && no_tag_space[i+1] == ' ' && i > 0) {
-            // Check if this is the end of a <p...> tag by looking backward
-            size_t tag_start = no_tag_space.rfind('<', i);
-            if (tag_start != std::string::npos && i - tag_start < 50) {
-                std::string tag_content = no_tag_space.substr(tag_start, i - tag_start + 1);
-                if (tag_content.find("<p") == 0 || tag_content.find("<p ") == 0) {
-                    cleaned += '>';
-                    i += 1;  // skip the space
-                    continue;
-                }
-            }
-        }
-        // Check for " </p>" pattern - skip the space before </p>
-        if (i + 4 < no_tag_space.size() &&
-            no_tag_space[i] == ' ' &&
-            no_tag_space[i+1] == '<' && no_tag_space[i+2] == '/' && 
-            no_tag_space[i+3] == 'p' && no_tag_space[i+4] == '>') {
-            // skip this space, next iteration will add </p>
-            continue;
-        }
-        cleaned += no_tag_space[i];
-    }
-    
-    // Step 4: Remove id attributes
-    cleaned = std::regex_replace(cleaned, std::regex(R"(\s+id="[^"]*")"), "");
-    
-    return cleaned;
-}
-
-// Generate parameter values for latex.js baseline fixtures
-std::vector<std::string> GetLatexJsBaselineFiles() {
-    std::vector<std::string> all = LatexJsFixturesTest::get_latexjs_test_files();
-    std::vector<std::string> baseline;
-    for (const auto& f : all) {
-        if (is_latexjs_baseline(f)) {
-            baseline.push_back(f);
-        }
-    }
-    return baseline;
-}
-
-// Generate parameter values for latex.js extended fixtures
-std::vector<std::string> GetLatexJsExtendedFiles() {
-    std::vector<std::string> all = LatexJsFixturesTest::get_latexjs_test_files();
-    std::vector<std::string> extended;
-    for (const auto& f : all) {
-        if (!is_latexjs_baseline(f)) {
-            extended.push_back(f);
-        }
-    }
-    return extended;
-}
-
-// Baseline test suite - these must all pass
-class LatexJsBaselineParamTest : public LatexJsFixturesTest,
-                                  public ::testing::WithParamInterface<std::string> {
-};
-
-TEST_P(LatexJsBaselineParamTest, CompareAgainstLatexJs) {
-    std::string rel_path = GetParam();
-    
-    // Build paths
-    fs::path tex_path = latexjs_fixtures_dir / rel_path;
-    fs::path expected_path = latexjs_expected_dir / rel_path;
-    expected_path.replace_extension(".latexjs.html");
-    
-    // Check if files exist
-    ASSERT_TRUE(fs::exists(tex_path)) << "Fixture not found: " << tex_path;
-    
-    // Read LaTeX source
-    std::string latex_content = read_file(tex_path);
-    ASSERT_FALSE(latex_content.empty()) << "Empty LaTeX file: " << tex_path;
-    
-    // Check for SKIP marker in source
-    if (latex_content.find("% SKIP:") != std::string::npos) {
-        GTEST_SKIP() << "Marked as SKIP in fixture";
-    }
-    
-    // Convert using Lambda pipeline in LEGACY mode
-    std::string lambda_html = latex_to_html(latex_content, rel_path, true /* legacy_mode */);
-    
-    // If we got no output, that's a failure
-    if (lambda_html.empty()) {
-        fs::path lambda_out = "test_output/latexjs/" + rel_path;
-        lambda_out.replace_extension(".lambda.html");
-        write_file(lambda_out, "<!-- Lambda conversion failed -->\n");
-        FAIL() << "Lambda failed to convert: " << rel_path;
-    }
-    
-    // Save Lambda output for debugging
-    fs::path lambda_out = "test_output/latexjs/" + rel_path;
-    lambda_out.replace_extension(".lambda.html");
-    write_file(lambda_out, lambda_html);
-    
-    // Check if expected file exists
-    if (!fs::exists(expected_path)) {
-        GTEST_SKIP() << "Expected output not found: " << expected_path;
-    }
-    
-    // Read expected HTML
-    std::string expected_html = read_file(expected_path);
-    
-    // Normalize both for comparison
-    std::string norm_lambda = normalize_for_latexjs(lambda_html);
-    std::string norm_expected = normalize_for_latexjs(expected_html);
-    
-    EXPECT_EQ(norm_expected, norm_lambda)
-        << "\n=== BASELINE Fixture: " << rel_path << " ==="
-        << "\n=== Expected HTML ===\n" << expected_html
-        << "\n=== Actual HTML ===\n" << lambda_html;
-}
-
-// Extended test suite - work in progress, failures expected
-class LatexJsExtendedParamTest : public LatexJsFixturesTest,
-                                  public ::testing::WithParamInterface<std::string> {
-};
-
-TEST_P(LatexJsExtendedParamTest, CompareAgainstLatexJs) {
-    std::string rel_path = GetParam();
-    
-    // Build paths
-    fs::path tex_path = latexjs_fixtures_dir / rel_path;
-    fs::path expected_path = latexjs_expected_dir / rel_path;
-    expected_path.replace_extension(".latexjs.html");
-    
-    // Check if files exist
-    ASSERT_TRUE(fs::exists(tex_path)) << "Fixture not found: " << tex_path;
-    
-    // Read LaTeX source
-    std::string latex_content = read_file(tex_path);
-    ASSERT_FALSE(latex_content.empty()) << "Empty LaTeX file: " << tex_path;
-    
-    // Check for SKIP marker in source
-    if (latex_content.find("% SKIP:") != std::string::npos) {
-        GTEST_SKIP() << "Marked as SKIP in fixture";
-    }
-    
-    // Convert using Lambda pipeline in LEGACY mode
-    std::string lambda_html = latex_to_html(latex_content, rel_path, true /* legacy_mode */);
-    
-    // If we got no output, that's a failure
-    if (lambda_html.empty()) {
-        fs::path lambda_out = "test_output/latexjs/" + rel_path;
-        lambda_out.replace_extension(".lambda.html");
-        write_file(lambda_out, "<!-- Lambda conversion failed -->\n");
-        FAIL() << "Lambda failed to convert: " << rel_path;
-    }
-    
-    // Save Lambda output for debugging
-    fs::path lambda_out = "test_output/latexjs/" + rel_path;
-    lambda_out.replace_extension(".lambda.html");
-    write_file(lambda_out, lambda_html);
-    
-    // Check if expected file exists
-    if (!fs::exists(expected_path)) {
-        GTEST_SKIP() << "Expected output not found: " << expected_path;
-    }
-    
-    // Read expected HTML
-    std::string expected_html = read_file(expected_path);
-    
-    // Normalize both for comparison
-    std::string norm_lambda = normalize_for_latexjs(lambda_html);
-    std::string norm_expected = normalize_for_latexjs(expected_html);
-    
-    EXPECT_EQ(norm_expected, norm_lambda)
-        << "\n=== EXTENDED Fixture: " << rel_path << " ==="
-        << "\n=== Expected HTML ===\n" << expected_html
-        << "\n=== Actual HTML ===\n" << lambda_html;
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    LatexJsBaseline,
-    LatexJsBaselineParamTest,
-    ::testing::ValuesIn(GetLatexJsBaselineFiles()),
-    [](const ::testing::TestParamInfo<std::string>& info) {
-        std::string name = info.param;
-        std::replace(name.begin(), name.end(), '/', '_');
-        std::replace(name.begin(), name.end(), '.', '_');
-        std::replace(name.begin(), name.end(), '-', '_');
-        return name;
-    }
-);
-
-INSTANTIATE_TEST_SUITE_P(
-    LatexJsExtended,
-    LatexJsExtendedParamTest,
-    ::testing::ValuesIn(GetLatexJsExtendedFiles()),
-    [](const ::testing::TestParamInfo<std::string>& info) {
-        std::string name = info.param;
-        std::replace(name.begin(), name.end(), '/', '_');
-        std::replace(name.begin(), name.end(), '.', '_');
-        std::replace(name.begin(), name.end(), '-', '_');
-        return name;
-    }
-);
-
-// ============================================================================
 // Hybrid Mode Test Suite
 // Tests Lambda's hybrid HTML output against .html reference files
 // Hybrid mode uses semantic HTML5 elements without CSS class prefixes
@@ -1000,13 +616,87 @@ fs::path HybridFixturesTest::hybrid_fixtures_dir = "test/latexml/fixtures/latexj
 fs::path HybridFixturesTest::hybrid_expected_dir = "test/latexml/expected/latexjs";
 std::vector<std::string> HybridFixturesTest::hybrid_test_files;
 
-// Baseline hybrid tests - same fixtures as latexjs baseline, except sectioning (different heading format)
+// Baseline fixtures for hybrid tests
+// Format: "category/##_slug" where ## is the fixture number
+static const std::set<std::string> HYBRID_BASELINE_FIXTURES = {
+    // basic_test - all passing
+    "basic_test/01_simple_text_test",
+    "basic_test/02_bold_text_test",
+    // formatting - all passing
+    "formatting/01_basic_text_formatting",
+    "formatting/02_emphasis_command",
+    "formatting/03_nested_formatting",
+    "formatting/04_underline_and_strikethrough",
+    "formatting/05_font_size_commands",
+    "formatting/06_text_alignment",
+    // symbols - all passing
+    "symbols/01_tex_char",
+    "symbols/02_tex_and",
+    "symbols/03_latex_symbol",
+    "symbols/04_predefined_symbols",
+    // text - all passing
+    "text/01_simple_text_in_paragraphs",
+    "text/02_paragraphs_and_newlines",
+    "text/03_paragraphs_and_indentation",
+    "text/04_utf_8_text_punctuation_tex_symbols",
+    "text/05_special_characters",
+    "text/06_dashes_dots_no_math",
+    "text/07_ligatures_and_ligature_prevention",
+    "text/08_verbatim_text",
+    "text/09_tex_and_latex_logos",
+    "text/10_alignment",
+    // environments - partial
+    "environments/01_nested_horizontal_environments",
+    "environments/02_itemize_environment",
+    "environments/03_empty_and_consecutive_itemize_environmen",
+    "environments/04_nested_itemize_environments",
+    "environments/05_nested_itemize_environments_ii",
+    "environments/06_single_itemize_environment_custom_labels",
+    "environments/07_enumerate_environment",
+    "environments/08_description_environment",
+    "environments/09_quote_quotation_verse",
+    "environments/10_font_environments",
+    "environments/11_alignment",
+    "environments/12_alignment_of_lists",
+    "environments/14_comment_environment",
+    // whitespace - partial
+    "whitespace/01_whitespaces_are_compressed_comments_are_",
+    "whitespace/02_how_to_force_two_paragraphs",
+    "whitespace/03_standard_double_newline_paragraph_separa",
+    "whitespace/04_and_newline_do_not_add_spaces_they_unski",
+    "whitespace/09_more_than_two_newlines_including_spaces_",
+    "whitespace/10_comments_are_disregarded_and_won_t_add_a",
+    "whitespace/11_comments_are_disregarded_and_won_t_preve",
+    "whitespace/12_comments_can_remove_a_linebreak_i_e_spac",
+    "whitespace/13_one_space_inside_as_well_as_after_a_grou",
+    "whitespace/14_macros_without_arguments_ignore_spaces_a",
+    "whitespace/15_force_a_space_after_a_macro_with",
+    "whitespace/16_force_a_space_after_a_macro_with",
+    "whitespace/17_followed_by_tab_or_linebreak_is_also_a_s",
+    "whitespace/18_escaped_newlines_in_an_empty_document_or",
+    "whitespace/19_escaped_newlines_at_the_start_of_a_parag",
+    "whitespace/20_escaped_newlines_after_an_environment",
+    // fonts - partial
+    "fonts/01_bfseries_declaration",
+    "fonts/02_em_and_emph",
+    "fonts/03_emph_command_and_nesting",
+    // groups - partial
+    "groups/01_groups_need_to_be_balanced",
+    "groups/02_brackets_do_not_need_to_be_balanced_they",
+    // macros - partial
+    "macros/01_custom_macros_without_arguments",
+    // preamble - partial
+    "preamble/01_document_with_a_preamble",
+};
+
+// Check if a fixture is in the baseline set
 static bool is_hybrid_baseline(const std::string& rel_path) {
-    // Exclude sectioning tests from hybrid baseline - heading format differs by design
-    if (rel_path.find("sectioning/") == 0) {
-        return false;
+    // Remove .tex extension
+    std::string path = rel_path;
+    if (path.size() > 4 && path.substr(path.size() - 4) == ".tex") {
+        path = path.substr(0, path.size() - 4);
     }
-    return is_latexjs_baseline(rel_path);  // Reuse the same baseline list otherwise
+    return HYBRID_BASELINE_FIXTURES.count(path) > 0;
 }
 
 // Helper to normalize HTML for hybrid comparison
