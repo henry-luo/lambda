@@ -1,0 +1,65 @@
+{
+  "name": "amsfonts",
+  "version": "3.01",
+  "description": "TeX fonts from the American Mathematical Society",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Provides blackboard bold, Fraktur, and script fonts",
+    "related": "amssymb loads amsfonts automatically"
+  },
+  
+  "commands": {
+    "mathbb": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Blackboard bold (double-struck)",
+      "pattern": "<mi class=\"bb\">#1</mi>"
+    },
+    "mathfrak": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Fraktur (Gothic) letters",
+      "pattern": "<mi class=\"fraktur\">#1</mi>"
+    },
+    "mathcal": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Calligraphic letters (enhanced)",
+      "pattern": "<mi class=\"calligraphic\">#1</mi>"
+    },
+    "checkmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✓",
+      "description": "Check mark"
+    },
+    "circledR": {
+      "type": "macro",
+      "params": "",
+      "replacement": "®",
+      "description": "Circled R"
+    },
+    "maltese": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✠",
+      "description": "Maltese cross"
+    },
+    "yen": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¥",
+      "description": "Yen symbol"
+    }
+  },
+  
+  "fonts": {
+    "msam": "AMS symbol font A",
+    "msbm": "AMS symbol font B (blackboard bold)",
+    "eufm": "Euler Fraktur",
+    "eufb": "Euler Fraktur bold",
+    "eusm": "Euler script",
+    "eusb": "Euler script bold"
+  }
+}

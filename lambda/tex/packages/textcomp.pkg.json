@@ -1,0 +1,363 @@
+{
+  "name": "textcomp",
+  "version": "2020-02-02",
+  "description": "LaTeX support for the Text Companion fonts",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "modern": "Many symbols now in LaTeX kernel since 2020",
+    "purpose": "Additional text symbols (currency, legal, etc.)"
+  },
+  
+  "commands": {
+    "textcent": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¢",
+      "description": "Cent sign"
+    },
+    "textsterling": {
+      "type": "macro",
+      "params": "",
+      "replacement": "£",
+      "description": "Pound sterling"
+    },
+    "textyen": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¥",
+      "description": "Yen sign"
+    },
+    "texteuro": {
+      "type": "macro",
+      "params": "",
+      "replacement": "€",
+      "description": "Euro sign"
+    },
+    "textcurrency": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¤",
+      "description": "Generic currency"
+    },
+    "textdollar": {
+      "type": "macro",
+      "params": "",
+      "replacement": "$",
+      "description": "Dollar sign"
+    },
+    "textcopyright": {
+      "type": "macro",
+      "params": "",
+      "replacement": "©",
+      "description": "Copyright"
+    },
+    "textregistered": {
+      "type": "macro",
+      "params": "",
+      "replacement": "®",
+      "description": "Registered trademark"
+    },
+    "texttrademark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "™",
+      "description": "Trademark"
+    },
+    "textservicemark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "℠",
+      "description": "Service mark"
+    },
+    "textdegree": {
+      "type": "macro",
+      "params": "",
+      "replacement": "°",
+      "description": "Degree sign"
+    },
+    "textcelsius": {
+      "type": "macro",
+      "params": "",
+      "replacement": "℃",
+      "description": "Celsius"
+    },
+    "textperthousand": {
+      "type": "macro",
+      "params": "",
+      "replacement": "‰",
+      "description": "Per thousand"
+    },
+    "textpertenthousand": {
+      "type": "macro",
+      "params": "",
+      "replacement": "‱",
+      "description": "Per ten thousand"
+    },
+    "textmu": {
+      "type": "macro",
+      "params": "",
+      "replacement": "µ",
+      "description": "Micro sign"
+    },
+    "textohm": {
+      "type": "macro",
+      "params": "",
+      "replacement": "Ω",
+      "description": "Ohm sign"
+    },
+    "textmho": {
+      "type": "macro",
+      "params": "",
+      "replacement": "℧",
+      "description": "Mho (inverted ohm)"
+    },
+    "textnumero": {
+      "type": "macro",
+      "params": "",
+      "replacement": "№",
+      "description": "Numero sign"
+    },
+    "textestimated": {
+      "type": "macro",
+      "params": "",
+      "replacement": "℮",
+      "description": "Estimated sign"
+    },
+    "textreferencemark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "※",
+      "description": "Reference mark"
+    },
+    "textdagger": {
+      "type": "macro",
+      "params": "",
+      "replacement": "†",
+      "description": "Dagger"
+    },
+    "textdaggerdbl": {
+      "type": "macro",
+      "params": "",
+      "replacement": "‡",
+      "description": "Double dagger"
+    },
+    "textbullet": {
+      "type": "macro",
+      "params": "",
+      "replacement": "•",
+      "description": "Bullet"
+    },
+    "textopenbullet": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◦",
+      "description": "Open bullet"
+    },
+    "textperiodcentered": {
+      "type": "macro",
+      "params": "",
+      "replacement": "·",
+      "description": "Middle dot"
+    },
+    "textinterrobang": {
+      "type": "macro",
+      "params": "",
+      "replacement": "‽",
+      "description": "Interrobang"
+    },
+    "textlangle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟨",
+      "description": "Left angle bracket"
+    },
+    "textrangle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟩",
+      "description": "Right angle bracket"
+    },
+    "textlquill": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⁅",
+      "description": "Left quill bracket"
+    },
+    "textrquill": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⁆",
+      "description": "Right quill bracket"
+    },
+    "textlbrackdbl": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟦",
+      "description": "Left double bracket"
+    },
+    "textrbrackdbl": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟧",
+      "description": "Right double bracket"
+    },
+    "textuparrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↑",
+      "description": "Up arrow"
+    },
+    "textdownarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↓",
+      "description": "Down arrow"
+    },
+    "textleftarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "←",
+      "description": "Left arrow"
+    },
+    "textrightarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "→",
+      "description": "Right arrow"
+    },
+    "textquotesingle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "'",
+      "description": "Single quote (straight)"
+    },
+    "textquotedbl": {
+      "type": "macro",
+      "params": "",
+      "replacement": "\"",
+      "description": "Double quote (straight)"
+    },
+    "textasciigrave": {
+      "type": "macro",
+      "params": "",
+      "replacement": "`",
+      "description": "Grave accent"
+    },
+    "textasciiacute": {
+      "type": "macro",
+      "params": "",
+      "replacement": "´",
+      "description": "Acute accent"
+    },
+    "textasciicircum": {
+      "type": "macro",
+      "params": "",
+      "replacement": "^",
+      "description": "Circumflex"
+    },
+    "textasciitilde": {
+      "type": "macro",
+      "params": "",
+      "replacement": "~",
+      "description": "Tilde"
+    },
+    "textasciidieresis": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¨",
+      "description": "Dieresis"
+    },
+    "textasciimacron": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¯",
+      "description": "Macron"
+    },
+    "textbrokenbar": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¦",
+      "description": "Broken bar"
+    },
+    "textsection": {
+      "type": "macro",
+      "params": "",
+      "replacement": "§",
+      "description": "Section sign"
+    },
+    "textparagraph": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¶",
+      "description": "Paragraph sign"
+    },
+    "textordfeminine": {
+      "type": "macro",
+      "params": "",
+      "replacement": "ª",
+      "description": "Feminine ordinal"
+    },
+    "textordmasculine": {
+      "type": "macro",
+      "params": "",
+      "replacement": "º",
+      "description": "Masculine ordinal"
+    },
+    "textsuperscript": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Superscript text",
+      "pattern": "<sup>#1</sup>"
+    },
+    "textsubscript": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Subscript text",
+      "pattern": "<sub>#1</sub>"
+    },
+    "textonesuperior": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¹",
+      "description": "Superscript 1"
+    },
+    "texttwosuperior": {
+      "type": "macro",
+      "params": "",
+      "replacement": "²",
+      "description": "Superscript 2"
+    },
+    "textthreesuperior": {
+      "type": "macro",
+      "params": "",
+      "replacement": "³",
+      "description": "Superscript 3"
+    },
+    "textonequarter": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¼",
+      "description": "One quarter"
+    },
+    "textonehalf": {
+      "type": "macro",
+      "params": "",
+      "replacement": "½",
+      "description": "One half"
+    },
+    "textthreequarters": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¾",
+      "description": "Three quarters"
+    }
+  },
+  
+  "options": {
+    "force": "force loading even with modern kernel",
+    "warn": "issue warnings for missing glyphs",
+    "error": "issue errors for missing glyphs",
+    "quiet": "suppress warnings"
+  }
+}

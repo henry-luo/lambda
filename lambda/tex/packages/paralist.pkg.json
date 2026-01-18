@@ -1,0 +1,92 @@
+{
+  "name": "paralist",
+  "version": "2.7",
+  "description": "Enumerate and itemize within paragraphs",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Compact and inline lists",
+    "successor": "enumitem package provides similar features"
+  },
+  
+  "commands": {
+    "setdefaultitem": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Set default item labels",
+      "pattern": ""
+    },
+    "setdefaultenum": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Set default enum labels",
+      "pattern": ""
+    },
+    "setdefaultleftmargin": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}{}",
+      "description": "Set default left margins",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "compactitem": {
+      "description": "Compact itemize",
+      "begin": "<compactitem>",
+      "end": "</compactitem>"
+    },
+    "compactenum": {
+      "description": "Compact enumerate",
+      "begin": "<compactenum>",
+      "end": "</compactenum>"
+    },
+    "compactdesc": {
+      "description": "Compact description",
+      "begin": "<compactdesc>",
+      "end": "</compactdesc>"
+    },
+    "inparaitem": {
+      "description": "Itemize within paragraph",
+      "begin": "<inparaitem>",
+      "end": "</inparaitem>"
+    },
+    "inparaenum": {
+      "description": "Enumerate within paragraph",
+      "begin": "<inparaenum>",
+      "end": "</inparaenum>"
+    },
+    "inparadesc": {
+      "description": "Description within paragraph",
+      "begin": "<inparadesc>",
+      "end": "</inparadesc>"
+    },
+    "asparaitem": {
+      "description": "Itemize as paragraphs",
+      "begin": "<asparaitem>",
+      "end": "</asparaitem>"
+    },
+    "asparaenum": {
+      "description": "Enumerate as paragraphs",
+      "begin": "<asparaenum>",
+      "end": "</asparaenum>"
+    },
+    "asparadesc": {
+      "description": "Description as paragraphs",
+      "begin": "<asparadesc>",
+      "end": "</asparadesc>"
+    }
+  },
+  
+  "options": {
+    "newitem": "use new item definition",
+    "newenum": "use new enum definition",
+    "alwaysadjust": "always adjust margins",
+    "neveradjust": "never adjust margins",
+    "neverdecrease": "never decrease margins",
+    "increaseonly": "only increase margins",
+    "flushright": "flush right items",
+    "pointedenum": "use periods after enum labels",
+    "pointlessenum": "no periods after enum labels"
+  }
+}

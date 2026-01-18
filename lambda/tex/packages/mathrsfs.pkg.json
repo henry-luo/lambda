@@ -1,0 +1,25 @@
+{
+  "name": "mathrsfs",
+  "version": "1996-01-01",
+  "description": "Support for using RSFS fonts in maths",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Provides Ralph Smith's Formal Script fonts",
+    "usage": "\\mathscr{ABC} for script letters"
+  },
+  
+  "commands": {
+    "mathscr": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Script letters (RSFS font)",
+      "pattern": "<mi class=\"script\">#1</mi>"
+    }
+  },
+  
+  "fonts": {
+    "rsfs": "Ralph Smith Formal Script font",
+    "characters": "Uppercase letters A-Z only"
+  }
+}

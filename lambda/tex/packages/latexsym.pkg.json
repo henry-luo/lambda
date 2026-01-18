@@ -1,0 +1,80 @@
+{
+  "name": "latexsym",
+  "version": "1998-08-17",
+  "description": "LaTeX symbol font definitions",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Provides symbols from LaTeX 2.09 lasy font",
+    "recommendation": "amssymb provides these and more"
+  },
+  
+  "commands": {
+    "mho": {
+      "type": "macro",
+      "params": "",
+      "replacement": "℧",
+      "description": "Mho (inverted ohm)"
+    },
+    "Join": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⋈",
+      "description": "Join"
+    },
+    "Box": {
+      "type": "macro",
+      "params": "",
+      "replacement": "□",
+      "description": "Empty square"
+    },
+    "Diamond": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◇",
+      "description": "Empty diamond"
+    },
+    "leadsto": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⇝",
+      "description": "Squiggle arrow"
+    },
+    "sqsubset": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊏",
+      "description": "Square subset"
+    },
+    "sqsupset": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊐",
+      "description": "Square superset"
+    },
+    "lhd": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊲",
+      "description": "Left-pointing triangle"
+    },
+    "rhd": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊳",
+      "description": "Right-pointing triangle"
+    },
+    "unlhd": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊴",
+      "description": "Left triangle with underline"
+    },
+    "unrhd": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊵",
+      "description": "Right triangle with underline"
+    }
+  }
+}

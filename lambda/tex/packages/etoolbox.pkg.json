@@ -1,0 +1,344 @@
+{
+  "name": "etoolbox",
+  "version": "2.5k",
+  "description": "e-TeX tools for LaTeX class and package authors",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Provides programming tools using e-TeX primitives",
+    "usage": "Primarily for package/class authors"
+  },
+  
+  "commands": {
+    "newbool": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Declare new boolean",
+      "pattern": ""
+    },
+    "providebool": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Declare boolean if not exists",
+      "pattern": ""
+    },
+    "booltrue": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set boolean true",
+      "pattern": ""
+    },
+    "boolfalse": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set boolean false",
+      "pattern": ""
+    },
+    "setbool": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set boolean value",
+      "pattern": ""
+    },
+    "ifbool": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test boolean",
+      "pattern": ""
+    },
+    "notbool": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Negated boolean test",
+      "pattern": ""
+    },
+    "newtoggle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Declare new toggle",
+      "pattern": ""
+    },
+    "toggletrue": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set toggle true",
+      "pattern": ""
+    },
+    "togglefalse": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set toggle false",
+      "pattern": ""
+    },
+    "iftoggle": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test toggle",
+      "pattern": ""
+    },
+    "nottoggle": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Negated toggle test",
+      "pattern": ""
+    },
+    "ifdef": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if macro defined",
+      "pattern": ""
+    },
+    "ifundef": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if macro undefined",
+      "pattern": ""
+    },
+    "ifdefmacro": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if is macro",
+      "pattern": ""
+    },
+    "ifdefparam": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if macro has parameters",
+      "pattern": ""
+    },
+    "ifdefempty": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if macro expands to empty",
+      "pattern": ""
+    },
+    "ifcsdef": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if control sequence defined",
+      "pattern": ""
+    },
+    "ifcsundef": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if control sequence undefined",
+      "pattern": ""
+    },
+    "ifstrequal": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Compare two strings",
+      "pattern": ""
+    },
+    "ifstrempty": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if string empty",
+      "pattern": ""
+    },
+    "ifblank": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if blank (empty or spaces)",
+      "pattern": ""
+    },
+    "ifnumcomp": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}",
+      "description": "Compare numbers",
+      "pattern": ""
+    },
+    "ifnumequal": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Test number equality",
+      "pattern": ""
+    },
+    "ifnumodd": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if number odd",
+      "pattern": ""
+    },
+    "ifdimcomp": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}",
+      "description": "Compare dimensions",
+      "pattern": ""
+    },
+    "appto": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Append to macro",
+      "pattern": ""
+    },
+    "preto": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Prepend to macro",
+      "pattern": ""
+    },
+    "gappto": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Globally append to macro",
+      "pattern": ""
+    },
+    "gpreto": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Globally prepend to macro",
+      "pattern": ""
+    },
+    "csappto": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Append to control sequence",
+      "pattern": ""
+    },
+    "cspreto": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Prepend to control sequence",
+      "pattern": ""
+    },
+    "AtBeginEnvironment": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Hook at environment begin",
+      "pattern": ""
+    },
+    "AtEndEnvironment": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Hook at environment end",
+      "pattern": ""
+    },
+    "BeforeBeginEnvironment": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Hook before environment begin",
+      "pattern": ""
+    },
+    "AfterEndEnvironment": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Hook after environment end",
+      "pattern": ""
+    },
+    "patchcmd": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}",
+      "description": "Patch a command",
+      "pattern": ""
+    },
+    "pretocmd": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Prepend to command",
+      "pattern": ""
+    },
+    "apptocmd": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Append to command",
+      "pattern": ""
+    },
+    "listadd": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add to list",
+      "pattern": ""
+    },
+    "listgadd": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Globally add to list",
+      "pattern": ""
+    },
+    "listeadd": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add expanded value to list",
+      "pattern": ""
+    },
+    "forlistloop": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Loop over list",
+      "pattern": ""
+    },
+    "dolistloop": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Execute list loop",
+      "pattern": ""
+    },
+    "ifinlist": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Test if in list",
+      "pattern": ""
+    },
+    "xifinlist": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Test if expanded value in list",
+      "pattern": ""
+    },
+    "csuse": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Use control sequence by name",
+      "pattern": ""
+    },
+    "csdef": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define control sequence by name",
+      "pattern": ""
+    },
+    "csedef": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Expanded def by name",
+      "pattern": ""
+    },
+    "cslet": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Let by name",
+      "pattern": ""
+    },
+    "letcs": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Let to cs by name",
+      "pattern": ""
+    },
+    "csletcs": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Let cs to cs by name",
+      "pattern": ""
+    },
+    "numdef": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define number macro",
+      "pattern": ""
+    },
+    "dimdef": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define dimension macro",
+      "pattern": ""
+    },
+    "defcounter": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define counter by name",
+      "pattern": ""
+    }
+  }
+}
